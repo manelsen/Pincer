@@ -1,0 +1,31 @@
+database:
+  adapter: "Ecto.Adapters.SQLite3"
+  database: "pincer_mvp.db"
+
+channels:
+  telegram:
+    enabled: true
+    adapter: "Pincer.Channels.Telegram"
+    token_env: "TELEGRAM_BOT_TOKEN"
+  cli:
+    enabled: true
+    adapter: "Pincer.Channels.CLI"
+
+llm:
+  provider: "z_ai"
+  z_ai:
+    base_url: "https://api.z.ai/api/coding/paas/v4/chat/completions"
+    default_model: "glm-4.7"
+  opencode_zen:
+    base_url: "https://opencode.ai/zen/v1/chat/completions"
+    default_model: "kimi-k2.5-free"
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1/chat/completions"
+    default_model: "openrouter/free"
+
+mcp:
+  servers:
+    github:
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-github"]
+
