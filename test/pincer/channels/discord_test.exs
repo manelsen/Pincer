@@ -216,11 +216,44 @@ defmodule Pincer.Channels.DiscordTest do
       Pincer.Channels.Discord.Consumer.handle_event({:MESSAGE_CREATE, message, nil})
     end
 
-    test "plain project text routes to /project with DDD/TDD guidance" do
+    test "kanban uses session project board when plan is ready" do
+      session_id = "discord_893"
+      Pincer.Core.ProjectOrchestrator.reset(session_id)
+
+      Pincer.Core.ProjectOrchestrator.start(session_id)
+
+      {:handled, _} =
+        Pincer.Core.ProjectOrchestrator.continue(session_id, "Comprar parafusadeira")
+
+      {:handled, _} = Pincer.Core.ProjectOrchestrator.continue(session_id, "nao-software")
+      {:handled, _} = Pincer.Core.ProjectOrchestrator.continue(session_id, "Belo Horizonte")
+      {:handled, _} = Pincer.Core.ProjectOrchestrator.continue(session_id, "Top 3 com preco")
+
+      APIMock
+      |> expect(:create_message, fn 893, content, _opts ->
+        assert content =~ "Kanban Board"
+        assert content =~ "Project: Comprar parafusadeira"
+        assert content =~ "Flow Research/Validation"
+        {:ok, %{id: 129}}
+      end)
+
+      message = %{
+        author: %{bot: false, username: "tester"},
+        content: "kanban",
+        channel_id: 893,
+        guild_id: 777,
+        attachments: []
+      }
+
+      Pincer.Channels.Discord.Consumer.handle_event({:MESSAGE_CREATE, message, nil})
+      Pincer.Core.ProjectOrchestrator.reset(session_id)
+    end
+
+    test "plain project text routes to project manager wizard" do
       APIMock
       |> expect(:create_message, fn 891, content, _opts ->
-        assert content =~ "DDD Checklist"
-        assert content =~ "TDD Checklist"
+        assert content =~ "Project Manager"
+        assert content =~ "Qual e o objetivo principal?"
         {:ok, %{id: 126}}
       end)
 
@@ -233,6 +266,37 @@ defmodule Pincer.Channels.DiscordTest do
       }
 
       Pincer.Channels.Discord.Consumer.handle_event({:MESSAGE_CREATE, message, nil})
+    end
+
+    test "project wizard follow-up text is captured before default session flow" do
+      APIMock
+      |> expect(:create_message, fn 892, content, _opts ->
+        assert content =~ "Project Manager"
+        {:ok, %{id: 127}}
+      end)
+      |> expect(:create_message, fn 892, content, _opts ->
+        assert content =~ "tipo do projeto"
+        {:ok, %{id: 128}}
+      end)
+
+      project_start = %{
+        author: %{bot: false, username: "tester"},
+        content: "project",
+        channel_id: 892,
+        guild_id: 777,
+        attachments: []
+      }
+
+      follow_up = %{
+        author: %{bot: false, username: "tester"},
+        content: "Quero pesquisar parafusadeiras em Belo Horizonte",
+        channel_id: 892,
+        guild_id: 777,
+        attachments: []
+      }
+
+      Pincer.Channels.Discord.Consumer.handle_event({:MESSAGE_CREATE, project_start, nil})
+      Pincer.Channels.Discord.Consumer.handle_event({:MESSAGE_CREATE, follow_up, nil})
     end
 
     test "models interaction includes a Menu fallback button" do
