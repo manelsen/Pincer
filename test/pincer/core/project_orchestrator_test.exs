@@ -1,7 +1,39 @@
+defmodule Pincer.Core.ProjectGitStubSuccess do
+  @moduledoc false
+
+  def ensure_branch(name) do
+    {:ok, %{name: name, status: :created, source_branch: "sprint/spr-080"}}
+  end
+end
+
+defmodule Pincer.Core.ProjectGitStubFailure do
+  @moduledoc false
+
+  def ensure_branch(_name) do
+    {:error, {:branch_create_failed, "permission denied"}}
+  end
+end
+
 defmodule Pincer.Core.ProjectOrchestratorTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Pincer.Core.ProjectOrchestrator
+
+  setup do
+    previous = Application.get_env(:pincer, :project_git)
+    Application.put_env(:pincer, :project_git, Pincer.Core.ProjectGitStubSuccess)
+
+    on_exit(fn ->
+      case previous do
+        nil -> Application.delete_env(:pincer, :project_git)
+        module -> Application.put_env(:pincer, :project_git, module)
+      end
+
+      ProjectOrchestrator.reset_all()
+    end)
+
+    :ok
+  end
 
   describe "project wizard flow" do
     test "starts wizard asking for objective" do
@@ -47,6 +79,8 @@ defmodule Pincer.Core.ProjectOrchestratorTest do
       assert completed =~ "Architect"
       assert completed =~ "Coder"
       assert completed =~ "Reviewer"
+      assert completed =~ "**Git Branch**"
+      assert completed =~ "git checkout project/"
       refute completed =~ "DDD/TDD"
 
       assert {:ok, board} = ProjectOrchestrator.board(session_id)
@@ -78,6 +112,27 @@ defmodule Pincer.Core.ProjectOrchestratorTest do
       assert board =~ "Kanban Board"
       assert board =~ "Flow DDD/TDD"
       assert board =~ "Spec -> Contract -> Red -> Green -> Refactor -> Review -> Done"
+    end
+
+    test "keeps project flow alive when branch creation fails" do
+      session_id = unique_session_id()
+      on_exit(fn -> ProjectOrchestrator.reset(session_id) end)
+      Application.put_env(:pincer, :project_git, Pincer.Core.ProjectGitStubFailure)
+
+      assert ProjectOrchestrator.start(session_id) =~ "Project Manager"
+      assert {:handled, _} = ProjectOrchestrator.continue(session_id, "Pesquisar parafusadeiras")
+      assert {:handled, _} = ProjectOrchestrator.continue(session_id, "nao-software")
+      assert {:handled, _} = ProjectOrchestrator.continue(session_id, "Belo Horizonte")
+
+      assert {:handled, completed} =
+               ProjectOrchestrator.continue(
+                 session_id,
+                 "Definir recomendacao com evidencias"
+               )
+
+      assert completed =~ "Project plan initialized"
+      assert completed =~ "Falha ao preparar branch automaticamente"
+      assert completed =~ "git checkout -b project/"
     end
   end
 

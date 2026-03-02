@@ -233,8 +233,7 @@ defmodule Pincer.Channels.Discord do
     alias Pincer.Core.AccessPolicy
     alias Pincer.Core.ChannelInteractionPolicy
     alias Pincer.Core.Pairing
-    alias Pincer.Core.ProjectBoard
-    alias Pincer.Core.ProjectOrchestrator
+    alias Pincer.Core.ProjectRouter
     alias Pincer.Core.SessionScopePolicy
     alias Pincer.Core.UX
     alias Pincer.Session.Server
@@ -265,14 +264,11 @@ defmodule Pincer.Channels.Discord do
                   :error ->
                     session_id = resolve_session_id(msg)
 
-                    case maybe_handle_project_message(
-                           msg.channel_id,
-                           msg.attachments,
-                           session_id,
-                           trimmed
+                    case ProjectRouter.continue_if_collecting(session_id, trimmed,
+                           has_attachments: not Enum.empty?(msg.attachments)
                          ) do
-                      :handled ->
-                        :ok
+                      {:handled, response} ->
+                        Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
 
                       :not_handled ->
                         Logger.info(
@@ -455,19 +451,19 @@ defmodule Pincer.Channels.Discord do
 
       Pincer.Channels.Discord.send_message(
         "#{msg.channel_id}",
-        render_kanban_for_session(session_id)
+        ProjectRouter.kanban(session_id)
       )
     end
 
     defp handle_command(msg, "/project") do
       session_id = resolve_session_id(msg)
-      response = ProjectOrchestrator.start(session_id)
+      response = ProjectRouter.project(session_id)
       Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
     end
 
     defp handle_command(msg, "/project " <> details) do
       session_id = resolve_session_id(msg)
-      response = ProjectOrchestrator.start(session_id, details)
+      response = ProjectRouter.project(session_id, details)
       Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
     end
 
@@ -564,7 +560,7 @@ defmodule Pincer.Channels.Discord do
 
       response = %{
         type: 4,
-        data: %{content: render_kanban_for_session(session_id)}
+        data: %{content: ProjectRouter.kanban(session_id)}
       }
 
       send_interaction_response(interaction, response)
@@ -575,37 +571,10 @@ defmodule Pincer.Channels.Discord do
 
       response = %{
         type: 4,
-        data: %{content: ProjectOrchestrator.start(session_id)}
+        data: %{content: ProjectRouter.project(session_id)}
       }
 
       send_interaction_response(interaction, response)
-    end
-
-    defp maybe_handle_project_message(channel_id, attachments, session_id, trimmed) do
-      cond do
-        not is_binary(trimmed) or String.trim(trimmed) == "" ->
-          :not_handled
-
-        is_list(attachments) and attachments != [] ->
-          :not_handled
-
-        true ->
-          case ProjectOrchestrator.continue(session_id, trimmed) do
-            {:handled, response} ->
-              Pincer.Channels.Discord.send_message("#{channel_id}", response)
-              :handled
-
-            :not_active ->
-              :not_handled
-          end
-      end
-    end
-
-    defp render_kanban_for_session(session_id) do
-      case ProjectOrchestrator.board(session_id) do
-        {:ok, session_board} -> session_board
-        :not_found -> ProjectBoard.render()
-      end
     end
 
     defp build_status_content(session_id) do
