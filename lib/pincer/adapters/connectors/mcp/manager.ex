@@ -1,4 +1,4 @@
-defmodule Pincer.Connectors.MCP.Manager do
+defmodule Pincer.Adapters.Connectors.MCP.Manager do
   @moduledoc """
   Manages multiple MCP servers and provides unified tool discovery and execution.
 
@@ -97,10 +97,10 @@ defmodule Pincer.Connectors.MCP.Manager do
   ## Usage
 
       # Get all available tools
-      tools = Pincer.Connectors.MCP.Manager.get_all_tools()
+      tools = Pincer.Adapters.Connectors.MCP.Manager.get_all_tools()
 
       # Execute a tool
-      {:ok, result} = Pincer.Connectors.MCP.Manager.execute_tool("read_file", %{
+      {:ok, result} = Pincer.Adapters.Connectors.MCP.Manager.execute_tool("read_file", %{
         "path" => "/home/user/file.txt"
       })
 
@@ -118,18 +118,18 @@ defmodule Pincer.Connectors.MCP.Manager do
 
   ## See Also
 
-  - `Pincer.Connectors.MCP.Client` - Individual server client
-  - `Pincer.Connectors.MCP.Transport` - Transport behaviour
+  - `Pincer.Adapters.Connectors.MCP.Client` - Individual server client
+  - `Pincer.Adapters.Connectors.MCP.Transport` - Transport behaviour
   """
 
   use GenServer
   require Logger
-  alias Pincer.Connectors.MCP.Client
-  alias Pincer.Connectors.MCP.ConfigLoader
-  alias Pincer.Connectors.MCP.SidecarAudit
-  alias Pincer.Connectors.MCP.SkillsSidecarPolicy
-  alias Pincer.Connectors.MCP.Transports.HTTP
-  alias Pincer.Connectors.MCP.Transports.Stdio
+  alias Pincer.Adapters.Connectors.MCP.Client
+  alias Pincer.Adapters.Connectors.MCP.ConfigLoader
+  alias Pincer.Adapters.Connectors.MCP.SidecarAudit
+  alias Pincer.Core.LLM.SkillsSidecarPolicy
+  alias Pincer.Adapters.Connectors.MCP.Transports.HTTP
+  alias Pincer.Adapters.Connectors.MCP.Transports.Stdio
   @default_get_tools_timeout 200
   @skills_sidecar_tool_timeout_ms 15_000
   @skills_sidecar_hard_kill_timeout_ms 100
@@ -147,7 +147,7 @@ defmodule Pincer.Connectors.MCP.Manager do
 
   ## Examples
 
-      {:ok, _pid} = Pincer.Connectors.MCP.Manager.start_link([])
+      {:ok, _pid} = Pincer.Adapters.Connectors.MCP.Manager.start_link([])
   """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(_opts) do

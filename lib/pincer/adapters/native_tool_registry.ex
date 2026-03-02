@@ -2,25 +2,25 @@ defmodule Pincer.Adapters.NativeToolRegistry do
   @moduledoc """
   Adapter for native Elixir tools.
 
-  Implements the `Pincer.Core.Ports.ToolRegistry` port by serving
+  Implements the `Pincer.Ports.ToolRegistry` port by serving
   the core Pincer tools and dynamically connected MCP tools.
   """
-  @behaviour Pincer.Core.Ports.ToolRegistry
+  @behaviour Pincer.Ports.ToolRegistry
   require Logger
 
-  alias Pincer.Connectors.MCP.Manager, as: MCPManager
+  alias Pincer.Adapters.Connectors.MCP.Manager, as: MCPManager
 
   @native_tools [
-    Pincer.Tools.FileSystem,
-    Pincer.Tools.Config,
-    Pincer.Tools.Scheduler,
-    Pincer.Tools.Timer,
-    Pincer.Tools.GitHub,
-    Pincer.Tools.Orchestrator,
-    Pincer.Tools.BlackboardReader,
-    Pincer.Tools.SafeShell,
-    Pincer.Tools.Web,
-    Pincer.Tools.GraphMemory
+    Pincer.Adapters.Tools.FileSystem,
+    Pincer.Adapters.Tools.Config,
+    Pincer.Adapters.Tools.Scheduler,
+    Pincer.Adapters.Tools.Timer,
+    Pincer.Adapters.Tools.GitHub,
+    Pincer.Adapters.Tools.Orchestrator,
+    Pincer.Adapters.Tools.BlackboardReader,
+    Pincer.Adapters.Tools.SafeShell,
+    Pincer.Adapters.Tools.Web,
+    Pincer.Adapters.Tools.GraphMemory
   ]
 
   @impl true

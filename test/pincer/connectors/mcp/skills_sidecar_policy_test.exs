@@ -1,7 +1,7 @@
-defmodule Pincer.Connectors.MCP.SkillsSidecarPolicyTest do
+defmodule Pincer.Core.LLM.SkillsSidecarPolicyTest do
   use ExUnit.Case, async: true
 
-  alias Pincer.Connectors.MCP.SkillsSidecarPolicy
+  alias Pincer.Core.LLM.SkillsSidecarPolicy
 
   describe "validate/1" do
     test "accepts hardened docker sidecar config" do

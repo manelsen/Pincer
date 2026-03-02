@@ -1,10 +1,10 @@
-defmodule Pincer.Connectors.MCP.ClientTest do
+defmodule Pincer.Adapters.Connectors.MCP.ClientTest do
   use ExUnit.Case, async: true
 
-  alias Pincer.Connectors.MCP.Client
+  alias Pincer.Adapters.Connectors.MCP.Client
 
   defmodule FakeTransport do
-    @behaviour Pincer.Connectors.MCP.Transport
+    @behaviour Pincer.Adapters.Connectors.MCP.Transport
 
     @impl true
     def connect(opts) do

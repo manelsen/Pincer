@@ -1,8 +1,8 @@
-defmodule Pincer.Cron.Storage do
+defmodule Pincer.Adapters.Cron.Storage do
   @moduledoc """
   Database context for managing persistent cron job schedules.
 
-  Storage provides the persistence layer for `Pincer.Cron.Job` records,
+  Storage provides the persistence layer for `Pincer.Adapters.Cron.Job` records,
   handling CRUD operations and schedule calculations. All jobs are stored
   in the database and survive application restarts.
 
@@ -15,9 +15,9 @@ defmodule Pincer.Cron.Storage do
 
   ## Usage with Scheduler
 
-  The `Pincer.Cron.Scheduler` calls `list_due_jobs/1` every 60 seconds:
+  The `Pincer.Adapters.Cron.Scheduler` calls `list_due_jobs/1` every 60 seconds:
 
-      due_jobs = Pincer.Cron.Storage.list_due_jobs()
+      due_jobs = Pincer.Adapters.Cron.Storage.list_due_jobs()
       # => [%Job{id: "...", prompt: "Wake up!", ...}]
 
   ## Job Lifecycle
@@ -38,22 +38,22 @@ defmodule Pincer.Cron.Storage do
   ## Examples
 
       # List all jobs (for admin/debugging)
-      jobs = Pincer.Cron.Storage.list_jobs()
+      jobs = Pincer.Adapters.Cron.Storage.list_jobs()
 
       # Disable a job temporarily
-      {:ok, _} = Pincer.Cron.Storage.disable_job(job_id)
+      {:ok, _} = Pincer.Adapters.Cron.Storage.disable_job(job_id)
 
       # Delete permanently
-      {:ok, _} = Pincer.Cron.Storage.delete_job(job_id)
+      {:ok, _} = Pincer.Adapters.Cron.Storage.delete_job(job_id)
   """
   import Ecto.Query
-  alias Pincer.Repo
-  alias Pincer.Cron.Job
+  alias Pincer.Infra.Repo
+  alias Pincer.Adapters.Cron.Job
 
   @doc """
   Returns all enabled jobs whose `next_run_at` is at or before the given time.
 
-  This is the primary query used by `Pincer.Cron.Scheduler` to find jobs
+  This is the primary query used by `Pincer.Adapters.Cron.Scheduler` to find jobs
   that need to be executed.
 
   ## Parameters
@@ -67,15 +67,15 @@ defmodule Pincer.Cron.Storage do
   ## Examples
 
       # Get jobs due right now
-      due = Pincer.Cron.Storage.list_due_jobs()
+      due = Pincer.Adapters.Cron.Storage.list_due_jobs()
       # => [%Job{name: "Morning Alert", ...}]
 
       # Get jobs due as of a specific time
       cutoff = ~U[2024-01-15 10:00:00Z]
-      due = Pincer.Cron.Storage.list_due_jobs(cutoff)
+      due = Pincer.Adapters.Cron.Storage.list_due_jobs(cutoff)
 
       # No jobs due yet
-      [] = Pincer.Cron.Storage.list_due_jobs()
+      [] = Pincer.Adapters.Cron.Storage.list_due_jobs()
   """
   @spec list_due_jobs(DateTime.t()) :: [Job.t()]
   def list_due_jobs(now \\ DateTime.utc_now()) do
@@ -107,7 +107,7 @@ defmodule Pincer.Cron.Storage do
   ## Examples
 
       job = %Job{cron_expression: "0 9 * * *", ...}
-      updated = Pincer.Cron.Storage.update_next_run!(job)
+      updated = Pincer.Adapters.Cron.Storage.update_next_run!(job)
       # => %Job{next_run_at: ~U[2024-01-16 09:00:00Z], ...}
   """
   @spec update_next_run!(Job.t()) :: Job.t()
@@ -152,7 +152,7 @@ defmodule Pincer.Cron.Storage do
 
   ## Examples
 
-      {:ok, job} = Pincer.Cron.Storage.create_job(%{
+      {:ok, job} = Pincer.Adapters.Cron.Storage.create_job(%{
         name: "Weekly Report",
         cron_expression: "0 9 * * 1",
         prompt: "Generate weekly report",
@@ -160,7 +160,7 @@ defmodule Pincer.Cron.Storage do
       })
       # => {:ok, %Job{id: "uuid-...", next_run_at: ~U[2024-01-22 09:00:00Z]}}
 
-      {:error, changeset} = Pincer.Cron.Storage.create_job(%{name: "Bad"})
+      {:error, changeset} = Pincer.Adapters.Cron.Storage.create_job(%{name: "Bad"})
       # => {:error, %Ecto.Changeset{errors: [cron_expression: {"can't be blank", ...}, ...]}}
   """
   @spec create_job(map()) :: {:ok, Job.t()} | {:error, Ecto.Changeset.t()}
@@ -194,10 +194,10 @@ defmodule Pincer.Cron.Storage do
 
   ## Examples
 
-      {:ok, job} = Pincer.Cron.Storage.disable_job("uuid-123")
+      {:ok, job} = Pincer.Adapters.Cron.Storage.disable_job("uuid-123")
       # => {:ok, %Job{enabled: false, ...}}
 
-      {:error, :not_found} = Pincer.Cron.Storage.disable_job("nonexistent")
+      {:error, :not_found} = Pincer.Adapters.Cron.Storage.disable_job("nonexistent")
   """
   @spec disable_job(binary()) :: {:ok, Job.t()} | {:error, :not_found}
   def disable_job(id) do
@@ -223,7 +223,7 @@ defmodule Pincer.Cron.Storage do
 
   ## Examples
 
-      jobs = Pincer.Cron.Storage.list_jobs()
+      jobs = Pincer.Adapters.Cron.Storage.list_jobs()
       # => [%Job{name: "Job 1"}, %Job{name: "Job 2"}]
 
       active = Enum.filter(jobs, & &1.enabled)
@@ -250,10 +250,10 @@ defmodule Pincer.Cron.Storage do
 
   ## Examples
 
-      {:ok, job} = Pincer.Cron.Storage.delete_job("uuid-123")
+      {:ok, job} = Pincer.Adapters.Cron.Storage.delete_job("uuid-123")
       # => {:ok, %Job{name: "Deleted Job", ...}}
 
-      {:error, :not_found} = Pincer.Cron.Storage.delete_job("nonexistent")
+      {:error, :not_found} = Pincer.Adapters.Cron.Storage.delete_job("nonexistent")
   """
   @spec delete_job(binary()) :: {:ok, Job.t()} | {:error, :not_found}
   def delete_job(id) do
