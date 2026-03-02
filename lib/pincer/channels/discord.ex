@@ -233,6 +233,7 @@ defmodule Pincer.Channels.Discord do
     alias Pincer.Core.AccessPolicy
     alias Pincer.Core.ChannelInteractionPolicy
     alias Pincer.Core.Pairing
+    alias Pincer.Core.ProjectBoard
     alias Pincer.Core.SessionScopePolicy
     alias Pincer.Core.UX
     alias Pincer.Session.Server
@@ -392,6 +393,12 @@ defmodule Pincer.Channels.Discord do
         "models" ->
           handle_models_command(interaction)
 
+        "kanban" ->
+          handle_kanban_command(interaction)
+
+        "project" ->
+          handle_project_command(interaction)
+
         _ ->
           response = %{
             type: 4,
@@ -426,10 +433,21 @@ defmodule Pincer.Channels.Discord do
       )
     end
 
+    defp handle_command(msg, "/kanban") do
+      Pincer.Channels.Discord.send_message("#{msg.channel_id}", ProjectBoard.render())
+    end
+
+    defp handle_command(msg, "/project") do
+      Pincer.Channels.Discord.send_message(
+        "#{msg.channel_id}",
+        ProjectBoard.render(view: :project)
+      )
+    end
+
     defp handle_command(msg, "/pair") do
       Pincer.Channels.Discord.send_message(
         "#{msg.channel_id}",
-        "Uso: /pair <codigo>. Envie uma mensagem comum primeiro para gerar o codigo de pairing."
+        "Uso: /pair <codigo>. Solicite o codigo de pairing ao operador."
       )
     end
 
@@ -447,13 +465,13 @@ defmodule Pincer.Channels.Discord do
         {:error, :not_pending} ->
           Pincer.Channels.Discord.send_message(
             "#{msg.channel_id}",
-            "Nenhum pairing pendente para este usuario. Envie uma mensagem comum para gerar um codigo."
+            "Nenhum pairing pendente para este usuario. Solicite um novo codigo ao operador."
           )
 
         {:error, :expired} ->
           Pincer.Channels.Discord.send_message(
             "#{msg.channel_id}",
-            "Codigo de pairing expirado. Envie uma nova mensagem para gerar outro codigo."
+            "Codigo de pairing expirado. Solicite um novo codigo ao operador."
           )
 
         {:error, :invalid_code} ->
@@ -465,7 +483,7 @@ defmodule Pincer.Channels.Discord do
         {:error, :attempts_exceeded} ->
           Pincer.Channels.Discord.send_message(
             "#{msg.channel_id}",
-            "Tentativas excedidas para este codigo. Gere um novo codigo com uma nova mensagem."
+            "Tentativas excedidas para este codigo. Solicite um novo codigo ao operador."
           )
       end
     end
@@ -509,6 +527,24 @@ defmodule Pincer.Channels.Discord do
           content: "🔧 **Select AI Provider:**",
           components: components
         }
+      }
+
+      send_interaction_response(interaction, response)
+    end
+
+    defp handle_kanban_command(interaction) do
+      response = %{
+        type: 4,
+        data: %{content: ProjectBoard.render()}
+      }
+
+      send_interaction_response(interaction, response)
+    end
+
+    defp handle_project_command(interaction) do
+      response = %{
+        type: 4,
+        data: %{content: ProjectBoard.render(view: :project)}
       }
 
       send_interaction_response(interaction, response)

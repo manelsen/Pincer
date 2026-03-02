@@ -11,6 +11,8 @@ defmodule Pincer.Core.Executor do
 
   @max_recursion_depth 15
   @approval_timeout_ms 60_000
+  @markdown_notice_max_chars 12_000
+  @markdown_ignored_roots MapSet.new([".git", "_build", "deps", "node_modules", "target"])
 
   # Maximum file size for inline base64 encoding (≈10 MB decoded → ≈13.3 MB base64).
   # Larger files are described as text instead of sent inline.
@@ -38,6 +40,7 @@ defmodule Pincer.Core.Executor do
     Process.put(:session_id, session_id)
     Process.put(:long_term_memory, long_term_memory)
     Process.put(:executor_deps, deps)
+    init_markdown_tracker()
 
     try do
       case run_loop(history, session_id, session_pid, 0, model_override, deps) do
@@ -336,12 +339,21 @@ defmodule Pincer.Core.Executor do
        ) do
     case assistant_msg do
       %{"tool_calls" => tool_calls} when is_list(tool_calls) and tool_calls != [] ->
-        tool_names = Enum.map(tool_calls, fn tc -> tc["function"]["name"] end) |> Enum.join(", ")
+        normalized_tool_calls = Enum.map(tool_calls, &ensure_tool_call_type/1)
+        assistant_msg = Map.put(assistant_msg, "tool_calls", normalized_tool_calls)
+
+        tool_names =
+          normalized_tool_calls
+          |> Enum.map(&tool_call_name/1)
+          |> Enum.reject(&is_nil_or_blank/1)
+          |> Enum.join(", ")
+
+        tool_names = if tool_names == "", do: "unknown_tool", else: tool_names
         Logger.info("[EXECUTOR] LLM decided to use tools: #{tool_names}")
         send(session_pid, {:sme_tool_use, tool_names})
 
         tool_results =
-          Enum.map(tool_calls, fn call ->
+          Enum.map(normalized_tool_calls, fn call ->
             execute_tool_via_registry(call, session_pid, session_id, deps.tool_registry)
           end)
 
@@ -360,28 +372,40 @@ defmodule Pincer.Core.Executor do
     end
   end
 
-  defp merge_tool_deltas(acc, deltas) do
+  defp merge_tool_deltas(acc, deltas) when is_list(deltas) do
     Enum.reduce(deltas, acc, fn delta, inner_acc ->
-      index = delta["index"]
+      index = read_map_field(delta, "index", :index)
 
       existing =
         Map.get(inner_acc, index, %{
           "index" => index,
           "id" => nil,
+          "type" => "function",
           "function" => %{"name" => "", "arguments" => ""}
         })
 
-      updated =
-        existing
-        |> Map.put("id", delta["id"] || existing["id"])
-        |> update_in(["function", "name"], &((delta["function"]["name"] || "") <> &1))
+      function_delta = read_map_field(delta, "function", :function)
 
-      name_delta = get_in(delta, ["function", "name"]) || ""
+      type_delta =
+        delta
+        |> read_map_field("type", :type)
+        |> normalize_tool_call_type()
+
+      name_delta =
+        function_delta
+        |> read_map_field("name", :name)
+        |> normalize_delta_fragment()
+
+      updated = Map.put(existing, "id", read_map_field(delta, "id", :id) || existing["id"])
+      updated = Map.put(updated, "type", type_delta || existing["type"] || "function")
 
       updated =
         put_in(updated, ["function", "name"], (existing["function"]["name"] || "") <> name_delta)
 
-      args_delta = get_in(delta, ["function", "arguments"]) || ""
+      args_delta =
+        function_delta
+        |> read_map_field("arguments", :arguments)
+        |> normalize_arguments_fragment()
 
       updated =
         put_in(
@@ -394,19 +418,14 @@ defmodule Pincer.Core.Executor do
     end)
   end
 
-  defp execute_tool_via_registry(
-         %{"id" => call_id, "function" => %{"name" => name, "arguments" => args_json}},
-         session_pid,
-         session_id,
-         registry
-       ) do
+  defp merge_tool_deltas(acc, _deltas), do: acc
+
+  defp execute_tool_via_registry(tool_call, session_pid, session_id, registry)
+       when is_map(tool_call) do
+    {call_id, name, raw_arguments} = normalize_tool_call(tool_call)
     Logger.info("[TOOL] Executing #{name}")
 
-    args =
-      case Jason.decode(args_json) do
-        {:ok, d} -> d
-        _ -> args_json
-      end
+    args = parse_tool_arguments(raw_arguments)
 
     context = %{"session_id" => session_id}
 
@@ -422,7 +441,18 @@ defmodule Pincer.Core.Executor do
           "Error: #{inspect(r)}"
       end
 
+    maybe_send_markdown_artifacts(session_pid)
+
     %{"role" => "tool", "tool_call_id" => call_id, "name" => name, "content" => to_string(result)}
+  end
+
+  defp execute_tool_via_registry(_invalid_call, _session_pid, _session_id, _registry) do
+    %{
+      "role" => "tool",
+      "tool_call_id" => "tool_call_invalid",
+      "name" => "unknown_tool",
+      "content" => "Error: invalid tool call payload."
+    }
   end
 
   defp handle_approval(call_id, command, session_pid, session_id, registry) do
@@ -687,4 +717,310 @@ defmodule Pincer.Core.Executor do
       fn {_tool, count} -> count >= 5 end
     )
   end
+
+  defp tool_call_name(tool_call) when is_map(tool_call) do
+    tool_call
+    |> read_map_field("function", :function)
+    |> read_map_field("name", :name)
+    |> normalize_binary()
+  end
+
+  defp tool_call_name(_), do: nil
+
+  defp normalize_tool_call(tool_call) do
+    call_id =
+      tool_call
+      |> read_map_field("id", :id)
+      |> normalize_binary()
+      |> case do
+        nil -> "tool_call_" <> Integer.to_string(System.unique_integer([:positive]))
+        value -> value
+      end
+
+    function = read_map_field(tool_call, "function", :function)
+
+    name =
+      function
+      |> read_map_field("name", :name)
+      |> normalize_binary()
+      |> case do
+        nil -> "unknown_tool"
+        value -> value
+      end
+
+    raw_arguments = read_map_field(function, "arguments", :arguments)
+
+    {call_id, name, raw_arguments}
+  end
+
+  defp parse_tool_arguments(nil), do: %{}
+  defp parse_tool_arguments(args) when is_map(args), do: normalize_map_keys(args)
+
+  defp parse_tool_arguments(args_json) when is_binary(args_json) do
+    trimmed = String.trim(args_json)
+
+    if trimmed == "" do
+      %{}
+    else
+      case Jason.decode(trimmed) do
+        {:ok, decoded} when is_map(decoded) ->
+          normalize_map_keys(decoded)
+
+        {:ok, decoded} ->
+          decoded
+
+        _ ->
+          args_json
+      end
+    end
+  end
+
+  defp parse_tool_arguments(other), do: other
+
+  defp normalize_map_keys(map) when is_map(map) do
+    Enum.reduce(map, %{}, fn {key, value}, acc ->
+      normalized_key =
+        cond do
+          is_binary(key) -> key
+          is_atom(key) -> Atom.to_string(key)
+          true -> to_string(key)
+        end
+
+      normalized_value =
+        cond do
+          is_map(value) -> normalize_map_keys(value)
+          is_list(value) -> Enum.map(value, &normalize_nested_value/1)
+          true -> value
+        end
+
+      Map.put(acc, normalized_key, normalized_value)
+    end)
+  end
+
+  defp normalize_map_keys(other), do: other
+
+  defp normalize_nested_value(value) when is_map(value), do: normalize_map_keys(value)
+
+  defp normalize_nested_value(value) when is_list(value),
+    do: Enum.map(value, &normalize_nested_value/1)
+
+  defp normalize_nested_value(value), do: value
+
+  defp normalize_delta_fragment(nil), do: ""
+  defp normalize_delta_fragment(fragment) when is_binary(fragment), do: fragment
+  defp normalize_delta_fragment(fragment), do: to_string(fragment)
+
+  defp normalize_arguments_fragment(nil), do: ""
+  defp normalize_arguments_fragment(fragment) when is_binary(fragment), do: fragment
+
+  defp normalize_arguments_fragment(fragment) do
+    case Jason.encode(fragment) do
+      {:ok, json} -> json
+      _ -> inspect(fragment)
+    end
+  end
+
+  defp ensure_tool_call_type(tool_call) when is_map(tool_call) do
+    type =
+      tool_call
+      |> read_map_field("type", :type)
+      |> normalize_tool_call_type()
+      |> case do
+        nil -> "function"
+        value -> value
+      end
+
+    Map.put(tool_call, "type", type)
+  end
+
+  defp ensure_tool_call_type(other), do: other
+
+  defp normalize_tool_call_type(nil), do: nil
+
+  defp normalize_tool_call_type(type) when is_binary(type) do
+    case String.trim(type) do
+      "" -> nil
+      value -> value
+    end
+  end
+
+  defp normalize_tool_call_type(type) when is_atom(type),
+    do: type |> Atom.to_string() |> normalize_tool_call_type()
+
+  defp normalize_tool_call_type(_), do: nil
+
+  defp init_markdown_tracker do
+    root = File.cwd!() |> Path.expand()
+    Process.put(:executor_markdown_root, root)
+    Process.put(:executor_markdown_snapshot, markdown_snapshot(root))
+  rescue
+    error ->
+      Logger.warning(
+        "[EXECUTOR] Failed to initialize markdown tracker: #{Exception.message(error)}"
+      )
+
+      Process.put(:executor_markdown_root, nil)
+      Process.put(:executor_markdown_snapshot, %{})
+  end
+
+  defp maybe_send_markdown_artifacts(session_pid) when is_pid(session_pid) do
+    root = Process.get(:executor_markdown_root)
+    previous = Process.get(:executor_markdown_snapshot, %{})
+
+    if is_binary(root) and is_map(previous) do
+      current = markdown_snapshot(root)
+
+      changed_rel_paths =
+        current
+        |> Enum.filter(fn {rel_path, metadata} ->
+          Map.get(previous, rel_path) != metadata
+        end)
+        |> Enum.map(&elem(&1, 0))
+        |> Enum.sort()
+
+      Enum.each(changed_rel_paths, fn rel_path ->
+        case read_markdown_notice_content(root, rel_path) do
+          {:ok, content} ->
+            send(session_pid, {:sme_status, :executor, markdown_notice(rel_path, content)})
+
+          :error ->
+            :ok
+        end
+      end)
+
+      Process.put(:executor_markdown_snapshot, current)
+    end
+  rescue
+    error ->
+      Logger.warning("[EXECUTOR] Markdown artifact tracking failed: #{Exception.message(error)}")
+  end
+
+  defp maybe_send_markdown_artifacts(_session_pid), do: :ok
+
+  defp markdown_snapshot(root) do
+    root
+    |> collect_markdown_files()
+    |> Enum.reduce(%{}, fn rel_path, acc ->
+      full_path = Path.join(root, rel_path)
+
+      case File.stat(full_path, time: :posix) do
+        {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} ->
+          Map.put(acc, rel_path, %{mtime: mtime, size: size})
+
+        _ ->
+          acc
+      end
+    end)
+  rescue
+    _ -> %{}
+  end
+
+  defp collect_markdown_files(root) do
+    walk_markdown_files(root, "", [])
+  end
+
+  defp walk_markdown_files(root, rel_dir, acc) do
+    current_dir = if rel_dir == "", do: root, else: Path.join(root, rel_dir)
+
+    case File.ls(current_dir) do
+      {:ok, entries} ->
+        Enum.reduce(entries, acc, fn entry, inner_acc ->
+          rel_path = if rel_dir == "", do: entry, else: Path.join(rel_dir, entry)
+          full_path = Path.join(root, rel_path)
+
+          cond do
+            ignored_markdown_path?(rel_path) ->
+              inner_acc
+
+            true ->
+              case File.stat(full_path) do
+                {:ok, %File.Stat{type: :directory}} ->
+                  walk_markdown_files(root, rel_path, inner_acc)
+
+                {:ok, %File.Stat{type: :regular}} ->
+                  if markdown_file?(rel_path) do
+                    [rel_path | inner_acc]
+                  else
+                    inner_acc
+                  end
+
+                _ ->
+                  inner_acc
+              end
+          end
+        end)
+
+      {:error, _reason} ->
+        acc
+    end
+  end
+
+  defp ignored_markdown_path?(rel_path) when is_binary(rel_path) do
+    case Path.split(rel_path) do
+      [head | _tail] -> MapSet.member?(@markdown_ignored_roots, head)
+      _ -> false
+    end
+  end
+
+  defp ignored_markdown_path?(_), do: false
+
+  defp markdown_file?(rel_path) when is_binary(rel_path) do
+    String.downcase(Path.extname(rel_path)) == ".md"
+  end
+
+  defp markdown_file?(_), do: false
+
+  defp read_markdown_notice_content(root, rel_path) do
+    full_path = Path.join(root, rel_path)
+
+    case File.read(full_path) do
+      {:ok, content} ->
+        truncated =
+          if String.length(content) > @markdown_notice_max_chars do
+            String.slice(content, 0, @markdown_notice_max_chars) <>
+              "\n\n[... markdown truncated for preview ...]"
+          else
+            content
+          end
+
+        {:ok, truncated}
+
+      {:error, _reason} ->
+        :error
+    end
+  end
+
+  defp markdown_notice(rel_path, content) do
+    """
+    📄 Markdown artifact updated: `#{rel_path}`
+
+    #{content}
+    """
+    |> String.trim()
+  end
+
+  defp read_map_field(map, string_key, atom_key) when is_map(map) do
+    Map.get(map, string_key) || Map.get(map, atom_key)
+  end
+
+  defp read_map_field(_map, _string_key, _atom_key), do: nil
+
+  defp normalize_binary(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_binary(value) when is_atom(value),
+    do: value |> Atom.to_string() |> normalize_binary()
+
+  defp normalize_binary(value) when is_integer(value),
+    do: value |> Integer.to_string() |> normalize_binary()
+
+  defp normalize_binary(_), do: nil
+
+  defp is_nil_or_blank(nil), do: true
+  defp is_nil_or_blank(value) when is_binary(value), do: String.trim(value) == ""
+  defp is_nil_or_blank(_), do: false
 end

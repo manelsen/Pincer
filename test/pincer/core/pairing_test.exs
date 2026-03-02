@@ -62,6 +62,23 @@ defmodule Pincer.Core.PairingTest do
       assert {:error, :not_pending} =
                Pairing.approve_code(:telegram, "user-3", "333333", now_ms: 3, max_attempts: 2)
     end
+
+    test "paired state survives runtime table recreation (persistent store)" do
+      assert {:ok, %{code: code}} =
+               Pairing.issue_code(:telegram, "user-persist",
+                 now_ms: 1_000,
+                 ttl_ms: 60_000,
+                 code_generator: fn -> "555555" end
+               )
+
+      assert :ok = Pairing.approve_code(:telegram, "user-persist", code, now_ms: 1_001)
+      assert Pairing.paired?(:telegram, "user-persist")
+
+      delete_runtime_table(:pincer_pairing_pending)
+      delete_runtime_table(:pincer_pairing_pairs)
+
+      assert Pairing.paired?(:telegram, "user-persist")
+    end
   end
 
   describe "reject_code/4" do
@@ -77,6 +94,13 @@ defmodule Pincer.Core.PairingTest do
 
       assert {:error, :not_pending} =
                Pairing.approve_code(:telegram, "user-4", code, now_ms: 2)
+    end
+  end
+
+  defp delete_runtime_table(table) do
+    case :ets.whereis(table) do
+      :undefined -> :ok
+      _ -> :ets.delete(table)
     end
   end
 end

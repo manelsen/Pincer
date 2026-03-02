@@ -204,14 +204,11 @@ defmodule Pincer.Channels.TelegramTest do
       assert :ok == Telegram.register_commands()
     end
 
-    test "menu_reply_markup/0 contains persistent Menu button" do
+    test "menu_reply_markup/0 defaults to native-first (no persistent custom keyboard)" do
       markup = Telegram.menu_reply_markup()
 
       assert is_map(markup)
-      assert markup.keyboard == [[%{text: "Menu"}]]
-      assert markup.resize_keyboard == true
-      assert markup.is_persistent == true
-      assert markup.one_time_keyboard == false
+      assert markup.remove_keyboard == true
     end
 
     test "plain status text routes to /status command for keyboard-first navigation" do
@@ -228,6 +225,61 @@ defmodule Pincer.Channels.TelegramTest do
       |> expect(:send_message, fn 901, text, _opts ->
         assert text =~ "Session Status"
         {:ok, %{message_id: 613}}
+      end)
+
+      {:ok, pid} = Pincer.Channels.Telegram.UpdatesProvider.start_link(nil)
+      allow(APIMock, self(), pid)
+      ref = Process.monitor(pid)
+
+      send(pid, :poll)
+      Process.sleep(100)
+
+      refute_receive {:DOWN, ^ref, :process, ^pid, _}
+      GenServer.stop(pid)
+    end
+
+    test "plain kanban text routes to /kanban command" do
+      APIMock
+      |> expect(:get_updates, fn _opts ->
+        {:ok,
+         [
+           %{
+             update_id: 14,
+             message: %{text: "kanban", chat: %{id: 902, type: "private"}}
+           }
+         ]}
+      end)
+      |> expect(:send_message, fn 902, text, _opts ->
+        assert text =~ "Kanban Board"
+        {:ok, %{message_id: 614}}
+      end)
+
+      {:ok, pid} = Pincer.Channels.Telegram.UpdatesProvider.start_link(nil)
+      allow(APIMock, self(), pid)
+      ref = Process.monitor(pid)
+
+      send(pid, :poll)
+      Process.sleep(100)
+
+      refute_receive {:DOWN, ^ref, :process, ^pid, _}
+      GenServer.stop(pid)
+    end
+
+    test "plain project text routes to /project command with DDD/TDD guidance" do
+      APIMock
+      |> expect(:get_updates, fn _opts ->
+        {:ok,
+         [
+           %{
+             update_id: 15,
+             message: %{text: "project", chat: %{id: 903, type: "private"}}
+           }
+         ]}
+      end)
+      |> expect(:send_message, fn 903, text, _opts ->
+        assert text =~ "DDD Checklist"
+        assert text =~ "TDD Checklist"
+        {:ok, %{message_id: 615}}
       end)
 
       {:ok, pid} = Pincer.Channels.Telegram.UpdatesProvider.start_link(nil)
@@ -345,7 +397,7 @@ defmodule Pincer.Channels.TelegramTest do
       |> expect(:send_message, fn chat_id, text, opts ->
         assert chat_id == 321
         assert text =~ "Opcao de menu"
-        assert opts[:reply_markup][:keyboard] == [[%{text: "Menu"}]]
+        assert opts[:reply_markup] == Telegram.menu_reply_markup()
         {:ok, %{message_id: 100}}
       end)
 
@@ -408,7 +460,7 @@ defmodule Pincer.Channels.TelegramTest do
       end)
       |> expect(:send_message, fn 777, text, opts ->
         assert text =~ "Opcao de menu"
-        assert opts[:reply_markup][:keyboard] == [[%{text: "Menu"}]]
+        assert opts[:reply_markup] == Telegram.menu_reply_markup()
         {:ok, %{message_id: 909}}
       end)
 
@@ -442,7 +494,7 @@ defmodule Pincer.Channels.TelegramTest do
       |> expect(:send_message, fn chat_id, text, opts ->
         assert chat_id == 333
         assert text =~ "Opcao de menu"
-        assert opts[:reply_markup][:keyboard] == [[%{text: "Menu"}]]
+        assert opts[:reply_markup] == Telegram.menu_reply_markup()
         {:ok, %{message_id: 500}}
       end)
 
@@ -482,7 +534,7 @@ defmodule Pincer.Channels.TelegramTest do
       |> expect(:send_message, fn chat_id, text, opts ->
         assert chat_id == 555
         assert text =~ "Nao consegui atualizar o menu"
-        assert opts[:reply_markup][:keyboard] == [[%{text: "Menu"}]]
+        assert opts[:reply_markup] == Telegram.menu_reply_markup()
         {:ok, %{message_id: 200}}
       end)
 
@@ -577,7 +629,7 @@ defmodule Pincer.Channels.TelegramTest do
       |> expect(:send_message, fn chat_id, text, opts ->
         assert chat_id == 321
         assert text =~ "nao esta autorizado"
-        assert opts[:reply_markup][:keyboard] == [[%{text: "Menu"}]]
+        assert opts[:reply_markup] == Telegram.menu_reply_markup()
         assert opts[:parse_mode] == "HTML"
         {:ok, %{message_id: 300}}
       end)

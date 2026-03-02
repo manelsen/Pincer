@@ -143,16 +143,16 @@ defmodule Pincer.LLM.Client do
   """
   @spec list_providers() :: [%{id: String.t(), name: String.t()}]
   def list_providers do
-    ModelRegistry.list_providers(Application.get_env(:pincer, :llm_providers, %{}))
+    ModelRegistry.list_providers(model_selection_registry())
   end
 
   @doc """
-  Returns a list containing the default model for a specific provider.
-  Unlike the hardcoded version, this pulls from the dynamic config.
+  Returns available models for a specific provider from the model-selection
+  registry (config.yaml `llm` with fallback to `:llm_providers`).
   """
   @spec list_models(String.t()) :: [String.t()]
   def list_models(provider_id) do
-    ModelRegistry.list_models(provider_id, Application.get_env(:pincer, :llm_providers, %{}))
+    ModelRegistry.list_models(provider_id, model_selection_registry())
   end
 
   @doc """
@@ -410,6 +410,51 @@ defmodule Pincer.LLM.Client do
   end
 
   defp normalize_success(_action, result), do: {:ok, result}
+
+  defp model_selection_registry do
+    llm_registry = llm_config_registry()
+
+    if map_size(llm_registry) > 0 do
+      llm_registry
+    else
+      Application.get_env(:pincer, :llm_providers, %{})
+    end
+  end
+
+  defp llm_config_registry do
+    case Application.get_env(:pincer, :llm, %{}) do
+      llm when is_map(llm) ->
+        Enum.reduce(llm, %{}, fn {provider_id, config}, acc ->
+          normalized_provider = normalize_provider_id(provider_id)
+
+          cond do
+            normalized_provider == "" ->
+              acc
+
+            normalized_provider == "provider" ->
+              acc
+
+            not is_map(config) ->
+              acc
+
+            true ->
+              Map.put(acc, normalized_provider, config)
+          end
+        end)
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp normalize_provider_id(provider_id) when is_atom(provider_id),
+    do: provider_id |> Atom.to_string() |> String.trim()
+
+  defp normalize_provider_id(provider_id) when is_binary(provider_id),
+    do: String.trim(provider_id)
+
+  defp normalize_provider_id(provider_id),
+    do: provider_id |> to_string() |> String.trim()
 
   defp valid_stream?(stream) do
     cond do
@@ -737,7 +782,7 @@ defmodule Pincer.LLM.Client do
     fetch = fn key, default ->
       case config do
         map when is_map(map) -> Map.get(map, key, default)
-        list when is_list(list) -> Keyword.get(list, key, default)
+        list when is_list(list) -> fetch_list_value(list, key, default)
         _ -> default
       end
     end
@@ -765,6 +810,33 @@ defmodule Pincer.LLM.Client do
           @default_jitter_ratio
         )
     }
+  end
+
+  defp fetch_list_value(list, key, default) when is_list(list) do
+    string_key = to_string(key)
+
+    cond do
+      Keyword.keyword?(list) ->
+        Keyword.get(list, key, default)
+
+      true ->
+        Enum.find_value(list, default, fn
+          {^key, value} ->
+            value
+
+          {list_key, value} when is_binary(list_key) and list_key == string_key ->
+            value
+
+          {list_key, value} when is_atom(list_key) ->
+            if Atom.to_string(list_key) == string_key, do: value, else: nil
+
+          %{} = map ->
+            Map.get(map, key) || Map.get(map, string_key)
+
+          _ ->
+            nil
+        end)
+    end
   end
 
   defp positive_integer(value, _default) when is_integer(value) and value > 0, do: value
