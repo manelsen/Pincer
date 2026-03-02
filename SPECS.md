@@ -708,6 +708,118 @@ channels:
   2. testes cobrem bloqueio para `http://` e aceitação de wildcard de host;
   3. testes cobrem bloqueio de `sandbox_root` symlink.
 
+### MCP HTTP long-lived stream resilience (SPR-046 / C15 - especificação)
+- Objetivo:
+  - endurecer transporte HTTP MCP para streams SSE de longa duração;
+  - reduzir perda de sessão por desconexão transitória com reconexão controlada;
+  - evitar ruído de payload por heartbeats e replay de eventos após reconnect.
+- Interface (transport):
+  - `Pincer.Connectors.MCP.Transports.HTTP.connect/1`
+  - `Pincer.Connectors.MCP.Transports.HTTP.send_message/2`
+- Novas opções de conexão (v1):
+  - `:max_reconnect_attempts` (default `3`)
+  - `:initial_backoff_ms` (default `200`)
+  - `:max_backoff_ms` (default `2_000`)
+  - `:sleep_fn` (injeção para testes)
+- Regras v1:
+  - eventos SSE heartbeat/keepalive (`event: heartbeat|ping`, comentários `: ...`) são ignorados;
+  - stream SSE encerrado sem sentinel `data: [DONE]` é tratado como interrupção transitória e pode reconectar;
+  - reconexão usa backoff exponencial com teto;
+  - em reconexão, payload duplicado já entregue não deve ser reenviado ao owner;
+  - erros não transitórios (ex.: SSE inválido, `4xx` terminal) falham sem loop de reconexão.
+- Critérios de aceite:
+  1. testes cobrem ignore de heartbeat sem impacto no payload útil;
+  2. testes cobrem reconnect com backoff e entrega final bem-sucedida;
+  3. testes cobrem dedupe de replay após reconnect e parada ao exceder tentativas.
+
+### Onboarding remoto/assistido + preflight de ambiente expandido (SPR-045 / C01 - especificação)
+- Objetivo:
+  - fechar gap restante do `C01` com um fluxo assistido para bootstrap remoto;
+  - antecipar riscos operacionais com checklist de ambiente antes do deploy.
+- Documento detalhado:
+  - `docs/SPECS/ONBOARD_REMOTE_ASSISTED_V1.md`
+- Interface (core):
+  - `Pincer.Core.Onboard.assisted_preflight/2`
+  - `Pincer.Core.Onboard.remote_assisted_plan/2`
+- Interface (CLI adapter):
+  - `mix pincer.onboard --mode remote --non-interactive --remote-host <host>`
+  - flags novas:
+    - `--mode local|remote`
+    - `--remote-host`
+    - `--remote-user`
+    - `--remote-path`
+- Regras v1:
+  - modo `remote` exige `--remote-host`;
+  - `remote_path` deve ser absoluto e não conter `..`;
+  - `assisted_preflight/2` reporta warnings com hint para:
+    - token ausente em `token_env` de canais habilitados;
+    - credencial ausente do provider LLM atual (`env_key`);
+    - comando MCP ausente no PATH (`npx`, etc.).
+  - preflight estrutural existente (`preflight/1`) continua bloqueante para erros de configuração.
+- Critérios de aceite:
+  1. modo remoto imprime plano determinístico de bootstrap e não executa `apply_plan/2`;
+  2. modo remoto não cria/escreve arquivos locais de onboarding;
+  3. checklist expandido mostra warnings acionáveis para lacunas de ambiente.
+
+### Resiliência concorrente de callbacks/interactions (SPR-047 / C05 - especificação)
+- Objetivo:
+  - endurecer adapters de canal contra rajadas de callbacks/interactions malformados;
+  - garantir estabilidade do hot-swap de modelo sob troca concorrente durante janela de backoff.
+- Interface (adapters):
+  - `Pincer.Channels.Telegram.UpdatesProvider.handle_info/2` (via `safe_process_update/1`);
+  - `Pincer.Channels.Discord.Consumer.handle_event/1`;
+  - `Pincer.Channels.Discord.Consumer.send_interaction_response/2` (com validação de envelope).
+- Interface (LLM core/client):
+  - `Pincer.LLM.Client.do_request_with_retry/13` para evento `{:model_changed, provider, model}`.
+- Regras v1:
+  - flood de callbacks malformados não pode derrubar o poller Telegram;
+  - flood de interactions malformadas sem `id/token` válido deve ser ignorado com log de warning, sem tentativa de chamada à API Discord;
+  - quando múltiplos `model_changed` chegam durante backoff, a troca aplicada deve ser a mais recente (last-write-wins) antes do retry imediato.
+- Critérios de aceite:
+  1. testes cobrem lote grande de callbacks malformados no Telegram com processo vivo após poll;
+  2. testes cobrem interações malformadas no Discord sem `create_interaction_response/3` quando envelope é inválido;
+  3. testes cobrem hot-swap concorrente durante backoff com resultado final refletindo a última troca.
+
+### Streaming incremental consistente por SessionScope (SPR-048 / C17 - especificação)
+- Objetivo:
+  - garantir entrega de `agent_partial`/`agent_response` em Telegram e Discord quando `SessionScopePolicy` resolve sessão dinâmica (ex.: `*_main`);
+  - eliminar mismatch entre tópico PubSub assinado pelo worker de canal e `session_id` efetivo usado pelo `Session.Server`.
+- Interface (adapters):
+  - `Pincer.Channels.Telegram.Session.ensure_started/2`
+  - `Pincer.Channels.Discord.Session.ensure_started/2`
+  - `Pincer.Channels.Telegram.UpdatesProvider.do_process_message/3`
+  - `Pincer.Channels.Discord.Consumer.handle_event/1` (MESSAGE_CREATE path)
+- Regras v1:
+  - worker de sessão deve suportar bind/rebind explícito para `session_id`;
+  - ao rebind, worker desinscreve do tópico antigo, inscreve no novo e reseta estado de streaming local (buffer/message_id);
+  - chamada de `ensure_started` no path de entrada de mensagem deve informar o `session_id` roteado por policy.
+- Critérios de aceite:
+  1. testes cobrem rebind de worker Telegram para `telegram_main` com entrega de resposta no tópico novo;
+  2. testes cobrem rebind de worker Discord para `discord_main` com entrega de resposta no tópico novo;
+  3. suites de sessão/canais permanecem verdes sem regressão do fluxo atual.
+
+### Carregamento dinâmico de MCP `config.json` (SPR-049 / operabilidade - especificação)
+- Objetivo:
+  - permitir descoberta de servidores MCP a partir de arquivos `config.json` no padrão Cursor/Claude Desktop;
+  - reduzir acoplamento do bootstrap MCP ao `config.yaml` local;
+  - manter previsibilidade operacional com precedência explícita para configuração estática do projeto.
+- Interface (MCP adapter layer):
+  - `Pincer.Connectors.MCP.ConfigLoader.discover_servers/1`
+  - `Pincer.Connectors.MCP.ConfigLoader.merge_static_and_dynamic/2`
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/1`
+- Regras v1:
+  - fontes de leitura dinâmicas vêm de `:pincer, :mcp_dynamic_config_paths` (quando configurado) ou de caminhos default conhecidos;
+  - formatos aceitos:
+    - `%{"mcpServers" => %{...}}` (padrão Cursor/Claude Desktop);
+    - `%{"mcp" => %{"servers" => %{...}}}` (variante compatível com Pincer);
+  - entradas inválidas (arquivo ausente, JSON inválido, shape inválido) não derrubam o manager e geram fallback seguro para `%{}`;
+  - servidores com `disabled: true` são ignorados no merge dinâmico;
+  - merge final é determinístico: `static_servers` (do `config.yaml` carregado) sobrescreve nomes conflitantes vindos de config dinâmica.
+- Critérios de aceite:
+  1. testes cobrem parse de `mcpServers` e `mcp.servers`;
+  2. testes cobrem fallback sem crash para arquivos inválidos/ausentes;
+  3. testes cobrem precedência estática no merge final consumido pelo `MCP.Manager`.
+
 ---
 
 ## 1. ExGram (v0.57.0)
@@ -831,3 +943,544 @@ config = ~y"""
 2. **Resiliência de Rede**: Aproveitar o sistema de retries do `Req` dentro do adaptador do `ExGram`.
 3. **Persistência**: Utilizar `Ecto.Repo.transaction` para operações críticas de estado do bot.
 4. **Configuração Externa**: Usar `YamlElixir` para carregar mensagens e parâmetros de comportamento sem necessidade de recompilação.
+
+### Hardening de Superfície de Ferramentas (SPR-050 / Security)
+- Objetivo:
+  - bloquear escapes por symlink no `FileSystem`;
+  - endurecer `SafeShell` para impedir caminhos absolutos/fora de workspace em comandos whitelisted;
+  - reforçar `Web` contra SSRF por hostname ambíguo e evitar crash em IPv6.
+- Interface afetada:
+  - `Pincer.Tools.FileSystem.execute/1`
+  - `Pincer.Tools.SafeShell.execute/1`
+  - `Pincer.Tools.Web.execute/1`
+- Regras v1:
+  - `FileSystem`:
+    - valida confinamento por `Path.expand` e também por `realpath` do ancestral existente mais próximo;
+    - se o ancestral real resolver fora do root do workspace, retorna erro de acesso negado;
+    - mantém contrato read-only (`list`/`read`) e não faz follow inseguro para fora da jail.
+  - `SafeShell`:
+    - comandos com argumento de caminho absoluto (`/`), home expansion (`~`) ou traversal (`..`) exigem aprovação;
+    - endurecimento aplica para `cat/head/tail/du -sh` e também para argumentos genéricos de `ls/find`.
+  - `Web`:
+    - parsing de IP privado não pode lançar exceção para IPv6/IPv4-mapped IPv6;
+    - hostnames com ponto final (`localhost.`) devem ser tratados como host equivalente (`localhost`);
+    - host que resolve para faixa interna/metadata é bloqueado antes do fetch.
+- Critérios de aceite:
+  1. teste de regressão bloqueia leitura por symlink (`workspace/link -> /etc/passwd`);
+  2. teste de regressão bloqueia `SafeShell` com `cat /etc/passwd` e `ls /etc`;
+  3. teste de regressão para `Web` com `http://[::ffff:127.0.0.1]/` retorna erro controlado (sem crash);
+  4. suíte focada de segurança passa sem regressão no comportamento seguro já coberto.
+
+### Baseline A11y de Canais (SPR-051 / UX-A11y)
+- Objetivo:
+  - consolidar rotas de menu acessíveis no core;
+  - permitir navegação por teclado com comandos explícitos com e sem `/`;
+  - manter mensagens de orientação curtas para leitores de tela.
+- Interface afetada:
+  - `Pincer.Core.UX.help_text/1`
+  - `Pincer.Core.UX.unknown_command_hint/0`
+  - `Pincer.Core.UX.unknown_interaction_hint/0`
+  - `Pincer.Core.UX.resolve_shortcut/1` (nova)
+  - `Pincer.Channels.Telegram.UpdatesProvider` (roteamento de shortcut textual)
+  - `Pincer.Channels.Discord.Consumer` (roteamento de shortcut textual)
+- Regras v1:
+  - `resolve_shortcut/1` aceita atalhos com e sem `/` para:
+    - `menu`, `status`, `models`, `ping`;
+    - mantém compatibilidade com `Menu` (botão/label) e aliases de ajuda (`/help`, `/commands`).
+  - atalhos inválidos não devem capturar mensagens livres; seguem para fluxo normal da sessão.
+  - `help_text/1` deve mencionar explicitamente as rotas textuais (com e sem `/`).
+  - hints de erro/desconhecido devem permanecer curtos e com ação única clara (`/menu`).
+- Critérios de aceite:
+  1. `Pincer.Core.UX.resolve_shortcut/1` resolve corretamente atalhos válidos e rejeita ruído;
+  2. Telegram roteia `status` (sem `/`) para o mesmo comportamento de `/status`;
+  3. Discord roteia `status` (sem `/`) para o mesmo comportamento de `/status`;
+  4. suíte focada de UX/canais permanece verde sem regressão.
+
+### Front de Segurança (SPR-052 / Security)
+- Objetivo:
+  - reduzir risco de prompt injection indireta no `Web.fetch`;
+  - bloquear bypass por line-continuation/multiline no `SafeShell`;
+  - ampliar `SecurityAudit` com flags perigosas de configuração.
+- Interface afetada:
+  - `Pincer.Tools.Web.execute/1`
+  - `Pincer.Tools.WebVisibility.sanitize_html/1` (novo)
+  - `Pincer.Tools.WebVisibility.strip_invisible_unicode/1` (novo)
+  - `Pincer.Tools.SafeShell.execute/1`
+  - `Pincer.Core.SecurityAudit.run/1`
+- Regras v1:
+  - `Web`:
+    - remover nós ocultos por `hidden`, `aria-hidden=true`, classes de ocultação comuns e estilos inline típicos de ocultação;
+    - remover comentários HTML antes de extrair texto;
+    - remover caracteres Unicode invisíveis usados em ataques de injeção.
+  - `SafeShell`:
+    - comandos com `\\\n`, `\\\r\n` ou quebra de linha direta (`\n`/`\r`) exigem aprovação;
+    - manter comportamento atual para whitelist e demais validações.
+  - `SecurityAudit`:
+    - alertar quando flags perigosas estiverem habilitadas (ex.: `gateway.control_ui.allow_insecure_auth`, `gateway.control_ui.dangerously_disable_device_auth`, `hooks.*.allow_unsafe_external_content`, `tools.exec.apply_patch.workspace_only=false`);
+    - considerar variações de chave snake_case/camelCase para compatibilidade.
+- Critérios de aceite:
+  1. teste de unidade valida sanitização de conteúdo oculto e remoção de Unicode invisível;
+  2. teste de regressão bloqueia line-continuation/multiline no `SafeShell`;
+  3. `SecurityAudit` retorna `warn` ao detectar flags perigosas;
+  4. suíte focada de segurança permanece verde sem regressões existentes.
+
+### Restrict To Workspace (SPR-053 / Security Runtime)
+- Objetivo:
+  - aplicar política de confinamento de workspace para shell e leitura de arquivos;
+  - fechar bypass pós-aprovação no executor com política fail-closed;
+  - expor postura no `SecurityAudit`.
+- Interface afetada:
+  - `Pincer.Core.WorkspaceGuard.confine_path/2` (novo)
+  - `Pincer.Tools.FileSystem.execute/1`
+  - `Pincer.Tools.SafeShell.execute/1`
+  - `Pincer.Tools.SafeShell.approved_command_allowed?/2` (novo)
+  - `Pincer.Core.Executor` (fluxo de aprovação de comando)
+  - `Pincer.Core.SecurityAudit.run/1`
+- Regras v1:
+  - `WorkspaceGuard` valida:
+    - bloqueio de null-byte e traversal (`..`);
+    - confinamento por `Path.expand` + validação de ancestral real para bloquear escape por symlink.
+  - `FileSystem` usa o guard centralizado para path jail.
+  - `SafeShell` valida argumentos de path com guard centralizado (bloqueio de escape por symlink em path relativo).
+  - Executor:
+    - ao receber aprovação de comando, revalida comando por política de workspace antes de executar `run_command`;
+    - em modo restrito, comandos reprovados retornam erro explícito (sem execução).
+  - `SecurityAudit`:
+    - sinaliza como erro quando `tools.restrict_to_workspace=false`.
+- Critérios de aceite:
+  1. regressão cobre bloqueio de symlink escape no `SafeShell`;
+  2. regressão cobre bloqueio no executor de comando aprovado fora da política;
+  3. `SecurityAudit` reporta erro para `tools.restrict_to_workspace=false`;
+  4. suíte focada de segurança/executor permanece verde.
+
+### Runtime de Skills Isolado (SPR-054 / Sidecar Hardened Baseline)
+- Objetivo:
+  - criar gate fail-closed para `skills_sidecar` antes de iniciar cliente MCP;
+  - impedir ativação de sidecar sem isolamento mínimo obrigatório;
+  - expor postura do sidecar no `SecurityAudit`.
+- Documento de referência:
+  - `docs/SPECS/SIDECAR_RUNTIME_HARDENED_V2.md`
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1` (novo)
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/2`
+  - `Pincer.Core.SecurityAudit.run/1`
+- Regras v1:
+  - política aplica-se somente ao servidor `mcp.servers.skills_sidecar`;
+  - sidecar deve usar `docker run` com isolamento mínimo:
+    - `--read-only`
+    - `--network=none`
+    - `--cap-drop=ALL`
+    - `--pids-limit` (ou `--pids-limit=<n>`)
+    - `--memory` (ou `--memory=<value>`)
+    - `--cpus` (ou `--cpus=<value>`)
+    - `--user` (não-root)
+    - `-v ...:/sandbox` (mount explícito do sandbox)
+  - quando `skills_sidecar` estiver inválido, `MCP.Manager` deve remover esse servidor da configuração resolvida (sem derrubar os demais);
+  - `SecurityAudit` deve:
+    - emitir `:ok` quando sidecar estiver ausente (não habilitado) ou presente com isolamento válido;
+    - emitir `:error` quando sidecar estiver presente com isolamento inválido.
+- Critérios de aceite:
+  1. testes unitários validam aceitação de sidecar hardened e rejeição de sidecar inseguro;
+  2. `resolve_servers_config/2` não retorna `skills_sidecar` quando policy falha;
+  3. `SecurityAudit` reporta erro explícito para sidecar inseguro;
+  4. suíte focada (policy/manager/audit) permanece verde.
+
+### Runtime de Skills Isolado (SPR-055 / Sidecar Execution Audit)
+- Objetivo:
+  - emitir auditoria mínima por execução de tool no `skills_sidecar`;
+  - capturar status e duração sem quebrar contrato atual de `MCP.Manager.execute_tool/2`;
+  - fornecer telemetria estável para observabilidade e incident response.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SidecarAudit.emit/5` (novo)
+  - `Pincer.Connectors.MCP.SidecarAudit.status_from_result/1` (novo)
+  - `Pincer.Connectors.MCP.Manager.audit_sidecar_result/5` (novo, `@doc false`)
+  - `Pincer.Connectors.MCP.Manager.handle_call({:execute, ...})`
+- Regras v1:
+  - somente chamadas roteadas para `server_name == "skills_sidecar"` geram evento de auditoria;
+  - evento deve incluir no mínimo:
+    - tool chamada
+    - skill id (baseline: `skills_sidecar`)
+    - skill version (baseline: `unknown`)
+    - duração em ms
+    - status (`:ok`, `:error`, `:timeout`, `:blocked`)
+  - resultado funcional de `execute_tool/2` deve permanecer inalterado (audit side-effect only).
+- Critérios de aceite:
+  1. status é classificado corretamente para respostas `{:ok, _}`, `{:error, :timeout}` e erros genéricos;
+  2. `audit_sidecar_result/5` audita sidecar e não audita outros servidores;
+  3. evento de telemetria é emitido com métricas/metadados mínimos esperados;
+  4. suíte focada de audit/manager permanece verde.
+
+### Runtime de Skills Isolado (SPR-056 / Sidecar Env Secrets Denylist)
+- Objetivo:
+  - bloquear vazamento de credenciais host->sidecar via `mcp.servers.skills_sidecar.env`;
+  - aplicar política fail-closed no bootstrap do sidecar;
+  - reaproveitar validação central no `SecurityAudit`.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1`
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.sensitive_env_keys/0` (novo)
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/2`
+  - `Pincer.Core.SecurityAudit.run/1` (via policy já integrada)
+- Regras v1:
+  - `skills_sidecar` deve rejeitar env com chaves sensíveis (denylist explícita), por exemplo:
+    - `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, `SLACK_BOT_TOKEN`
+    - `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY`
+    - `GITHUB_TOKEN`, `GITHUB_PERSONAL_ACCESS_TOKEN`
+    - `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+    - `DATABASE_URL`
+  - suporte a formatos de `env`:
+    - map (`%{"KEY" => "value"}`)
+    - lista de tuplas (`[{"KEY", "value"}]`)
+    - lista `KEY=VALUE` (string)
+  - quando houver chave sensível, `skills_sidecar` não deve ser ativado em `resolve_servers_config/2`.
+- Critérios de aceite:
+  1. policy rejeita `skills_sidecar` com env sensível e informa quais chaves foram bloqueadas;
+  2. policy aceita env não sensível;
+  3. `resolve_servers_config/2` remove sidecar com env sensível;
+  4. `SecurityAudit` reporta erro para sidecar com env sensível.
+
+### Runtime de Skills Isolado (SPR-057 / Sidecar Tool Timeout Hard)
+- Objetivo:
+  - aplicar timeout hard para execução de tools no `skills_sidecar`;
+  - evitar bloqueio prolongado do `MCP.Manager` em chamadas de skill travadas;
+  - classificar timeout para auditoria de execução já existente.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.Manager.call_tool_with_timeout/4` (novo, `@doc false`)
+  - `Pincer.Connectors.MCP.Manager.handle_call({:execute, ...})`
+  - `Pincer.Connectors.MCP.SidecarAudit.status_from_result/1` (reuso para `{:error, :timeout}`)
+- Regras v1:
+  - apenas `skills_sidecar` usa execução com timeout hard; outros servidores mantêm fluxo atual;
+  - em timeout:
+    - retornar `{:error, :timeout}`;
+    - encerrar processo de chamada (`Task.shutdown(..., :brutal_kill)`) para não reter worker;
+  - resultado funcional de chamadas bem-sucedidas permanece inalterado.
+- Critérios de aceite:
+  1. helper de timeout retorna sucesso quando execução termina dentro do limite;
+  2. helper retorna `{:error, :timeout}` quando execução excede o limite;
+  3. helper não aplica timeout hard para servidores que não são `skills_sidecar`;
+  4. suíte focada de manager/audit permanece verde.
+
+### Runtime de Skills Isolado (SPR-058 / Sidecar Mount Target Allowlist)
+- Objetivo:
+  - restringir targets de mount no sidecar para reduzir superfície de escape no container;
+  - impedir bind mounts inesperados para paths além de `/sandbox` e `/tmp`;
+  - manter validação centralizada na policy de sidecar.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1`
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/2` (reuso da policy)
+  - `Pincer.Core.SecurityAudit.run/1` (reuso da policy já integrada)
+- Regras v1:
+  - mounts de `skills_sidecar` só podem apontar para targets:
+    - `/sandbox`
+    - `/tmp`
+  - qualquer target diferente deve falhar com erro explícito e bloquear ativação do sidecar.
+- Critérios de aceite:
+  1. policy rejeita mount target fora da allowlist e informa targets bloqueados;
+  2. policy aceita configuração com `/sandbox` e `/tmp`;
+  3. `resolve_servers_config/2` remove sidecar inválido por mount target;
+  4. `SecurityAudit` reporta erro para sidecar com mount target inválido.
+
+### Runtime de Skills Isolado (SPR-059 / Sidecar Dangerous Docker Flags Denylist)
+- Objetivo:
+  - bloquear flags Docker de alto risco na execução do `skills_sidecar`;
+  - evitar escalada de privilégio e quebra de isolamento por configuração permissiva;
+  - manter validação fail-closed centralizada na policy.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1`
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/2` (reuso da policy)
+  - `Pincer.Core.SecurityAudit.run/1` (reuso da policy já integrada)
+- Regras v1:
+  - sidecar deve rejeitar flags perigosas como:
+    - `--privileged`
+    - `--cap-add`
+    - `--device`
+    - `--pid=host`
+    - `--ipc=host`
+    - `--security-opt=*unconfined*`
+  - quando houver flag perigosa, sidecar não deve ser ativado.
+- Critérios de aceite:
+  1. policy rejeita flags perigosas e informa quais foram detectadas;
+  2. `resolve_servers_config/2` remove sidecar com flag perigosa;
+  3. `SecurityAudit` reporta erro para sidecar com flag perigosa;
+  4. suíte focada de policy/manager/audit permanece verde.
+
+### Runtime de Skills Isolado (SPR-060 / Sidecar Image Digest Pinning)
+- Objetivo:
+  - impor imutabilidade de imagem do `skills_sidecar` para reduzir risco de supply-chain;
+  - evitar uso de tags mutáveis (`:latest`, sem digest) no runtime isolado;
+  - manter validação fail-closed centralizada na policy.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1`
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/2` (reuso da policy)
+  - `Pincer.Core.SecurityAudit.run/1` (reuso da policy já integrada)
+- Regras v1:
+  - imagem do `skills_sidecar` deve estar pinada por digest:
+    - formato esperado: `repo@sha256:<64-hex>`
+  - sidecar com imagem não-pinada deve ser bloqueado.
+- Critérios de aceite:
+  1. policy rejeita imagem não-pinada;
+  2. policy aceita imagem com digest pinado válido;
+  3. `resolve_servers_config/2` remove sidecar com imagem não-pinada;
+  4. `SecurityAudit` reporta erro para sidecar com imagem não-pinada.
+
+### Runtime de Skills Isolado (SPR-061 / Sandbox Mount Source Confinement)
+- Objetivo:
+  - impedir bind-mount de paths sensíveis do host no target `/sandbox`;
+  - reduzir risco de exfiltração/escala lateral por configuração de mount permissiva;
+  - manter validação fail-closed centralizada na policy.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1`
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/2` (reuso da policy)
+  - `Pincer.Core.SecurityAudit.run/1` (reuso da policy já integrada)
+- Regras v1:
+  - mount com target `/sandbox` deve usar source relativo do workspace (ex.: `./skills`);
+  - mount com target `/sandbox` deve bloquear:
+    - source absoluto (ex.: `/etc:/sandbox`);
+    - source volume nomeado (ex.: `pincer-skills:/sandbox`);
+    - source com `..` (traversal).
+- Critérios de aceite:
+  1. policy rejeita source inválido para target `/sandbox` e informa quais sources foram bloqueados;
+  2. `resolve_servers_config/2` remove sidecar com source inválido em `/sandbox`;
+  3. `SecurityAudit` reporta erro para sidecar com source inválido em `/sandbox`;
+  4. sidecar hardened com `./skills:/sandbox` permanece aceito.
+
+### Runtime de Skills Isolado (SPR-062 / Tmp Mount Source Guard)
+- Objetivo:
+  - impedir bind-mount de paths do host no target opcional `/tmp`;
+  - reduzir risco de exposição de arquivos/soquetes sensíveis via `/tmp` no container;
+  - manter validação fail-closed centralizada na policy.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1`
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/2` (reuso da policy)
+  - `Pincer.Core.SecurityAudit.run/1` (reuso da policy já integrada)
+- Regras v1:
+  - mount com target `/tmp` é opcional;
+  - quando presente, source deve ser volume nomeado (ex.: `pincer-tmp:/tmp`);
+  - mount com target `/tmp` deve bloquear source path (absoluto/relativo/traversal), ex.:
+    - `/var/run/docker.sock:/tmp`
+    - `./tmp:/tmp`
+    - `../tmp:/tmp`
+- Critérios de aceite:
+  1. policy rejeita source inválido para target `/tmp` e informa quais sources foram bloqueados;
+  2. `resolve_servers_config/2` remove sidecar com source inválido em `/tmp`;
+  3. `SecurityAudit` reporta erro para sidecar com source inválido em `/tmp`;
+  4. sidecar permanece aceito para source volume nomeado em `/tmp`.
+
+### Runtime de Skills Isolado (SPR-063 / Env Args Secret Guard)
+- Objetivo:
+  - eliminar bypass de secrets via flags `-e/--env` em `docker args`;
+  - manter bloqueio de credenciais host->sidecar consistente entre `env` no config e args CLI;
+  - preservar validação fail-closed centralizada na policy.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1`
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/2` (reuso da policy)
+  - `Pincer.Core.SecurityAudit.run/1` (reuso da policy já integrada)
+- Regras v1:
+  - denylist de chaves sensíveis deve considerar também variáveis passadas em args Docker:
+    - `-e KEY=VALUE`
+    - `--env KEY=VALUE`
+    - `--env`, `KEY=VALUE` (token seguinte)
+  - sidecar com chave sensível em args deve ser bloqueado com erro explícito.
+- Critérios de aceite:
+  1. policy rejeita secrets em args `-e/--env` e reporta as chaves bloqueadas;
+  2. `resolve_servers_config/2` remove sidecar com secrets em args;
+  3. `SecurityAudit` reporta erro para sidecar com secrets em args;
+  4. sidecar permanece aceito quando args `-e/--env` usam somente chaves não sensíveis.
+
+### Runtime de Skills Isolado (SPR-064 / Mount Flag Bypass Guard)
+- Objetivo:
+  - bloquear bypass de política de mounts via flag `--mount`;
+  - manter superfície de montagem restrita ao parser auditado (`-v/--volume`);
+  - preservar validação fail-closed centralizada na policy.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1`
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/2` (reuso da policy)
+  - `Pincer.Core.SecurityAudit.run/1` (reuso da policy já integrada)
+- Regras v1:
+  - sidecar deve rejeitar uso de:
+    - `--mount`
+    - `--mount=...`
+  - rejeição deve ocorrer com erro explícito em `dangerous_docker_flags`.
+- Critérios de aceite:
+  1. policy rejeita `--mount`/`--mount=` e reporta a flag bloqueada;
+  2. `resolve_servers_config/2` remove sidecar com `--mount`;
+  3. `SecurityAudit` reporta erro para sidecar com `--mount`;
+  4. sidecar hardened sem `--mount` permanece aceito.
+
+### Runtime de Skills Isolado (SPR-065 / Env File Flag Guard)
+- Objetivo:
+  - bloquear bypass de política de segredos via `--env-file`;
+  - impedir injeção indireta de credenciais host->container por arquivo de ambiente externo;
+  - preservar validação fail-closed centralizada na policy.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1`
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/2` (reuso da policy)
+  - `Pincer.Core.SecurityAudit.run/1` (reuso da policy já integrada)
+- Regras v1:
+  - sidecar deve rejeitar uso de:
+    - `--env-file`
+    - `--env-file=...`
+  - rejeição deve ocorrer com erro explícito em `dangerous_docker_flags`.
+- Critérios de aceite:
+  1. policy rejeita `--env-file`/`--env-file=` e reporta a flag bloqueada;
+  2. `resolve_servers_config/2` remove sidecar com `--env-file`;
+  3. `SecurityAudit` reporta erro para sidecar com `--env-file`;
+  4. sidecar hardened sem `--env-file` permanece aceito.
+
+### Runtime de Skills Isolado (SPR-066 / Required Flag Override Guard)
+- Objetivo:
+  - bloquear bypass por override tardio de flags obrigatórias no `docker run`;
+  - validar o valor efetivo (última ocorrência) de flags críticas de isolamento;
+  - preservar validação fail-closed centralizada na policy.
+- Interface afetada:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1`
+  - `Pincer.Connectors.MCP.Manager.resolve_servers_config/2` (reuso da policy)
+  - `Pincer.Core.SecurityAudit.run/1` (reuso da policy já integrada)
+- Regras v1:
+  - validação de flags obrigatórias com valor deve considerar valor efetivo (última ocorrência), por exemplo:
+    - `--network=none`
+    - `--cap-drop=ALL`
+    - `--pids-limit`
+    - `--memory`
+    - `--cpus`
+    - `--user`
+  - se houver override final inseguro (ex.: `--network=none ... --network=host`), sidecar deve ser bloqueado.
+- Critérios de aceite:
+  1. policy rejeita configuração com override final inseguro em flag obrigatória;
+  2. `resolve_servers_config/2` remove sidecar com override final inseguro;
+  3. `SecurityAudit` reporta erro para sidecar com override final inseguro;
+  4. sidecar hardened sem override inseguro permanece aceito.
+
+### CLI Interativo com Histórico Persistente (SPR-067)
+- Objetivo:
+  - fechar o item de backlog do `mix pincer.chat` com histórico persistente de entradas;
+  - oferecer comandos de histórico para inspeção e limpeza sem sair do loop;
+  - manter compatibilidade com comandos já existentes (`/q`, `/quit`, `/clear`).
+- Interfaces públicas:
+  - `Pincer.CLI.process_command/1`
+  - `Pincer.CLI.History.append/2`
+  - `Pincer.CLI.History.recent/2`
+  - `Pincer.CLI.History.clear/1`
+- Regras v1:
+  - cada entrada de usuário enviada ao backend pelo CLI deve ser persistida em arquivo local;
+  - comando `/history` exibe os últimos 10 itens;
+  - comando `/history N` exibe os últimos `N` itens (`N` inteiro positivo);
+  - comando `/history clear` limpa o histórico persistido;
+  - comando inválido de histórico (ex.: `/history abc`) faz fallback para o padrão de 10 itens.
+- Critérios de aceite:
+  1. histórico persiste entre execuções (`append` + `recent`);
+  2. limpeza de histórico funciona via comando dedicado e API;
+  3. parsing de comando mantém comportamento legado para `/q`, `/quit`, `/clear`;
+  4. cobertura de testes para parsing e ciclo append/recent/clear.
+
+### Webhook Universal (SPR-068 / Ingestão v1)
+- Objetivo:
+  - habilitar integração universal de eventos externos via canal `Webhook` sem acoplamento a provider específico;
+  - padronizar ingestão em sessão Pincer com suporte a autenticação por token e dedupe de retries;
+  - manter contrato receive-only do canal (sem requisito de outbound).
+- Interfaces públicas:
+  - `Pincer.Channels.Webhook.start_link/1`
+  - `Pincer.Channels.Webhook.ingest/2`
+- Regras v1:
+  - payload deve conter texto útil em formato flexível (`text`, `content`, `prompt`, estruturas aninhadas como `message.text`/`event.text`);
+  - resolução de sessão:
+    - `session_id` explícito no payload tem precedência;
+    - `session_mode: "per_sender"` deriva `session_id` por `source + sender_id`;
+    - fallback para `default_session_id` quando não há identificador de remetente;
+  - autenticação obrigatória via `token_env`; sem token configurado, o canal não inicia (fail-closed);
+  - dedupe por `event_id` deve ignorar retry duplicado sem reenfileirar no `Session.Server`;
+  - integração principal: `Session.Supervisor.start_session/1` (quando necessário) + `Session.Server.process_input/2`.
+- Critérios de aceite:
+  1. webhook válido é aceito e roteado para sessão correta;
+  2. webhook sem token válido é rejeitado;
+  3. retry com mesmo `event_id` retorna status de duplicado e não processa de novo;
+  4. payload sem conteúdo textual útil falha com erro explícito.
+
+### Notificações Inteligentes de Progresso (SPR-069 / Sub-Agente)
+- Objetivo:
+  - tornar progresso de sub-agentes visível de forma útil ao usuário final;
+  - reduzir spam de status repetido com dedupe determinístico por agente/etapa;
+  - limitar avaliação via LLM do blackboard a casos realmente ambíguos.
+- Interfaces públicas:
+  - `Pincer.Core.SubAgentProgress.notifications/2`
+  - `Pincer.Session.Server.handle_info(:heartbeat, state)` (integração)
+  - `Pincer.Channels.Telegram.Session.handle_info({:agent_status, text}, state)` (entrega em canal)
+- Regras v1:
+  - classificar mensagens de blackboard por padrão:
+    - `Started with goal:` -> notificação de início (uma vez por agente);
+    - `Using tool:` -> notificação apenas quando a ferramenta muda;
+    - `FINISHED:` -> notificação terminal de sucesso (uma vez);
+    - `FAILED:` -> notificação terminal de erro (uma vez);
+  - mensagens não classificadas marcam `needs_review=true` para fallback de decisão por LLM;
+  - no heartbeat:
+    - publicar `agent_status` para notificações determinísticas geradas pela policy;
+    - executar `evaluate_blackboard_update` somente se `needs_review=true` e sessão estiver `:idle`.
+- Critérios de aceite:
+  1. início/ferramenta/finalização não geram spam repetido por mensagens duplicadas;
+  2. canais que exibem `agent_status` passam a refletir progresso real dos sub-agentes;
+  3. Telegram exibe `agent_status` (além de `typing` para `agent_thinking`);
+  4. updates ambíguos continuam com fallback inteligente via LLM.
+
+### Processamento de Imagens/Logs como Arquivo (SPR-070 / Telegram + Executor)
+- Objetivo:
+  - fechar o gap de ingestão de anexos no canal Telegram para imagens e logs;
+  - manter segredo do token Telegram fora do histórico persistido de sessão;
+  - permitir fallback textual para logs mesmo quando o provider ativo não suporta multimodal nativo.
+- Interfaces públicas:
+  - `Pincer.Channels.Telegram.UpdatesProvider.prepare_input_content/2`
+  - `Pincer.Core.Executor.resolve_attachment_url/2`
+- Regras v1:
+  - updates Telegram com `photo` e `document` devem ser transformados em payload multimodal (`attachment_ref`) para `Session.Server.process_input/2`;
+  - anexos devem usar URL interna sem token (`telegram://file/<file_path>`) no histórico de sessão;
+  - `Executor` deve resolver `telegram://file/...` para URL real somente em runtime, usando token atual;
+  - quando `attachment_ref` tiver `mime_type` textual (`text/*`) e provider ativo não suportar arquivos:
+    - baixar conteúdo do arquivo e converter para parte textual (`type=text`) em vez de descartar;
+    - manter fallback existente para tipos não textuais.
+- Critérios de aceite:
+  1. `prepare_input_content/2` converte foto em `attachment_ref` com metadata estável;
+  2. `prepare_input_content/2` converte `.log` em `attachment_ref` com `mime_type=text/plain`;
+  3. `resolve_attachment_url/2` converte corretamente `telegram://file/...` e falha sem token;
+  4. cobertura de testes para parser de anexos Telegram e resolução de URL de attachment.
+
+### Sidecar v2: Checksum de Artefato + Auditoria Enriquecida (SPR-071)
+- Objetivo:
+  - fechar o item restante de hardening do sidecar v2 com validação explícita de checksum de artefato;
+  - enriquecer telemetria de execução com metadados de skill (`id`, `version`, `artifact_checksum`);
+  - manter postura fail-closed no `skills_sidecar`.
+- Interfaces públicas:
+  - `Pincer.Connectors.MCP.SkillsSidecarPolicy.validate/1`
+  - `Pincer.Connectors.MCP.Manager.audit_sidecar_result/6`
+- Regras v1:
+  - `skills_sidecar` deve declarar `artifact_checksum` (ou alias `skill_artifact_checksum`) em formato:
+    - `sha256:<64-hex>`;
+  - ausência de checksum deve falhar com `:artifact_checksum_required`;
+  - checksum malformado deve falhar com `:invalid_artifact_checksum`;
+  - `audit_sidecar_result/6` deve:
+    - ler `skill_id`, `skill_version` e `artifact_checksum` dos argumentos da tool call quando presentes;
+    - fallback para valores `unknown`/`skills_sidecar` quando ausentes.
+- Critérios de aceite:
+  1. policy rejeita sidecar sem `artifact_checksum`;
+  2. policy aceita sidecar hardened com checksum válido;
+  3. `resolve_servers_config/2` mantém sidecar hardened apenas quando checksum está válido;
+  4. auditoria por execução inclui metadata de `skill_version` e `artifact_checksum` quando fornecidos.
+
+### Containerização do Servidor (SPR-072 / Docker Runtime v1)
+- Objetivo:
+  - empacotar o servidor Pincer em imagem Docker reproduzível para execução local/host;
+  - manter persistência de dados/logs por volume sem gravar estado efêmero na camada da imagem;
+  - expor comando único para subir o servidor (`mix pincer.server`) em ambiente containerizado.
+- Interfaces públicas:
+  - `Dockerfile` (build da imagem de runtime)
+  - `.dockerignore` (redução de contexto de build)
+  - `docker-compose.yml` (orquestração local do serviço `pincer-server`)
+- Regras v1:
+  - build multi-stage (`builder` + `runtime`) com Elixir/Erlang compatíveis;
+  - imagem final deve executar como usuário não-root;
+  - runtime deve montar `db/`, `logs/` e `sessions/` como volumes bind locais;
+  - inicialização padrão do container deve executar:
+    - `mix pincer.server`;
+  - configuração sensível deve entrar por `.env`/`env_file`, sem hardcode de segredos em imagem.
+- Critérios de aceite:
+  1. `docker compose build pincer-server` conclui com sucesso;
+  2. `docker compose up -d pincer-server` sobe container em execução;
+  3. logs do container exibem bootstrap do servidor Pincer sem crash imediato;
+  4. `docker compose down` encerra o serviço sem perda dos dados persistidos em `db/` e `logs/`.

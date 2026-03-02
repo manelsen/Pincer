@@ -35,6 +35,7 @@ defmodule Pincer.Tools.Web do
   """
 
   @behaviour Pincer.Tool
+  alias Pincer.Tools.WebVisibility
   require Logger
   import Bitwise
 
@@ -102,11 +103,17 @@ defmodule Pincer.Tools.Web do
   defp validate_url(url) do
     case URI.parse(url) do
       %URI{scheme: scheme, host: host} when not is_nil(scheme) and not is_nil(host) ->
+        normalized_scheme = String.downcase(String.trim(scheme))
+        normalized_host = normalize_host(host)
+
         cond do
-          scheme not in @allowed_schemes ->
+          normalized_scheme not in @allowed_schemes ->
             {:error, "URL scheme '#{scheme}' not allowed"}
 
-          blocked_host?(host) ->
+          is_nil(normalized_host) ->
+            {:error, "Invalid URL format"}
+
+          blocked_host?(normalized_host) ->
             {:error, "Access to internal hosts is not allowed"}
 
           true ->
@@ -119,27 +126,92 @@ defmodule Pincer.Tools.Web do
   end
 
   defp blocked_host?(host) do
-    host = String.downcase(host)
-    host in @blocked_hosts or match_private_ip?(host)
+    host in @blocked_hosts or
+      match_private_ip?(host) or
+      resolves_to_private_ip?(host)
   end
 
-  defp match_private_ip?(ip) do
-    case :inet.parse_address(String.to_charlist(ip)) do
-      {:ok, addr} ->
-        in_range?(addr, {10, 0, 0, 0}, 8) or
-          in_range?(addr, {172, 16, 0, 0}, 12) or
-          in_range?(addr, {192, 168, 0, 0}, 16) or
-          in_range?(addr, {127, 0, 0, 0}, 8) or
-          in_range?(addr, {169, 254, 0, 0}, 16)
-
-      _ ->
-        false
+  defp normalize_host(host) when is_binary(host) do
+    host
+    |> String.trim()
+    |> String.trim_leading("[")
+    |> String.trim_trailing("]")
+    |> String.trim_trailing(".")
+    |> String.downcase()
+    |> case do
+      "" -> nil
+      normalized -> normalized
     end
   end
 
-  defp in_range?(addr, base, prefix) do
-    # Convert tuple to list for easier handling if needed, but tuple matching works for ipv4
-    {a, b, c, d} = addr
+  defp normalize_host(_), do: nil
+
+  defp match_private_ip?(ip) when is_binary(ip) do
+    ip
+    |> strip_ipv6_zone()
+    |> String.to_charlist()
+    |> :inet.parse_address()
+    |> case do
+      {:ok, addr} -> private_address?(addr)
+      _ -> false
+    end
+  end
+
+  defp match_private_ip?(_), do: false
+
+  defp private_address?({_, _, _, _} = ipv4), do: private_ipv4?(ipv4)
+  defp private_address?({_, _, _, _, _, _, _, _} = ipv6), do: private_ipv6?(ipv6)
+  defp private_address?(_), do: false
+
+  defp private_ipv4?(addr) do
+    in_range?(addr, {0, 0, 0, 0}, 8) or
+      in_range?(addr, {10, 0, 0, 0}, 8) or
+      in_range?(addr, {100, 64, 0, 0}, 10) or
+      in_range?(addr, {127, 0, 0, 0}, 8) or
+      in_range?(addr, {169, 254, 0, 0}, 16) or
+      in_range?(addr, {172, 16, 0, 0}, 12) or
+      in_range?(addr, {192, 168, 0, 0}, 16)
+  end
+
+  defp private_ipv6?({0, 0, 0, 0, 0, 65_535, high, low}) do
+    # IPv4-mapped IPv6 address (::ffff:a.b.c.d)
+    ipv4 = {high >>> 8, high &&& 255, low >>> 8, low &&& 255}
+    private_ipv4?(ipv4)
+  end
+
+  defp private_ipv6?({segment1, _, _, _, _, _, _, _} = ipv6) do
+    ipv6 == {0, 0, 0, 0, 0, 0, 0, 1} or
+      ipv6 == {0, 0, 0, 0, 0, 0, 0, 0} or
+      (segment1 >= 0xFC00 and segment1 <= 0xFDFF) or
+      (segment1 >= 0xFE80 and segment1 <= 0xFEBF)
+  end
+
+  defp resolves_to_private_ip?(host) do
+    if match_private_ip?(host) do
+      true
+    else
+      host
+      |> resolve_host_addresses(:inet)
+      |> Kernel.++(resolve_host_addresses(host, :inet6))
+      |> Enum.any?(&private_address?/1)
+    end
+  end
+
+  defp resolve_host_addresses(host, family) do
+    case :inet.getaddrs(String.to_charlist(host), family) do
+      {:ok, addresses} -> addresses
+      _ -> []
+    end
+  end
+
+  defp strip_ipv6_zone(host) do
+    case String.split(host, "%", parts: 2) do
+      [address, _zone] -> address
+      [address] -> address
+    end
+  end
+
+  defp in_range?({a, b, c, d}, base, prefix) do
     {base_a, base_b, base_c, base_d} = base
 
     # Calculate mask
@@ -151,6 +223,8 @@ defmodule Pincer.Tools.Web do
 
     (ip_int &&& mask) == (base_int &&& mask)
   end
+
+  defp in_range?(_addr, _base, _prefix), do: false
 
   defp do_search(query, count) do
     api_key = System.get_env("BRAVE_API_KEY")
@@ -250,10 +324,12 @@ defmodule Pincer.Tools.Web do
 
   defp extract_text(html) do
     html
+    |> WebVisibility.sanitize_html()
     |> remove_scripts_and_styles()
     |> convert_blocks_to_text()
     |> strip_tags()
     |> decode_and_normalize()
+    |> WebVisibility.strip_invisible_unicode()
   end
 
   defp remove_scripts_and_styles(html) do

@@ -178,6 +178,24 @@ defmodule Pincer.Channels.DiscordTest do
       Pincer.Channels.Discord.Consumer.handle_event({:MESSAGE_CREATE, message, nil})
     end
 
+    test "plain status text routes to /status for keyboard-first navigation" do
+      APIMock
+      |> expect(:create_message, fn 889, content, _opts ->
+        assert content =~ "Session Status"
+        {:ok, %{id: 124}}
+      end)
+
+      message = %{
+        author: %{bot: false, username: "tester"},
+        content: "status",
+        channel_id: 889,
+        guild_id: 777,
+        attachments: []
+      }
+
+      Pincer.Channels.Discord.Consumer.handle_event({:MESSAGE_CREATE, message, nil})
+    end
+
     test "models interaction includes a Menu fallback button" do
       Application.put_env(:pincer, :llm_providers, %{
         "z_ai" => %{default_model: "glm-4.7"}
@@ -316,6 +334,38 @@ defmodule Pincer.Channels.DiscordTest do
       }
 
       Pincer.Channels.Discord.Consumer.handle_event({:INTERACTION_CREATE, interaction, nil})
+    end
+
+    test "malformed interaction flood without id/token does not call Discord API" do
+      APIMock
+      |> expect(:create_interaction_response, fn 335, "token-5", response ->
+        assert response.type == 7
+        assert response.data.content =~ "Use /menu"
+        :ok
+      end)
+
+      malformed =
+        for n <- 1..50 do
+          %{
+            id: nil,
+            token: nil,
+            channel_id: 456,
+            type: 3,
+            data: %{custom_id: "unknown_action_#{n}"}
+          }
+        end
+
+      valid = %{
+        id: 335,
+        token: "token-5",
+        channel_id: 456,
+        type: 3,
+        data: %{custom_id: "unknown_action"}
+      }
+
+      Enum.each(malformed ++ [valid], fn interaction ->
+        Pincer.Channels.Discord.Consumer.handle_event({:INTERACTION_CREATE, interaction, nil})
+      end)
     end
   end
 

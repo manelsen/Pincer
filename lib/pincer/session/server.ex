@@ -105,6 +105,7 @@ defmodule Pincer.Session.Server do
   alias Pincer.Core.Executor
   alias Pincer.Core.ErrorUX
   alias Pincer.Core.RetryPolicy
+  alias Pincer.Core.SubAgentProgress
   alias Pincer.Core.Telemetry, as: CoreTelemetry
   alias Pincer.PubSub
 
@@ -143,6 +144,7 @@ defmodule Pincer.Session.Server do
          status: :idle,
          worker_pid: nil,
          last_blackboard_id: 0,
+         subagent_progress_tracker: %{},
          model_override: nil
        }}
     else
@@ -154,6 +156,7 @@ defmodule Pincer.Session.Server do
          responses: %{},
          worker_pid: nil,
          last_blackboard_id: 0,
+         subagent_progress_tracker: %{},
          model_override: nil
        }}
     end
@@ -327,7 +330,7 @@ defmodule Pincer.Session.Server do
       {:ok, _pid} ->
         publish(
           state.session_id,
-          {:agent_thinking, "Sub-Agent #{id} started for: #{task_desc}"}
+          {:agent_status, "🚀 Sub-Agent #{id} started for: #{task_desc}"}
         )
 
       {:error, reason} ->
@@ -346,6 +349,13 @@ defmodule Pincer.Session.Server do
         {:noreply, state}
 
       {messages, new_last_id} ->
+        {progress_notifications, progress_tracker, needs_review?} =
+          SubAgentProgress.notifications(messages, state.subagent_progress_tracker)
+
+        Enum.each(progress_notifications, fn message ->
+          publish(state.session_id, {:agent_status, message})
+        end)
+
         updates =
           messages
           |> Enum.map(fn msg -> "[SUB-AGENT #{msg.agent_id}]: #{msg.content}" end)
@@ -359,7 +369,7 @@ defmodule Pincer.Session.Server do
 
         new_history = state.history ++ [system_msg]
 
-        if state.status == :idle do
+        if state.status == :idle and needs_review? do
           Task.start(fn ->
             evaluate_blackboard_update(
               self(),
@@ -370,7 +380,13 @@ defmodule Pincer.Session.Server do
           end)
         end
 
-        {:noreply, %{state | history: new_history, last_blackboard_id: new_last_id}}
+        {:noreply,
+         %{
+           state
+           | history: new_history,
+             last_blackboard_id: new_last_id,
+             subagent_progress_tracker: progress_tracker
+         }}
     end
   end
 
