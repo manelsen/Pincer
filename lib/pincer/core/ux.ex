@@ -16,7 +16,7 @@ defmodule Pincer.Core.UX do
     %{name: "status", description: "Show current session status"},
     %{name: "models", description: "Switch AI provider and model"},
     %{name: "kanban", description: "Show project kanban board"},
-    %{name: "project", description: "Show project planning board"},
+    %{name: "project", description: "Open project manager wizard"},
     %{name: "ping", description: "Health check"}
   ]
 
@@ -51,8 +51,8 @@ defmodule Pincer.Core.UX do
     /menu   - Open this menu
     /status - Show session status
     /models - Switch provider/model
-    /kanban - Show sprint kanban board
-    /project - Open project planning board
+    /kanban - Show session kanban board
+    /project - Start/resume project manager wizard
     /ping   - Check if the bot is alive
 
     Accessibility note:

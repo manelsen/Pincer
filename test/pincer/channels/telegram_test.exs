@@ -265,7 +265,7 @@ defmodule Pincer.Channels.TelegramTest do
       GenServer.stop(pid)
     end
 
-    test "plain project text routes to /project command with DDD/TDD guidance" do
+    test "plain project text routes to project manager wizard" do
       APIMock
       |> expect(:get_updates, fn _opts ->
         {:ok,
@@ -277,9 +277,87 @@ defmodule Pincer.Channels.TelegramTest do
          ]}
       end)
       |> expect(:send_message, fn 903, text, _opts ->
-        assert text =~ "DDD Checklist"
-        assert text =~ "TDD Checklist"
+        assert text =~ "Project Manager"
+        assert text =~ "Qual e o objetivo principal?"
         {:ok, %{message_id: 615}}
+      end)
+
+      {:ok, pid} = Pincer.Channels.Telegram.UpdatesProvider.start_link(nil)
+      allow(APIMock, self(), pid)
+      ref = Process.monitor(pid)
+
+      send(pid, :poll)
+      Process.sleep(100)
+
+      refute_receive {:DOWN, ^ref, :process, ^pid, _}
+      GenServer.stop(pid)
+    end
+
+    test "kanban uses session project board when project plan is ready" do
+      session_id = "telegram_905"
+      Pincer.Core.ProjectOrchestrator.reset(session_id)
+
+      Pincer.Core.ProjectOrchestrator.start(session_id)
+
+      {:handled, _} =
+        Pincer.Core.ProjectOrchestrator.continue(session_id, "Comprar parafusadeira")
+
+      {:handled, _} = Pincer.Core.ProjectOrchestrator.continue(session_id, "nao-software")
+      {:handled, _} = Pincer.Core.ProjectOrchestrator.continue(session_id, "Belo Horizonte")
+      {:handled, _} = Pincer.Core.ProjectOrchestrator.continue(session_id, "Top 3 com preco")
+
+      APIMock
+      |> expect(:get_updates, fn _opts ->
+        {:ok,
+         [
+           %{
+             update_id: 18,
+             message: %{text: "kanban", chat: %{id: 905, type: "private"}}
+           }
+         ]}
+      end)
+      |> expect(:send_message, fn 905, text, _opts ->
+        assert text =~ "Kanban Board"
+        assert text =~ "Project: Comprar parafusadeira"
+        assert text =~ "Flow Research/Validation"
+        {:ok, %{message_id: 618}}
+      end)
+
+      {:ok, pid} = Pincer.Channels.Telegram.UpdatesProvider.start_link(nil)
+      allow(APIMock, self(), pid)
+      ref = Process.monitor(pid)
+
+      send(pid, :poll)
+      Process.sleep(100)
+
+      refute_receive {:DOWN, ^ref, :process, ^pid, _}
+      GenServer.stop(pid)
+
+      Pincer.Core.ProjectOrchestrator.reset(session_id)
+    end
+
+    test "project wizard follow-up message is captured before normal session input" do
+      APIMock
+      |> expect(:get_updates, fn _opts ->
+        {:ok,
+         [
+           %{
+             update_id: 16,
+             message: %{text: "project", chat: %{id: 904, type: "private"}}
+           },
+           %{
+             update_id: 17,
+             message: %{text: "Comprar parafusadeiras em BH", chat: %{id: 904, type: "private"}}
+           }
+         ]}
+      end)
+      |> expect(:send_message, fn 904, text, _opts ->
+        assert text =~ "Project Manager"
+        {:ok, %{message_id: 616}}
+      end)
+      |> expect(:send_message, fn 904, text, _opts ->
+        assert text =~ "tipo do projeto"
+        {:ok, %{message_id: 617}}
       end)
 
       {:ok, pid} = Pincer.Channels.Telegram.UpdatesProvider.start_link(nil)
