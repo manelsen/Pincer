@@ -4,6 +4,7 @@ defmodule Mix.Tasks.Pincer.Chat do
   Tries to connect to the server (pincer_server). If it fails, starts locally.
   """
   use Mix.Task
+  use Boundary, classify_to: Pincer.Mix
 
   def run(args) do
     # Load .env to ensure configuration (even if connecting remotely)

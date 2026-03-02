@@ -10,6 +10,7 @@ defmodule Mix.Tasks.Pincer.SecurityAudit do
   """
 
   use Mix.Task
+  use Boundary, classify_to: Pincer.Mix
 
   alias Pincer.Core.SecurityAudit
 
