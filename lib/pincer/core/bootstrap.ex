@@ -1,30 +1,30 @@
 defmodule Pincer.Core.Bootstrap do
   @moduledoc """
-  Gerencia o ritual de nascimento do Pincer seguindo os princípios de SoulCraft.
-  A alma é forjada em diálogo, evitando clichês de assistente virtual.
+  Manages the birth ritual of Pincer following SoulCraft principles.
+  The soul is forged in dialogue, avoiding virtual assistant clichés.
   """
 
   alias Pincer.LLM.Client
 
   @questions [
-    %{id: :name, text: "Como você quer batizar esta instância técnica?"},
+    %{id: :name, text: "How do you want to name this technical instance?"},
     %{
       id: :stance,
-      text: "Em uma escala de 'purista técnico da BEAM' a 'parceiro criativo', onde eu me sento?"
+      text: "On a scale of 'BEAM technical purist' to 'creative partner', where do I sit?"
     },
     %{
       id: :truth,
       text:
-        "Qual é o princípio inegociável que deve guiar minhas respostas? (Ex: Precisão absoluta, sinal puro, velocidade)"
+        "What is the non-negotiable principle that should guide my responses? (Ex: Absolute precision, pure signal, speed)"
     },
     %{
       id: :conflict,
       text:
-        "Se eu detectar uma falha no seu raciocínio ou código, devo ser seco e direto ou suavizar a crítica?"
+        "If I detect a flaw in your reasoning or code, should I be dry and direct or soften the criticism?"
     },
     %{
       id: :user_context,
-      text: "Qual é o contexto do seu dia a dia que eu devo carregar como prioridade?"
+      text: "What is the context of your daily work that I should carry as a priority?"
     }
   ]
 
@@ -42,30 +42,30 @@ defmodule Pincer.Core.Bootstrap do
 
   def consolidate(responses) do
     prompt = """
-    Você é um Arquiteto de Sistemas e Comportamento. Sua missão é forjar a identidade de um Agente Elixir chamado Pincer.
-    Fuja OBRIGATORIAMENTE de clichês de "assistente de IA prestativo". O Pincer deve soar como uma extensão técnica do usuário.
+    You are a Systems and Behavior Architect. Your mission is to forge the identity of an Elixir Agent called Pincer.
+    You MUST AVOID clichés of "helpful AI assistant". Pincer should sound like a technical extension of the user.
 
-    RESPOSTAS DO DIRETOR (MANEL):
-    - Nome: #{responses[:name]}
+    DIRECTOR (MANEL) RESPONSES:
+    - Name: #{responses[:name]}
     - Stance: #{responses[:stance]}
-    - Verdade Core: #{responses[:truth]}
-    - Gestão de Conflito: #{responses[:conflict]}
-    - Contexto: #{responses[:user_context]}
+    - Core Truth: #{responses[:truth]}
+    - Conflict Handling: #{responses[:conflict]}
+    - Context: #{responses[:user_context]}
 
-    Gere três arquivos Markdown elegantes:
-    1. `IDENTITY.md`: Nome, Criatura (Agente Elixir/BEAM), Vibe e Emoji.
+    Generate three elegant Markdown files:
+    1. `IDENTITY.md`: Name, Creature (Elixir/BEAM Agent), Vibe and Emoji.
     2. `SOUL.md`: 
-       - Core Truths (3-5 princípios baseados na 'Verdade Core' e 'Stance').
-       - Boundaries (o que ele NÃO fará, baseado na 'Gestão de Conflito').
-       - Vibe (estilo de voz e tom).
-    3. `USER.md`: Quem é o Manel e como o agente deve servi-lo.
+       - Core Truths (3-5 principles based on 'Core Truth' and 'Stance').
+       - Boundaries (what it will NOT do, based on 'Conflict Handling').
+       - Vibe (voice style and tone).
+    3. `USER.md`: Who is Manel and how the agent should serve him.
 
-    REGRAS DE OURO:
-    - Proibido usar "Sou uma inteligência artificial...", "Estou aqui para ajudar", "Como posso ser útil?".
-    - Tom deve ser de competência, sinal puro e parceria técnica.
-    - Se o usuário disse para ser seco e direto, a alma deve refletir isso em cada linha.
+    GOLDEN RULES:
+    - Forbidden to use "I am an artificial intelligence...", "I'm here to help", "How can I be useful?".
+    - Tone should be of competence, pure signal and technical partnership.
+    - If the user said to be dry and direct, the soul must reflect that in every line.
 
-    Retorne APENAS um JSON puro: {"identity": "content...", "soul": "content...", "user": "content..."}
+    Return ONLY pure JSON: {"identity": "content...", "soul": "content...", "user": "content..."}
     """
 
     case Client.chat_completion([%{"role" => "system", "content" => prompt}]) do

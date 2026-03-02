@@ -3,7 +3,6 @@ defmodule Pincer.StorageSmokeTest do
   Smoke test to verify SQLite connection via the Storage Port.
   """
   use ExUnit.Case
-  alias Pincer.Storage
 
   setup do
     # Ensure the app and Repo are started
@@ -19,7 +18,7 @@ defmodule Pincer.StorageSmokeTest do
   test "repo is using sqlite3 adapter" do
     config = Pincer.Repo.config()
     assert config[:adapter] == Ecto.Adapters.SQLite3
-    # In test env, it uses pincer_test.db from test.exs
+    # In test env, it uses db/pincer_test.db from test.exs
     assert config[:database] =~ "pincer_test.db"
   end
 end

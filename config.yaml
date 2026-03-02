@@ -1,31 +1,34 @@
+channels:
+  cli:
+    adapter: "Pincer.Channels.CLI"
+    enabled: true
+  discord:
+    adapter: "Pincer.Channels.Discord"
+    enabled: false
+    token_env: "DISCORD_BOT_TOKEN"
+  telegram:
+    adapter: "Pincer.Channels.Telegram"
+    enabled: true
+    token_env: "TELEGRAM_BOT_TOKEN"
 database:
   adapter: "Ecto.Adapters.SQLite3"
-  database: "pincer_mvp.db"
-
-channels:
-  telegram:
-    enabled: true
-    adapter: "Pincer.Channels.Telegram"
-    token_env: "TELEGRAM_BOT_TOKEN"
-  cli:
-    enabled: true
-    adapter: "Pincer.Channels.CLI"
-
+  database: "db/pincer_mvp.db"
 llm:
-  provider: "z_ai"
-  z_ai:
-    base_url: "https://api.z.ai/api/coding/paas/v4/chat/completions"
-    default_model: "glm-4.7"
   opencode_zen:
     base_url: "https://opencode.ai/zen/v1/chat/completions"
     default_model: "kimi-k2.5-free"
   openrouter:
     base_url: "https://openrouter.ai/api/v1/chat/completions"
     default_model: "openrouter/free"
-
+  provider: "z_ai"
+  z_ai:
+    base_url: "https://api.z.ai/api/coding/paas/v4/chat/completions"
+    default_model: "glm-4.7"
 mcp:
   servers:
-    github:
+    filesystem:
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
       command: "npx"
+    github:
       args: ["-y", "@modelcontextprotocol/server-github"]
-
+      command: "npx"

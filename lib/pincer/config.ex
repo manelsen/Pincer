@@ -1,82 +1,203 @@
 defmodule Pincer.Config do
   @moduledoc """
-  Configuration loader for Pincer using YAML and Dotenv.
+  Configuration loader and manager for the Pincer application.
+
+  Config provides a unified interface for loading configuration from multiple
+  sources with proper precedence: environment variables take priority over
+  YAML configuration for sensitive values (API keys, tokens).
+
+  ## Configuration Sources
+
+  | Source | Priority | Purpose |
+  |--------|----------|---------|
+  | `.env` | Highest | API keys, tokens, secrets |
+  | `config.yaml` | Lower | Database, LLM providers, MCP servers |
+  | System env | Variable | Override any value |
+
+  ## Configuration Structure
+
+  The `config.yaml` file should contain:
+
+      database:
+        adapter: "Ecto.Adapters.SQLite3"
+        database: "db/pincer.db"
+
+      llm:
+        provider: "opencode_zen"
+        opencode_zen:
+          base_url: "https://api.example.com"
+          default_model: "model-id"
+        openrouter:
+          base_url: "https://openrouter.ai/api/v1"
+          default_model: "anthropic/claude-3-opus"
+
+      mcp:
+        servers:
+          filesystem:
+            command: "mcp-filesystem"
+            args: ["/path/to/root"]
+
+  ## Environment Variables
+
+  Required for token authentication:
+
+      TELEGRAM_BOT_TOKEN=your-telegram-token
+      OPENROUTER_API_KEY=your-openrouter-key
+      OPENCODE_ZEN_API_KEY=your-opencode-key
+      GITHUB_PERSONAL_ACCESS_TOKEN=your-github-token
+
+  ## Usage
+
+  Load configuration at application startup:
+
+      # In application.ex
+      def start(_type, _args) do
+        Pincer.Config.load()
+        # ... start supervisors
+      end
+
+  Access configuration throughout the application:
+
+      # Get with default
+      provider = Pincer.Config.get(:llm)["provider"]
+
+      # Fetch required value (raises if missing)
+      tokens = Pincer.Config.fetch!(:tokens)
+
+  ## Hot Reloading Model
+
+  Change the active LLM model at runtime:
+
+      {:ok, model, provider} = Pincer.Config.set_model("gpt-4-turbo")
+
+  ## Examples
+
+      # Load all configuration
+      :ok = Pincer.Config.load()
+
+      # Get configuration value
+      Pincer.Config.get(:llm)
+      # => %{"provider" => "opencode_zen", "opencode_zen" => %{...}}
+
+      # Get with default
+      Pincer.Config.get(:unknown_key, "default_value")
+      # => "default_value"
+
+      # Fetch required value
+      Pincer.Config.fetch!(:tokens)
+      # => %{"telegram" => "bot123...", "openrouter" => "sk-or-..."}
   """
 
   @config_file "config.yaml"
 
+  @doc """
+  Loads configuration from `.env` and `config.yaml` into application environment.
+
+  This function should be called once at application startup. It performs
+  the following steps in order:
+
+  1. Loads `.env` file and sets environment variables
+  2. Reads `config.yaml` for structural configuration
+  3. Collects API tokens from environment variables
+  4. Configures LLM provider settings
+  5. Sets up database adapter configuration
+
+  ## Returns
+
+    - `:ok` - Configuration loaded successfully
+    - `:error` - Failed to load `config.yaml`
+
+  ## Examples
+
+      :ok = Pincer.Config.load()
+      # => Prints status messages and loads config
+
+  ## Side Effects
+
+    - Sets `System.put_env/2` for `.env` values
+    - Sets `Application.put_env/3` for all config sections
+  """
+  @spec load() :: :ok | :error
   def load do
-    # 1. Tenta carregar o .env usando File.read para maior controle
-    IO.puts("Carregando variáveis de ambiente do .env...")
+    IO.puts("Loading environment variables from .env...")
+
     case File.read(".env") do
       {:ok, content} ->
         content
         |> String.split("\n", trim: true)
         |> Enum.each(fn line ->
           case String.split(line, "=", parts: 2) do
-            [key, value] -> 
+            [key, value] ->
               trimmed_key = String.trim(key)
               trimmed_value = String.trim(value) |> String.trim("\"") |> String.trim("'")
               System.put_env(trimmed_key, trimmed_value)
-            _ -> :ok
+
+            _ ->
+              :ok
           end
         end)
-      {:error, _} -> 
-        IO.puts("Aviso: Arquivo .env não encontrado.")
+
+      {:error, _} ->
+        IO.puts("Warning: .env file not found.")
     end
 
-    # 2. Carrega o YAML (Apenas para configurações não sensíveis)
     case YamlElixir.read_from_file(@config_file) do
       {:ok, config} ->
-        # Salva config estrutural
         Enum.each(config, fn {key, value} ->
           Application.put_env(:pincer, String.to_atom(key), value)
         end)
 
-        # 3. Tokens (Apenas via Variáveis de Ambiente)
         env_telegram = System.get_env("TELEGRAM_BOT_TOKEN")
         env_openrouter = System.get_env("OPENROUTER_API_KEY")
         env_opencode_zen = System.get_env("OPENCODE_ZEN_API_KEY")
-        
-        IO.puts("Token ENV Telegram: #{if env_telegram && env_telegram != "", do: "OK", else: "NÃO ENCONTRADO"}")
-        IO.puts("Token ENV Opencode Zen: #{if env_opencode_zen && env_opencode_zen != "", do: "OK", else: "NÃO ENCONTRADO"}")
-        
+
+        IO.puts(
+          "Token ENV Telegram: #{if env_telegram && env_telegram != "", do: "OK", else: "NOT FOUND"}"
+        )
+
+        IO.puts(
+          "Token ENV Opencode Zen: #{if env_opencode_zen && env_opencode_zen != "", do: "OK", else: "NOT FOUND"}"
+        )
+
         tokens = %{
           "telegram" => env_telegram,
           "openrouter" => env_openrouter,
-          "opencode_zen" => env_opencode_zen
+          "opencode_zen" => env_opencode_zen,
+          "github" => System.get_env("GITHUB_PERSONAL_ACCESS_TOKEN")
         }
-        
-        # Filtra nils/vazios
-        final_tokens = 
-          tokens 
+
+        final_tokens =
+          tokens
           |> Enum.filter(fn {_, v} -> v != nil && v != "" end)
           |> Map.new()
-        
+
         Application.put_env(:pincer, :tokens, final_tokens)
 
-        # 4. Configuração LLM (Provedores)
         if llm_config = config["llm"] do
           Application.put_env(:pincer, :llm, llm_config)
-          
+
           provider = llm_config["provider"] || "openrouter"
           IO.puts("LLM Provider: #{provider}")
         end
 
-        # 5. Configuração do Repo
         if db_config = config["database"] do
           current_repo_config = Application.get_env(:pincer, Pincer.Repo, [])
-          
-          ecto_config = 
-            db_config 
+
+          ecto_config =
+            db_config
             |> Enum.map(fn {k, v} -> {String.to_atom(k), v} end)
             |> Keyword.merge(current_repo_config)
 
-          ecto_config = 
+          ecto_config =
             case db_config["adapter"] do
-              "Ecto.Adapters.SQLite3" -> Keyword.put(ecto_config, :adapter, Ecto.Adapters.SQLite3)
-              "Ecto.Adapters.PostgreSQL" -> Keyword.put(ecto_config, :adapter, Ecto.Adapters.PostgreSQL)
-              _ -> ecto_config
+              "Ecto.Adapters.SQLite3" ->
+                Keyword.put(ecto_config, :adapter, Ecto.Adapters.SQLite3)
+
+              "Ecto.Adapters.PostgreSQL" ->
+                Keyword.put(ecto_config, :adapter, Ecto.Adapters.PostgreSQL)
+
+              _ ->
+                ecto_config
             end
 
           Application.put_env(:pincer, :repo, ecto_config)
@@ -85,38 +206,116 @@ defmodule Pincer.Config do
         :ok
 
       {:error, reason} ->
-        IO.puts("Erro fatal: Falha ao carregar config.yaml: #{inspect(reason)}")
+        IO.puts("Fatal error: Failed to load config.yaml: #{inspect(reason)}")
         :error
     end
   end
 
+  @doc """
+  Retrieves a configuration value from the application environment.
+
+  ## Parameters
+
+    - `key` - Atom key to look up in `:pincer` application env
+    - `default` - Value to return if key is not set (default: `nil`)
+
+  ## Returns
+
+    - The configured value, or `default` if not found
+
+  ## Examples
+
+      iex> Pincer.Config.get(:llm)
+      %{"provider" => "opencode_zen", ...}
+
+      iex> Pincer.Config.get(:nonexistent, "fallback")
+      "fallback"
+
+      iex> Pincer.Config.get(:nonexistent)
+      nil
+  """
+  @spec get(atom(), term()) :: term()
   def get(key, default \\ nil) do
     Application.get_env(:pincer, key, default)
   end
 
+  @doc """
+  Fetches a required configuration value, raising if not found.
+
+  Use this when a configuration value is required for the application
+  to function correctly.
+
+  ## Parameters
+
+    - `key` - Atom key to look up in `:pincer` application env
+
+  ## Returns
+
+    - The configured value
+
+  ## Raises
+
+    - `ArgumentError` if the key is not set
+
+  ## Examples
+
+      iex> Pincer.Config.fetch!(:tokens)
+      %{"telegram" => "bot123...", ...}
+
+      iex> Pincer.Config.fetch!(:nonexistent)
+      ** (ArgumentError) could not fetch application environment ...
+  """
+  @spec fetch!(atom()) :: term()
   def fetch!(key) do
     Application.fetch_env!(:pincer, key)
   end
 
+  @doc """
+  Updates the default model for an LLM provider and persists to `config.yaml`.
+
+  This allows hot-swapping models at runtime without restarting the application.
+  The configuration is written back to disk and reloaded.
+
+  ## Parameters
+
+    - `model_id` - String identifier of the model to use
+    - `provider` - Optional provider name (defaults to current provider)
+
+  ## Returns
+
+    - `{:ok, model_id, provider}` - Successfully updated and reloaded
+    - `{:error, reason}` - Failed to read or write config file
+
+  ## Examples
+
+      iex> Pincer.Config.set_model("gpt-4-turbo")
+      {:ok, "gpt-4-turbo", "openrouter"}
+
+      iex> Pincer.Config.set_model("claude-3-opus", "openrouter")
+      {:ok, "claude-3-opus", "openrouter"}
+
+      iex> Pincer.Config.set_model("model-id")
+      {:error, :enoent}  # config.yaml not found
+  """
+  @spec set_model(String.t(), String.t() | nil) ::
+          {:ok, String.t(), String.t()} | {:error, term()}
   def set_model(model_id, provider \\ nil) do
     case YamlElixir.read_from_file(@config_file) do
       {:ok, config} ->
-        # Atualiza o modelo no provider correto ou no provider atual
         current_provider = provider || Map.get(config["llm"], "provider", "openrouter")
-        
-        new_llm = 
+
+        new_llm =
           config["llm"]
           |> Map.put("provider", current_provider)
           |> put_in([current_provider, "default_model"], model_id)
 
         new_config = Map.put(config, "llm", new_llm)
 
-        # Escreve de volta no YAML
         case write_yaml(@config_file, new_config) do
           :ok ->
-            # Recarrega a config na Application Elixir
             load()
             {:ok, model_id, current_provider}
+
           {:error, reason} ->
             {:error, reason}
         end
@@ -127,18 +326,16 @@ defmodule Pincer.Config do
   end
 
   defp write_yaml(path, config) do
-    # Constrói o conteúdo preservando a seção mcp se existir
-    mcp_section = if config["mcp"] do
-      """
-      mcp:
-        servers:
-          #{Enum.map(config["mcp"]["servers"], fn {name, cfg} ->
-            "#{name}:\n      command: \"#{cfg["command"]}\"\n      args: #{inspect(cfg["args"])}"
-          end) |> Enum.join("\n    ")}
-      """
-    else
-      ""
-    end
+    mcp_section =
+      if config["mcp"] do
+        """
+        mcp:
+          servers:
+            #{Enum.map(config["mcp"]["servers"], fn {name, cfg} -> "#{name}:\n      command: \"#{cfg["command"]}\"\n      args: #{inspect(cfg["args"])}" end) |> Enum.join("\n    ")}
+        """
+      else
+        ""
+      end
 
     content = """
     database:
@@ -156,6 +353,7 @@ defmodule Pincer.Config do
 
     #{mcp_section}
     """
+
     File.write(path, content)
   end
 end
