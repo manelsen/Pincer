@@ -10,6 +10,7 @@ defmodule Mix.Tasks.Pincer.Doctor do
   """
 
   use Mix.Task
+  use Boundary, classify_to: Pincer.Mix
 
   alias Pincer.Core.Doctor
 

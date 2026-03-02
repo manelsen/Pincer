@@ -1,6 +1,6 @@
 import Config
 
-config :pincer, Pincer.Repo,
+config :pincer, Pincer.Infra.Repo,
   database: Path.expand("../db/pincer_dev.db", Path.dirname(__ENV__.file)),
   pool_size: 5,
   stacktrace: true,

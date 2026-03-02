@@ -55,3 +55,22 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
 - [x] Identidade, Alma e Perfil de Usuário.
 - [x] Integração API REST GitHub (Listagem Real).
 - [x] Migração para Telegex (Modern Bot Framework).
+
+---
+
+## 🚨 Remediação de Falhas (2026-03-02)
+
+Ordem de execução por risco (produção + segurança + quebra de contrato):
+
+1. [x] **P0 Segurança**: fechar escape por symlink/path traversal no `WorkspaceGuard.confine_path/2`.
+2. [x] **P0 Contrato de Porta**: alinhar `Pincer.Ports.LLM` com `stream_completion/2`.
+3. [x] **P0 API Pública**: restaurar facade compatível de `ProjectOrchestrator` (`start/2`, `continue/2`, `reset/1`, `reset_all/0`, `kickoff/1`).
+4. [x] **P1 Robustez de Execução**: corrigir ciclo de vida de worker no `Project.Server` (processo não-linkado + `terminate/2`) e respeitar `max_retries`.
+5. [x] **P1 Streaming/Hot Swap**: propagar `{:agent_stream_token, ...}` para PubSub e encaminhar `{:model_changed, ...}` ao worker ativo.
+6. [x] **P1 Orquestração**: tornar Blackboard determinístico em testes (fetch sem limite por padrão + `reset/0` + recuperação do journal após remoção do arquivo).
+7. [x] **P2 Compatibilidade**: restaurar `Pincer.hello/0` para manter o smoke test padrão verde.
+8. [x] **P2 Isolamento de Testes**: estabilizar suites que alteram config global de LLM (`planner` e `multimodal`).
+9. [x] **P3 Arquitetura**: revisar startup supervisionado do Discord Consumer.
+10. [x] **P3 Performance/Manutenção**: reduzir `acc ++ ...` em `Enum.reduce`.
+
+Status atual: suíte completa verde (`541 testes + 2 doctests`, `0` falhas).

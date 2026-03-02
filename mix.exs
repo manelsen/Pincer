@@ -11,6 +11,13 @@ defmodule Pincer.MixProject do
       version: @version,
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
+      compilers: [:boundary] ++ Mix.compilers(),
+      boundary: [
+        externals: [
+          {:html_entities, Pincer.Utils}
+        ],
+        ignore_unknown: true
+      ],
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
       aliases: aliases(),
@@ -29,7 +36,7 @@ defmodule Pincer.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :os_mon],
+      extra_applications: [:logger],
       mod: {Pincer.Application, []}
     ]
   end
@@ -74,9 +81,12 @@ defmodule Pincer.MixProject do
       # Scheduling
       {:crontab, "~> 1.1"},
 
-      # Dev
+      # Boundary Enforcement
+      {:boundary, "~> 0.10", runtime: false},
+
+      # Dev & Hot Reload
       {:mox, "~> 1.0", only: :test},
-      {:file_system, "~> 1.0", only: :dev},
+      {:file_system, "~> 1.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end
