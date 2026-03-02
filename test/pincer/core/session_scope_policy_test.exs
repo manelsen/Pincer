@@ -58,5 +58,26 @@ defmodule Pincer.Core.SessionScopePolicyTest do
 
       assert SessionScopePolicy.resolve(:discord, context, config) == "discord_321"
     end
+
+    test "whatsapp private chat uses main scope when configured" do
+      config = %{"dm_session_scope" => "main"}
+      context = %{chat_id: "551199000111", is_group: false}
+
+      assert SessionScopePolicy.resolve(:whatsapp, context, config) == "whatsapp_main"
+    end
+
+    test "whatsapp private chat uses per-peer by default" do
+      context = %{chat_id: "551199000111", is_group: false}
+
+      assert SessionScopePolicy.resolve(:whatsapp, context, %{}) == "whatsapp_551199000111"
+    end
+
+    test "whatsapp group scope stays chat-scoped even when dm_session_scope is main" do
+      config = %{"dm_session_scope" => "main"}
+      context = %{chat_id: "120363025073717274@g.us", is_group: true}
+
+      assert SessionScopePolicy.resolve(:whatsapp, context, config) ==
+               "whatsapp_120363025073717274@g.us"
+    end
   end
 end

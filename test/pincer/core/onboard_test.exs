@@ -8,6 +8,13 @@ defmodule Pincer.Core.OnboardTest do
       defaults = Onboard.defaults()
       assert get_in(defaults, ["database", "database"]) == "db/pincer_mvp.db"
     end
+
+    test "includes whatsapp channel scaffold disabled by default" do
+      defaults = Onboard.defaults()
+      assert get_in(defaults, ["channels", "whatsapp", "enabled"]) == false
+      assert get_in(defaults, ["channels", "whatsapp", "adapter"]) == "Pincer.Channels.WhatsApp"
+      assert get_in(defaults, ["channels", "whatsapp", "bridge", "pairing_phone"]) == ""
+    end
   end
 
   describe "plan/1" do

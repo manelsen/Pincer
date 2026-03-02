@@ -201,7 +201,8 @@ defmodule Pincer.Channels.DiscordTest do
     test "plain kanban text routes to /kanban for board visualization" do
       APIMock
       |> expect(:create_message, fn 890, content, _opts ->
-        assert content =~ "Kanban Board"
+        assert content =~ "Kanban indisponivel para esta sessao"
+        assert content =~ "/project"
         {:ok, %{id: 125}}
       end)
 

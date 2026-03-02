@@ -8,7 +8,7 @@ defmodule Pincer.Core.AccessPolicy do
 
   alias Pincer.Core.Pairing
 
-  @type channel :: :telegram | :discord
+  @type channel :: :telegram | :discord | :whatsapp
   @type mode :: :open | :allowlist | :disabled | :pairing
 
   @type allow_result :: {:allow, %{mode: mode()}}
@@ -145,12 +145,20 @@ defmodule Pincer.Core.AccessPolicy do
     "Seu usuario nao esta autorizado para DM neste bot. Use /menu apos liberar seu ID."
   end
 
+  defp not_allowlisted_message(:whatsapp) do
+    "Seu usuario nao esta autorizado para DM neste bot. Use /menu apos liberar seu ID."
+  end
+
   defp disabled_message(_channel) do
     "Conversas diretas estao desativadas neste canal no momento."
   end
 
   defp pairing_message(_channel) do
-    "Este canal exige pairing para DM. Solicite o codigo ao operador e use /pair <codigo> antes da expiracao."
+    """
+    Este canal exige pairing para DM.
+    Solicite o codigo ao operador e envie `/pair <codigo>` em ate 5 minutos.
+    """
+    |> String.trim()
   end
 
   defp read_field(map, key) when is_map(map) and is_binary(key) do

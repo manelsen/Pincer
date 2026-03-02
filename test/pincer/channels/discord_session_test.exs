@@ -72,4 +72,25 @@ defmodule Pincer.Channels.Discord.SessionTest do
     Pincer.PubSub.broadcast("session:discord_main", {:agent_response, "Main scope reply"})
     Process.sleep(80)
   end
+
+  test "sub-agent status updates reuse the same discord message via edit" do
+    channel_id = 423
+
+    APIMock
+    |> expect(:create_message, fn ^channel_id, "⚙️ Sub-Agent a1 running: web.", _opts ->
+      {:ok, %{id: 702}}
+    end)
+    |> expect(:edit_message, fn ^channel_id, 702, opts ->
+      assert opts[:content] == "✅ Sub-Agent a1 finished."
+      {:ok, %{}}
+    end)
+
+    {:ok, pid} = Session.start_link(channel_id)
+    allow(APIMock, self(), pid)
+
+    send(pid, {:agent_status, "⚙️ Sub-Agent a1 running: web."})
+    send(pid, {:agent_status, "✅ Sub-Agent a1 finished."})
+
+    Process.sleep(80)
+  end
 end

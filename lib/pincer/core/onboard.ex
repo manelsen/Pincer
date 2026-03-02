@@ -84,6 +84,19 @@ defmodule Pincer.Core.Onboard do
           "enabled" => true,
           "adapter" => "Pincer.Channels.Discord",
           "token_env" => "DISCORD_BOT_TOKEN"
+        },
+        "whatsapp" => %{
+          "enabled" => false,
+          "adapter" => "Pincer.Channels.WhatsApp",
+          "dm_policy" => %{"mode" => "pairing"},
+          "bridge" => %{
+            "command" => "node",
+            "args" => ["infrastructure/whatsapp/baileys_bridge.js"],
+            "auth_dir" => "sessions/whatsapp",
+            "qr_ascii" => true,
+            "qr_ascii_small" => true,
+            "pairing_phone" => ""
+          }
         }
       },
       "llm" => %{

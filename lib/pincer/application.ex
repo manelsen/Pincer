@@ -125,10 +125,13 @@ defmodule Pincer.Application do
       Pincer.Connectors.MCP.Manager,
       {Registry, keys: :unique, name: Pincer.Session.Registry},
       Pincer.Session.Supervisor,
+      Pincer.Project.Registry,
+      Pincer.Project.Supervisor,
       Pincer.Cron.Scheduler,
       Pincer.Channels.Supervisor,
       Pincer.Channels.Telegram.SessionSupervisor,
-      Pincer.Channels.Discord.SessionSupervisor
+      Pincer.Channels.Discord.SessionSupervisor,
+      Pincer.Channels.WhatsApp.SessionSupervisor
     ]
 
     children = if Mix.env() == :dev, do: children ++ [Pincer.Core.Reloader], else: children

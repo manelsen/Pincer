@@ -330,6 +330,14 @@ defmodule Pincer.LLM.Client do
                   retries_left: retries
                 })
 
+                notify_runtime_status(%{
+                  kind: :retry_wait,
+                  action: action,
+                  reason: reason_label(reason),
+                  wait_ms: wait_ms,
+                  retries_left: retries
+                })
+
                 Logger.warning(
                   "Transient LLM failure (#{reason_label(reason)}). Waiting #{wait_ms}ms... (Retries left: #{retries})"
                 )
@@ -500,6 +508,15 @@ defmodule Pincer.LLM.Client do
           failover_action: :retry_same
         })
 
+        notify_runtime_status(%{
+          kind: :failover,
+          action: :stream_completion,
+          failover_action: :retry_same,
+          provider: next_state.current_provider,
+          model: next_state.current_model,
+          reason: reason_label(reason)
+        })
+
         stream_completion(messages,
           provider: next_state.current_provider,
           model: next_state.current_model,
@@ -513,6 +530,15 @@ defmodule Pincer.LLM.Client do
           failover_action: :fallback_model,
           provider: provider,
           model: model
+        })
+
+        notify_runtime_status(%{
+          kind: :failover,
+          action: :stream_completion,
+          failover_action: :fallback_model,
+          provider: provider,
+          model: model,
+          reason: reason_label(reason)
         })
 
         stream_completion(messages,
@@ -530,6 +556,15 @@ defmodule Pincer.LLM.Client do
           model: model
         })
 
+        notify_runtime_status(%{
+          kind: :failover,
+          action: :stream_completion,
+          failover_action: :fallback_provider,
+          provider: provider,
+          model: model,
+          reason: reason_label(reason)
+        })
+
         stream_completion(messages,
           provider: provider,
           model: model,
@@ -544,6 +579,15 @@ defmodule Pincer.LLM.Client do
           action: :stream_completion,
           failover_action: :stop,
           failover_attempts: length(attempts)
+        })
+
+        notify_runtime_status(%{
+          kind: :failover,
+          action: :stream_completion,
+          failover_action: :stop,
+          provider: next_state.current_provider,
+          model: next_state.current_model,
+          reason: reason_label(reason)
         })
 
         {:error, reason}
@@ -577,6 +621,15 @@ defmodule Pincer.LLM.Client do
           failover_action: :retry_same
         })
 
+        notify_runtime_status(%{
+          kind: :failover,
+          action: :chat_completion,
+          failover_action: :retry_same,
+          provider: next_state.current_provider,
+          model: next_state.current_model,
+          reason: reason_label(reason)
+        })
+
         chat_completion(messages,
           provider: next_state.current_provider,
           model: next_state.current_model,
@@ -590,6 +643,15 @@ defmodule Pincer.LLM.Client do
           failover_action: :fallback_model,
           provider: provider,
           model: model
+        })
+
+        notify_runtime_status(%{
+          kind: :failover,
+          action: :chat_completion,
+          failover_action: :fallback_model,
+          provider: provider,
+          model: model,
+          reason: reason_label(reason)
         })
 
         chat_completion(messages,
@@ -607,6 +669,15 @@ defmodule Pincer.LLM.Client do
           model: model
         })
 
+        notify_runtime_status(%{
+          kind: :failover,
+          action: :chat_completion,
+          failover_action: :fallback_provider,
+          provider: provider,
+          model: model,
+          reason: reason_label(reason)
+        })
+
         chat_completion(messages,
           provider: provider,
           model: model,
@@ -621,6 +692,15 @@ defmodule Pincer.LLM.Client do
           action: :chat_completion,
           failover_action: :stop,
           failover_attempts: length(attempts)
+        })
+
+        notify_runtime_status(%{
+          kind: :failover,
+          action: :chat_completion,
+          failover_action: :stop,
+          provider: next_state.current_provider,
+          model: next_state.current_model,
+          reason: reason_label(reason)
         })
 
         {:error, reason}
@@ -949,4 +1029,15 @@ defmodule Pincer.LLM.Client do
   defp reason_label(%Req.TransportError{reason: reason}), do: "transport #{inspect(reason)}"
   defp reason_label({:timeout, _}), do: "internal timeout"
   defp reason_label(other), do: inspect(other)
+
+  defp notify_runtime_status(payload) when is_map(payload) do
+    case Process.get(:session_pid) do
+      pid when is_pid(pid) ->
+        send(pid, {:llm_runtime_status, payload})
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
 end

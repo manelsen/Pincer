@@ -1,5 +1,6 @@
 defmodule Pincer.Core.PairingTest do
   use ExUnit.Case, async: false
+  import ExUnit.CaptureLog
 
   alias Pincer.Core.Pairing
 
@@ -14,6 +15,23 @@ defmodule Pincer.Core.PairingTest do
   end
 
   describe "issue_code/3 and approve_code/4" do
+    test "logs pairing metadata with readable expiration and ready-to-use command" do
+      log =
+        capture_log(fn ->
+          assert {:ok, %{code: "123456", expires_at_ms: 61_000}} =
+                   Pairing.issue_code(:telegram, "user-log",
+                     now_ms: 1_000,
+                     ttl_ms: 60_000,
+                     code_generator: fn -> "123456" end
+                   )
+        end)
+
+      assert log =~ "[PAIRING] issued channel=telegram sender=user-log code=123456"
+      assert log =~ "expires_at="
+      assert log =~ "ttl_s=60"
+      assert log =~ "command=/pair 123456"
+    end
+
     test "issues code, approves once, and blocks replay approval" do
       assert {:ok, %{code: code, expires_at_ms: expires_at_ms}} =
                Pairing.issue_code(:telegram, "user-1",

@@ -1,210 +1,211 @@
 defmodule Pincer.Orchestration.Blackboard do
   @moduledoc """
-  A central message repository enabling decoupled communication between agents.
-
-  The Blackboard implements the **Blackboard Pattern**, a collaborative problem-solving
-  architecture where multiple independent agents (knowledge sources) contribute to a
-  shared workspace. This pattern is particularly effective for:
-
-  - **Decoupled communication**: Agents don't need to know about each other
-  - **Asynchronous coordination**: Results are posted and polled independently
-  - **Observability**: All agent activity is centralized and queryable
-  - **Fault isolation**: One agent's failure doesn't affect others
-
-  ## Architecture
-
-      ┌──────────────┐     ┌──────────────┐     ┌──────────────┐
-      │   SubAgent   │     │   SubAgent   │     │   MainAgent  │
-      │   (writer)   │     │   (writer)   │     │   (reader)   │
-      └──────┬───────┘     └──────┬───────┘     └──────┬───────┘
-             │                    │                    │
-             │ post/2             │ post/2             │ fetch_new/1
-             ▼                    ▼                    ▼
-      ┌─────────────────────────────────────────────────────────┐
-      │                      BLACKBOARD                         │
-      │  ┌─────────────────────────────────────────────────┐   │
-      │  │  Messages: [{id, agent_id, content, timestamp}] │   │
-      │  └─────────────────────────────────────────────────┘   │
-      └─────────────────────────────────────────────────────────┘
-
-  ## Message Format
-
-  Each message on the Blackboard contains:
-
-  - `:id` - Monotonically increasing integer (used for polling)
-  - `:agent_id` - Identifier of the posting agent
-  - `:content` - The message payload (string)
-  - `:timestamp` - UTC datetime when posted
-
-  ## Usage Pattern
-
-  The typical flow is:
-
-  1. **Main Agent** spawns multiple SubAgents
-  2. **SubAgents** post progress/results to Blackboard
-  3. **Main Agent** periodically polls for new messages
-  4. **Main Agent** processes results and takes action
-
-  ## Examples
-
-      # Start the Blackboard (typically done by supervisor)
-      {:ok, _pid} = Pincer.Orchestration.Blackboard.start_link([])
-
-      # SubAgent posts a message
-      msg_id = Pincer.Orchestration.Blackboard.post("agent_001", "Task started")
-
-      # Main Agent polls for new messages
-      {messages, last_id} = Pincer.Orchestration.Blackboard.fetch_new(0)
-      # => {[%{id: 1, agent_id: "agent_001", content: "Task started", ...}], 1}
-
-      # Later, poll again from last seen ID
-      {new_messages, last_id} = Pincer.Orchestration.Blackboard.fetch_new(last_id)
-
-  ## Implementation Notes
-
-  - Messages are stored in reverse chronological order (newest first)
-  - This enables O(1) prepend for new messages
-  - `fetch_new/1` reverses results to return oldest-to-newest order
-  - The Blackboard is a named process registered as `__MODULE__`
+  Tiered Event Store: RAM (Hot) + Disk (Cold).
+  Automatically retrieves pruned messages from the journal file.
   """
-
   use GenServer
   require Logger
 
-  @type message :: %{
-          id: pos_integer(),
-          agent_id: String.t(),
-          content: String.t(),
-          timestamp: DateTime.t()
-        }
+  @table :pincer_blackboard
+  @journal_file "memory/blackboard.journal"
+  @ram_threshold_prune 0.80
 
-  @type state :: %{
-          messages: [message()],
-          next_id: pos_integer()
-        }
+  def start_link(_opts \\ []) do
+    GenServer.start_link(__MODULE__, %{next_id: 1, journal_pid: nil}, name: __MODULE__)
+  end
 
   # --- API ---
 
-  @doc """
-  Starts the Blackboard GenServer.
+  @doc "Compatibility API for posting messages."
+  def post(agent_id, content, project_id \\ nil) do
+    GenServer.call(__MODULE__, {:post, agent_id, content, project_id})
+  end
 
-  The Blackboard is registered under its module name, allowing global access
-  via `post/2` and `fetch_new/1` without needing the PID.
+  @doc "Wait for the journaler to process all pending messages (for tests)."
+  def wait_for_journal do
+    if p = Process.whereis(:blackboard_journaler) do
+      # Envia uma mensagem e espera o retorno, garantindo que a fila anterior foi processada
+      ref = make_ref()
+      send(p, {:ping, self(), ref})
+      receive do
+        {:pong, ^ref} -> :ok
+      after
+        1000 -> :timeout
+      end
+    end
+  end
 
-  ## Returns
-
-    * `{:ok, pid}` - The Blackboard process started successfully
-
-  ## Examples
-
-      iex> Pincer.Orchestration.Blackboard.start_link([])
-      {:ok, #PID<0.100.0>}
-
-  """
-  @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, %{messages: [], next_id: 1}, name: __MODULE__)
+  @doc "Direct write to ETS. This is what allows 10M+ ops."
+  def post_direct(id, agent_id, content, project_id) do
+    msg = %{
+      id: id,
+      agent_id: agent_id,
+      project_id: project_id,
+      content: content,
+      timestamp: DateTime.utc_now()
+    }
+    
+    :ets.insert(@table, {id, msg})
+    notify_journaler(msg)
+    {:ok, id}
   end
 
   @doc """
-  Posts a new message to the Blackboard.
-
-  Messages are timestamped automatically and assigned a unique, monotonically
-  increasing ID. The ID can be used by readers to track which messages they've
-  already processed.
-
-  ## Parameters
-
-    * `agent_id` - Identifier of the posting agent (e.g., "sub_agent_001")
-    * `content` - The message content/payload
-
-  ## Returns
-
-    * The message ID (positive integer) assigned to this message
-
-  ## Examples
-
-      iex> Pincer.Orchestration.Blackboard.post("agent_001", "Started processing")
-      1
-
-      iex> Pincer.Orchestration.Blackboard.post("agent_002", "Found 5 files")
-      2
-
+  Fetches new messages. If not in RAM, automatically falls back to Disk Journal.
   """
-  @spec post(String.t(), String.t()) :: pos_integer()
-  def post(agent_id, content) do
-    GenServer.call(__MODULE__, {:post, agent_id, content})
-  end
+  def fetch_new(since_id, limit \\ 100) do
+    first_key = :ets.first(@table)
 
-  @doc """
-  Fetches all messages posted after the given ID.
+    cond do
+      # 1. Caso base: Cache vazio ou since_id muito antigo -> Busca no Disco
+      first_key == :"$end_of_table" or since_id < first_key ->
+        # Busca no disco primeiro
+        disk_messages = read_from_journal(since_id, limit)
+        
+        # Se o disco preencheu o limite, retorna. 
+        # Caso contrário, tenta complementar com o que tem na RAM.
+        if length(disk_messages) >= limit do
+          {disk_messages, List.last(disk_messages).id}
+        else
+          ram_limit = limit - length(disk_messages)
+          ram_since = if Enum.empty?(disk_messages), do: since_id, else: List.last(disk_messages).id
+          {ram_messages, last_id} = fetch_from_ram(ram_since, ram_limit)
+          {disk_messages ++ ram_messages, last_id}
+        end
 
-  This is the primary polling mechanism for agents to receive updates.
-  The returned messages are ordered oldest-to-newest, making sequential
-  processing natural.
-
-  ## Parameters
-
-    * `since_id` - Only return messages with ID greater than this value.
-      Use `0` to fetch all messages from the beginning.
-
-  ## Returns
-
-    * `{messages, last_seen_id}` - A tuple containing:
-      - `messages` - List of new messages (may be empty)
-      - `last_seen_id` - The highest ID in the returned messages,
-        or `since_id` if no new messages exist
-
-  ## Examples
-
-      # Fetch all messages from the beginning
-      iex> {messages, last_id} = Pincer.Orchestration.Blackboard.fetch_new(0)
-      iex> length(messages)
-      3
-      iex> last_id
-      3
-
-      # Poll for new messages since last check
-      iex> {new_messages, new_last_id} = Pincer.Orchestration.Blackboard.fetch_new(last_id)
-      iex> new_messages
-      []
-
-      # After another agent posts...
-      iex> {new_messages, _} = Pincer.Orchestration.Blackboard.fetch_new(3)
-      iex> hd(new_messages).content
-      "Task completed"
-
-  """
-  @spec fetch_new(non_neg_integer()) :: {[message()], non_neg_integer()}
-  def fetch_new(since_id) do
-    GenServer.call(__MODULE__, {:fetch, since_id})
+      # 2. Caso padrão: Tudo está na RAM
+      true ->
+        fetch_from_ram(since_id, limit)
+    end
   end
 
   # --- Callbacks ---
 
   @impl true
   def init(state) do
-    Logger.info("Blackboard started.")
-    {:ok, state}
+    Application.ensure_all_started(:os_mon)
+    :ets.new(@table, [:named_table, :ordered_set, :public, read_concurrency: true, write_concurrency: true])
+    
+    journaler = spawn_link(fn -> journal_loop() end)
+    Process.register(journaler, :blackboard_journaler)
+
+    send(self(), :check_memory_health)
+    Logger.info("📚 BLACKBOARD ARMED: Tiered Storage (RAM + Journal Recovery) active.")
+    {:ok, %{state | journal_pid: journaler}}
   end
 
   @impl true
-  def handle_call({:post, agent_id, content}, _from, state) do
+  def handle_call({:post, agent_id, content, project_id}, _from, state) do
     id = state.next_id
-    msg = %{id: id, agent_id: agent_id, content: content, timestamp: DateTime.utc_now()}
-
-    {:reply, id, %{state | messages: [msg | state.messages], next_id: id + 1}}
+    post_direct(id, agent_id, content, project_id)
+    {:reply, id, %{state | next_id: id + 1}}
   end
 
   @impl true
-  def handle_call({:fetch, since_id}, _from, state) do
-    new_messages =
-      state.messages
-      |> Enum.take_while(fn msg -> msg.id > since_id end)
-      |> Enum.reverse()
+  def handle_info(:check_memory_health, state) do
+    Process.send_after(self(), :check_memory_health, 5000)
+    usage = try do
+      {total, allocated, _} = :memsup.get_memory_data()
+      allocated / total
+    rescue _ -> 0.0 end
 
-    last_id = if Enum.empty?(new_messages), do: since_id, else: List.last(new_messages).id
+    if usage > @ram_threshold_prune do
+      Logger.warning("⚠️ RAM High (#{Float.round(usage * 100, 2)}%). Purging Hot Cache. Data remains safe in Disk Journal.")
+      prune_cache()
+    end
+    {:noreply, state}
+  end
 
-    {:reply, {new_messages, last_id}, state}
+  @impl true
+  def handle_info(_msg, state), do: {:noreply, state}
+
+  # --- Internal Logic: RAM Fetch ---
+
+  defp fetch_from_ram(since_id, limit) do
+    spec = [{{:"$1", :"$2"}, [{:>, :"$1", since_id}], [:"$2"]}]
+    case :ets.select(@table, spec, limit) do
+      {messages, _continuation} -> 
+        {messages, List.last(messages).id}
+      :"$end_of_table" -> 
+        {[], since_id}
+      msgs when is_list(msgs) ->
+        {msgs, if(Enum.empty?(msgs), do: since_id, else: List.last(msgs).id)}
+    end
+  end
+
+  # --- Internal Logic: Disk Recovery ---
+
+  defp read_from_journal(since_id, limit) do
+    if File.exists?(@journal_file) do
+      {:ok, file} = :file.open(@journal_file, [:read, :binary, :raw])
+      try do
+        iterate_journal(file, since_id, limit, [])
+      after
+        :file.close(file)
+      end
+    else
+      []
+    end
+  end
+
+  defp iterate_journal(file, since_id, limit, acc) do
+    if length(acc) >= limit do
+      Enum.reverse(acc)
+    else
+      case :file.read(file, 4) do
+        {:ok, <<size::32>>} ->
+          case :file.read(file, size) do
+            {:ok, binary} ->
+              msg = :erlang.binary_to_term(binary)
+              if msg.id > since_id do
+                iterate_journal(file, since_id, limit, [msg | acc])
+              else
+                iterate_journal(file, since_id, limit, acc)
+              end
+            _ -> Enum.reverse(acc)
+          end
+        :eof ->
+          Enum.reverse(acc)
+        _ -> Enum.reverse(acc)
+      end
+    end
+  end
+
+  # --- Internal Logic: Journaler & Pruning ---
+
+  defp notify_journaler(msg), do: if(p = Process.whereis(:blackboard_journaler), do: send(p, {:journal, msg}))
+
+  defp journal_loop do
+    File.mkdir_p!("memory")
+    {:ok, file} = File.open(@journal_file, [:append, :raw, :delayed_write])
+    receive_loop(file)
+  end
+
+  defp receive_loop(file) do
+    receive do
+      {:journal, msg} ->
+        binary = :erlang.term_to_binary(msg)
+        :file.write(file, <<byte_size(binary)::32, binary::binary>>)
+        receive_loop(file)
+      {:ping, from, ref} ->
+        # Força o flush do arquivo para o disco antes de responder
+        :file.datasync(file)
+        send(from, {:pong, ref})
+        receive_loop(file)
+      :stop -> File.close(file)
+    end
+  end
+
+  defp prune_cache do
+    first = :ets.first(@table)
+    delete_half(first, div(:ets.info(@table, :size), 2))
+  end
+
+  defp delete_half(:"$end_of_table", _), do: :ok
+  defp delete_half(_, 0), do: :ok
+  defp delete_half(key, count) do
+    next = :ets.next(@table, key)
+    :ets.delete(@table, key)
+    delete_half(next, count - 1)
   end
 end

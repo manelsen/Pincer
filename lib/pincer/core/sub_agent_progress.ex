@@ -9,6 +9,7 @@ defmodule Pincer.Core.SubAgentProgress do
   @type tracker_entry :: %{
           started?: boolean(),
           last_tool: String.t() | nil,
+          last_status: String.t() | nil,
           terminal?: boolean()
         }
 
@@ -47,6 +48,23 @@ defmodule Pincer.Core.SubAgentProgress do
               true ->
                 notification = "⚙️ Sub-Agent #{agent_id} running: #{tool}."
                 next = Map.put(current, agent_id, %{entry | last_tool: tool})
+                {[notification | acc], next, review?}
+            end
+
+          {:llm_status, status} ->
+            cond do
+              entry.terminal? ->
+                {acc, current, review?}
+
+              not is_binary(status) or status == "" ->
+                {acc, current, review?}
+
+              entry.last_status == status ->
+                {acc, current, review?}
+
+              true ->
+                notification = "🧠 Sub-Agent #{agent_id}: #{status}"
+                next = Map.put(current, agent_id, %{entry | last_status: status})
                 {[notification | acc], next, review?}
             end
 
@@ -99,6 +117,9 @@ defmodule Pincer.Core.SubAgentProgress do
       String.starts_with?(trimmed, "Using tool:") ->
         {:tool, String.trim_leading(trimmed, "Using tool:") |> String.trim()}
 
+      String.starts_with?(trimmed, "LLM_STATUS:") ->
+        {:llm_status, String.trim_leading(trimmed, "LLM_STATUS:") |> String.trim()}
+
       String.starts_with?(trimmed, "FINISHED:") ->
         {:finished, String.trim_leading(trimmed, "FINISHED:") |> String.trim()}
 
@@ -134,7 +155,7 @@ defmodule Pincer.Core.SubAgentProgress do
   defp normalize_agent_id(_), do: "unknown"
 
   defp default_entry do
-    %{started?: false, last_tool: nil, terminal?: false}
+    %{started?: false, last_tool: nil, last_status: nil, terminal?: false}
   end
 
   defp message_value(map, key) do

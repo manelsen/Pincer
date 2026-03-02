@@ -88,5 +88,17 @@ defmodule Pincer.Core.AccessPolicyTest do
       config = %{"dm_policy" => %{"mode" => "not-a-real-mode"}}
       assert {:allow, %{mode: :open}} = AccessPolicy.authorize_dm(:telegram, 10, config)
     end
+
+    test "supports whatsapp channel policy evaluation" do
+      config = %{"dm_policy" => %{"mode" => "allowlist", "allow_from" => ["5511*"]}}
+
+      assert {:allow, %{mode: :allowlist}} =
+               AccessPolicy.authorize_dm(:whatsapp, "551199000111", config)
+
+      assert {:deny, %{mode: :allowlist, reason: :not_allowlisted, user_message: msg}} =
+               AccessPolicy.authorize_dm(:whatsapp, "3399000111", config)
+
+      assert msg =~ "nao esta autorizado"
+    end
   end
 end
