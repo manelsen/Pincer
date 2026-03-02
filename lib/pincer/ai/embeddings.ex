@@ -7,16 +7,19 @@ defmodule Pincer.AI.Embeddings do
   @model_repo "thenlper/gte-small"
 
   def start_link(_opts) do
-    Logger.info("Carregando modelo de embeddings: #{@model_repo}")
-    {:ok, model_info} = Bumblebee.load_model({:hf, @model_repo})
-    {:ok, tokenizer} = Bumblebee.load_tokenizer({:hf, @model_repo})
+    if Code.ensure_loaded?(Bumblebee) do
+      Logger.info("Carregando modelo de embeddings: #{@model_repo}")
+      {:ok, model_info} = apply(Bumblebee, :load_model, [{:hf, @model_repo}])
+      {:ok, tokenizer} = apply(Bumblebee, :load_tokenizer, [{:hf, @model_repo}])
 
-    serving = Bumblebee.Text.text_embedding(model_info, tokenizer,
-      output_pool: :mean_pooling,
-      output_attribute: :hidden_state
-    )
+      serving = apply(Bumblebee.Text, :text_embedding, [model_info, tokenizer,
+        [output_pool: :mean_pooling, output_attribute: :hidden_state]])
 
-    Nx.Serving.start_link(serving: serving, name: :pincer_embeddings)
+      apply(Nx.Serving, :start_link, [[serving: serving, name: :pincer_embeddings]])
+    else
+      Logger.warning("Bumblebee não está carregado. Embeddings locais desativados.")
+      :ignore
+    end
   end
 
   def child_spec(opts) do
@@ -24,35 +27,47 @@ defmodule Pincer.AI.Embeddings do
   end
 
   def generate(text) do
-    try do
-      # O Nx.Serving.run/2 retorna o resultado diretamente para o processo
-      case Nx.Serving.run(:pincer_embeddings, text) do
-        %{embedding: tensor} -> tensor
-        # Se for uma lista (batch)
-        [%{embedding: tensor} | _] -> tensor
+    if Code.ensure_loaded?(Nx.Serving) do
+      try do
+        case apply(Nx.Serving, :run, [:pincer_embeddings, text]) do
+          %{embedding: tensor} -> tensor
+          [%{embedding: tensor} | _] -> tensor
+          _ -> fallback_tensor()
+        end
+      rescue
         _ -> fallback_tensor()
       end
-    rescue
-      _ -> fallback_tensor()
+    else
+      fallback_tensor()
     end
   end
 
-  defp fallback_tensor, do: Nx.broadcast(0.0, {384})
+  defp fallback_tensor do
+    if Code.ensure_loaded?(Nx) do
+      apply(Nx, :broadcast, [0.0, {384}])
+    else
+      nil
+    end
+  end
 
   def similarity(v1, v2) do
-    # Garante que v1 e v2 são tensores válidos e não nil
-    v1 = v1 || fallback_tensor()
-    v2 = v2 || fallback_tensor()
+    if Code.ensure_loaded?(Nx) do
+      v1 = v1 || fallback_tensor()
+      v2 = v2 || fallback_tensor()
 
-    dot = Nx.dot(v1, v2)
-    norm1 = Nx.LinAlg.norm(v1)
-    norm2 = Nx.LinAlg.norm(v2)
-    
-    # Evita divisão por zero
-    if Nx.to_number(norm1) == 0 or Nx.to_number(norm2) == 0 do
-      0.0
+      dot = apply(Nx, :dot, [v1, v2])
+      norm1 = apply(Nx.LinAlg, :norm, [v1])
+      norm2 = apply(Nx.LinAlg, :norm, [v2])
+      
+      if apply(Nx, :to_number, [norm1]) == 0 or apply(Nx, :to_number, [norm2]) == 0 do
+        0.0
+      else
+        dot 
+        |> then(&apply(Nx, :divide, [&1, apply(Nx, :multiply, [norm1, norm2])])) 
+        |> then(&apply(Nx, :to_number, [&1]))
+      end
     else
-      dot |> Nx.divide(Nx.multiply(norm1, norm2)) |> Nx.to_number()
+      0.0
     end
   end
 end

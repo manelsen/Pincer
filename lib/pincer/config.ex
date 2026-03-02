@@ -1,4 +1,4 @@
-defmodule Pincer.Config do
+defmodule Pincer.Infra.Config do
   @moduledoc """
   Configuration loader and manager for the Pincer application.
 
@@ -52,39 +52,39 @@ defmodule Pincer.Config do
 
       # In application.ex
       def start(_type, _args) do
-        Pincer.Config.load()
+        Pincer.Infra.Config.load()
         # ... start supervisors
       end
 
   Access configuration throughout the application:
 
       # Get with default
-      provider = Pincer.Config.get(:llm)["provider"]
+      provider = Pincer.Infra.Config.get(:llm)["provider"]
 
       # Fetch required value (raises if missing)
-      tokens = Pincer.Config.fetch!(:tokens)
+      tokens = Pincer.Infra.Config.fetch!(:tokens)
 
   ## Hot Reloading Model
 
   Change the active LLM model at runtime:
 
-      {:ok, model, provider} = Pincer.Config.set_model("gpt-4-turbo")
+      {:ok, model, provider} = Pincer.Infra.Config.set_model("gpt-4-turbo")
 
   ## Examples
 
       # Load all configuration
-      :ok = Pincer.Config.load()
+      :ok = Pincer.Infra.Config.load()
 
       # Get configuration value
-      Pincer.Config.get(:llm)
+      Pincer.Infra.Config.get(:llm)
       # => %{"provider" => "opencode_zen", "opencode_zen" => %{...}}
 
       # Get with default
-      Pincer.Config.get(:unknown_key, "default_value")
+      Pincer.Infra.Config.get(:unknown_key, "default_value")
       # => "default_value"
 
       # Fetch required value
-      Pincer.Config.fetch!(:tokens)
+      Pincer.Infra.Config.fetch!(:tokens)
       # => %{"telegram" => "bot123...", "openrouter" => "sk-or-..."}
   """
 
@@ -109,7 +109,7 @@ defmodule Pincer.Config do
 
   ## Examples
 
-      :ok = Pincer.Config.load()
+      :ok = Pincer.Infra.Config.load()
       # => Prints status messages and loads config
 
   ## Side Effects
@@ -181,7 +181,7 @@ defmodule Pincer.Config do
         end
 
         if db_config = config["database"] do
-          current_repo_config = Application.get_env(:pincer, Pincer.Repo, [])
+          current_repo_config = Application.get_env(:pincer, Pincer.Infra.Repo, [])
 
           ecto_config =
             db_config
@@ -225,13 +225,13 @@ defmodule Pincer.Config do
 
   ## Examples
 
-      iex> Pincer.Config.get(:llm)
+      iex> Pincer.Infra.Config.get(:llm)
       %{"provider" => "opencode_zen", ...}
 
-      iex> Pincer.Config.get(:nonexistent, "fallback")
+      iex> Pincer.Infra.Config.get(:nonexistent, "fallback")
       "fallback"
 
-      iex> Pincer.Config.get(:nonexistent)
+      iex> Pincer.Infra.Config.get(:nonexistent)
       nil
   """
   @spec get(atom(), term()) :: term()
@@ -259,10 +259,10 @@ defmodule Pincer.Config do
 
   ## Examples
 
-      iex> Pincer.Config.fetch!(:tokens)
+      iex> Pincer.Infra.Config.fetch!(:tokens)
       %{"telegram" => "bot123...", ...}
 
-      iex> Pincer.Config.fetch!(:nonexistent)
+      iex> Pincer.Infra.Config.fetch!(:nonexistent)
       ** (ArgumentError) could not fetch application environment ...
   """
   @spec fetch!(atom()) :: term()
@@ -288,13 +288,13 @@ defmodule Pincer.Config do
 
   ## Examples
 
-      iex> Pincer.Config.set_model("gpt-4-turbo")
+      iex> Pincer.Infra.Config.set_model("gpt-4-turbo")
       {:ok, "gpt-4-turbo", "openrouter"}
 
-      iex> Pincer.Config.set_model("claude-3-opus", "openrouter")
+      iex> Pincer.Infra.Config.set_model("claude-3-opus", "openrouter")
       {:ok, "claude-3-opus", "openrouter"}
 
-      iex> Pincer.Config.set_model("model-id")
+      iex> Pincer.Infra.Config.set_model("model-id")
       {:error, :enoent}  # config.yaml not found
   """
   @spec set_model(String.t(), String.t() | nil) ::

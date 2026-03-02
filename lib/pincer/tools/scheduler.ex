@@ -1,10 +1,10 @@
-defmodule Pincer.Tools.Scheduler do
+defmodule Pincer.Adapters.Tools.Scheduler do
   @moduledoc """
   Pincer's definitive tool for scheduling proactive tasks in the future
   using Cron notation in the SQLite database.
   """
-  @behaviour Pincer.Tool
-  alias Pincer.Cron.Storage
+  @behaviour Pincer.Ports.Tool
+  alias Pincer.Ports.Cron
 
   def spec do
     [
@@ -51,7 +51,7 @@ defmodule Pincer.Tools.Scheduler do
         "prompt" => p,
         "session_id" => sid
       }) do
-    case Storage.create_job(%{name: name, cron_expression: cron, prompt: p, session_id: sid}) do
+    case Cron.create_job(%{name: name, cron_expression: cron, prompt: p, session_id: sid}) do
       {:ok, job} ->
         {:ok,
          "Schedule '#{job.name}' (ID: #{job.id}) registered! Next execution: #{job.next_run_at}"}
@@ -65,7 +65,7 @@ defmodule Pincer.Tools.Scheduler do
   end
 
   def execute(%{"tool_name" => "list_cron_jobs"}) do
-    jobs = Storage.list_jobs()
+    jobs = Cron.list_jobs()
 
     if Enum.empty?(jobs) do
       {:ok, "No schedules found."}
@@ -82,7 +82,7 @@ defmodule Pincer.Tools.Scheduler do
   end
 
   def execute(%{"tool_name" => "delete_cron_job", "id" => id}) do
-    case Storage.delete_job(id) do
+    case Cron.delete_job(id) do
       {:ok, _} -> {:ok, "Job #{id} removed successfully."}
       {:error, _} -> {:error, "Could not find or remove job #{id}."}
     end

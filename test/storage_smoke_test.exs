@@ -16,7 +16,7 @@ defmodule Pincer.StorageSmokeTest do
   end
 
   test "repo is using sqlite3 adapter" do
-    config = Pincer.Repo.config()
+    config = Pincer.Infra.Repo.config()
     assert config[:adapter] == Ecto.Adapters.SQLite3
     # In test env, it uses db/pincer_test.db from test.exs
     assert config[:database] =~ "pincer_test.db"

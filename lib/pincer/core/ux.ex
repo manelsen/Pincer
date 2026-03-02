@@ -6,7 +6,7 @@ defmodule Pincer.Core.UX do
   render the same interaction model without becoming the source of truth.
   """
 
-  @behaviour Pincer.Core.Ports.UserMenu
+  @behaviour Pincer.Ports.UserMenu
 
   @type command :: %{name: String.t(), description: String.t()}
   @type shortcut_result :: {:ok, String.t()} | :error

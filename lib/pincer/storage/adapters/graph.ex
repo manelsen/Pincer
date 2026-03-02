@@ -69,7 +69,7 @@ defmodule Pincer.Storage.Adapters.Graph do
   """
 
   import Ecto.Query
-  alias Pincer.Repo
+  alias Pincer.Infra.Repo
   alias Pincer.Storage.Graph.{Node, Edge}
   require Logger
 
