@@ -3,7 +3,7 @@
 IO.puts("Starting Pincer to test Filesystem MCP...")
 Application.ensure_all_started(:pincer)
 
-alias Pincer.Connectors.MCP.Manager
+alias Pincer.Adapters.Connectors.MCP.Manager
 Logger.configure(level: :info)
 
 IO.puts("Waiting for MCP tools discovery (10s)...")

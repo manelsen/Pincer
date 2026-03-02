@@ -5,7 +5,7 @@ IO.puts("Starting Pincer to test Node Sidecar MCP...")
 # Ensure application is started
 Application.ensure_all_started(:pincer)
 
-alias Pincer.Connectors.MCP.Manager
+alias Pincer.Adapters.Connectors.MCP.Manager
 
 # Wait a bit for the MCP Manager to discover tools
 IO.puts("Waiting for MCP tools discovery (5s)...")

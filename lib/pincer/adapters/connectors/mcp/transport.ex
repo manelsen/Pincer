@@ -1,4 +1,4 @@
-defmodule Pincer.Connectors.MCP.Transport do
+defmodule Pincer.Adapters.Connectors.MCP.Transport do
   @moduledoc """
   Behaviour defining the contract for MCP (Model Context Protocol) transport implementations.
 
@@ -22,7 +22,7 @@ defmodule Pincer.Connectors.MCP.Transport do
   A transport module must implement the following callbacks:
 
       defmodule MyTransport do
-        @behaviour Pincer.Connectors.MCP.Transport
+        @behaviour Pincer.Adapters.Connectors.MCP.Transport
 
         @impl true
         def connect(opts) do
@@ -52,8 +52,8 @@ defmodule Pincer.Connectors.MCP.Transport do
 
   ## See Also
 
-  - `Pincer.Connectors.MCP.Transports.Stdio` - Standard implementation
-  - `Pincer.Connectors.MCP.Client` - Client using transports
+  - `Pincer.Adapters.Connectors.MCP.Transports.Stdio` - Standard implementation
+  - `Pincer.Adapters.Connectors.MCP.Client` - Client using transports
   """
 
   @type state :: any()

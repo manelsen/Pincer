@@ -1,7 +1,7 @@
-defmodule Pincer.Connectors.MCP.ConfigLoaderTest do
+defmodule Pincer.Adapters.Connectors.MCP.ConfigLoaderTest do
   use ExUnit.Case, async: true
 
-  alias Pincer.Connectors.MCP.ConfigLoader
+  alias Pincer.Adapters.Connectors.MCP.ConfigLoader
 
   describe "discover_servers/1" do
     test "loads Cursor/Claude style mcpServers map" do

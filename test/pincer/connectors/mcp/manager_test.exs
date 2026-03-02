@@ -1,9 +1,9 @@
-defmodule Pincer.Connectors.MCP.ManagerTest do
+defmodule Pincer.Adapters.Connectors.MCP.ManagerTest do
   use ExUnit.Case, async: false
 
-  alias Pincer.Connectors.MCP.Manager
-  alias Pincer.Connectors.MCP.Transports.HTTP
-  alias Pincer.Connectors.MCP.Transports.Stdio
+  alias Pincer.Adapters.Connectors.MCP.Manager
+  alias Pincer.Adapters.Connectors.MCP.Transports.HTTP
+  alias Pincer.Adapters.Connectors.MCP.Transports.Stdio
 
   defmodule SidecarAuditSpy do
     def status_from_result({:ok, _}), do: :ok

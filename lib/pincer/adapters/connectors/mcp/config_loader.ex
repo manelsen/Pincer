@@ -1,4 +1,4 @@
-defmodule Pincer.Connectors.MCP.ConfigLoader do
+defmodule Pincer.Adapters.Connectors.MCP.ConfigLoader do
   @moduledoc """
   Loads MCP server definitions from external JSON configuration files.
 

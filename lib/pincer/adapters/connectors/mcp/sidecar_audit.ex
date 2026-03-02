@@ -1,4 +1,4 @@
-defmodule Pincer.Connectors.MCP.SidecarAudit do
+defmodule Pincer.Adapters.Connectors.MCP.SidecarAudit do
   @moduledoc """
   Emits minimal audit trail for `skills_sidecar` MCP tool executions.
   """
