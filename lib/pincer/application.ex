@@ -12,13 +12,13 @@ defmodule Pincer.Application do
 
       Pincer.Supervisor (one_for_one)
       │
-      ├── Pincer.PubSub
+      ├── Pincer.Infra.PubSub
       │   Message broadcasting for real-time events
       │
       ├── Pincer.Finch
       │   HTTP client pool for API requests
       │
-      ├── Pincer.Repo
+      ├── Pincer.Infra.Repo
       │   Database connection pool (Ecto)
       │
       ├── Pincer.Core.Cron
@@ -33,16 +33,16 @@ defmodule Pincer.Application do
       ├── Pincer.MCP.Supervisor
       │   DynamicSupervisor for MCP server connections
       │
-      ├── Pincer.Connectors.MCP.Manager
+      ├── Pincer.Adapters.Connectors.MCP.Manager
       │   MCP server lifecycle and tool discovery
       │
-      ├── Pincer.Session.Registry
+      ├── Pincer.Core.Session.Registry
       │   Registry for active sessions (unique keys)
       │
-      ├── Pincer.Session.Supervisor
+      ├── Pincer.Core.Session.Supervisor
       │   DynamicSupervisor for user sessions
       │
-      ├── Pincer.Cron.Scheduler
+      ├── Pincer.Adapters.Cron.Scheduler
       │   Job scheduling and execution
       │
       ├── Pincer.Channels.Supervisor
@@ -56,7 +56,7 @@ defmodule Pincer.Application do
 
   ## Startup Sequence
 
-  1. Load configuration from `Pincer.Config`
+  1. Load configuration from `Pincer.Infra.Config`
   2. Initialize PubSub for event broadcasting
   3. Start Finch HTTP client pool
   4. Connect to database
@@ -75,14 +75,14 @@ defmodule Pincer.Application do
   The application reads configuration from:
 
   - `config/config.exs` - Application-level config
-  - `Pincer.Config` module - Runtime config loading
+  - `Pincer.Infra.Config` module - Runtime config loading
   - Environment variables - Secrets and overrides
 
   ## See Also
 
-  - `Pincer.Session.Supervisor` - Session lifecycle management
-  - `Pincer.Connectors.MCP.Manager` - MCP tool discovery
-  - `Pincer.PubSub` - Event broadcasting
+  - `Pincer.Core.Session.Supervisor` - Session lifecycle management
+  - `Pincer.Adapters.Connectors.MCP.Manager` - MCP tool discovery
+  - `Pincer.Infra.PubSub` - Event broadcasting
   """
 
   use Application
@@ -108,33 +108,33 @@ defmodule Pincer.Application do
   @spec start(Application.start_type(), term()) :: Supervisor.on_start()
   def start(_type, _args) do
     File.mkdir_p!("logs")
-    Pincer.Config.load()
-
-    repo_config = Pincer.Config.get(:repo)
+    Pincer.Infra.Config.load()
+    
+    repo_config = Pincer.Infra.Config.get(:repo)
 
     IO.puts("Starting Bot...")
 
     children = [
-      Pincer.PubSub,
+      Pincer.Infra.PubSub,
+      Pincer.Core.Orchestration.Blackboard,
       {Finch, name: Pincer.Finch},
-      {Pincer.Repo, repo_config},
+      {Pincer.Infra.Repo, repo_config},
       Pincer.Core.Cron,
       Pincer.Core.Heartbeat,
       {Registry, keys: :duplicate, name: Pincer.Dispatcher.Registry},
       {DynamicSupervisor, strategy: :one_for_one, name: Pincer.MCP.Supervisor},
-      Pincer.Connectors.MCP.Manager,
-      {Registry, keys: :unique, name: Pincer.Session.Registry},
-      Pincer.Session.Supervisor,
-      Pincer.Project.Registry,
-      Pincer.Project.Supervisor,
-      Pincer.Cron.Scheduler,
+      Pincer.Adapters.Connectors.MCP.Manager,
+      {Registry, keys: :unique, name: Pincer.Core.Session.Registry},
+      Pincer.Core.Session.Supervisor,
+      Pincer.Core.Project.Registry,
+      Pincer.Core.Project.Supervisor,
+      Pincer.Adapters.Cron.Scheduler,
       Pincer.Channels.Supervisor,
       Pincer.Channels.Telegram.SessionSupervisor,
       Pincer.Channels.Discord.SessionSupervisor,
-      Pincer.Channels.WhatsApp.SessionSupervisor
+      Pincer.Channels.WhatsApp.SessionSupervisor,
+      Pincer.Core.Reloader
     ]
-
-    children = if Mix.env() == :dev, do: children ++ [Pincer.Core.Reloader], else: children
 
     opts = [strategy: :one_for_one, name: Pincer.Supervisor]
     Supervisor.start_link(children, opts)

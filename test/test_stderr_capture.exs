@@ -14,7 +14,7 @@ sleep 1
 """)
 File.chmod!("mock_stderr.sh", 0o755)
 
-alias Pincer.Connectors.MCP.Transports.Stdio
+alias Pincer.Adapters.Connectors.MCP.Transports.Stdio
 
 # Start the transport manually
 {:ok, state} = Stdio.connect(command: "./mock_stderr.sh")

@@ -1,4 +1,4 @@
-defmodule Pincer.Tools.WebVisibility do
+defmodule Pincer.Adapters.Tools.WebVisibility do
   @moduledoc """
   Utilities to sanitize HTML visibility before extracting text for LLM context.
 

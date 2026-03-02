@@ -1,4 +1,4 @@
-defmodule Pincer.Tools.Web do
+defmodule Pincer.Adapters.Tools.Web do
   @moduledoc """
   Web interaction tool providing search and content fetching capabilities.
 
@@ -34,8 +34,8 @@ defmodule Pincer.Tools.Web do
   Set the `BRAVE_API_KEY` environment variable for search functionality.
   """
 
-  @behaviour Pincer.Tool
-  alias Pincer.Tools.WebVisibility
+  @behaviour Pincer.Ports.Tool
+  alias Pincer.Adapters.Tools.WebVisibility
   require Logger
   import Bitwise
 
@@ -351,14 +351,14 @@ defmodule Pincer.Tools.Web do
 
   defp decode_and_normalize(text) do
     text
-    |> HtmlEntities.decode()
+    |> Pincer.Adapters.Tools.Web.HtmlEntities.decode()
     |> String.replace(~r/[ \t]+/, " ")
     |> String.replace(~r/\n{3,}/, "\n\n")
     |> String.trim()
   end
 end
 
-defmodule HtmlEntities do
+defmodule Pincer.Adapters.Tools.Web.HtmlEntities do
   @moduledoc """
   Basic HTML entity decoder.
   """

@@ -21,7 +21,7 @@ defmodule Pincer.Core.Cron do
 
   @impl true
   def init(state) do
-    Logger.info("Pincer Cron system started.")
+    Logger.info("Pincer.Adapters.Cron system started.")
     {:ok, state}
   end
 
@@ -41,7 +41,7 @@ defmodule Pincer.Core.Cron do
     Logger.info("Cron trigger fired for session #{session_id}")
 
     # Notifies the session. If the session is offline, the Registry will handle it.
-    case Registry.lookup(Pincer.Session.Registry, session_id) do
+    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
       [{pid, _}] ->
         send(pid, {:cron_trigger, message})
 

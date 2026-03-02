@@ -2,7 +2,7 @@
 # Verifies if GITHUB_PERSONAL_ACCESS_TOKEN is loaded correctly
 
 IO.puts("Loading Config...")
-Pincer.Config.load()
+Pincer.Infra.Config.load()
 
 token = Application.get_env(:pincer, :tokens, %{}) |> Map.get("github")
 

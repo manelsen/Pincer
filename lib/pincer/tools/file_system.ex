@@ -1,4 +1,4 @@
-defmodule Pincer.Tools.FileSystem do
+defmodule Pincer.Adapters.Tools.FileSystem do
   @moduledoc """
   Tools for file system manipulation with path confinement (jail).
 
@@ -26,7 +26,7 @@ defmodule Pincer.Tools.FileSystem do
   - **Blocked**: `/etc/shadow` (Absolute path outside workspace)
   - **Allowed**: `lib/pincer.ex` (Relative path inside workspace)
   """
-  @behaviour Pincer.Tool
+  @behaviour Pincer.Ports.Tool
   alias Pincer.Core.WorkspaceGuard
   require Logger
 

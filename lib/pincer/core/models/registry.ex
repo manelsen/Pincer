@@ -159,16 +159,16 @@ defmodule Pincer.Core.Models.Registry do
   defp normalize_model_entry(_), do: ""
 
   defp uniq_preserve_order(list) do
-    {acc, _seen} =
+    {acc_rev, _seen} =
       Enum.reduce(list, {[], MapSet.new()}, fn item, {items, seen} ->
         if MapSet.member?(seen, item) do
           {items, seen}
         else
-          {items ++ [item], MapSet.put(seen, item)}
+          {[item | items], MapSet.put(seen, item)}
         end
       end)
 
-    acc
+    Enum.reverse(acc_rev)
   end
 
   defp normalize_model(value), do: normalize_string(value)
