@@ -358,17 +358,46 @@ defmodule Pincer.Channels.Telegram do
   end
 
   @doc """
-  Returns a persistent Telegram keyboard with a single `Menu` affordance.
+  Returns Telegram reply markup for menu affordance.
+
+  Default mode is native-first (`remove_keyboard: true`) to avoid duplicated
+  menu buttons on Telegram mobile (native menu button + custom keyboard).
+  Set `channels.telegram.menu_keyboard: "persistent"` in config to force the
+  legacy persistent keyboard.
   """
   @spec menu_reply_markup() :: map()
   def menu_reply_markup do
-    %{
-      keyboard: [[%{text: UX.menu_button_label()}]],
-      resize_keyboard: true,
-      one_time_keyboard: false,
-      is_persistent: true
-    }
+    case menu_keyboard_mode(Application.get_env(:pincer, :telegram_channel_config, %{})) do
+      :persistent ->
+        %{
+          keyboard: [[%{text: UX.menu_button_label()}]],
+          resize_keyboard: true,
+          one_time_keyboard: false,
+          is_persistent: true
+        }
+
+      :native ->
+        %{remove_keyboard: true}
+    end
   end
+
+  defp menu_keyboard_mode(config) when is_map(config) do
+    mode =
+      config["menu_keyboard"] ||
+        config[:menu_keyboard] ||
+        config["menuKeyboard"] ||
+        config[:menuKeyboard]
+
+    case mode do
+      "persistent" -> :persistent
+      :persistent -> :persistent
+      "custom" -> :persistent
+      :custom -> :persistent
+      _ -> :native
+    end
+  end
+
+  defp menu_keyboard_mode(_), do: :native
 
   def api_client do
     Application.get_env(:pincer, :telegram_api, Pincer.Channels.Telegram.API.Adapter)
@@ -421,6 +450,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   alias Pincer.Core.AccessPolicy
   alias Pincer.Core.ChannelInteractionPolicy
   alias Pincer.Core.Pairing
+  alias Pincer.Core.ProjectBoard
   alias Pincer.Core.RetryPolicy
   alias Pincer.Core.SessionScopePolicy
   alias Pincer.Core.Telemetry, as: CoreTelemetry
@@ -894,6 +924,14 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     end
   end
 
+  defp handle_command(chat_id, "/kanban", _text, _chat_type) do
+    Pincer.Channels.Telegram.send_message(chat_id, ProjectBoard.render())
+  end
+
+  defp handle_command(chat_id, "/project", _text, _chat_type) do
+    Pincer.Channels.Telegram.send_message(chat_id, ProjectBoard.render(view: :project))
+  end
+
   defp handle_command(chat_id, "/pair", text, chat_type) do
     if normalize_chat_type(chat_type) == "private" do
       handle_pairing_command(chat_id, text)
@@ -1038,7 +1076,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       "" ->
         Pincer.Channels.Telegram.send_message(
           chat_id,
-          "Uso: /pair <codigo>. Envie uma mensagem comum primeiro para gerar o codigo de pairing."
+          "Uso: /pair <codigo>. Solicite o codigo de pairing ao operador."
         )
 
       code ->
@@ -1052,13 +1090,13 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
           {:error, :not_pending} ->
             Pincer.Channels.Telegram.send_message(
               chat_id,
-              "Nenhum pairing pendente para este usuario. Envie uma mensagem comum para gerar um codigo."
+              "Nenhum pairing pendente para este usuario. Solicite um novo codigo ao operador."
             )
 
           {:error, :expired} ->
             Pincer.Channels.Telegram.send_message(
               chat_id,
-              "Codigo de pairing expirado. Envie uma nova mensagem para gerar outro codigo."
+              "Codigo de pairing expirado. Solicite um novo codigo ao operador."
             )
 
           {:error, :invalid_code} ->
@@ -1070,7 +1108,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
           {:error, :attempts_exceeded} ->
             Pincer.Channels.Telegram.send_message(
               chat_id,
-              "Tentativas excedidas para este codigo. Gere um novo codigo com uma nova mensagem."
+              "Tentativas excedidas para este codigo. Solicite um novo codigo ao operador."
             )
         end
     end

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Project Guidance View for `/project` (SPR-078)**
+  - Added `view` support to `Pincer.Core.ProjectBoard.render/1` with:
+    - `:kanban` (concise operational board)
+    - `:project` (operational board + `DDD Checklist`, `TDD Checklist`, `Next Action`)
+  - Telegram `/project` now renders `ProjectBoard.render(view: :project)`.
+  - Discord `/project` (text + slash) now renders `ProjectBoard.render(view: :project)`.
+  - `/kanban` behavior remains concise and unchanged.
+
 - **Skills Sidecar Hardening Track (SPR-054..SPR-066)**
   - Added centralized fail-closed policy enforcement in `Pincer.Connectors.MCP.SkillsSidecarPolicy`.
   - Added sidecar execution audit telemetry and hard timeout behavior in `Pincer.Connectors.MCP.Manager`.
@@ -67,6 +75,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `.dockerignore` to reduce build context and avoid shipping local runtime artifacts/secrets.
   - Added `docker-compose.yml` service (`pincer-server`) with persistent bind mounts for `db/`, `logs/`, `sessions/`, and `memory/`.
   - Added `infrastructure/docker/entrypoint.sh` to run `mix ecto.migrate` before starting `mix pincer.server`.
+- **Pairing Persistence + Out-of-Band Approval (FIX-075)**
+  - Added persistent pairing storage in `Pincer.Core.Pairing` using DETS (`sessions/pairing_store.dets`) with ETS bootstrap on runtime table recreation.
+  - Added out-of-band pairing code emission for operator workflows:
+    - structured pairing logs with channel/sender/code metadata
+    - PubSub broadcast on `session:cli:admin` with pairing code payload
 
 - **Core Retry/Transient Policy**
   - Added `Pincer.Core.RetryPolicy` as a centralized operational policy for:
@@ -135,6 +148,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Tool-Call Argument Normalization + Telegram Native-First Menu (SPR-073)**
+  - `Pincer.Core.Executor` now tolerates non-string `tool_calls.function.arguments` payloads (map, empty, JSON string) without crashing execution loops.
+  - Tool-call parsing now normalizes mixed key shapes (string/atom) and keeps malformed payloads fail-soft at tool-message level.
+  - `Pincer.Channels.Telegram.menu_reply_markup/0` now defaults to native-first (`remove_keyboard: true`) to avoid duplicate menu affordances on mobile.
+  - Telegram can still opt into legacy persistent keyboard via `channels.telegram.menu_keyboard: "persistent"`.
+- **Pairing UX Copy (FIX-075)**
+  - `Pincer.Core.AccessPolicy` no longer exposes pairing code in blocked DM responses.
+  - Telegram/Discord `/pair` guidance now follows out-of-band operator flow (request code from operator instead of generating it in the blocked conversation).
+- **Tool-Call History Type + Config Read Fail-Safe (FIX-074)**
+  - `Pincer.Core.Executor` now enriches streamed `assistant.tool_calls` with `"type": "function"` when missing, preserving provider-compatible history across tool turns.
+  - `Pincer.LLM.Client`, `Pincer.Core.LLM.CooldownStore`, and `Pincer.Core.AuthProfiles` now read list-shaped runtime config fail-safe (keyword and non-keyword lists) without `Keyword.get/3` crashes.
 - **Retry and Logging Integration**
   - `Pincer.LLM.Client` now delegates retryability and `Retry-After` handling to `Pincer.Core.RetryPolicy`.
   - `Pincer.Session.Server` now uses centralized transient policy for executor failure log level.
@@ -191,6 +215,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Discord Tool-Execution Crash Path**
+  - Prevented `FunctionClauseError` / binary-concat crashes in executor when providers return tool-call arguments as decoded maps during online research/tool flows.
+- **Telegram Tool-Continuation Failure Path (FIX-074)**
+  - Prevented provider-side `400` errors (`Tool type cannot be empty`) by preserving tool call type in assistant history after streamed tool calls.
+  - Prevented terminal-failure follow-up `FunctionClauseError` when cooldown/retry config is provided as malformed non-keyword list.
 - **Test Stability**
   - Reduced flakiness in retry policy HTTP-date test by accounting for second-level precision in `Retry-After` formatting.
 - **Interaction Resilience**
