@@ -1,4 +1,4 @@
-defmodule Pincer.Connectors.MCP.Transports.Stdio do
+defmodule Pincer.Adapters.Connectors.MCP.Transports.Stdio do
   @moduledoc """
   Stdio transport implementation for MCP using Erlang Ports.
 
@@ -18,10 +18,10 @@ defmodule Pincer.Connectors.MCP.Transports.Stdio do
 
   This transport is typically used through the MCP Client:
 
-      {:ok, pid} = Pincer.Connectors.MCP.Client.start_link(
+      {:ok, pid} = Pincer.Adapters.Connectors.MCP.Client.start_link(
         command: "npx",
         args: ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/dir"],
-        transport: Pincer.Connectors.MCP.Transports.Stdio
+        transport: Pincer.Adapters.Connectors.MCP.Transports.Stdio
       )
 
   ## Configuration
@@ -54,11 +54,11 @@ defmodule Pincer.Connectors.MCP.Transports.Stdio do
 
   ## See Also
 
-  - `Pincer.Connectors.MCP.Transport` - The behaviour this module implements
-  - `Pincer.Connectors.MCP.Client` - Client that uses this transport
+  - `Pincer.Adapters.Connectors.MCP.Transport` - The behaviour this module implements
+  - `Pincer.Adapters.Connectors.MCP.Client` - Client that uses this transport
   """
 
-  @behaviour Pincer.Connectors.MCP.Transport
+  @behaviour Pincer.Adapters.Connectors.MCP.Transport
   require Logger
 
   @type t :: %__MODULE__{

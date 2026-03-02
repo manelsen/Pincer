@@ -1,4 +1,4 @@
-defmodule Pincer.Connectors.MCP.Client do
+defmodule Pincer.Adapters.Connectors.MCP.Client do
   @moduledoc """
   JSON-RPC client for MCP (Model Context Protocol) servers.
 
@@ -50,26 +50,26 @@ defmodule Pincer.Connectors.MCP.Client do
 
   Start a client connected to an MCP server:
 
-      {:ok, pid} = Pincer.Connectors.MCP.Client.start_link(
+      {:ok, pid} = Pincer.Adapters.Connectors.MCP.Client.start_link(
         command: "npx",
         args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"],
-        transport: Pincer.Connectors.MCP.Transports.Stdio
+        transport: Pincer.Adapters.Connectors.MCP.Transports.Stdio
       )
 
   List available tools:
 
-      {:ok, response} = Pincer.Connectors.MCP.Client.list_tools(pid)
+      {:ok, response} = Pincer.Adapters.Connectors.MCP.Client.list_tools(pid)
       # => %{"result" => %{"tools" => [%{"name" => "read_file", ...}]}}
 
   Execute a tool:
 
-      {:ok, result} = Pincer.Connectors.MCP.Client.call_tool(pid, "read_file", %{
+      {:ok, result} = Pincer.Adapters.Connectors.MCP.Client.call_tool(pid, "read_file", %{
         "path" => "/home/user/example.txt"
       })
 
   ## Transport Abstraction
 
-  The client uses a pluggable transport layer (see `Pincer.Connectors.MCP.Transport`).
+  The client uses a pluggable transport layer (see `Pincer.Adapters.Connectors.MCP.Transport`).
   By default, it uses `Stdio` transport which spawns the MCP server as a subprocess.
 
   ## Timeout Handling
@@ -79,14 +79,14 @@ defmodule Pincer.Connectors.MCP.Client do
 
   ## See Also
 
-  - `Pincer.Connectors.MCP.Manager` - Manages multiple clients
-  - `Pincer.Connectors.MCP.Transport` - Transport behaviour
-  - `Pincer.Connectors.MCP.Transports.Stdio` - Default transport
+  - `Pincer.Adapters.Connectors.MCP.Manager` - Manages multiple clients
+  - `Pincer.Adapters.Connectors.MCP.Transport` - Transport behaviour
+  - `Pincer.Adapters.Connectors.MCP.Transports.Stdio` - Default transport
   """
 
   use GenServer
   require Logger
-  alias Pincer.Connectors.MCP.Transports.Stdio
+  alias Pincer.Adapters.Connectors.MCP.Transports.Stdio
 
   @type t :: %__MODULE__{
           transport: module(),
@@ -123,7 +123,7 @@ defmodule Pincer.Connectors.MCP.Client do
       {:ok, pid} = Client.start_link(
         command: "npx",
         args: ["-y", "@modelcontextprotocol/server-filesystem", "/home/user"],
-        transport: Pincer.Connectors.MCP.Transports.Stdio
+        transport: Pincer.Adapters.Connectors.MCP.Transports.Stdio
       )
 
       # Connect to GitHub MCP server with authentication

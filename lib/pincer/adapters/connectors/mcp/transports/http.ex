@@ -1,4 +1,4 @@
-defmodule Pincer.Connectors.MCP.Transports.HTTP do
+defmodule Pincer.Adapters.Connectors.MCP.Transports.HTTP do
   @moduledoc """
   HTTP transport implementation for MCP servers.
 
@@ -16,7 +16,7 @@ defmodule Pincer.Connectors.MCP.Transports.HTTP do
   - payload dedupe across reconnect attempts.
   """
 
-  @behaviour Pincer.Connectors.MCP.Transport
+  @behaviour Pincer.Adapters.Connectors.MCP.Transport
 
   @default_max_reconnect_attempts 3
   @default_initial_backoff_ms 200

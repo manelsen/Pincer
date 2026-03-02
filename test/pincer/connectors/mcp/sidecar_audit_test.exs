@@ -1,7 +1,7 @@
-defmodule Pincer.Connectors.MCP.SidecarAuditTest do
+defmodule Pincer.Adapters.Connectors.MCP.SidecarAuditTest do
   use ExUnit.Case, async: true
 
-  alias Pincer.Connectors.MCP.SidecarAudit
+  alias Pincer.Adapters.Connectors.MCP.SidecarAudit
 
   @event [:pincer, :mcp, :skills_sidecar, :tool_execution]
 
