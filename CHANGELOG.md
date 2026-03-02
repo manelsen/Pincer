@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Automatic Project Branch + Core-first Routing (SPR-080)**
+  - Added `Pincer.Core.ProjectGit` for safe local branch provisioning (`git branch`, no auto-checkout).
+  - Added `Pincer.Core.ProjectRouter` to centralize `/project` and `/kanban` flow decisions in the core.
+  - `Pincer.Core.ProjectOrchestrator` now reserves a project branch when a plan is finalized and reports:
+    - branch name
+    - creation status (`created` or `existing`)
+    - suggested next command (`git checkout <branch>`)
+  - Branch creation failures are now fail-soft with user-visible guidance (manual fallback command) instead of breaking project flow.
+  - Telegram and Discord adapters now delegate project flow decisions to `ProjectRouter` instead of duplicating workflow logic.
+
 - **Project Manager Multi-Agent Wizard (SPR-079)**
   - Added `Pincer.Core.ProjectOrchestrator` with session-scoped project discovery wizard:
     - objective

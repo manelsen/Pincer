@@ -1740,3 +1740,31 @@ config = ~y"""
   3. projetos não-software não exibem `DDD Checklist`/`TDD Checklist`;
   4. `/kanban` apresenta itens do projeto da sessão quando disponível;
   5. testes cobrem fluxo guiado, adaptação por tipo e integração nos canais.
+
+### Branch Automática por Projeto + Roteamento Core-first (SPR-080)
+- Objetivo:
+  - criar branch Git por projeto ao finalizar o wizard do `/project`;
+  - mover decisão de fluxo `/project`/`/kanban` para o core, reduzindo lógica nos adapters de canal.
+- Interfaces públicas afetadas:
+  - `Pincer.Core.ProjectOrchestrator`
+  - `Pincer.Core.ProjectRouter` (novo)
+  - `Pincer.Core.ProjectGit` (novo)
+  - `Pincer.Channels.Telegram.UpdatesProvider`
+  - `Pincer.Channels.Discord.Consumer`
+- Regras v1:
+  - ao concluir um projeto, o core deve:
+    - gerar nome de branch estável (`project/<slug>-<session-hint>`);
+    - criar branch local se não existir (sem checkout automático);
+    - incluir no resumo do projeto o branch reservado e próximo comando sugerido.
+  - `/project` e `/kanban` devem delegar ao core (`ProjectRouter`) para:
+    - iniciar/continuar wizard;
+    - renderizar board por sessão com fallback para `TODO.md`.
+  - canais devem manter responsabilidades de transporte:
+    - extração de texto/anexos;
+    - resolução de `session_id`;
+    - envio da resposta.
+- Critérios de aceite:
+  1. saída final do wizard inclui referência ao branch do projeto;
+  2. falha de Git não derruba o fluxo (mensagem amigável e continuação do plano);
+  3. Telegram e Discord chamam o roteador core para `/project` e `/kanban`;
+  4. testes cobrem criação/falha de branch e roteamento core-first.
