@@ -6,11 +6,11 @@ defmodule Pincer.Contracts.ChannelAdapterContractTest do
     Pincer.Channels.Discord
   ]
 
-  test "channel adapters declare Pincer.Channel behaviour and required callbacks" do
+  test "channel adapters declare Pincer.Ports.Channel behaviour and required callbacks" do
     Enum.each(@channel_modules, fn channel_module ->
       behaviours = channel_module.module_info(:attributes)[:behaviour] || []
 
-      assert Pincer.Channel in behaviours or Supervisor in behaviours
+      assert Pincer.Ports.Channel in behaviours or Supervisor in behaviours
       assert function_exported?(channel_module, :start_link, 1)
       assert function_exported?(channel_module, :send_message, 2)
       assert function_exported?(channel_module, :update_message, 3)

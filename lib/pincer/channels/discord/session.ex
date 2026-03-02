@@ -7,7 +7,7 @@ defmodule Pincer.Channels.Discord.Session do
   require Logger
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.StreamingPolicy
-  alias Pincer.Session.Server
+  alias Pincer.Core.Session.Server
 
   def start_link(%{channel_id: channel_id} = args) do
     GenServer.start_link(__MODULE__, args, name: via_tuple(channel_id))
@@ -18,14 +18,14 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   defp via_tuple(channel_id),
-    do: {:via, Registry, {Pincer.Session.Registry, "discord_session_worker_#{channel_id}"}}
+    do: {:via, Registry, {Pincer.Core.Session.Registry, "discord_session_worker_#{channel_id}"}}
 
   def ensure_started(channel_id, session_id \\ nil)
 
   def ensure_started(channel_id, session_id) do
     session_id = normalize_session_id(channel_id, session_id)
 
-    case Registry.lookup(Pincer.Session.Registry, "discord_session_worker_#{channel_id}") do
+    case Registry.lookup(Pincer.Core.Session.Registry, "discord_session_worker_#{channel_id}") do
       [] ->
         case Pincer.Channels.Discord.SessionSupervisor.start_session(channel_id, session_id) do
           {:ok, pid} ->
@@ -278,8 +278,8 @@ defmodule Pincer.Channels.Discord.Session do
 
   defp normalize_session_id(channel_id, _), do: default_session_id(channel_id)
 
-  defp subscribe_session(session_id), do: Pincer.PubSub.subscribe("session:#{session_id}")
-  defp unsubscribe_session(session_id), do: Pincer.PubSub.unsubscribe("session:#{session_id}")
+  defp subscribe_session(session_id), do: Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+  defp unsubscribe_session(session_id), do: Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
 
   defp state(channel_id, session_id) do
     Map.merge(

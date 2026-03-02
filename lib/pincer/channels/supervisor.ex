@@ -56,7 +56,7 @@ defmodule Pincer.Channels.Supervisor do
 
   ## Adding a New Channel
 
-  1. Implement `Pincer.Channel` behaviour in your module
+  1. Implement `Pincer.Ports.Channel` behaviour in your module
   2. Add configuration to `config.yaml`:
 
          channels:
@@ -70,7 +70,7 @@ defmodule Pincer.Channels.Supervisor do
   ## See Also
 
   - `Pincer.Channels.Factory` - Creates channel specs from config
-  - `Pincer.Channel` - Behaviour for channel implementations
+  - `Pincer.Ports.Channel` - Behaviour for channel implementations
   - `Pincer.Channels.Telegram` - Example channel implementation
   """
 

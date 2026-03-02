@@ -7,7 +7,9 @@ defmodule Pincer.Channels.Discord do
   - Sending messages from sessions back to Discord
   - Formatting Pincer Markdown to Discord-flavored Markdown
   """
-  use Pincer.Channel
+  @behaviour Pincer.Ports.Channel
+  use Supervisor
+  require Logger
   alias Pincer.Core.UX
   alias Pincer.Core.UX.MenuPolicy
 
@@ -30,9 +32,8 @@ defmodule Pincer.Channels.Discord do
       case Application.ensure_all_started(:nostrum) do
         {:ok, _} ->
           Logger.info("[DISCORD] Nostrum started successfully.")
-          # 4. Start our Consumer and then the GenServer
-          Pincer.Channels.Discord.Consumer.start_link()
-          GenServer.start_link(__MODULE__, config, name: __MODULE__)
+          # 4. Start channel runtime under a dedicated supervisor
+          Supervisor.start_link(__MODULE__, config, name: __MODULE__)
 
         {:error, reason} ->
           Logger.error("[DISCORD] Failed to start Nostrum: #{inspect(reason)}")
@@ -48,15 +49,20 @@ defmodule Pincer.Channels.Discord do
   Initializes the Discord channel.
   """
   @impl true
-  def init(config) do
+  def init(_config) do
     Logger.info("Discord Channel Adapter Initialized.")
-    {:ok, %{config: config}}
+
+    children = [
+      {Pincer.Channels.Discord.Consumer, []}
+    ]
+
+    Supervisor.init(children, strategy: :one_for_one)
   end
 
   @doc """
   Sends a message to a Discord channel.
   """
-  @impl Pincer.Channel
+  @impl Pincer.Ports.Channel
   def send_message(channel_id, text, opts \\ []) do
     # 1. Handle auto-attachments (extract large code blocks)
     {text, files} = auto_attach_files(text, opts[:files] || [])
@@ -72,7 +78,7 @@ defmodule Pincer.Channels.Discord do
   @doc """
   Updates an existing Discord message.
   """
-  @impl Pincer.Channel
+  @impl Pincer.Ports.Channel
   def update_message(channel_id, message_id, text) do
     formatted_text = markdown_to_discord(text)
     # Note: Discord has a 2000 char limit for edits too.
@@ -236,11 +242,7 @@ defmodule Pincer.Channels.Discord do
     alias Pincer.Core.ProjectRouter
     alias Pincer.Core.SessionScopePolicy
     alias Pincer.Core.UX
-    alias Pincer.Session.Server
-
-    def start_link do
-      GenServer.start_link(__MODULE__, [], name: __MODULE__)
-    end
+    alias Pincer.Core.Session.Server
 
     @impl true
     def handle_event({:MESSAGE_CREATE, msg, _ws_state}) do
@@ -438,7 +440,7 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_command(msg, "/models") do
-      providers = Pincer.LLM.Client.list_providers()
+      providers = Pincer.Ports.LLM.list_providers()
       buttons = providers |> build_provider_buttons() |> with_menu_button()
       components = chunk_buttons(buttons)
 
@@ -543,7 +545,7 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_models_command(interaction) do
-      providers = Pincer.LLM.Client.list_providers()
+      providers = Pincer.Ports.LLM.list_providers()
       buttons = providers |> build_provider_buttons() |> with_menu_button()
       components = chunk_buttons(buttons)
 
@@ -584,7 +586,7 @@ defmodule Pincer.Channels.Discord do
     defp build_status_content(session_id) do
       ensure_brain_session_started(session_id)
 
-      case Server.get_status(session_id) do
+      case Pincer.Core.Session.Server.get_status(session_id) do
         {:ok, state} ->
           provider = if state.model_override, do: state.model_override.provider, else: "Default"
           model = if state.model_override, do: state.model_override.model, else: "Default"
@@ -606,18 +608,19 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp build_provider_buttons(providers) do
-      Enum.reduce(providers, [], fn provider, acc ->
+      providers
+      |> Enum.reduce([], fn provider, acc ->
         case ChannelInteractionPolicy.provider_selector_id(:discord, provider.id) do
           {:ok, custom_id} ->
-            acc ++
-              [
-                %{
-                  type: 2,
-                  style: 1,
-                  label: provider.name,
-                  custom_id: custom_id
-                }
-              ]
+            [
+              %{
+                type: 2,
+                style: 1,
+                label: provider.name,
+                custom_id: custom_id
+              }
+              | acc
+            ]
 
           {:error, :payload_too_large} ->
             Logger.warning(
@@ -630,13 +633,14 @@ defmodule Pincer.Channels.Discord do
             acc
         end
       end)
+      |> Enum.reverse()
     end
 
     defp handle_interaction(interaction) do
       # Defer formatting: Nostrum interactions usually need to be ACKed
       case ChannelInteractionPolicy.parse(:discord, read_interaction_custom_id(interaction)) do
         {:ok, {:select_provider, provider_id}} ->
-          models = Pincer.LLM.Client.list_models(provider_id)
+          models = Pincer.Ports.LLM.list_models(provider_id)
 
           buttons =
             models |> build_model_buttons(provider_id) |> with_back_button() |> with_menu_button()
@@ -673,7 +677,7 @@ defmodule Pincer.Channels.Discord do
           send_interaction_response(interaction, response)
 
         {:ok, :back_to_providers} ->
-          providers = Pincer.LLM.Client.list_providers()
+          providers = Pincer.Ports.LLM.list_providers()
 
           buttons = providers |> build_provider_buttons() |> with_menu_button()
 
@@ -706,18 +710,19 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp build_model_buttons(provider_id, models) do
-      Enum.reduce(models, [], fn model, acc ->
+      models
+      |> Enum.reduce([], fn model, acc ->
         case ChannelInteractionPolicy.model_selector_id(:discord, provider_id, model) do
           {:ok, custom_id} ->
-            acc ++
-              [
-                %{
-                  type: 2,
-                  style: 1,
-                  label: model,
-                  custom_id: custom_id
-                }
-              ]
+            [
+              %{
+                type: 2,
+                style: 1,
+                label: model,
+                custom_id: custom_id
+              }
+              | acc
+            ]
 
           {:error, :payload_too_large} ->
             Logger.warning(
@@ -730,6 +735,7 @@ defmodule Pincer.Channels.Discord do
             acc
         end
       end)
+      |> Enum.reverse()
     end
 
     defp with_back_button(buttons) do
@@ -799,10 +805,10 @@ defmodule Pincer.Channels.Discord do
     defp maybe_start_project_execution(_channel_id, _session_id), do: :ok
 
     defp ensure_brain_session_started(session_id) do
-      case Registry.lookup(Pincer.Session.Registry, session_id) do
+      case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
         [] ->
           Logger.info("[DISCORD] Creating new brain session: #{session_id}")
-          Pincer.Session.Supervisor.start_session(session_id)
+          Pincer.Core.Session.Supervisor.start_session(session_id)
 
         [_] ->
           :ok

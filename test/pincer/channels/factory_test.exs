@@ -5,7 +5,7 @@ defmodule Pincer.Channels.Factory.Test do
   # Mock de canais para teste
   defmodule MockTelegramChannel do
     use GenServer
-    @behaviour Pincer.Channel
+    @behaviour Pincer.Ports.Channel
     def start_link(_opts), do: GenServer.start_link(__MODULE__, %{})
     def send_message(_, _), do: :ok
     def init(_), do: {:ok, %{}}
@@ -13,7 +13,7 @@ defmodule Pincer.Channels.Factory.Test do
 
   defmodule MockSignalChannel do
     use GenServer
-    @behaviour Pincer.Channel
+    @behaviour Pincer.Ports.Channel
     def start_link(_opts), do: GenServer.start_link(__MODULE__, %{})
     def send_message(_, _), do: :ok
     def init(_), do: {:ok, %{}}
