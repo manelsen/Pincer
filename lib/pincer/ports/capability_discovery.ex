@@ -1,4 +1,4 @@
-defmodule Pincer.Core.Ports.CapabilityDiscovery do
+defmodule Pincer.Ports.CapabilityDiscovery do
   @moduledoc """
   Port for capability catalog/discovery in the core.
 

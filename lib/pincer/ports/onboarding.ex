@@ -1,4 +1,4 @@
-defmodule Pincer.Core.Ports.Onboarding do
+defmodule Pincer.Ports.Onboarding do
   @moduledoc """
   Port for onboarding workflows.
 
