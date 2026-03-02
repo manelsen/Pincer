@@ -5,7 +5,7 @@ ENV MIX_ENV=prod \
     LC_ALL=C.UTF-8
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential git ca-certificates && \
+    apt-get install -y --no-install-recommends build-essential git ca-certificates nodejs npm && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -20,6 +20,7 @@ RUN mix deps.compile
 
 COPY lib ./lib
 COPY priv ./priv
+COPY infrastructure/whatsapp ./infrastructure/whatsapp
 COPY config.yaml ./config.yaml
 COPY TODO.md ./TODO.md
 COPY README.md ./README.md
@@ -29,6 +30,7 @@ COPY SOUL.md ./SOUL.md
 COPY USER.md ./USER.md
 
 RUN mix compile
+RUN npm install --prefix /app/infrastructure/whatsapp --omit=dev
 
 FROM elixir:1.18 AS runtime
 
@@ -43,7 +45,7 @@ ENV MIX_ENV=prod \
     HEX_HOME=/app/.hex
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates && \
+    apt-get install -y --no-install-recommends ca-certificates nodejs npm && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --gid "${APP_GID}" pincer && \
     useradd --uid "${APP_UID}" --gid pincer --home /app --shell /bin/sh --create-home pincer
@@ -55,6 +57,7 @@ COPY --from=builder /app/deps /app/deps
 COPY --from=builder /app/lib /app/lib
 COPY --from=builder /app/priv /app/priv
 COPY --from=builder /app/config /app/config
+COPY --from=builder /app/infrastructure/whatsapp /app/infrastructure/whatsapp
 COPY --from=builder /app/mix.exs /app/mix.exs
 COPY --from=builder /app/mix.lock /app/mix.lock
 COPY --from=builder /app/config.yaml /app/config.yaml

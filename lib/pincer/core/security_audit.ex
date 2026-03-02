@@ -28,7 +28,7 @@ defmodule Pincer.Core.SecurityAudit do
 
   @default_config_file "config.yaml"
   @token_channels MapSet.new(["telegram", "discord", "slack", "webhook"])
-  @dm_channels MapSet.new(["telegram", "discord"])
+  @dm_channels MapSet.new(["telegram", "discord", "whatsapp"])
   @risky_binds MapSet.new(["0.0.0.0", "::", "[::]"])
   @dangerous_flag_paths [
     {"gateway.control_ui.allow_insecure_auth", true,

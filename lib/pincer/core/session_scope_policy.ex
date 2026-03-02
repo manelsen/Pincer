@@ -9,7 +9,7 @@ defmodule Pincer.Core.SessionScopePolicy do
   Non-DM routes always remain channel-scoped.
   """
 
-  @type channel :: :telegram | :discord
+  @type channel :: :telegram | :discord | :whatsapp
   @type dm_scope :: :main | :per_peer
 
   @doc """
@@ -50,6 +50,21 @@ defmodule Pincer.Core.SessionScopePolicy do
       end
     else
       scoped_id("discord", channel_id)
+    end
+  end
+
+  def resolve(:whatsapp, context, channel_config)
+      when is_map(context) and is_map(channel_config) do
+    chat_id = stringify(read_field(context, :chat_id))
+    is_group = truthy?(read_field(context, :is_group))
+
+    if is_group do
+      scoped_id("whatsapp", chat_id)
+    else
+      case dm_scope(channel_config) do
+        :main -> "whatsapp_main"
+        :per_peer -> scoped_id("whatsapp", chat_id)
+      end
     end
   end
 
@@ -102,6 +117,9 @@ defmodule Pincer.Core.SessionScopePolicy do
   defp dm_event?(""), do: true
   defp dm_event?(guild_id) when is_binary(guild_id), do: String.trim(guild_id) == ""
   defp dm_event?(_), do: false
+
+  defp truthy?(value) when value in [true, "true", 1, "1", true], do: true
+  defp truthy?(_), do: false
 
   defp scoped_id(prefix, ""), do: "#{prefix}_unknown"
   defp scoped_id(prefix, id), do: "#{prefix}_#{id}"

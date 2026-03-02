@@ -168,6 +168,16 @@ defmodule Mix.Tasks.Pincer.Onboard do
     Mix.shell().info("Next steps:")
     Mix.shell().info("1) Review config.yaml and set provider credentials in .env")
     Mix.shell().info("2) Start with: mix pincer.chat")
+
+    Mix.shell().info(
+      "3) WhatsApp bridge (optional): npm install --prefix infrastructure/whatsapp"
+    )
+
+    Mix.shell().info("4) To enable WhatsApp, set channels.whatsapp.enabled=true in config.yaml")
+
+    Mix.shell().info(
+      "5) Pairing flow: WhatsApp Mobile -> Aparelhos conectados -> Conectar um aparelho (scan terminal QR)"
+    )
   end
 
   defp parse_mode!(nil), do: :local
