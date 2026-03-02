@@ -1,56 +1,47 @@
 defmodule Pincer.Core.ProjectRouter do
   @moduledoc """
-  Core-first routing for project workflow commands.
-
-  Keeps channel adapters slim by centralizing `/project` and `/kanban` behavior.
+  Command routing and parsing for project-related messages.
+  Maintains compatibility with legacy channel calls while supporting the new OTP-native flow.
   """
-
-  alias Pincer.Core.ProjectBoard
+  alias Pincer.Project.Server
   alias Pincer.Core.ProjectOrchestrator
 
-  @doc """
-  Handles `/project` command for a session.
-  """
-  @spec project(String.t(), String.t() | nil) :: String.t()
-  def project(session_id, seed_input \\ nil) when is_binary(session_id) do
-    ProjectOrchestrator.start(session_id, seed_input)
-  end
-
-  @doc """
-  Handles `/kanban` command for a session with fallback board.
-  """
-  @spec kanban(String.t()) :: String.t()
-  def kanban(session_id) when is_binary(session_id) do
-    case ProjectOrchestrator.board(session_id) do
-      {:ok, session_board} -> session_board
-      :not_found -> ProjectBoard.render()
-    end
-  end
-
-  @doc """
-  Continues project wizard from free-form text when active.
-
-  Returns `:not_handled` when attachments are present or no active project wizard
-  is collecting requirements for the session.
-  """
-  @spec continue_if_collecting(String.t(), String.t(), keyword()) ::
-          {:handled, String.t()} | :not_handled
-  def continue_if_collecting(session_id, text, opts \\ [])
-      when is_binary(session_id) and is_binary(text) do
-    has_attachments = Keyword.get(opts, :has_attachments, false)
-
-    cond do
-      has_attachments ->
-        :not_handled
-
-      String.trim(text) == "" ->
-        :not_handled
-
-      true ->
-        case ProjectOrchestrator.continue(session_id, text) do
-          {:handled, response} -> {:handled, response}
-          :not_active -> :not_handled
+  def parse(text) when is_binary(text) do
+    case String.split(text, " ", parts: 3) do
+      ["/project", "start" | rest] -> {:ok, :start, Enum.join(rest, " ")}
+      ["/project", "approve", id] -> {:ok, :approve, id}
+      ["/project", "pause", id] -> {:ok, :pause, id}
+      ["/project", "resume", id] -> {:ok, :resume, id}
+      ["/project", "stop", id] -> {:ok, :stop, id}
+      ["/project", "modify", id_and_tasks] ->
+        case String.split(id_and_tasks, " ", parts: 2) do
+          [id, tasks] -> {:ok, :modify, {id, tasks}}
+          _ -> :error
         end
+      _ -> :error
     end
   end
+  
+  def parse(_), do: :error
+
+  def handle_command(cmd, args, session_id) do
+    case cmd do
+      :start -> ProjectOrchestrator.start(session_id, args)
+      :approve -> Server.approve(args)
+      :pause -> Server.pause(args)
+      :resume -> Server.resume(args)
+      :stop -> Server.stop(args)
+      :modify -> 
+        {id, tasks} = args
+        Server.update_plan(id, tasks)
+    end
+  end
+
+  # --- Legacy Compatibility Stubs ---
+  def kanban(_session_id), do: "Use `/project list` para ver seus projetos ativos."
+  def project(_session_id, _seed \\ nil), do: "Para iniciar um novo projeto, use `/project start <objetivo>`"
+  def continue_if_collecting(_session_id, _text, _opts \\ []), do: :not_handled
+  def on_agent_response(_session_id), do: :noop
+  def on_agent_error(_session_id), do: :noop
+  def kickoff(_session_id), do: :not_ready
 end

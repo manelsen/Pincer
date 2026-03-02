@@ -12,6 +12,18 @@ channels:
     token_env: "TELEGRAM_BOT_TOKEN"
     dm_policy:
       mode: "pairing"
+  whatsapp:
+    adapter: "Pincer.Channels.WhatsApp"
+    enabled: false
+    dm_policy:
+      mode: "pairing"
+    bridge:
+      command: "node"
+      args: ["infrastructure/whatsapp/baileys_bridge.js"]
+      auth_dir: "sessions/whatsapp"
+      qr_ascii: true
+      qr_ascii_small: true
+      pairing_phone: ""
   webhook:
     adapter: "Pincer.Channels.Webhook"
     enabled: false

@@ -1,0 +1,12 @@
+{
+  "name": "pincer-whatsapp-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Baileys bridge for Pincer WhatsApp channel",
+  "type": "commonjs",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.18",
+    "pino": "^9.6.0",
+    "qrcode-terminal": "^0.12.0"
+  }
+}
