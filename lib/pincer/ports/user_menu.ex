@@ -1,4 +1,4 @@
-defmodule Pincer.Core.Ports.UserMenu do
+defmodule Pincer.Ports.UserMenu do
   @moduledoc """
   Port for channel-agnostic menu/command UX contracts.
 

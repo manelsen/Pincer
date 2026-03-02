@@ -1,4 +1,4 @@
-defmodule Pincer.Tool do
+defmodule Pincer.Ports.Tool do
   @moduledoc """
   Behaviour for defining tools that Pincer agents can use.
 
@@ -17,7 +17,7 @@ defmodule Pincer.Tool do
   ## Example: A Simple Calculator
 
       defmodule MyApp.Tools.Calculator do
-        @behaviour Pincer.Tool
+        @behaviour Pincer.Ports.Tool
 
         @impl true
         def spec do
@@ -118,8 +118,8 @@ defmodule Pincer.Tool do
   Native tools are registered in `Pincer.Core.Executor`:
 
       @native_tools [
-        Pincer.Tools.FileSystem,
-        Pincer.Tools.Config,
+        Pincer.Adapters.Tools.FileSystem,
+        Pincer.Adapters.Tools.Config,
         # Add your tool here
       ]
 
@@ -128,8 +128,8 @@ defmodule Pincer.Tool do
   ## See Also
 
   - `Pincer.Core.Executor` - How tools are invoked
-  - `Pincer.Tools.FileSystem` - Example implementation
-  - `Pincer.Tools.SafeShell` - Approval workflow example
+  - `Pincer.Adapters.Tools.FileSystem` - Example implementation
+  - `Pincer.Adapters.Tools.SafeShell` - Approval workflow example
   """
 
   @doc """
