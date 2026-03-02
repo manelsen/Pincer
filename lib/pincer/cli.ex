@@ -70,9 +70,9 @@ defmodule Pincer.CLI do
   end
 
   defp ensure_local_session do
-    case Registry.lookup(Pincer.Session.Registry, @session_id) do
+    case Registry.lookup(Pincer.Core.Session.Registry, @session_id) do
       [{_pid, _}] -> :ok
-      [] -> Pincer.Session.Server.start_link(session_id: @session_id)
+      [] -> Pincer.Core.Session.Server.start_link(session_id: @session_id)
     end
   end
 

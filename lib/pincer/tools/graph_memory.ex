@@ -1,4 +1,4 @@
-defmodule Pincer.Tools.GraphMemory do
+defmodule Pincer.Adapters.Tools.GraphMemory do
   @moduledoc """
   Tool for querying the project's knowledge graph for bug and fix history.
 
@@ -34,15 +34,15 @@ defmodule Pincer.Tools.GraphMemory do
   ## Examples
 
       # Get all history
-      iex> Pincer.Tools.GraphMemory.execute(%{})
+      iex> Pincer.Adapters.Tools.GraphMemory.execute(%{})
       {:ok, "[{\"bug\":\"Nil error in parser\",\"file\":\"lib/parser.ex\",...}]"}
 
       # Filter by file name
-      iex> Pincer.Tools.GraphMemory.execute(%{"filter" => "parser"})
+      iex> Pincer.Adapters.Tools.GraphMemory.execute(%{"filter" => "parser"})
       {:ok, "[{\"bug\":\"Nil error in parser\",\"file\":\"lib/parser.ex\",...}]"}
 
       # Filter by error type
-      iex> Pincer.Tools.GraphMemory.execute(%{"filter" => "TypeError"})
+      iex> Pincer.Adapters.Tools.GraphMemory.execute(%{"filter" => "TypeError"})
       {:ok, "[{\"bug\":\"TypeError in concat\",\"file\":\"lib/utils.ex\",...}]"}
 
   ## Integration
@@ -61,12 +61,12 @@ defmodule Pincer.Tools.GraphMemory do
   ## See Also
 
   - `Pincer.Storage.Adapters.Graph` - Graph storage adapter
-  - `Pincer.Tool` - Tool behaviour specification
+  - `Pincer.Ports.Tool` - Tool behaviour specification
   """
 
-  @behaviour Pincer.Tool
+  @behaviour Pincer.Ports.Tool
   require Logger
-  alias Pincer.Storage.Adapters.Graph
+  alias Pincer.Ports.Storage
 
   @type history_entry :: %{
           bug: String.t(),
@@ -146,16 +146,16 @@ defmodule Pincer.Tools.GraphMemory do
 
   ## Examples
 
-      iex> Pincer.Tools.GraphMemory.execute(%{})
+      iex> Pincer.Adapters.Tools.GraphMemory.execute(%{})
       {:ok, "[{\"bug\":\"NullReference\",\"file\":\"lib/auth.ex\",...}]"}
 
-      iex> Pincer.Tools.GraphMemory.execute(%{"filter" => "auth"})
+      iex> Pincer.Adapters.Tools.GraphMemory.execute(%{"filter" => "auth"})
       {:ok, "[{\"bug\":\"NullReference in auth\",\"file\":\"lib/auth.ex\",...}]"}
 
-      iex> Pincer.Tools.GraphMemory.execute(%{})
+      iex> Pincer.Adapters.Tools.GraphMemory.execute(%{})
       {:ok, "Nenhum bug ou correção encontrado no grafo ainda."}
 
-      iex> Pincer.Tools.GraphMemory.execute(%{"filter" => "nonexistent"})
+      iex> Pincer.Adapters.Tools.GraphMemory.execute(%{"filter" => "nonexistent"})
       {:ok, "Nenhum resultado para o filtro 'nonexistent'."}
   """
   @spec execute(map()) :: execute_result()
@@ -163,7 +163,7 @@ defmodule Pincer.Tools.GraphMemory do
   def execute(params) do
     Logger.info("[TOOL] Graph History Query: #{inspect(params)}")
 
-    results = Graph.query_history()
+    results = Storage.query_history()
 
     if Enum.empty?(results) do
       {:ok, "Nenhum bug ou correção encontrado no grafo ainda."}

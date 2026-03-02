@@ -1,4 +1,4 @@
-defmodule Pincer.Tools.GitHub do
+defmodule Pincer.Adapters.Tools.GitHub do
   @moduledoc """
   Native GitHub API integration tool for accessing user repositories.
 
@@ -42,15 +42,15 @@ defmodule Pincer.Tools.GitHub do
   ## Examples
 
       # List all repositories
-      iex> Pincer.Tools.GitHub.execute(%{})
+      iex> Pincer.Adapters.Tools.GitHub.execute(%{})
       {:ok, "Found 15 repositories:\\n\\n- **pincer** (user/pincer)..."}
 
       # List only private repositories
-      iex> Pincer.Tools.GitHub.execute(%{"visibility" => "private"})
+      iex> Pincer.Adapters.Tools.GitHub.execute(%{"visibility" => "private"})
       {:ok, "Found 3 repositories:\\n\\n- **secret-project** (user/secret-project)..."}
 
       # List only public repositories
-      iex> Pincer.Tools.GitHub.execute(%{"visibility" => "public"})
+      iex> Pincer.Adapters.Tools.GitHub.execute(%{"visibility" => "public"})
       {:ok, "Found 12 repositories:\\n\\n- **open-source-lib** (user/open-source-lib)..."}
 
   ## Security Considerations
@@ -73,10 +73,10 @@ defmodule Pincer.Tools.GitHub do
   ## See Also
 
   - [GitHub REST API Documentation](https://docs.github.com/en/rest)
-  - `Pincer.Tool` - Tool behaviour specification
+  - `Pincer.Ports.Tool` - Tool behaviour specification
   """
 
-  @behaviour Pincer.Tool
+  @behaviour Pincer.Ports.Tool
   require Logger
 
   @github_api_url "https://api.github.com"
@@ -155,13 +155,13 @@ defmodule Pincer.Tools.GitHub do
 
   ## Examples
 
-      iex> Pincer.Tools.GitHub.execute(%{})
+      iex> Pincer.Adapters.Tools.GitHub.execute(%{})
       {:ok, "Found 10 repositories:\\n\\n- **my-project** (user/my-project)..."}
 
-      iex> Pincer.Tools.GitHub.execute(%{"visibility" => "private"})
+      iex> Pincer.Adapters.Tools.GitHub.execute(%{"visibility" => "private"})
       {:ok, "Found 2 repositories:\\n\\n- **secret-repo** (user/secret-repo)..."}
 
-      iex> Pincer.Tools.GitHub.execute(%{})
+      iex> Pincer.Adapters.Tools.GitHub.execute(%{})
       {:error, "GITHUB_PERSONAL_ACCESS_TOKEN not configured in environment"}
   """
   @spec execute(map()) :: execute_result()

@@ -1,8 +1,8 @@
-defmodule Pincer.Tools.Config do
+defmodule Pincer.Adapters.Tools.Config do
   @moduledoc """
   Tools for managing Pincer configuration in real time.
   """
-  @behaviour Pincer.Tool
+  @behaviour Pincer.Ports.Tool
   require Logger
 
   @impl true
@@ -33,7 +33,7 @@ defmodule Pincer.Tools.Config do
     model_id = Map.get(args, "model_id")
     provider = Map.get(args, "provider")
 
-    case Pincer.Config.set_model(model_id, provider) do
+    case Pincer.Infra.Config.set_model(model_id, provider) do
       {:ok, mid, p} ->
         {:ok, "Model changed successfully to #{mid} on provider #{p}."}
 

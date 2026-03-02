@@ -2,13 +2,13 @@
 IO.puts("Starting Safe Shell & Approval Test...")
 Application.ensure_all_started(:pincer)
 
-alias Pincer.PubSub
+alias Pincer.Infra.PubSub
 alias Pincer.Core.Executor
-alias Pincer.Session.Server
+alias Pincer.Core.Session.Server
 
 # 1. Setup Session
 session_id = "safe_shell_test_#{:os.system_time(:seconds)}"
-Pincer.PubSub.subscribe("session:#{session_id}")
+Pincer.Infra.PubSub.subscribe("session:#{session_id}")
 
 # 2. Test Case A: Whitelisted Command (ls)
 IO.puts("\n--- Case A: Whitelisted Command (ls) ---")
