@@ -1,7 +1,7 @@
-defmodule Pincer.Connectors.MCP.Transports.HTTPTest do
+defmodule Pincer.Adapters.Connectors.MCP.Transports.HTTPTest do
   use ExUnit.Case, async: true
 
-  alias Pincer.Connectors.MCP.Transports.HTTP
+  alias Pincer.Adapters.Connectors.MCP.Transports.HTTP
 
   test "connect/1 returns error when URL is missing" do
     assert {:error, :missing_url} = HTTP.connect([])

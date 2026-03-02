@@ -1,4 +1,4 @@
-defmodule Pincer.Cron.Scheduler do
+defmodule Pincer.Adapters.Cron.Scheduler do
   @moduledoc """
   A lightweight GenServer-based cron scheduler that monitors and executes scheduled jobs.
 
@@ -9,17 +9,17 @@ defmodule Pincer.Cron.Scheduler do
   ## Architecture
 
   The Scheduler follows a pull-based model:
-  1. Every 60 seconds, queries `Pincer.Cron.Storage` for due jobs
+  1. Every 60 seconds, queries `Pincer.Adapters.Cron.Storage` for due jobs
   2. For each due job, sends a `{:cron_trigger, prompt}` message to the target session
   3. If the session is not active, automatically wakes it up via `SessionSupervisor`
-  4. Reschedules each job using the cron expression in `Pincer.Cron.Storage`
+  4. Reschedules each job using the cron expression in `Pincer.Adapters.Cron.Storage`
 
   ## Supervision Tree
 
   The Scheduler should be started under your application's supervision tree:
 
       children = [
-        Pincer.Cron.Scheduler,
+        Pincer.Adapters.Cron.Scheduler,
         # ... other children
       ]
 
@@ -36,7 +36,7 @@ defmodule Pincer.Cron.Scheduler do
       # No manual intervention required after Scheduler starts
 
       # To check Scheduler status (if monitoring is added):
-      GenServer.call(Pincer.Cron.Scheduler, :status)
+      GenServer.call(Pincer.Adapters.Cron.Scheduler, :status)
 
   ## Notes
 
@@ -46,14 +46,15 @@ defmodule Pincer.Cron.Scheduler do
   """
   use GenServer
   require Logger
-  alias Pincer.Cron.Storage
+  alias Pincer.Adapters.Cron.Storage
 
   @tick_interval :timer.seconds(60)
+  @default_name __MODULE__
 
   @doc """
   Starts the Scheduler GenServer.
 
-  The Scheduler registers itself with the name `Pincer.Cron.Scheduler`.
+  The Scheduler registers itself with the name `Pincer.Adapters.Cron.Scheduler`.
 
   ## Parameters
 
@@ -66,49 +67,91 @@ defmodule Pincer.Cron.Scheduler do
 
   ## Examples
 
-      {:ok, pid} = Pincer.Cron.Scheduler.start_link([])
+      {:ok, pid} = Pincer.Adapters.Cron.Scheduler.start_link([])
   """
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
+  def start_link(opts \\ []) do
+    {name, init_opts} = Keyword.pop(opts, :name, @default_name)
+    server_opts = if is_nil(name), do: [], else: [name: name]
+    GenServer.start_link(__MODULE__, init_opts, server_opts)
   end
 
   @impl true
-  def init(state) do
-    Logger.info("[Scheduler] Cron Scheduler started. First tick in #{@tick_interval}ms.")
+  def init(opts) do
+    tick_interval = Keyword.get(opts, :tick_interval, @tick_interval)
 
-    schedule_next_tick()
+    state = %{
+      tick_interval: tick_interval,
+      due_jobs_fetcher: Keyword.get(opts, :due_jobs_fetcher, fn -> Storage.list_due_jobs() end),
+      next_run_updater: Keyword.get(opts, :next_run_updater, &Storage.update_next_run!/1),
+      job_dispatcher: Keyword.get(opts, :job_dispatcher, &deploy_job/1),
+      missing_table_warned?: false
+    }
+
+    Logger.info("[Scheduler] Cron Scheduler started. First tick in #{tick_interval}ms.")
+
+    schedule_next_tick(tick_interval)
     {:ok, state}
   end
 
   @impl true
   def handle_info(:tick, state) do
-    process_due_jobs()
-    schedule_next_tick()
+    state = process_due_jobs(state)
+    schedule_next_tick(state.tick_interval)
     {:noreply, state}
   end
 
-  defp schedule_next_tick do
-    Process.send_after(self(), :tick, @tick_interval)
+  defp schedule_next_tick(tick_interval) do
+    Process.send_after(self(), :tick, tick_interval)
   end
 
-  defp process_due_jobs do
-    due_jobs = Storage.list_due_jobs()
+  defp process_due_jobs(state) do
+    {due_jobs, state} = load_due_jobs(state)
 
     if length(due_jobs) > 0 do
       Logger.info("[Scheduler] Found #{length(due_jobs)} due jobs in database! Dispatching...")
     end
 
     Enum.each(due_jobs, fn job ->
-      deploy_job(job)
-      Storage.update_next_run!(job)
+      state.job_dispatcher.(job)
+      state.next_run_updater.(job)
     end)
+
+    state
+  end
+
+  defp load_due_jobs(state) do
+    {state.due_jobs_fetcher.(), state}
+  rescue
+    error in Exqlite.Error ->
+      if missing_cron_jobs_table?(error) do
+        state = maybe_warn_missing_table(state)
+        {[], state}
+      else
+        reraise(error, __STACKTRACE__)
+      end
+  end
+
+  defp missing_cron_jobs_table?(%Exqlite.Error{message: msg}) when is_binary(msg) do
+    String.contains?(msg, "no such table") and String.contains?(msg, "cron_jobs")
+  end
+
+  defp missing_cron_jobs_table?(_), do: false
+
+  defp maybe_warn_missing_table(%{missing_table_warned?: true} = state), do: state
+
+  defp maybe_warn_missing_table(state) do
+    Logger.warning(
+      "[Scheduler] cron_jobs table missing; scheduler will stay idle until migrations run."
+    )
+
+    %{state | missing_table_warned?: true}
   end
 
   defp deploy_job(job) do
     Logger.debug("[Scheduler] Dispatching Job #{job.id}: '#{job.name}' (To: #{job.session_id})")
 
-    session_tuple = Registry.lookup(Pincer.Session.Registry, job.session_id)
+    session_tuple = Registry.lookup(Pincer.Core.Session.Registry, job.session_id)
 
     case session_tuple do
       [{pid, _}] ->
@@ -120,7 +163,7 @@ defmodule Pincer.Cron.Scheduler do
           "[Scheduler] Waking up hibernated session (#{job.session_id}) to trigger cron alarm."
         )
 
-        case Pincer.Session.Supervisor.start_session(job.session_id) do
+        case Pincer.Core.Session.Supervisor.start_session(job.session_id) do
           {:ok, pid} ->
             send(pid, {:cron_trigger, job.prompt})
 

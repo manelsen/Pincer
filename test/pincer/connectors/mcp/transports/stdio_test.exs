@@ -1,6 +1,6 @@
-defmodule Pincer.Connectors.MCP.Transports.StdioTest do
+defmodule Pincer.Adapters.Connectors.MCP.Transports.StdioTest do
   use ExUnit.Case, async: true
-  alias Pincer.Connectors.MCP.Transports.Stdio
+  alias Pincer.Adapters.Connectors.MCP.Transports.Stdio
 
   describe "handle_data/2" do
     test "extracts single json message" do

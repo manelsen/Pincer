@@ -1,10 +1,10 @@
-defmodule Pincer.Cron.Job do
+defmodule Pincer.Adapters.Cron.Job do
   @moduledoc """
   Ecto schema representing a scheduled cron job in Pincer.
 
   A Job encapsulates a prompt that should be sent to a specific session
   at recurring intervals defined by a cron expression. Jobs persist across
-  application restarts and are managed by `Pincer.Cron.Scheduler`.
+  application restarts and are managed by `Pincer.Adapters.Cron.Scheduler`.
 
   ## Fields
 
@@ -30,7 +30,7 @@ defmodule Pincer.Cron.Job do
   ## Examples
 
       # Creating a new job struct
-      %Pincer.Cron.Job{
+      %Pincer.Adapters.Cron.Job{
         name: "Daily Standup Reminder",
         cron_expression: "0 9 * * 1-5",
         prompt: "Time for daily standup!",
@@ -46,12 +46,12 @@ defmodule Pincer.Cron.Job do
         session_id: "cli:admin"
       }
 
-      changeset = Pincer.Cron.Job.changeset(%Pincer.Cron.Job{}, attrs)
+      changeset = Pincer.Adapters.Cron.Job.changeset(%Pincer.Adapters.Cron.Job{}, attrs)
       # => %Ecto.Changeset{valid?: true, ...}
 
       # Invalid cron expression
       invalid_attrs = %{cron_expression: "invalid"}
-      changeset = Pincer.Cron.Job.changeset(%Pincer.Cron.Job{}, invalid_attrs)
+      changeset = Pincer.Adapters.Cron.Job.changeset(%Pincer.Adapters.Cron.Job{}, invalid_attrs)
       # => %Ecto.Changeset{valid?: false, errors: [cron_expression: {"invalid cron format...", ...}]}
   """
   use Ecto.Schema
@@ -104,7 +104,7 @@ defmodule Pincer.Cron.Job do
 
   ## Examples
 
-      iex> Pincer.Cron.Job.changeset(%Pincer.Cron.Job{}, %{
+      iex> Pincer.Adapters.Cron.Job.changeset(%Pincer.Adapters.Cron.Job{}, %{
       ...>   name: "Test Job",
       ...>   cron_expression: "0 8 * * *",
       ...>   prompt: "Good morning!",
@@ -112,7 +112,7 @@ defmodule Pincer.Cron.Job do
       ...> })
       %Ecto.Changeset{valid?: true}
 
-      iex> Pincer.Cron.Job.changeset(%Pincer.Cron.Job{}, %{cron_expression: "bad"})
+      iex> Pincer.Adapters.Cron.Job.changeset(%Pincer.Adapters.Cron.Job{}, %{cron_expression: "bad"})
       %Ecto.Changeset{valid?: false}
   """
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
