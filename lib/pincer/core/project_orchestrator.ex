@@ -20,7 +20,9 @@ defmodule Pincer.Core.ProjectOrchestrator do
           kind: project_kind() | nil,
           scope: String.t() | nil,
           success_criteria: String.t() | nil,
-          items: [map()]
+          items: [map()],
+          git_branch: String.t() | nil,
+          git_branch_status: :created | :existing | {:error, any()} | nil
         }
 
   @doc """
@@ -139,7 +141,9 @@ defmodule Pincer.Core.ProjectOrchestrator do
       kind: nil,
       scope: nil,
       success_criteria: nil,
-      items: []
+      items: [],
+      git_branch: nil,
+      git_branch_status: nil
     }
   end
 
@@ -195,7 +199,9 @@ defmodule Pincer.Core.ProjectOrchestrator do
   end
 
   defp finalize_state(state) do
-    %{state | items: build_items(state)}
+    state
+    |> Map.put(:items, build_items(state))
+    |> ensure_project_branch()
   end
 
   defp build_items(%{kind: :software, objective: objective, scope: scope}) do
@@ -263,6 +269,8 @@ defmodule Pincer.Core.ProjectOrchestrator do
 
     **Reviewer**
     - #{reviewer_line}
+
+    #{git_summary(state)}
 
     #{flow_line}
     Use `/kanban` para visualizar o board desta sessao.
@@ -432,6 +440,100 @@ defmodule Pincer.Core.ProjectOrchestrator do
   defp fallback_text(nil, fallback), do: fallback
   defp fallback_text("", fallback), do: fallback
   defp fallback_text(text, _fallback), do: text
+
+  defp ensure_project_branch(%{git_branch: branch} = state)
+       when is_binary(branch) and branch != "" do
+    state
+  end
+
+  defp ensure_project_branch(state) do
+    branch_name = build_branch_name(state)
+
+    case git_adapter().ensure_branch(branch_name) do
+      {:ok, %{status: status}} when status in [:created, :existing] ->
+        %{state | git_branch: branch_name, git_branch_status: status}
+
+      {:ok, :created} ->
+        %{state | git_branch: branch_name, git_branch_status: :created}
+
+      {:ok, :existing} ->
+        %{state | git_branch: branch_name, git_branch_status: :existing}
+
+      {:error, reason} ->
+        %{state | git_branch: branch_name, git_branch_status: {:error, reason}}
+    end
+  end
+
+  defp git_summary(%{git_branch: branch, git_branch_status: status})
+       when is_binary(branch) and status in [:created, :existing] do
+    status_label =
+      case status do
+        :created -> "criada"
+        :existing -> "ja existente"
+      end
+
+    """
+    **Git Branch**
+    - `#{branch}` (#{status_label}, sem checkout automatico)
+    - Proximo passo: `git checkout #{branch}`
+    """
+    |> String.trim()
+  end
+
+  defp git_summary(%{git_branch: branch, git_branch_status: {:error, reason}})
+       when is_binary(branch) do
+    """
+    **Git Branch**
+    - Falha ao preparar branch automaticamente: #{format_branch_error(reason)}
+    - Sugestao manual: `git checkout -b #{branch}`
+    """
+    |> String.trim()
+  end
+
+  defp git_summary(_state) do
+    """
+    **Git Branch**
+    - Branch nao preparada automaticamente.
+    """
+    |> String.trim()
+  end
+
+  defp build_branch_name(state) do
+    objective_slug =
+      state.objective
+      |> fallback_text("project")
+      |> slugify(36)
+
+    session_hint =
+      state.session_id
+      |> fallback_text("session")
+      |> slugify(12)
+
+    "project/#{objective_slug}-#{session_hint}"
+  end
+
+  defp slugify(text, max_len) when is_binary(text) and is_integer(max_len) and max_len > 0 do
+    text
+    |> String.downcase()
+    |> String.replace(~r/[^a-z0-9]+/u, "-")
+    |> String.trim("-")
+    |> case do
+      "" -> "project"
+      value -> String.slice(value, 0, max_len)
+    end
+  end
+
+  defp format_branch_error(reason) do
+    case reason do
+      {:branch_create_failed, detail} -> detail
+      {:git_unavailable, detail} -> detail
+      other -> inspect(other)
+    end
+  end
+
+  defp git_adapter do
+    Application.get_env(:pincer, :project_git, Pincer.Core.ProjectGit)
+  end
 
   defp get_state(session_id) do
     case :ets.lookup(@table, session_id) do
