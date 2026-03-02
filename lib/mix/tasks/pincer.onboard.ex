@@ -11,6 +11,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
   """
 
   use Mix.Task
+  use Boundary, classify_to: Pincer.Mix
   alias Pincer.Core.Onboard
 
   @shortdoc "Initialize config and workspace files"

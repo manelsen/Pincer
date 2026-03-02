@@ -1,6 +1,6 @@
 import Config
 
-config :pincer, Pincer.Repo,
+config :pincer, Pincer.Infra.Repo,
   adapter: Ecto.Adapters.SQLite3,
   database: "db/pincer_test.db",
   pool: Ecto.Adapters.SQL.Sandbox,
