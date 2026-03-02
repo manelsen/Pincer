@@ -1,4 +1,4 @@
-defmodule Pincer.Project.Supervisor do
+defmodule Pincer.Core.Project.Supervisor do
   @moduledoc """
   Dynamic supervisor for project GenServer processes.
   """
@@ -14,6 +14,6 @@ defmodule Pincer.Project.Supervisor do
   end
 
   def start_project(args) do
-    DynamicSupervisor.start_child(__MODULE__, {Pincer.Project.Server, args})
+    DynamicSupervisor.start_child(__MODULE__, {Pincer.Core.Project.Server, args})
   end
 end

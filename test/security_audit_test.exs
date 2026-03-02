@@ -9,9 +9,9 @@ defmodule Pincer.SecurityAuditTest do
 
   use ExUnit.Case, async: true
 
-  alias Pincer.Tools.SafeShell
-  alias Pincer.Tools.FileSystem
-  alias Pincer.Tools.Web
+  alias Pincer.Adapters.Tools.SafeShell
+  alias Pincer.Adapters.Tools.FileSystem
+  alias Pincer.Adapters.Tools.Web
 
   # ---------------------------------------------------------------------------
   # VULN-001: Command Injection via SafeShell whitelist bypass
