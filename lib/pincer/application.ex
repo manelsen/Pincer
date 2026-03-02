@@ -1,22 +1,123 @@
 defmodule Pincer.Application do
-  @moduledoc false
+  @moduledoc """
+  OTP Application callback module for Pincer.
+
+  This module implements the `Application` behaviour and is responsible for
+  starting the Pincer supervision tree when the application boots.
+
+  ## Supervision Tree
+
+  Pincer uses a `one_for_one` strategy, meaning if a child process crashes,
+  only that process is restarted. The tree is structured as follows:
+
+      Pincer.Supervisor (one_for_one)
+      │
+      ├── Pincer.PubSub
+      │   Message broadcasting for real-time events
+      │
+      ├── Pincer.Finch
+      │   HTTP client pool for API requests
+      │
+      ├── Pincer.Repo
+      │   Database connection pool (Ecto)
+      │
+      ├── Pincer.Core.Cron
+      │   Scheduled task management
+      │
+      ├── Pincer.Core.Heartbeat
+      │   Periodic health checks and maintenance
+      │
+      ├── Pincer.Dispatcher.Registry
+      │   Registry for message dispatchers (duplicate keys)
+      │
+      ├── Pincer.MCP.Supervisor
+      │   DynamicSupervisor for MCP server connections
+      │
+      ├── Pincer.Connectors.MCP.Manager
+      │   MCP server lifecycle and tool discovery
+      │
+      ├── Pincer.Session.Registry
+      │   Registry for active sessions (unique keys)
+      │
+      ├── Pincer.Session.Supervisor
+      │   DynamicSupervisor for user sessions
+      │
+      ├── Pincer.Cron.Scheduler
+      │   Job scheduling and execution
+      │
+      ├── Pincer.Channels.Supervisor
+      │   Channel adapters (Telegram, etc.)
+      │
+      ├── Pincer.Channels.Telegram.SessionSupervisor
+      │   Telegram-specific session management
+      │
+      └── Pincer.Core.Reloader (dev only)
+          Hot code reloading in development
+
+  ## Startup Sequence
+
+  1. Load configuration from `Pincer.Config`
+  2. Initialize PubSub for event broadcasting
+  3. Start Finch HTTP client pool
+  4. Connect to database
+  5. Initialize MCP connections
+  6. Start session management
+  7. Enable channel adapters
+  8. (In dev) Start code reloader
+
+  ## Development Mode
+
+  In development, an additional `Pincer.Core.Reloader` process is started
+  to enable hot code reloading without restarting the application.
+
+  ## Configuration
+
+  The application reads configuration from:
+
+  - `config/config.exs` - Application-level config
+  - `Pincer.Config` module - Runtime config loading
+  - Environment variables - Secrets and overrides
+
+  ## See Also
+
+  - `Pincer.Session.Supervisor` - Session lifecycle management
+  - `Pincer.Connectors.MCP.Manager` - MCP tool discovery
+  - `Pincer.PubSub` - Event broadcasting
+  """
+
   use Application
 
   @impl true
+  @doc """
+  Starts the Pincer application supervision tree.
+
+  Called automatically by the BEAM when the application starts.
+  Should not be called directly.
+
+  ## Parameters
+
+  - `_type` - Application start type (ignored, always `:normal`)
+  - `_args` - Application arguments (ignored)
+
+  ## Returns
+
+  - `{:ok, pid}` - Supervisor started successfully
+  - `{:error, reason}` - Startup failed
+
+  """
+  @spec start(Application.start_type(), term()) :: Supervisor.on_start()
   def start(_type, _args) do
+    File.mkdir_p!("logs")
     Pincer.Config.load()
-    
+
     repo_config = Pincer.Config.get(:repo)
 
-    IO.puts("Iniciando Bot...")
+    IO.puts("Starting Bot...")
 
     children = [
-      # Infraestrutura Base
       Pincer.PubSub,
-      
       {Finch, name: Pincer.Finch},
       {Pincer.Repo, repo_config},
-      Pincer.AI.Embeddings,
       Pincer.Core.Cron,
       Pincer.Core.Heartbeat,
       {Registry, keys: :duplicate, name: Pincer.Dispatcher.Registry},
@@ -24,10 +125,13 @@ defmodule Pincer.Application do
       Pincer.Connectors.MCP.Manager,
       {Registry, keys: :unique, name: Pincer.Session.Registry},
       Pincer.Session.Supervisor,
-      
+      Pincer.Cron.Scheduler,
       Pincer.Channels.Supervisor,
-      Pincer.Channels.Telegram.SessionSupervisor
+      Pincer.Channels.Telegram.SessionSupervisor,
+      Pincer.Channels.Discord.SessionSupervisor
     ]
+
+    children = if Mix.env() == :dev, do: children ++ [Pincer.Core.Reloader], else: children
 
     opts = [strategy: :one_for_one, name: Pincer.Supervisor]
     Supervisor.start_link(children, opts)

@@ -1,6 +1,6 @@
 defmodule Pincer.Models do
   @moduledoc """
-  Centraliza a configuração e gerenciamento de modelos LLM.
+  Centralizes LLM model configuration and management.
   """
 
   @models_config %{
@@ -16,24 +16,24 @@ defmodule Pincer.Models do
   }
 
   @doc """
-  Retorna o mapa completo de configuração de modelos.
+  Returns the complete model configuration map.
   """
   def all, do: @models_config
 
   @doc """
-  Retorna a lista de provedores disponíveis.
+  Returns the list of available providers.
   """
   def providers, do: Map.keys(@models_config)
 
   @doc """
-  Retorna os modelos para um provedor específico.
+  Returns models for a specific provider.
   """
   def for_provider(provider) when is_binary(provider) do
     Map.get(@models_config, provider, [])
   end
 
   @doc """
-  Retorna um mapa de provedores para exibição (capitalizado).
+  Returns a map of providers for display (capitalized).
   """
   def providers_for_display do
     @models_config
@@ -49,14 +49,14 @@ defmodule Pincer.Models do
   end
 
   @doc """
-  Verifica se um provedor existe.
+  Checks if a provider exists.
   """
   def valid_provider?(provider) do
     Map.has_key?(@models_config, provider)
   end
 
   @doc """
-  Verifica se um modelo existe para um provedor.
+  Checks if a model exists for a provider.
   """
   def valid_model?(provider, model_id) do
     provider

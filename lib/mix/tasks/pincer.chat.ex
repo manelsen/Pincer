@@ -1,15 +1,15 @@
 defmodule Mix.Tasks.Pincer.Chat do
   @moduledoc """
-  Inicia o CLI do Pincer.
-  Tenta conectar ao servidor (pincer_server). Se falhar, inicia localmente.
+  Starts the Pincer CLI.
+  Tries to connect to the server (pincer_server). If it fails, starts locally.
   """
   use Mix.Task
 
   def run(args) do
-    # Carrega .env para garantir configuração (mesmo se for conectar remoto)
+    # Load .env to ensure configuration (even if connecting remotely)
     load_env()
 
-    # O Pincer.CLI decide se inicia a app ou conecta
+    # Pincer.CLI decides whether to start the app or connect
     Pincer.CLI.main(args)
   end
 
