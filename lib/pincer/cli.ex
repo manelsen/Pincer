@@ -1,16 +1,25 @@
 defmodule Pincer.CLI do
   @moduledoc """
-  Frontend do CLI.
-  Pode rodar localmente (Standalone) ou conectar-se a um servidor remoto.
+  CLI Frontend.
+  Can run locally (Standalone) or connect to a remote server.
   """
   require Logger
 
   @session_id "cli_user"
   @backend_name Pincer.Channels.CLI
 
-  def main(_args) do
+  def main(args) do
     IO.puts(IO.ANSI.green() <> "=== Pincer CLI v0.2 (Distributed) ===" <> IO.ANSI.reset())
-    IO.puts("Digite /q para sair.")
+    IO.puts("Type /q to exit.")
+
+    # If there are arguments, assume they are the desired channels (e.g.: telegram)
+    if args != [] do
+      IO.puts(
+        IO.ANSI.yellow() <> "Active Channel Filter: #{Enum.join(args, ", ")}" <> IO.ANSI.reset()
+      )
+
+      Application.put_env(:pincer, :enabled_channels, args)
+    end
 
     target_node = connect_to_server()
     attach_to_backend(target_node)
@@ -19,17 +28,26 @@ defmodule Pincer.CLI do
 
   defp connect_to_server do
     unless Node.alive?() do
-      {:ok, _} = Node.start(:"pincer_cli_#{System.unique_integer([:positive])}@localhost", :shortnames)
+      {:ok, _} =
+        Node.start(:"pincer_cli_#{System.unique_integer([:positive])}@localhost", :shortnames)
+
       Node.set_cookie(Node.self(), :pincer_secret)
     end
 
-    server_node = :"pincer_server@localhost"
+    server_node = :pincer_server@localhost
 
     if Node.connect(server_node) do
-      IO.puts(IO.ANSI.blue() <> "🔗 Conectado ao Servidor Imortal: #{server_node}" <> IO.ANSI.reset())
+      IO.puts(
+        IO.ANSI.blue() <> "🔗 Connected to Immortal Server: #{server_node}" <> IO.ANSI.reset()
+      )
+
       server_node
     else
-      IO.puts(IO.ANSI.yellow() <> "⚠️ Servidor não encontrado. Iniciando modo Standalone..." <> IO.ANSI.reset())
+      IO.puts(
+        IO.ANSI.yellow() <>
+          "⚠️ Server not found. Starting Standalone mode..." <> IO.ANSI.reset()
+      )
+
       Mix.Task.run("app.start", [])
       ensure_local_session()
       Node.self()
@@ -40,8 +58,11 @@ defmodule Pincer.CLI do
     try do
       GenServer.call({@backend_name, node}, :attach)
     catch
-      :exit, _ -> 
-        IO.puts(IO.ANSI.red() <> "❌ Falha ao conectar ao canal CLI no servidor." <> IO.ANSI.reset())
+      :exit, _ ->
+        IO.puts(
+          IO.ANSI.red() <> "❌ Failed to connect to CLI channel on server." <> IO.ANSI.reset()
+        )
+
         System.halt(1)
     end
   end
@@ -54,20 +75,20 @@ defmodule Pincer.CLI do
   end
 
   def loop(target_node) do
-    input = IO.gets(IO.ANSI.cyan() <> "[Manel]: " <> IO.ANSI.reset()) |> String.trim()
-    
+    input = IO.gets(IO.ANSI.cyan() <> "[User]: " <> IO.ANSI.reset()) |> String.trim()
+
     case process_command(input) do
-      :quit -> 
-        IO.puts("Até mais!")
+      :quit ->
+        IO.puts("Goodbye!")
         System.halt(0)
-      
+
       :clear ->
         IO.puts(IO.ANSI.clear() <> IO.ANSI.home())
         loop(target_node)
-        
+
       {:send, msg} ->
         send_message(target_node, msg)
-        await_response() 
+        await_response()
         loop(target_node)
     end
   end
@@ -78,26 +99,28 @@ defmodule Pincer.CLI do
   def process_command(msg), do: {:send, msg}
 
   def send_message(node, msg) do
-    # Envia para o Backend no nó alvo como INPUT do usuário
-    GenServer.cast({@backend_name, node}, {:user_input, msg})
+    # Sends to the Backend on the target node as user INPUT
+    target = if is_pid(node), do: node, else: {@backend_name, node}
+    GenServer.cast(target, {:user_input, msg})
   end
 
   defp await_response do
     receive do
       {:cli_output, text} ->
         IO.puts("\n" <> IO.ANSI.green() <> "[Pincer]: " <> text <> IO.ANSI.reset() <> "\n")
-        
-        # Se for mensagem de status, continua esperando a resposta final
+
+        # If it's a status message, keep waiting for the final response
         if String.starts_with?(text, "📐") or String.starts_with?(text, "⚙️") do
           await_response()
         else
-          # Se for resposta final (ou erro), sai do loop e volta pro prompt
+          # If it's the final response (or error), exits the loop and returns to prompt
           :ok
         end
 
-      _ -> await_response()
+      _ ->
+        await_response()
     after
-      60_000 -> IO.puts(IO.ANSI.red() <> "[Timeout] Sem resposta." <> IO.ANSI.reset())
+      60_000 -> IO.puts(IO.ANSI.red() <> "[Timeout] No response." <> IO.ANSI.reset())
     end
   end
 end
