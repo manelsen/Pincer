@@ -52,7 +52,7 @@ defmodule Pincer.Channels.Telegram do
   ## Message Flow
 
   1. UpdatesProvider polls Telegram API every 1 second
-  2. Incoming messages are routed to `Pincer.Session.Server.process_input/2`
+  2. Incoming messages are routed to `Pincer.Core.Session.Server.process_input/2`
   3. Responses are sent back via `Telegex.send_message/2`
 
   ## Examples
@@ -66,12 +66,12 @@ defmodule Pincer.Channels.Telegram do
   ## See Also
 
   - `Pincer.Channels.Telegram.UpdatesProvider` - The polling GenServer
-  - `Pincer.Session.Server` - Session message processing
+  - `Pincer.Core.Session.Server` - Session message processing
   - `Pincer.LLM.Client` - Model selection integration
   """
 
   use Supervisor
-  @behaviour Pincer.Channel
+  @behaviour Pincer.Ports.Channel
   require Logger
   alias Pincer.Core.UX
   alias Pincer.Core.UX.MenuPolicy
@@ -98,7 +98,7 @@ defmodule Pincer.Channels.Telegram do
       Pincer.Channels.Telegram.start_link(%{"token_env" => "TELEGRAM_BOT_TOKEN"})
   """
   @spec start_link(config :: map()) :: Supervisor.on_start()
-  @impl Pincer.Channel
+  @impl Pincer.Ports.Channel
   def start_link(config) do
     Supervisor.start_link(__MODULE__, config, name: __MODULE__)
   end
@@ -128,7 +128,7 @@ defmodule Pincer.Channels.Telegram do
   @doc """
   Sends a text message to a Telegram chat.
 
-  This is the implementation of `Pincer.Channel.send_message/2` callback.
+  This is the implementation of `Pincer.Ports.Channel.send_message/2` callback.
   Uses Telegex to communicate with the Telegram Bot API.
 
   ## Parameters
@@ -143,7 +143,7 @@ defmodule Pincer.Channels.Telegram do
   """
   @spec send_message(chat_id :: String.t() | integer(), text :: String.t(), opts :: keyword()) ::
           {:ok, integer()} | {:error, any()}
-  @impl Pincer.Channel
+  @impl Pincer.Ports.Channel
   def send_message(chat_id, text, opts \\ []) do
     # 1. Pipeline: Strip Reasoning -> Convert Markdown to HTML
     html_text =
@@ -157,7 +157,7 @@ defmodule Pincer.Channels.Telegram do
   @doc """
   Updates an existing Telegram message.
   """
-  @impl Pincer.Channel
+  @impl Pincer.Ports.Channel
   def update_message(chat_id, message_id, text) do
     html_text =
       text
@@ -456,7 +456,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   alias Pincer.Core.SessionScopePolicy
   alias Pincer.Core.Telemetry, as: CoreTelemetry
   alias Pincer.Core.UX
-  alias Pincer.Session.Server
+  alias Pincer.Core.Session.Server
 
   @base_poll_interval 1000
   @max_poll_interval 30_000
@@ -481,6 +481,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   def init(state) do
     if Mix.env() != :test do
       Logger.info("Telegram Poller Started (Manual Mode).")
+
+      # Subscribe to outbound message delivery
+      Pincer.Infra.PubSub.subscribe("system:delivery")
+
       # Asynchronously cleanup and register commands
       Task.start(fn ->
         Pincer.Channels.Telegram.api_client().delete_webhook()
@@ -491,6 +495,26 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     end
 
     {:ok, state}
+  end
+
+  @impl GenServer
+  def handle_info({:deliver_message, session_id, message}, state) do
+    case String.split(session_id, "_", parts: 2) do
+      ["telegram", chat_id_str] ->
+        # Converts to integer since Telegex expects numbers
+        chat_id =
+          case Integer.parse(chat_id_str) do
+            {id, _} -> id
+            :error -> chat_id_str
+          end
+
+        Pincer.Channels.Telegram.send_message(chat_id, message)
+        {:noreply, state}
+
+      _ ->
+        # Not a telegram session, ignore
+        {:noreply, state}
+    end
   end
 
   @impl GenServer
@@ -922,7 +946,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp handle_command(chat_id, "/models", _text, _chat_type) do
-    providers = Pincer.LLM.Client.list_providers()
+    providers = Pincer.Ports.LLM.list_providers()
     buttons = build_provider_buttons(providers)
 
     if buttons == [] do
@@ -961,26 +985,9 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     session_id = session_id_for_chat(chat_id, chat_type)
     ensure_session_started(session_id)
 
-    case Server.get_status(session_id) do
-      {:ok, state} ->
-        provider = if state.model_override, do: state.model_override.provider, else: "Default"
-        model = if state.model_override, do: state.model_override.model, else: "Default"
-        status = if state.status == :working, do: "🏗️ Busy", else: "😴 Idle"
-
-        msg = """
-        📊 <b>Session Status</b>
-        ━━━━━━━━━━━━━━━
-        🆔 <b>ID</b>: <code>#{session_id}</code>
-        📡 <b>Status</b>: #{status}
-        🏢 <b>Provider</b>: <code>#{provider}</code>
-        🤖 <b>Model</b>: <code>#{model}</code>
-        📜 <b>History</b>: #{length(state.history)} messages
-        """
-
-        Pincer.Channels.Telegram.send_message(chat_id, msg)
-
-      _ ->
-        Pincer.Channels.Telegram.send_message(chat_id, "❌ Could not get session status.")
+    case Pincer.Core.ProjectRouter.handle_command(:status, nil, session_id) do
+      {:ok, msg} -> Pincer.Channels.Telegram.send_message(chat_id, msg)
+      {:error, reason} -> Pincer.Channels.Telegram.send_message(chat_id, "❌ #{reason}")
     end
   end
 
@@ -996,7 +1003,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp handle_callback(chat_id, chat_type, payload, message_id) do
     case ChannelInteractionPolicy.parse(:telegram, payload) do
       {:ok, {:select_provider, provider_id}} ->
-        models = Pincer.LLM.Client.list_models(provider_id)
+        models = Pincer.Ports.LLM.list_models(provider_id)
 
         buttons =
           build_model_buttons(provider_id, models)
@@ -1028,7 +1035,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         )
 
       {:ok, :back_to_providers} ->
-        providers = Pincer.LLM.Client.list_providers()
+        providers = Pincer.Ports.LLM.list_providers()
         buttons = build_provider_buttons(providers)
 
         if buttons == [] do
@@ -1161,10 +1168,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp ensure_session_started(session_id) do
-    case Registry.lookup(Pincer.Session.Registry, session_id) do
+    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
       [] ->
         Logger.info("[TELEGRAM] Creating new session: #{session_id}")
-        Pincer.Session.Supervisor.start_session(session_id)
+        Pincer.Core.Session.Supervisor.start_session(session_id)
 
       [_] ->
         :ok
@@ -1233,10 +1240,11 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp build_provider_buttons(providers) do
-    Enum.reduce(providers, [], fn provider, acc ->
+    providers
+    |> Enum.reduce([], fn provider, acc ->
       case ChannelInteractionPolicy.provider_selector_id(:telegram, provider.id) do
         {:ok, callback_data} ->
-          acc ++ [[%{text: provider.name, callback_data: callback_data}]]
+          [[%{text: provider.name, callback_data: callback_data}] | acc]
 
         {:error, :payload_too_large} ->
           Logger.warning(
@@ -1249,13 +1257,15 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
           acc
       end
     end)
+    |> Enum.reverse()
   end
 
   defp build_model_buttons(provider_id, models) do
-    Enum.reduce(models, [], fn model, acc ->
+    models
+    |> Enum.reduce([], fn model, acc ->
       case ChannelInteractionPolicy.model_selector_id(:telegram, provider_id, model) do
         {:ok, callback_data} ->
-          acc ++ [[%{text: model, callback_data: callback_data}]]
+          [[%{text: model, callback_data: callback_data}] | acc]
 
         {:error, :payload_too_large} ->
           Logger.warning(
@@ -1268,6 +1278,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
           acc
       end
     end)
+    |> Enum.reverse()
   end
 
   defp with_back_to_providers_button(buttons) do

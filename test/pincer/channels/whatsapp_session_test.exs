@@ -95,7 +95,7 @@ defmodule Pincer.Channels.WhatsAppSessionTest do
 
     Process.sleep(50)
 
-    Pincer.PubSub.broadcast("session:whatsapp_main", {:agent_response, "Main scope reply"})
+    Pincer.Infra.PubSub.broadcast("session:whatsapp_main", {:agent_response, "Main scope reply"})
 
     assert_receive {:bridge_send, ^chat_id, "Main scope reply"}, 500
   end
