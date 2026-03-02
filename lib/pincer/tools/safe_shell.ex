@@ -61,6 +61,7 @@ defmodule Pincer.Tools.SafeShell do
 
   @behaviour Pincer.Tool
   alias Pincer.Connectors.MCP.Manager, as: MCPManager
+  alias Pincer.Core.Tooling.CommandProfile
   alias Pincer.Core.WorkspaceGuard
   require Logger
 
@@ -186,8 +187,40 @@ defmodule Pincer.Tools.SafeShell do
       ["find" | args] -> validate_generic_args("find", args, opts)
       # Grep is too complex to validate easily
       ["grep" | _] -> {:error, "Grep requires approval"}
-      _ -> {:error, "Command not in whitelist or invalid arguments"}
+      _ -> validate_dynamic_command(tokens, opts)
     end
+  end
+
+  defp validate_dynamic_command(tokens, opts) do
+    workspace_root = opts |> Keyword.get(:workspace_root, File.cwd!()) |> Path.expand()
+
+    prefixes = CommandProfile.dynamic_command_prefixes(workspace_root: workspace_root)
+
+    case matching_dynamic_prefix(tokens, prefixes) do
+      nil ->
+        {:error, "Command not in whitelist or invalid arguments"}
+
+      {prefix, args} ->
+        if Enum.any?(args, &unsafe_generic_arg?(&1, opts)) do
+          {:error, "Arguments contain unsafe path patterns"}
+        else
+          {:ok, Enum.join(prefix ++ args, " ")}
+        end
+    end
+  end
+
+  defp matching_dynamic_prefix(tokens, prefixes) do
+    prefixes
+    |> Enum.sort_by(&length/1, :desc)
+    |> Enum.find_value(fn prefix ->
+      if starts_with_tokens?(tokens, prefix) do
+        {prefix, Enum.drop(tokens, length(prefix))}
+      end
+    end)
+  end
+
+  defp starts_with_tokens?(tokens, prefix) do
+    Enum.take(tokens, length(prefix)) == prefix
   end
 
   defp validate_generic_args(cmd, args, opts) do

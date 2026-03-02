@@ -309,7 +309,30 @@ defmodule Pincer.Core.AuthProfiles do
   end
 
   defp read_field(list, key) when is_list(list) and is_atom(key) do
-    Keyword.get(list, key, Keyword.get(list, to_string(key)))
+    string_key = Atom.to_string(key)
+
+    cond do
+      Keyword.keyword?(list) ->
+        Keyword.get(list, key)
+
+      true ->
+        Enum.find_value(list, fn
+          {^key, value} ->
+            value
+
+          {list_key, value} when is_binary(list_key) and list_key == string_key ->
+            value
+
+          {list_key, value} when is_atom(list_key) ->
+            if Atom.to_string(list_key) == string_key, do: value, else: nil
+
+          %{} = map ->
+            Map.get(map, key) || Map.get(map, string_key)
+
+          _ ->
+            nil
+        end)
+    end
   end
 
   defp read_field(_other, _key), do: nil

@@ -64,7 +64,8 @@ defmodule Pincer.Core.AccessPolicyTest do
                AccessPolicy.authorize_dm(:discord, "u-1", config)
 
       assert msg =~ "pairing"
-      assert msg =~ "Codigo"
+      assert msg =~ "/pair <codigo>"
+      refute msg =~ ~r/\b\d{6}\b/
     end
 
     test "allows in pairing mode after valid code approval" do
@@ -73,11 +74,9 @@ defmodule Pincer.Core.AccessPolicyTest do
       assert {:deny, %{user_message: msg}} =
                AccessPolicy.authorize_dm(:telegram, 123, config)
 
-      code =
-        case Regex.run(~r/(\d{6})/, msg) do
-          [_, extracted] -> extracted
-          _ -> flunk("pairing code not found in message: #{msg}")
-        end
+      refute msg =~ ~r/\b\d{6}\b/
+
+      assert {:ok, %{code: code}} = Pairing.issue_code(:telegram, "123")
 
       assert :ok == Pairing.approve_code(:telegram, "123", code)
 

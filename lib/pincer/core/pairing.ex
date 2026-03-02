@@ -7,13 +7,19 @@ defmodule Pincer.Core.Pairing do
   - approve or reject pending request by code
   - enforce anti-replay by consuming/removing pending codes
   """
+  require Logger
+
+  alias Pincer.PubSub
 
   @table_pending :pincer_pairing_pending
   @table_pairs :pincer_pairing_pairs
+  @store_table :pincer_pairing_store
+  @store_lock_key {:pincer, :pairing_store_lock}
 
   @default_ttl_ms 300_000
   @default_max_attempts 5
   @default_code_length 6
+  @default_store_path "sessions/pairing_store.dets"
 
   @type channel :: :telegram | :discord
   @type sender_id :: String.t() | integer()
@@ -37,14 +43,18 @@ defmodule Pincer.Core.Pairing do
     case pending_entry(key) do
       {:ok, pending} ->
         if expired?(pending, now) do
-          :ets.delete(@table_pending, key)
-          create_pending(key, now, opts)
+          delete_pending(key)
+          create_pending(channel, sender_id, key, now, opts)
         else
+          announce_pairing_code(channel, sender_id, pending.code, pending.expires_at_ms,
+            reused: true
+          )
+
           {:ok, %{code: pending.code, expires_at_ms: pending.expires_at_ms}}
         end
 
       :error ->
-        create_pending(key, now, opts)
+        create_pending(channel, sender_id, key, now, opts)
     end
   end
 
@@ -68,16 +78,16 @@ defmodule Pincer.Core.Pairing do
       {:ok, pending} ->
         cond do
           expired?(pending, now) ->
-            :ets.delete(@table_pending, key)
+            delete_pending(key)
             {:error, :expired}
 
           attempts_exceeded?(pending) ->
-            :ets.delete(@table_pending, key)
+            delete_pending(key)
             {:error, :attempts_exceeded}
 
           code_valid?(pending, code) ->
-            :ets.delete(@table_pending, key)
-            :ets.insert(@table_pairs, {key, %{paired_at_ms: now}})
+            delete_pending(key)
+            put_pair(key, %{paired_at_ms: now})
             :ok
 
           true ->
@@ -85,11 +95,11 @@ defmodule Pincer.Core.Pairing do
             max_attempts = pending.max_attempts
 
             if next_attempts >= max_attempts do
-              :ets.delete(@table_pending, key)
+              delete_pending(key)
               {:error, :attempts_exceeded}
             else
               updated = %{pending | attempts: next_attempts}
-              :ets.insert(@table_pending, {key, updated})
+              put_pending(key, updated)
               {:error, :invalid_code}
             end
         end
@@ -112,11 +122,11 @@ defmodule Pincer.Core.Pairing do
       {:ok, pending} ->
         cond do
           expired?(pending, now) ->
-            :ets.delete(@table_pending, key)
+            delete_pending(key)
             {:error, :expired}
 
           code_valid?(pending, code) ->
-            :ets.delete(@table_pending, key)
+            delete_pending(key)
             :ok
 
           true ->
@@ -143,10 +153,11 @@ defmodule Pincer.Core.Pairing do
     ensure_tables()
     :ets.delete_all_objects(@table_pending)
     :ets.delete_all_objects(@table_pairs)
+    clear_persistent_store()
     :ok
   end
 
-  defp create_pending(key, now, opts) do
+  defp create_pending(channel, sender_id, key, now, opts) do
     code = generate_code(opts)
     ttl_ms = ttl_ms(opts)
     max_attempts = max_attempts(opts)
@@ -161,7 +172,8 @@ defmodule Pincer.Core.Pairing do
       max_attempts: max_attempts
     }
 
-    :ets.insert(@table_pending, {key, pending})
+    put_pending(key, pending)
+    announce_pairing_code(channel, sender_id, code, expires_at_ms)
     {:ok, %{code: code, expires_at_ms: expires_at_ms}}
   end
 
@@ -228,7 +240,7 @@ defmodule Pincer.Core.Pairing do
   defp now_ms(opts) do
     case Keyword.get(opts, :now_ms) do
       value when is_integer(value) -> value
-      _ -> System.monotonic_time(:millisecond)
+      _ -> System.system_time(:millisecond)
     end
   end
 
@@ -254,8 +266,13 @@ defmodule Pincer.Core.Pairing do
   end
 
   defp ensure_tables do
-    ensure_table(@table_pending)
-    ensure_table(@table_pairs)
+    pending_status = ensure_table(@table_pending)
+    pairs_status = ensure_table(@table_pairs)
+
+    if persist_enabled?() and (pending_status == :created or pairs_status == :created) do
+      bootstrap_from_store()
+    end
+
     :ok
   end
 
@@ -264,13 +281,215 @@ defmodule Pincer.Core.Pairing do
       :undefined ->
         try do
           :ets.new(table, [:named_table, :set, :public, read_concurrency: true])
-          :ok
+          :created
         rescue
-          ArgumentError -> :ok
+          ArgumentError -> :existing
         end
 
       _tid ->
-        :ok
+        :existing
     end
+  end
+
+  defp bootstrap_from_store do
+    _ =
+      with_store(fn store ->
+        :dets.foldl(
+          fn
+            {{:pending, key}, pending}, _acc when is_tuple(key) and is_map(pending) ->
+              :ets.insert(@table_pending, {key, pending})
+              :ok
+
+            {{:paired, key}, pair_data}, _acc when is_tuple(key) and is_map(pair_data) ->
+              :ets.insert(@table_pairs, {key, pair_data})
+              :ok
+
+            _entry, _acc ->
+              :ok
+          end,
+          :ok,
+          store
+        )
+      end)
+
+    :ok
+  end
+
+  defp put_pending(key, pending) do
+    :ets.insert(@table_pending, {key, pending})
+    persist_put(:pending, key, pending)
+    :ok
+  end
+
+  defp put_pair(key, pair_data) do
+    :ets.insert(@table_pairs, {key, pair_data})
+    persist_put(:paired, key, pair_data)
+    :ok
+  end
+
+  defp delete_pending(key) do
+    :ets.delete(@table_pending, key)
+    persist_delete(:pending, key)
+    :ok
+  end
+
+  defp persist_put(kind, key, value) do
+    _ =
+      with_store(fn store ->
+        :dets.insert(store, {{kind, key}, value})
+        :ok
+      end)
+
+    :ok
+  end
+
+  defp persist_delete(kind, key) do
+    _ =
+      with_store(fn store ->
+        :dets.delete(store, {kind, key})
+        :ok
+      end)
+
+    :ok
+  end
+
+  defp clear_persistent_store do
+    _ =
+      with_store(fn store ->
+        :dets.delete_all_objects(store)
+        :ok
+      end)
+
+    :ok
+  end
+
+  defp with_store(fun) when is_function(fun, 1) do
+    if persist_enabled?() do
+      :global.trans(@store_lock_key, fn ->
+        path = store_path()
+        ensure_store_directory(path)
+        open_opts = [type: :set, file: String.to_charlist(path), auto_save: 1_000]
+
+        case :dets.open_file(@store_table, open_opts) do
+          {:ok, store} ->
+            try do
+              fun.(store)
+            after
+              _ = :dets.sync(store)
+              _ = :dets.close(store)
+            end
+
+          {:error, reason} ->
+            Logger.error("[PAIRING] Failed to open store #{path}: #{inspect(reason)}")
+            {:error, reason}
+        end
+      end)
+    else
+      :ok
+    end
+  end
+
+  defp persist_enabled? do
+    case pairing_config() |> read_config_field("persist") do
+      nil -> true
+      value -> truthy?(value)
+    end
+  end
+
+  defp store_path do
+    configured = pairing_config() |> read_config_field("store_path")
+
+    path =
+      cond do
+        is_binary(configured) and String.trim(configured) != "" ->
+          configured
+
+        true ->
+          @default_store_path
+      end
+
+    Path.expand(path)
+  end
+
+  defp ensure_store_directory(path) do
+    path
+    |> Path.dirname()
+    |> File.mkdir_p!()
+  end
+
+  defp pairing_config do
+    Application.get_env(:pincer, :pairing, %{})
+  end
+
+  defp read_config_field(config, key) when is_map(config) and is_binary(key) do
+    Map.get(config, key) ||
+      Enum.find_value(config, fn
+        {config_key, value} when is_atom(config_key) ->
+          if Atom.to_string(config_key) == key, do: value, else: nil
+
+        _ ->
+          nil
+      end)
+  end
+
+  defp read_config_field(config, key) when is_list(config) and is_binary(key) do
+    Enum.find_value(config, fn
+      {^key, value} ->
+        value
+
+      {config_key, value} when is_binary(config_key) and config_key == key ->
+        value
+
+      {config_key, value} when is_atom(config_key) ->
+        if Atom.to_string(config_key) == key, do: value, else: nil
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp read_config_field(_config, _key), do: nil
+
+  defp truthy?(value) when is_boolean(value), do: value
+  defp truthy?(value) when is_integer(value), do: value != 0
+
+  defp truthy?(value) when is_binary(value) do
+    case value |> String.trim() |> String.downcase() do
+      "0" -> false
+      "false" -> false
+      "no" -> false
+      "off" -> false
+      _ -> true
+    end
+  end
+
+  defp truthy?(_value), do: true
+
+  defp announce_pairing_code(channel, sender_id, code, expires_at_ms, opts \\ []) do
+    reused? = Keyword.get(opts, :reused, false)
+    normalized_channel = normalize_channel(channel)
+    normalized_sender = normalize_sender(sender_id)
+    action = if reused?, do: "reused", else: "issued"
+
+    Logger.warning(
+      "[PAIRING] #{action} channel=#{normalized_channel} sender=#{normalized_sender} code=#{code} expires_at_ms=#{expires_at_ms}"
+    )
+
+    payload = %{
+      channel: normalized_channel,
+      sender_id: normalized_sender,
+      code: code,
+      expires_at_ms: expires_at_ms,
+      reused: reused?
+    }
+
+    safe_broadcast_pairing_code(payload)
+    :ok
+  end
+
+  defp safe_broadcast_pairing_code(payload) when is_map(payload) do
+    PubSub.broadcast("session:cli:admin", {:pairing_code, payload})
+  rescue
+    _ -> :ok
   end
 end

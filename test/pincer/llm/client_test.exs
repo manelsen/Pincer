@@ -36,6 +36,7 @@ defmodule Pincer.LLM.ClientTest do
     # Save original env
     orig_providers = Application.get_env(:pincer, :llm_providers)
     orig_default = Application.get_env(:pincer, :default_llm_provider)
+    orig_llm = Application.get_env(:pincer, :llm)
 
     # Set test env
     Application.put_env(:pincer, :llm_providers, %{
@@ -47,6 +48,7 @@ defmodule Pincer.LLM.ClientTest do
     })
 
     Application.put_env(:pincer, :default_llm_provider, "test_provider")
+    Application.delete_env(:pincer, :llm)
     System.put_env("TEST_API_KEY", "fake_key_123")
 
     on_exit(fn ->
@@ -60,6 +62,12 @@ defmodule Pincer.LLM.ClientTest do
         Application.put_env(:pincer, :default_llm_provider, orig_default)
       else
         Application.delete_env(:pincer, :default_llm_provider)
+      end
+
+      if orig_llm do
+        Application.put_env(:pincer, :llm, orig_llm)
+      else
+        Application.delete_env(:pincer, :llm)
       end
     end)
 
@@ -98,6 +106,38 @@ defmodule Pincer.LLM.ClientTest do
   end
 
   describe "model registry integration" do
+    test "list_providers/0 prioritizes config.yaml llm structure and ignores selector key" do
+      Application.put_env(:pincer, :llm, %{
+        "provider" => "z_ai",
+        "z_ai" => %{"default_model" => "glm-4.7"},
+        "openrouter" => %{"default_model" => "openrouter/free"}
+      })
+
+      Application.put_env(:pincer, :llm_providers, %{
+        "moonshot" => %{adapter: MockAdapter, default_model: "moonshot-v1-auto"}
+      })
+
+      providers = Client.list_providers()
+
+      assert Enum.map(providers, & &1.id) == ["openrouter", "z_ai"]
+    end
+
+    test "list_models/1 reads model list from config.yaml llm structure when present" do
+      Application.put_env(:pincer, :llm, %{
+        "provider" => "z_ai",
+        "z_ai" => %{
+          "default_model" => "glm-4.7",
+          "model_list" => ["glm-4.7", "glm-4.5"]
+        }
+      })
+
+      Application.put_env(:pincer, :llm_providers, %{
+        "z_ai" => %{adapter: MockAdapter, default_model: "legacy-model"}
+      })
+
+      assert Client.list_models("z_ai") == ["glm-4.7", "glm-4.5"]
+    end
+
     test "list_providers/0 returns stable ids" do
       Application.put_env(:pincer, :llm_providers, %{
         "z_ai" => %{adapter: MockAdapter, default_model: "glm-4.7"},
@@ -115,6 +155,20 @@ defmodule Pincer.LLM.ClientTest do
           adapter: MockAdapter,
           default_model: "glm-4.7",
           models: ["glm-4.7", "glm-4.5"]
+        }
+      })
+
+      assert Client.list_models("z_ai") == ["glm-4.7", "glm-4.5"]
+    end
+
+    test "list_models/1 falls back to llm_providers when llm config is unavailable" do
+      Application.delete_env(:pincer, :llm)
+
+      Application.put_env(:pincer, :llm_providers, %{
+        "z_ai" => %{
+          adapter: MockAdapter,
+          default_model: "glm-4.7",
+          models: ["glm-4.5"]
         }
       })
 

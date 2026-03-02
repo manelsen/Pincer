@@ -9,6 +9,8 @@ defmodule Pincer.Core.UXTest do
     assert "menu" in names
     assert "status" in names
     assert "models" in names
+    assert "kanban" in names
+    assert "project" in names
     assert "ping" in names
   end
 
@@ -19,6 +21,8 @@ defmodule Pincer.Core.UXTest do
     assert text =~ "/menu"
     assert text =~ "/status"
     assert text =~ "/models"
+    assert text =~ "/kanban"
+    assert text =~ "/project"
     assert text =~ "/ping"
     assert text =~ "with or without /"
   end
@@ -33,11 +37,15 @@ defmodule Pincer.Core.UXTest do
     assert String.length(UX.unknown_interaction_hint()) <= 80
   end
 
-  test "resolve_shortcut/1 accepts menu/status/models/ping with and without slash" do
+  test "resolve_shortcut/1 accepts menu/status/models/kanban/project/ping with and without slash" do
     assert {:ok, "/menu"} = UX.resolve_shortcut("menu")
     assert {:ok, "/menu"} = UX.resolve_shortcut("/menu")
     assert {:ok, "/status"} = UX.resolve_shortcut("status")
     assert {:ok, "/models"} = UX.resolve_shortcut("/models")
+    assert {:ok, "/kanban"} = UX.resolve_shortcut("kanban")
+    assert {:ok, "/kanban"} = UX.resolve_shortcut("/kanban")
+    assert {:ok, "/project"} = UX.resolve_shortcut("project")
+    assert {:ok, "/project"} = UX.resolve_shortcut("/project")
     assert {:ok, "/ping"} = UX.resolve_shortcut("ping")
   end
 

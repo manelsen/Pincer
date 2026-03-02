@@ -65,13 +65,13 @@ defmodule Pincer.Core.AccessPolicy do
         if Pairing.paired?(channel, sender) do
           {:allow, %{mode: :pairing}}
         else
-          {:ok, %{code: code}} = Pairing.issue_code(channel, sender)
+          {:ok, _pairing} = Pairing.issue_code(channel, sender)
 
           {:deny,
            %{
              mode: :pairing,
              reason: :pairing_required,
-             user_message: pairing_message(channel, code)
+             user_message: pairing_message(channel)
            }}
         end
     end
@@ -149,8 +149,8 @@ defmodule Pincer.Core.AccessPolicy do
     "Conversas diretas estao desativadas neste canal no momento."
   end
 
-  defp pairing_message(_channel, code) do
-    "Este canal exige pairing para DM. Codigo: #{code}. Use /pair <codigo> antes da expiracao."
+  defp pairing_message(_channel) do
+    "Este canal exige pairing para DM. Solicite o codigo ao operador e use /pair <codigo> antes da expiracao."
   end
 
   defp read_field(map, key) when is_map(map) and is_binary(key) do

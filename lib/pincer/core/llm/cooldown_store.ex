@@ -126,7 +126,33 @@ defmodule Pincer.Core.LLM.CooldownStore do
     Map.get(map, key, Map.get(map, to_string(key), default))
   end
 
-  defp fetch_key(list, key, default) when is_list(list), do: Keyword.get(list, key, default)
+  defp fetch_key(list, key, default) when is_list(list) do
+    string_key = to_string(key)
+
+    cond do
+      Keyword.keyword?(list) ->
+        Keyword.get(list, key, default)
+
+      true ->
+        Enum.find_value(list, default, fn
+          {^key, value} ->
+            value
+
+          {list_key, value} when is_binary(list_key) and list_key == string_key ->
+            value
+
+          {list_key, value} when is_atom(list_key) ->
+            if Atom.to_string(list_key) == string_key, do: value, else: nil
+
+          %{} = map ->
+            Map.get(map, key) || Map.get(map, string_key)
+
+          _ ->
+            nil
+        end)
+    end
+  end
+
   defp fetch_key(_other, _key, default), do: default
 
   defp now_ms, do: System.monotonic_time(:millisecond)

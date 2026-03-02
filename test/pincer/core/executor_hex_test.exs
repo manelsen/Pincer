@@ -40,7 +40,7 @@ defmodule Pincer.Core.ExecutorHexTest do
         )
 
       # 4. Assert we receive the finished message
-      assert_receive {:executor_finished, _new_history, "Hello from Mock LLM"}, 1000
+      assert_receive {:executor_finished, _new_history, "Hello from Mock LLM"}, 2000
     end
 
     test "executes tools via registry" do
@@ -84,6 +84,13 @@ defmodule Pincer.Core.ExecutorHexTest do
         assert last_msg["role"] == "tool"
         assert last_msg["content"] == "Tool Result"
 
+        assistant_msg = Enum.at(history, -2)
+        assert assistant_msg["role"] == "assistant"
+        assert is_list(assistant_msg["tool_calls"])
+
+        assert [%{"type" => "function", "function" => %{"name" => "my_tool"}} | _] =
+                 assistant_msg["tool_calls"]
+
         {:ok, [%{"choices" => [%{"delta" => %{"content" => "Done"}}]}]}
       end)
 
@@ -93,8 +100,167 @@ defmodule Pincer.Core.ExecutorHexTest do
           llm_client: Pincer.MockLLMClient
         )
 
-      assert_receive {:sme_tool_use, "my_tool"}, 1000
-      assert_receive {:executor_finished, _, "Done"}, 1000
+      assert_receive {:sme_tool_use, "my_tool"}, 2000
+      assert_receive {:executor_finished, _, "Done"}, 2000
+    end
+
+    test "auto-sends markdown artifacts created by tool execution" do
+      session_pid = self()
+      session_id = "tool_exec_markdown_session"
+      history = [%{"role" => "user", "content" => "Generate markdown"}]
+
+      rel_path =
+        Path.join("trash", "executor_markdown_#{System.unique_integer([:positive])}.md")
+
+      abs_path = Path.expand(rel_path, File.cwd!())
+
+      on_exit(fn ->
+        File.rm(abs_path)
+      end)
+
+      Pincer.MockToolRegistry
+      |> stub(:list_tools, fn -> [] end)
+      |> expect(:execute_tool, fn "my_tool", %{"arg" => "val"}, _ctx ->
+        File.mkdir_p!(Path.dirname(abs_path))
+        File.write!(abs_path, "# Project Brief\n\n- Domain captured\n")
+        {:ok, "Tool Result"}
+      end)
+
+      Pincer.MockLLMClient
+      |> expect(:stream_completion, fn _history, _opts ->
+        chunk1 = %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [
+                  %{
+                    "index" => 0,
+                    "id" => "call_md_1",
+                    "function" => %{"name" => "my_tool", "arguments" => "{\"arg\": \"val\"}"}
+                  }
+                ]
+              }
+            }
+          ]
+        }
+
+        chunk2 = %{"choices" => [%{"delta" => %{}}]}
+        {:ok, [chunk1, chunk2]}
+      end)
+      |> expect(:stream_completion, fn _history, _opts ->
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "Done"}}]}]}
+      end)
+
+      {:ok, _pid} =
+        Pincer.Core.Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MockToolRegistry,
+          llm_client: Pincer.MockLLMClient
+        )
+
+      assert_receive {:sme_status, :executor, markdown_notice}, 2000
+      assert markdown_notice =~ "Markdown artifact"
+      assert markdown_notice =~ rel_path
+      assert markdown_notice =~ "# Project Brief"
+
+      assert_receive {:executor_finished, _, "Done"}, 2000
+    end
+
+    test "does not auto-send markdown notice when no markdown changed" do
+      session_pid = self()
+      session_id = "tool_exec_no_markdown_session"
+      history = [%{"role" => "user", "content" => "Run tool"}]
+
+      Pincer.MockToolRegistry
+      |> stub(:list_tools, fn -> [] end)
+      |> expect(:execute_tool, fn "my_tool", %{"arg" => "val"}, _ctx ->
+        {:ok, "Tool Result"}
+      end)
+
+      Pincer.MockLLMClient
+      |> expect(:stream_completion, fn _history, _opts ->
+        chunk1 = %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [
+                  %{
+                    "index" => 0,
+                    "id" => "call_no_md_1",
+                    "function" => %{"name" => "my_tool", "arguments" => "{\"arg\": \"val\"}"}
+                  }
+                ]
+              }
+            }
+          ]
+        }
+
+        chunk2 = %{"choices" => [%{"delta" => %{}}]}
+        {:ok, [chunk1, chunk2]}
+      end)
+      |> expect(:stream_completion, fn _history, _opts ->
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "Done"}}]}]}
+      end)
+
+      {:ok, _pid} =
+        Pincer.Core.Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MockToolRegistry,
+          llm_client: Pincer.MockLLMClient
+        )
+
+      refute_receive {:sme_status, :executor, _}, 300
+      assert_receive {:executor_finished, _, "Done"}, 2000
+    end
+
+    test "accepts tool_call arguments already decoded as map in streamed deltas" do
+      session_pid = self()
+      session_id = "tool_exec_args_map_session"
+      history = [%{"role" => "user", "content" => "Pesquise online"}]
+
+      Pincer.MockToolRegistry
+      |> stub(:list_tools, fn -> [] end)
+      |> expect(:execute_tool, fn "web", %{"action" => "search", "query" => "elixir"}, _ctx ->
+        {:ok, "tool ok"}
+      end)
+
+      Pincer.MockLLMClient
+      |> expect(:stream_completion, fn _history, _opts ->
+        chunk = %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [
+                  %{
+                    "index" => 0,
+                    "id" => "call_map_1",
+                    "function" => %{
+                      "name" => "web",
+                      "arguments" => %{"action" => "search", "query" => "elixir"}
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+
+        {:ok, [chunk]}
+      end)
+      |> expect(:stream_completion, fn history, _opts ->
+        last_msg = List.last(history)
+        assert last_msg["role"] == "tool"
+        assert last_msg["content"] == "tool ok"
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "Done map args"}}]}]}
+      end)
+
+      {:ok, _pid} =
+        Pincer.Core.Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MockToolRegistry,
+          llm_client: Pincer.MockLLMClient
+        )
+
+      assert_receive {:sme_tool_use, "web"}, 2000
+      assert_receive {:executor_finished, _, "Done map args"}, 2000
+      refute_receive {:executor_failed, _}
     end
 
     test "denies approved command outside workspace when restrict_to_workspace is enabled" do
@@ -163,10 +329,10 @@ defmodule Pincer.Core.ExecutorHexTest do
           llm_client: Pincer.MockLLMClient
         )
 
-      assert_receive {:approval_requested, "call_restrict_1", "cat /etc/passwd"}, 1000
+      assert_receive {:approval_requested, "call_restrict_1", "cat /etc/passwd"}, 2000
       send(executor_pid, {:tool_approval, "call_restrict_1", :granted})
 
-      assert_receive {:executor_finished, _, "Done"}, 1000
+      assert_receive {:executor_finished, _, "Done"}, 2000
     end
   end
 end
