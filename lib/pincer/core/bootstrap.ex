@@ -4,7 +4,7 @@ defmodule Pincer.Core.Bootstrap do
   The soul is forged in dialogue, avoiding virtual assistant clichés.
   """
 
-  alias Pincer.LLM.Client
+  alias Pincer.Ports.LLM
 
   @questions [
     %{id: :name, text: "How do you want to name this technical instance?"},
@@ -68,7 +68,7 @@ defmodule Pincer.Core.Bootstrap do
     Return ONLY pure JSON: {"identity": "content...", "soul": "content...", "user": "content..."}
     """
 
-    case Client.chat_completion([%{"role" => "system", "content" => prompt}]) do
+    case LLM.chat_completion([%{"role" => "system", "content" => prompt}]) do
       {:ok, %{"content" => content}} ->
         clean_content =
           content

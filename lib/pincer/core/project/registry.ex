@@ -1,4 +1,4 @@
-defmodule Pincer.Project.Registry do
+defmodule Pincer.Core.Project.Registry do
   @moduledoc """
   Global registry for project processes.
   Allows looking up project GenServers by their unique ID.

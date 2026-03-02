@@ -1,4 +1,4 @@
-defmodule Pincer.Orchestration.Archivist do
+defmodule Pincer.Core.Orchestration.Archivist do
   @moduledoc """
   A memory consolidation agent that extracts and persists knowledge from sessions.
 
@@ -72,13 +72,13 @@ defmodule Pincer.Orchestration.Archivist do
   ## Examples
 
       # Start consolidation asynchronously
-      Pincer.Orchestration.Archivist.start_consolidation(
+      Pincer.Core.Orchestration.Archivist.start_consolidation(
         "session_123",
         conversation_history
       )
 
       # Or start as a supervised GenServer
-      {:ok, pid} = Pincer.Orchestration.Archivist.start_link([])
+      {:ok, pid} = Pincer.Core.Orchestration.Archivist.start_link([])
 
   ## Memory File Locations
 
@@ -91,7 +91,7 @@ defmodule Pincer.Orchestration.Archivist do
   use GenServer
   require Logger
   alias Pincer.Core.Memory
-  alias Pincer.LLM.Client
+  alias Pincer.Ports.LLM
 
   @memory_file "MEMORY.md"
 
@@ -110,7 +110,7 @@ defmodule Pincer.Orchestration.Archivist do
 
   ## Examples
 
-      iex> Pincer.Orchestration.Archivist.start_link([])
+      iex> Pincer.Core.Orchestration.Archivist.start_link([])
       {:ok, #PID<0.200.0>}
 
   """
@@ -137,7 +137,7 @@ defmodule Pincer.Orchestration.Archivist do
 
   ## Examples
 
-      iex> Pincer.Orchestration.Archivist.start_consolidation(
+      iex> Pincer.Core.Orchestration.Archivist.start_consolidation(
       ...>   "session_abc",
       ...>   [%{"role" => "user", "content" => "Hello"}]
       ...> )
@@ -228,7 +228,7 @@ defmodule Pincer.Orchestration.Archivist do
     RETURN ONLY THE FILE CONTENT.
     """
 
-    case Client.chat_completion([%{"role" => "system", "content" => archive_instruction}]) do
+    case LLM.chat_completion([%{"role" => "system", "content" => archive_instruction}]) do
       {:ok, %{"content" => new_memory}} ->
         clean_memory = sanitize_markdown(new_memory)
         File.write(@memory_file, clean_memory)
@@ -253,7 +253,7 @@ defmodule Pincer.Orchestration.Archivist do
     #{content}
     """
 
-    case Client.chat_completion([%{"role" => "system", "content" => snippet_instruction}]) do
+    case LLM.chat_completion([%{"role" => "system", "content" => snippet_instruction}]) do
       {:ok, %{"content" => response}} ->
         snippets =
           response
@@ -288,12 +288,12 @@ defmodule Pincer.Orchestration.Archivist do
     #{content}
     """
 
-    case Client.chat_completion([%{"role" => "system", "content" => graph_instruction}]) do
+    case LLM.chat_completion([%{"role" => "system", "content" => graph_instruction}]) do
       {:ok, %{"content" => response}} ->
         case String.split(response, "BUG_FIX:") do
           [_, data] ->
             [bug, fix, file] = data |> String.split("|") |> Enum.map(&String.trim/1)
-            Pincer.Storage.Adapters.Graph.ingest_bug_fix(bug, fix, file)
+            Pincer.Ports.Storage.ingest_bug_fix(bug, fix, file)
             Logger.info("[ARCHIVIST] 🕸️ Bug fix relationship ingested into SQLite Graph: #{file}")
 
           _ ->

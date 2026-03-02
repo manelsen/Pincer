@@ -1,13 +1,13 @@
-defmodule Pincer.Project.Planner do
+defmodule Pincer.Core.Project.Planner do
   @moduledoc """
   Architect logic for task atomization with STRICT SRP and Purity.
   Enforces read-only tests for Coder and atomic pure functions.
   """
   require Logger
-  alias Pincer.LLM.Client
+  alias Pincer.Ports.LLM
 
   @spec build_plan(String.t(), keyword()) :: {:ok, [String.t()]} | {:error, any()}
-  def build_plan(objective, opts \\ []) do
+  def build_plan(objective, _opts \\ []) do
     Logger.info("[ARCHITECT] Decomposing objective with STRICT SRP/Purity: #{objective}")
 
     prompt = """
@@ -38,7 +38,7 @@ defmodule Pincer.Project.Planner do
 
     messages = [%{"role" => "system", "content" => prompt}]
 
-    case Client.chat_completion(messages) do
+    case LLM.chat_completion(messages) do
       {:ok, %{"content" => content}} ->
         tasks = 
           content

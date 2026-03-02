@@ -57,16 +57,9 @@ defmodule Pincer.Core.Executor do
   end
 
   defp resolve_dependencies(opts) do
-    config = Application.get_env(:pincer, :core, [])
-
     %{
-      tool_registry:
-        Keyword.get(
-          opts,
-          :tool_registry,
-          config[:tool_registry] || Pincer.Adapters.NativeToolRegistry
-        ),
-      llm_client: Keyword.get(opts, :llm_client, config[:llm_client] || Pincer.LLM.Client),
+      tool_registry: Keyword.get(opts, :tool_registry, Pincer.Ports.ToolRegistry),
+      llm_client: Keyword.get(opts, :llm_client, Pincer.Ports.LLM),
       # file_fetcher: fn url -> {:ok, base64} | {:error, reason} end
       # Overridable in tests to avoid real HTTP calls during attachment inlining.
       file_fetcher: Keyword.get(opts, :file_fetcher, &Pincer.Core.Executor.default_file_fetch/1)
@@ -464,12 +457,12 @@ defmodule Pincer.Core.Executor do
        "⚠️ **APPROVAL REQUIRED** (id: #{call_id}): The command `#{command}` is potentially dangerous. Approve or Reject."}
     )
 
-    Pincer.PubSub.broadcast(
+    Pincer.Infra.PubSub.broadcast(
       "session:#{session_id}",
       {:agent_thinking, "Waiting for confirmation for: `#{command}`..."}
     )
 
-    Pincer.PubSub.broadcast("session:#{session_id}", {:approval_requested, call_id, command})
+    Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:approval_requested, call_id, command})
 
     receive do
       {:tool_approval, ^call_id, :granted} ->
@@ -477,7 +470,7 @@ defmodule Pincer.Core.Executor do
         workspace_restrict = restrict_to_workspace_enabled?()
         workspace_root = File.cwd!()
 
-        case Pincer.Tools.SafeShell.approved_command_allowed?(command,
+        case Pincer.Core.WorkspaceGuard.command_allowed?(command,
                workspace_restrict: workspace_restrict,
                workspace_root: workspace_root
              ) do

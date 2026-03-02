@@ -9,7 +9,7 @@ defmodule Pincer.Core.Pairing do
   """
   require Logger
 
-  alias Pincer.PubSub
+  alias Pincer.Infra.PubSub
 
   @table_pending :pincer_pairing_pending
   @table_pairs :pincer_pairing_pairs

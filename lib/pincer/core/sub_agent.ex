@@ -5,6 +5,7 @@ defmodule Pincer.Core.SubAgent do
   """
   use Task, restart: :temporary
   require Logger
+  alias Pincer.Ports.ToolRegistry
 
   @doc """
   Starts the execution of a tool in background.
@@ -29,27 +30,15 @@ defmodule Pincer.Core.SubAgent do
         _ -> args_json
       end
 
-    # 1. Try native tools
-    module = find_native_tool_module(name)
-
+    # Delegate 100% to the ToolRegistry Port
     result =
-      cond do
-        module ->
-          case module.execute(args) do
-            {:ok, content} -> content
-            {:error, reason} -> "Error in native tool #{name}: #{inspect(reason)}"
-          end
-
-        # 2. Try MCP tools
-        true ->
-          case Pincer.Connectors.MCP.Manager.execute_tool(name, args) do
-            {:ok, content} -> content
-            {:error, :tool_not_found} -> "Tool #{name} not found."
-            {:error, reason} -> "Error in MCP tool #{name}: #{inspect(reason)}"
-          end
+      case ToolRegistry.execute_tool(name, args) do
+        {:ok, content} -> content
+        {:error, :tool_not_found} -> "Tool #{name} not found."
+        {:error, reason} -> "Error in tool #{name}: #{inspect(reason)}"
       end
 
-    # Sends the result back to the Session via Cast or Call message
+    # Sends the result back to the Session
     send(
       session_pid,
       {:tool_result,
@@ -60,17 +49,5 @@ defmodule Pincer.Core.SubAgent do
          "content" => result
        }}
     )
-  end
-
-  defp find_native_tool_module(name) do
-    # Temporary fixed list
-    tools = [
-      Pincer.Tools.FileSystem,
-      Pincer.Tools.Config,
-      Pincer.Tools.Scheduler,
-      Pincer.Tools.GitHub
-    ]
-
-    Enum.find(tools, fn m -> m.spec().name == name end)
   end
 end

@@ -1,15 +1,17 @@
-defmodule Pincer.Orchestration.BlackboardRecoveryTest do
+defmodule Pincer.Core.Orchestration.BlackboardRecoveryTest do
   use ExUnit.Case, async: false
-  alias Pincer.Orchestration.Blackboard
+  alias Pincer.Core.Orchestration.Blackboard
 
   setup do
     # Limpa o arquivo de journal para o teste
     File.rm("memory/blackboard.journal")
-    
+
     case Process.whereis(Blackboard) do
       nil -> Blackboard.start_link([])
       _ -> :ok
     end
+
+    Blackboard.reset()
     :ok
   end
 

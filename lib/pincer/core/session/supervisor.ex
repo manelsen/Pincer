@@ -1,15 +1,15 @@
-defmodule Pincer.Session.Supervisor do
+defmodule Pincer.Core.Session.Supervisor do
   @moduledoc """
   DynamicSupervisor managing the lifecycle of session servers.
 
   Provides a centralized entry point for creating and terminating user sessions.
-  Each session runs as an independent `Pincer.Session.Server` process under this
+  Each session runs as an independent `Pincer.Core.Session.Server` process under this
   supervisor, allowing for fault isolation and dynamic scaling.
 
   ## Architecture
 
       ┌─────────────────────────────────────────────────┐
-      │            Pincer.Session.Supervisor            │
+      │            Pincer.Core.Session.Supervisor            │
       │            (DynamicSupervisor)                  │
       └─────────────────────────────────────────────────┘
                            │
@@ -27,19 +27,19 @@ defmodule Pincer.Session.Supervisor do
 
   ## Session Registry
 
-  Sessions are registered in `Pincer.Session.Registry` using their `session_id`,
+  Sessions are registered in `Pincer.Core.Session.Registry` using their `session_id`,
   enabling process lookup by ID rather than PID.
 
   ## Examples
 
       # Start the supervisor (typically done in application supervision tree)
-      {:ok, pid} = Pincer.Session.Supervisor.start_link([])
+      {:ok, pid} = Pincer.Core.Session.Supervisor.start_link([])
 
       # Create a new session
-      {:ok, session_pid} = Pincer.Session.Supervisor.start_session("user_123")
+      {:ok, session_pid} = Pincer.Core.Session.Supervisor.start_session("user_123")
 
       # Terminate a session
-      :ok = Pincer.Session.Supervisor.stop_session("user_123")
+      :ok = Pincer.Core.Session.Supervisor.stop_session("user_123")
 
   ## Integration
 
@@ -47,10 +47,10 @@ defmodule Pincer.Session.Supervisor do
 
       children = [
         # ... other children
-        Pincer.Session.Supervisor
+        Pincer.Core.Session.Supervisor
       ]
 
-  Note: Requires `Pincer.Session.Registry` to be started before use.
+  Note: Requires `Pincer.Core.Session.Registry` to be started before use.
   """
   use DynamicSupervisor
 
@@ -67,7 +67,7 @@ defmodule Pincer.Session.Supervisor do
 
   ## Examples
 
-      {:ok, pid} = Pincer.Session.Supervisor.start_link([])
+      {:ok, pid} = Pincer.Core.Session.Supervisor.start_link([])
 
   ## Returns
 
@@ -87,7 +87,7 @@ defmodule Pincer.Session.Supervisor do
   @doc """
   Creates and starts a new session server.
 
-  Spawns a new `Pincer.Session.Server` process registered under the given
+  Spawns a new `Pincer.Core.Session.Server` process registered under the given
   `session_id`. If a session with that ID already exists, returns an error.
 
   ## Parameters
@@ -96,11 +96,11 @@ defmodule Pincer.Session.Supervisor do
 
   ## Examples
 
-      {:ok, pid} = Pincer.Session.Supervisor.start_session("user_123")
+      {:ok, pid} = Pincer.Core.Session.Supervisor.start_session("user_123")
       #=> {:ok, #PID<0.456.0>}
 
       # Attempting to start duplicate session
-      {:error, {:already_started, pid}} = Pincer.Session.Supervisor.start_session("user_123")
+      {:error, {:already_started, pid}} = Pincer.Core.Session.Supervisor.start_session("user_123")
 
   ## Returns
 
@@ -110,7 +110,7 @@ defmodule Pincer.Session.Supervisor do
   """
   @spec start_session(session_id()) :: {:ok, pid()} | {:error, term()}
   def start_session(session_id) do
-    child_spec = {Pincer.Session.Server, [session_id: session_id]}
+    child_spec = {Pincer.Core.Session.Server, [session_id: session_id]}
     DynamicSupervisor.start_child(__MODULE__, child_spec)
   end
 
@@ -126,10 +126,10 @@ defmodule Pincer.Session.Supervisor do
 
   ## Examples
 
-      :ok = Pincer.Session.Supervisor.stop_session("user_123")
+      :ok = Pincer.Core.Session.Supervisor.stop_session("user_123")
 
       # Attempting to stop non-existent session
-      {:error, :not_found} = Pincer.Session.Supervisor.stop_session("unknown")
+      {:error, :not_found} = Pincer.Core.Session.Supervisor.stop_session("unknown")
 
   ## Returns
 
@@ -138,7 +138,7 @@ defmodule Pincer.Session.Supervisor do
   """
   @spec stop_session(session_id()) :: :ok | {:error, :not_found}
   def stop_session(session_id) do
-    case Registry.lookup(Pincer.Session.Registry, session_id) do
+    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
       [{pid, _}] -> DynamicSupervisor.terminate_child(__MODULE__, pid)
       [] -> {:error, :not_found}
     end

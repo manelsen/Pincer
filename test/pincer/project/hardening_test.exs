@@ -1,9 +1,9 @@
-defmodule Pincer.Project.HardeningTest do
+defmodule Pincer.Core.Project.HardeningTest do
   use ExUnit.Case, async: false
   import Mox
 
-  alias Pincer.Project.Server
-  alias Pincer.Orchestration.Blackboard
+  alias Pincer.Core.Project.Server
+  alias Pincer.Core.Orchestration.Blackboard
 
   # Usamos stub global para que os processos asíncronos (handle_continue)
   # consigam chamar o mock sem erro de ownership.
