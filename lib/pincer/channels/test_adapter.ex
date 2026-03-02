@@ -14,6 +14,7 @@ defmodule Pincer.Channels.TestAdapter do
   @behaviour Pincer.Channels.Telegram.API
   def delete_webhook(), do: {:ok, true}
   def get_updates(_opts), do: {:ok, []}
+  def get_file(_file_id), do: {:ok, %{file_path: "test/file.txt"}}
   def send_message(_chat_id, _text, _opts), do: {:ok, %{}}
   def edit_message_text(_chat_id, _message_id, _text, _opts), do: {:ok, %{}}
   def set_my_commands(_commands, _opts), do: {:ok, true}

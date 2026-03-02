@@ -213,6 +213,33 @@ defmodule Pincer.Channels.TelegramTest do
       assert markup.is_persistent == true
       assert markup.one_time_keyboard == false
     end
+
+    test "plain status text routes to /status command for keyboard-first navigation" do
+      APIMock
+      |> expect(:get_updates, fn _opts ->
+        {:ok,
+         [
+           %{
+             update_id: 13,
+             message: %{text: "status", chat: %{id: 901, type: "private"}}
+           }
+         ]}
+      end)
+      |> expect(:send_message, fn 901, text, _opts ->
+        assert text =~ "Session Status"
+        {:ok, %{message_id: 613}}
+      end)
+
+      {:ok, pid} = Pincer.Channels.Telegram.UpdatesProvider.start_link(nil)
+      allow(APIMock, self(), pid)
+      ref = Process.monitor(pid)
+
+      send(pid, :poll)
+      Process.sleep(100)
+
+      refute_receive {:DOWN, ^ref, :process, ^pid, _}
+      GenServer.stop(pid)
+    end
   end
 
   describe "callback interactions" do
@@ -358,6 +385,46 @@ defmodule Pincer.Channels.TelegramTest do
       GenServer.stop(pid)
     end
 
+    test "callback flood with malformed payloads does not crash poller" do
+      malformed_updates =
+        for n <- 1..60 do
+          %{
+            update_id: 1000 + n,
+            callback_query: if(rem(n, 2) == 0, do: "broken", else: %{data: "select_model::"})
+          }
+        end
+
+      final_valid_update = %{
+        update_id: 2000,
+        callback_query: %{
+          data: "totally_unknown_action",
+          message: %{chat: %{id: 777}, message_id: 404}
+        }
+      }
+
+      APIMock
+      |> expect(:get_updates, fn _opts ->
+        {:ok, malformed_updates ++ [final_valid_update]}
+      end)
+      |> expect(:send_message, fn 777, text, opts ->
+        assert text =~ "Opcao de menu"
+        assert opts[:reply_markup][:keyboard] == [[%{text: "Menu"}]]
+        {:ok, %{message_id: 909}}
+      end)
+
+      {:ok, pid} = Pincer.Channels.Telegram.UpdatesProvider.start_link(nil)
+      allow(APIMock, self(), pid)
+      ref = Process.monitor(pid)
+
+      send(pid, :poll)
+      Process.sleep(120)
+
+      state = :sys.get_state(pid)
+      assert state.offset == 2001
+      refute_receive {:DOWN, ^ref, :process, ^pid, _}
+      GenServer.stop(pid)
+    end
+
     test "invalid select_model callback shape returns friendly fallback" do
       APIMock
       |> expect(:get_updates, fn _opts ->
@@ -428,6 +495,62 @@ defmodule Pincer.Channels.TelegramTest do
 
       refute_receive {:DOWN, ^ref, :process, ^pid, _}
       GenServer.stop(pid)
+    end
+  end
+
+  describe "attachment input preparation" do
+    test "prepare_input_content/2 converts photo updates into multimodal parts" do
+      message = %{
+        caption: "Analisa esta imagem",
+        photo: [
+          %{file_id: "photo_small", file_size: 120, file_unique_id: "img_u1"},
+          %{file_id: "photo_large", file_size: 240, file_unique_id: "img_u1"}
+        ]
+      }
+
+      APIMock
+      |> expect(:get_file, fn "photo_large" ->
+        {:ok, %{file_path: "photos/file_abc.jpg"}}
+      end)
+
+      assert {:ok, [%{"type" => "text", "text" => "Analisa esta imagem"}, ref]} =
+               Telegram.UpdatesProvider.prepare_input_content(message, APIMock)
+
+      assert ref == %{
+               "type" => "attachment_ref",
+               "url" => "telegram://file/photos/file_abc.jpg",
+               "mime_type" => "image/jpeg",
+               "filename" => "photo_img_u1.jpg",
+               "size" => 240
+             }
+    end
+
+    test "prepare_input_content/2 includes log documents as attachment_ref" do
+      message = %{
+        caption: "Leia o log",
+        document: %{
+          file_id: "log_file_1",
+          file_name: "agent.log",
+          file_size: 1024,
+          mime_type: "text/plain"
+        }
+      }
+
+      APIMock
+      |> expect(:get_file, fn "log_file_1" ->
+        {:ok, %{file_path: "documents/agent.log"}}
+      end)
+
+      assert {:ok, [%{"type" => "text", "text" => "Leia o log"}, ref]} =
+               Telegram.UpdatesProvider.prepare_input_content(message, APIMock)
+
+      assert ref == %{
+               "type" => "attachment_ref",
+               "url" => "telegram://file/documents/agent.log",
+               "mime_type" => "text/plain",
+               "filename" => "agent.log",
+               "size" => 1024
+             }
     end
   end
 

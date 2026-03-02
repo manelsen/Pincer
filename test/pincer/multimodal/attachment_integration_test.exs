@@ -25,16 +25,26 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
 
   defp pdf_ref(size \\ 1_000) do
     %{
-      "type"      => "attachment_ref",
-      "url"       => "https://cdn.example.com/file.pdf",
+      "type" => "attachment_ref",
+      "url" => "https://cdn.example.com/file.pdf",
       "mime_type" => "application/pdf",
-      "filename"  => "file.pdf",
-      "size"      => size
+      "filename" => "file.pdf",
+      "size" => size
     }
   end
 
   defp user_msg_with_ref(text, ref) do
     %{"role" => "user", "content" => [%{"type" => "text", "text" => text}, ref]}
+  end
+
+  defp text_log_ref(size \\ 120) do
+    %{
+      "type" => "attachment_ref",
+      "url" => "https://cdn.example.com/agent.log",
+      "mime_type" => "text/plain",
+      "filename" => "agent.log",
+      "size" => size
+    }
   end
 
   defp simple_llm_stream(text) do
@@ -48,8 +58,8 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
   describe "Executor.run — attachment_ref resolution" do
     test "resolves attachment_ref to inline_data when provider supports files" do
       session_pid = self()
-      session_id  = "mm_test_support"
-      fake_b64    = Base.encode64("PDF bytes")
+      session_id = "mm_test_support"
+      fake_b64 = Base.encode64("PDF bytes")
 
       history = [user_msg_with_ref("Summarise this", pdf_ref())]
 
@@ -70,13 +80,15 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
       Application.put_env(:pincer, :llm_providers, %{
         "test_multimodal" => %{adapter: nil, supports_files: true}
       })
+
       Application.put_env(:pincer, :default_llm_provider, "test_multimodal")
 
-      {:ok, _} = Executor.start(session_pid, session_id, history,
-        tool_registry: Pincer.MultimodalMockToolRegistry,
-        llm_client: Pincer.MultimodalMockLLMClient,
-        file_fetcher: fake_fetcher
-      )
+      {:ok, _} =
+        Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MultimodalMockToolRegistry,
+          llm_client: Pincer.MultimodalMockLLMClient,
+          file_fetcher: fake_fetcher
+        )
 
       assert_receive {:executor_finished, _, "Summary done"}, 2_000
 
@@ -87,7 +99,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
 
     test "converts attachment_ref to descriptive text when provider does not support files" do
       session_pid = self()
-      session_id  = "mm_test_no_support"
+      session_id = "mm_test_no_support"
 
       history = [user_msg_with_ref("Summarise this", pdf_ref())]
 
@@ -99,25 +111,35 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
         assert is_list(user_content)
         # No binary attachment parts; should be plain text description.
         refute Enum.any?(user_content, &(&1["type"] == "inline_data"))
-        text_part = Enum.find(user_content, &(&1["type"] == "text" and
-                                String.contains?(&1["text"] || "", "não suporta")))
+
+        text_part =
+          Enum.find(
+            user_content,
+            &(&1["type"] == "text" and
+                String.contains?(&1["text"] || "", "não suporta"))
+          )
+
         assert text_part != nil
         simple_llm_stream("OK")
       end)
 
       # file_fetcher must NOT be called — assert by not providing one that would succeed
-      no_fetch = fn _url -> flunk("file_fetcher should not be called for non-supporting providers") end
+      no_fetch = fn _url ->
+        flunk("file_fetcher should not be called for non-supporting providers")
+      end
 
       Application.put_env(:pincer, :llm_providers, %{
         "test_text_only" => %{adapter: nil, supports_files: false}
       })
+
       Application.put_env(:pincer, :default_llm_provider, "test_text_only")
 
-      {:ok, _} = Executor.start(session_pid, session_id, history,
-        tool_registry: Pincer.MultimodalMockToolRegistry,
-        llm_client: Pincer.MultimodalMockLLMClient,
-        file_fetcher: no_fetch
-      )
+      {:ok, _} =
+        Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MultimodalMockToolRegistry,
+          llm_client: Pincer.MultimodalMockLLMClient,
+          file_fetcher: no_fetch
+        )
 
       assert_receive {:executor_finished, _, "OK"}, 2_000
 
@@ -125,9 +147,53 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
       Application.delete_env(:pincer, :llm_providers)
     end
 
+    test "converts text attachment_ref to inline text even when provider does not support files" do
+      session_pid = self()
+      session_id = "mm_test_text_ref_no_support"
+      history = [user_msg_with_ref("Summarise this log", text_log_ref())]
+
+      stub(Pincer.MultimodalMockToolRegistry, :list_tools, fn -> [] end)
+
+      Pincer.MultimodalMockLLMClient
+      |> expect(:stream_completion, fn ready_history, _opts ->
+        user_content = get_in(ready_history, [Access.at(-1), "content"])
+
+        text_part =
+          Enum.find(
+            user_content,
+            &(&1["type"] == "text" and String.contains?(&1["text"] || "", "agent.log"))
+          )
+
+        assert text_part != nil
+        assert text_part["text"] =~ "Content of agent.log"
+        assert text_part["text"] =~ "line one"
+        simple_llm_stream("Handled")
+      end)
+
+      fetcher = fn _url -> {:ok, Base.encode64("line one\nline two")} end
+
+      Application.put_env(:pincer, :llm_providers, %{
+        "test_text_only" => %{adapter: nil, supports_files: false}
+      })
+
+      Application.put_env(:pincer, :default_llm_provider, "test_text_only")
+
+      {:ok, _} =
+        Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MultimodalMockToolRegistry,
+          llm_client: Pincer.MultimodalMockLLMClient,
+          file_fetcher: fetcher
+        )
+
+      assert_receive {:executor_finished, _, "Handled"}, 2_000
+
+      Application.delete_env(:pincer, :default_llm_provider)
+      Application.delete_env(:pincer, :llm_providers)
+    end
+
     test "skips download and returns text for oversized attachments" do
       session_pid = self()
-      session_id  = "mm_test_oversize"
+      session_id = "mm_test_oversize"
 
       # size > @max_inline_bytes (10_485_760)
       big_ref = pdf_ref(15_000_000)
@@ -139,8 +205,14 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
       |> expect(:stream_completion, fn ready_history, _opts ->
         user_content = get_in(ready_history, [Access.at(-1), "content"])
         refute Enum.any?(user_content, &(&1["type"] == "inline_data"))
-        text_part = Enum.find(user_content, &(&1["type"] == "text" and
-                                String.contains?(&1["text"] || "", "maior que o limite")))
+
+        text_part =
+          Enum.find(
+            user_content,
+            &(&1["type"] == "text" and
+                String.contains?(&1["text"] || "", "maior que o limite"))
+          )
+
         assert text_part != nil
         simple_llm_stream("Noted")
       end)
@@ -150,13 +222,15 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
       Application.put_env(:pincer, :llm_providers, %{
         "test_oversize" => %{adapter: nil, supports_files: true}
       })
+
       Application.put_env(:pincer, :default_llm_provider, "test_oversize")
 
-      {:ok, _} = Executor.start(session_pid, session_id, history,
-        tool_registry: Pincer.MultimodalMockToolRegistry,
-        llm_client: Pincer.MultimodalMockLLMClient,
-        file_fetcher: never_called
-      )
+      {:ok, _} =
+        Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MultimodalMockToolRegistry,
+          llm_client: Pincer.MultimodalMockLLMClient,
+          file_fetcher: never_called
+        )
 
       assert_receive {:executor_finished, _, "Noted"}, 2_000
 
@@ -166,16 +240,22 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
 
     test "returns error text when download fails" do
       session_pid = self()
-      session_id  = "mm_test_dl_fail"
-      history     = [user_msg_with_ref("Read this", pdf_ref())]
+      session_id = "mm_test_dl_fail"
+      history = [user_msg_with_ref("Read this", pdf_ref())]
 
       stub(Pincer.MultimodalMockToolRegistry, :list_tools, fn -> [] end)
 
       Pincer.MultimodalMockLLMClient
       |> expect(:stream_completion, fn ready_history, _opts ->
         user_content = get_in(ready_history, [Access.at(-1), "content"])
-        text_part = Enum.find(user_content, &(&1["type"] == "text" and
-                                String.contains?(&1["text"] || "", "Falha ao baixar")))
+
+        text_part =
+          Enum.find(
+            user_content,
+            &(&1["type"] == "text" and
+                String.contains?(&1["text"] || "", "Falha ao baixar"))
+          )
+
         assert text_part != nil
         simple_llm_stream("Handled")
       end)
@@ -185,13 +265,15 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
       Application.put_env(:pincer, :llm_providers, %{
         "test_dl_fail" => %{adapter: nil, supports_files: true}
       })
+
       Application.put_env(:pincer, :default_llm_provider, "test_dl_fail")
 
-      {:ok, _} = Executor.start(session_pid, session_id, history,
-        tool_registry: Pincer.MultimodalMockToolRegistry,
-        llm_client: Pincer.MultimodalMockLLMClient,
-        file_fetcher: failing_fetcher
-      )
+      {:ok, _} =
+        Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MultimodalMockToolRegistry,
+          llm_client: Pincer.MultimodalMockLLMClient,
+          file_fetcher: failing_fetcher
+        )
 
       assert_receive {:executor_finished, _, "Handled"}, 2_000
 
@@ -201,8 +283,8 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
 
     test "plain string messages pass through unchanged" do
       session_pid = self()
-      session_id  = "mm_test_plain"
-      history     = [%{"role" => "user", "content" => "Hello, no attachments here"}]
+      session_id = "mm_test_plain"
+      history = [%{"role" => "user", "content" => "Hello, no attachments here"}]
 
       stub(Pincer.MultimodalMockToolRegistry, :list_tools, fn -> [] end)
 
@@ -213,19 +295,20 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
         simple_llm_stream("Hi!")
       end)
 
-      {:ok, _} = Executor.start(session_pid, session_id, history,
-        tool_registry: Pincer.MultimodalMockToolRegistry,
-        llm_client: Pincer.MultimodalMockLLMClient
-      )
+      {:ok, _} =
+        Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MultimodalMockToolRegistry,
+          llm_client: Pincer.MultimodalMockLLMClient
+        )
 
       assert_receive {:executor_finished, _, "Hi!"}, 2_000
     end
 
     test "attachment_ref is preserved in session history (not mutated to inline_data)" do
       session_pid = self()
-      session_id  = "mm_test_history_purity"
-      ref         = pdf_ref()
-      history     = [user_msg_with_ref("Read PDF", ref)]
+      session_id = "mm_test_history_purity"
+      ref = pdf_ref()
+      history = [user_msg_with_ref("Read PDF", ref)]
 
       stub(Pincer.MultimodalMockToolRegistry, :list_tools, fn -> [] end)
 
@@ -237,21 +320,25 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
       Application.put_env(:pincer, :llm_providers, %{
         "test_hist" => %{adapter: nil, supports_files: true}
       })
+
       Application.put_env(:pincer, :default_llm_provider, "test_hist")
 
-      {:ok, _} = Executor.start(session_pid, session_id, history,
-        tool_registry: Pincer.MultimodalMockToolRegistry,
-        llm_client: Pincer.MultimodalMockLLMClient,
-        file_fetcher: fn _url -> {:ok, Base.encode64("data")} end
-      )
+      {:ok, _} =
+        Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MultimodalMockToolRegistry,
+          llm_client: Pincer.MultimodalMockLLMClient,
+          file_fetcher: fn _url -> {:ok, Base.encode64("data")} end
+        )
 
       assert_receive {:executor_finished, final_history, _}, 2_000
 
       # The history returned to the session must keep the lazy ref, not base64 data.
-      original_msg  = Enum.find(final_history, &(&1["role"] == "user"))
-      stored_parts  = original_msg["content"]
+      original_msg = Enum.find(final_history, &(&1["role"] == "user"))
+      stored_parts = original_msg["content"]
+
       assert Enum.any?(stored_parts, &(&1["type"] == "attachment_ref")),
              "attachment_ref must survive in session history unchanged"
+
       refute Enum.any?(stored_parts, &(&1["type"] == "inline_data")),
              "base64 inline_data must NOT appear in the persisted history"
 
@@ -274,7 +361,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
     end
 
     test "list with text part returns text part" do
-      input  = [%{"type" => "text", "text" => "Hi"}]
+      input = [%{"type" => "text", "text" => "Hi"}]
       output = Google.translate_content_to_parts(input)
       assert output == [%{"text" => "Hi"}]
     end
@@ -294,22 +381,32 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
 
     test "mixed text + inline_data list preserves order" do
       input = [
-        %{"type" => "text",        "text"      => "See attached:"},
+        %{"type" => "text", "text" => "See attached:"},
         %{"type" => "inline_data", "mime_type" => "image/jpeg", "data" => "jpeg_b64"}
       ]
+
       output = Google.translate_content_to_parts(input)
       assert length(output) == 2
       assert hd(output) == %{"text" => "See attached:"}
-      assert List.last(output) == %{"inlineData" => %{"mimeType" => "image/jpeg", "data" => "jpeg_b64"}}
+
+      assert List.last(output) == %{
+               "inlineData" => %{"mimeType" => "image/jpeg", "data" => "jpeg_b64"}
+             }
     end
 
     test "unresolved attachment_ref is silently filtered out" do
       input = [
-        %{"type" => "text",           "text"      => "Before"},
-        %{"type" => "attachment_ref", "url"       => "https://cdn.example.com/x.pdf",
-          "mime_type" => "application/pdf", "filename" => "x.pdf", "size" => 500},
-        %{"type" => "text",           "text"      => "After"}
+        %{"type" => "text", "text" => "Before"},
+        %{
+          "type" => "attachment_ref",
+          "url" => "https://cdn.example.com/x.pdf",
+          "mime_type" => "application/pdf",
+          "filename" => "x.pdf",
+          "size" => 500
+        },
+        %{"type" => "text", "text" => "After"}
       ]
+
       output = Google.translate_content_to_parts(input)
       assert length(output) == 2
       assert Enum.all?(output, &is_map_key(&1, "text"))
@@ -318,8 +415,9 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
     test "unknown part types are silently filtered out" do
       input = [
         %{"type" => "video", "url" => "https://example.com/clip.mp4"},
-        %{"type" => "text",  "text" => "Caption"}
+        %{"type" => "text", "text" => "Caption"}
       ]
+
       output = Google.translate_content_to_parts(input)
       assert output == [%{"text" => "Caption"}]
     end

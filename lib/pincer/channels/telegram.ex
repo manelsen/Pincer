@@ -429,6 +429,17 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   @base_poll_interval 1000
   @max_poll_interval 30_000
+  @max_attachment_bytes 20_971_520
+  @multimodal_extension_mime %{
+    ".pdf" => "application/pdf",
+    ".png" => "image/png",
+    ".jpg" => "image/jpeg",
+    ".jpeg" => "image/jpeg",
+    ".webp" => "image/webp",
+    ".gif" => "image/gif",
+    ".log" => "text/plain",
+    ".txt" => "text/plain"
+  }
 
   @doc false
   def start_link(_) do
@@ -535,19 +546,42 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     end
   end
 
-  defp process_update(%{message: %{text: text, chat: %{id: chat_id}}} = update)
-       when not is_nil(text) do
-    chat_type = map_value(update.message.chat, :type)
+  defp process_update(%{message: message}) when is_map(message) do
+    chat = map_value(message, :chat)
+    chat_id = map_value(chat, :id)
+    chat_type = map_value(chat, :type)
+    text = map_value(message, :text)
+    trimmed = if is_binary(text), do: String.trim(text), else: ""
+    has_attachments = has_supported_attachments?(message)
 
-    if String.starts_with?(text, "/") do
-      [cmd | rest] = String.split(text, " ")
-      handle_command(chat_id, cmd, Enum.join(rest, " "), chat_type)
-    else
-      if String.trim(text) == UX.menu_button_label() do
-        handle_command(chat_id, "/menu", "", chat_type)
-      else
-        do_process_message(chat_id, text, chat_type)
-      end
+    cond do
+      is_nil(chat_id) ->
+        Logger.debug("Ignoring malformed Telegram message without chat_id: #{inspect(message)}")
+
+      is_binary(text) and not has_attachments and String.starts_with?(trimmed, "/") ->
+        [cmd | rest] = String.split(trimmed, " ")
+        handle_command(chat_id, cmd, Enum.join(rest, " "), chat_type)
+
+      is_binary(text) and not has_attachments ->
+        case UX.resolve_shortcut(trimmed) do
+          {:ok, command} ->
+            handle_command(chat_id, command, "", chat_type)
+
+          :error ->
+            do_process_message(chat_id, text, chat_type)
+        end
+
+      has_attachments ->
+        case prepare_input_content(message) do
+          {:ok, input_content} ->
+            do_process_message(chat_id, input_content, chat_type)
+
+          :empty ->
+            Logger.debug("[TELEGRAM] Ignoring message without text/supportable attachments.")
+        end
+
+      true ->
+        Logger.debug("Ignoring unsupported Telegram message payload: #{inspect(message)}")
     end
   end
 
@@ -555,18 +589,18 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     Logger.debug("Ignoring unsupported update or update without text: #{inspect(update)}")
   end
 
-  defp do_process_message(chat_id, text, chat_type) do
+  defp do_process_message(chat_id, input_content, chat_type) do
     case authorize_private_dm(chat_id, chat_type) do
       :allow ->
         session_id = session_id_for_chat(chat_id, chat_type)
         Logger.info("[TELEGRAM] Message received from #{chat_id}")
 
         ensure_session_started(session_id)
-        Pincer.Channels.Telegram.Session.ensure_started(chat_id)
+        Pincer.Channels.Telegram.Session.ensure_started(chat_id, session_id)
 
         Logger.info("[TELEGRAM] Routing message to Session ID: #{session_id}")
 
-        case Server.process_input(session_id, text) do
+        case Server.process_input(session_id, input_content) do
           {:ok, :started} ->
             :ok
 
@@ -589,6 +623,243 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
           reply_markup: Pincer.Channels.Telegram.menu_reply_markup()
         )
     end
+  end
+
+  @doc false
+  @spec prepare_input_content(map(), module()) :: {:ok, String.t() | [map()]} | :empty
+  def prepare_input_content(message, api_client \\ Pincer.Channels.Telegram.api_client())
+
+  def prepare_input_content(message, api_client) when is_map(message) do
+    base_text =
+      message
+      |> map_value(:caption)
+      |> normalize_text()
+
+    {attachment_text, refs} = extract_attachment_parts(message, api_client)
+    text_content = [base_text, attachment_text] |> Enum.reject(&(&1 == "")) |> Enum.join("\n")
+
+    cond do
+      refs == [] and text_content == "" ->
+        :empty
+
+      refs == [] ->
+        {:ok, text_content}
+
+      true ->
+        text_parts =
+          if text_content == "" do
+            []
+          else
+            [%{"type" => "text", "text" => text_content}]
+          end
+
+        {:ok, text_parts ++ refs}
+    end
+  end
+
+  def prepare_input_content(_message, _api_client), do: :empty
+
+  defp has_supported_attachments?(message) when is_map(message) do
+    has_document?(message) or has_photo?(message)
+  end
+
+  defp has_supported_attachments?(_), do: false
+
+  defp has_document?(message), do: is_map(map_value(message, :document))
+
+  defp has_photo?(message) do
+    case map_value(message, :photo) do
+      photos when is_list(photos) -> photos != []
+      _ -> false
+    end
+  end
+
+  defp extract_attachment_parts(message, api_client) do
+    {text_acc, refs_acc} =
+      {"", []}
+      |> maybe_collect_document(message, api_client)
+      |> maybe_collect_photo(message, api_client)
+
+    {String.trim(text_acc), refs_acc}
+  end
+
+  defp maybe_collect_document({text_acc, refs_acc}, message, api_client) do
+    case map_value(message, :document) do
+      document when is_map(document) ->
+        filename = sanitize_filename(map_value(document, :file_name) || "document")
+        size = normalize_size(map_value(document, :file_size))
+        mime = normalize_mime(document, filename)
+        ext = filename |> Path.extname() |> String.downcase()
+
+        cond do
+          size > @max_attachment_bytes ->
+            text = append_text_meta(text_acc, filename, size, " (arquivo grande demais)")
+            {text, refs_acc}
+
+          not multimodal_extension?(ext, mime) ->
+            text = append_text_meta(text_acc, filename, size, " (formato nao suportado)")
+            {text, refs_acc}
+
+          true ->
+            case build_attachment_ref(document, filename, size, mime, api_client) do
+              {:ok, ref} ->
+                {text_acc, refs_acc ++ [ref]}
+
+              {:error, reason} ->
+                Logger.warning(
+                  "[TELEGRAM] Failed to resolve document attachment '#{filename}': #{inspect(reason)}"
+                )
+
+                text = append_text_meta(text_acc, filename, size, " (erro ao resolver arquivo)")
+                {text, refs_acc}
+            end
+        end
+
+      _ ->
+        {text_acc, refs_acc}
+    end
+  end
+
+  defp maybe_collect_photo({text_acc, refs_acc}, message, api_client) do
+    case map_value(message, :photo) do
+      photos when is_list(photos) and photos != [] ->
+        case largest_photo(photos) do
+          nil ->
+            {text_acc, refs_acc}
+
+          photo ->
+            size = normalize_size(map_value(photo, :file_size))
+            unique_id = map_value(photo, :file_unique_id) || map_value(photo, :file_id) || "photo"
+            filename = sanitize_filename("photo_#{unique_id}.jpg")
+
+            case build_attachment_ref(photo, filename, size, "image/jpeg", api_client) do
+              {:ok, ref} ->
+                {text_acc, refs_acc ++ [ref]}
+
+              {:error, reason} ->
+                Logger.warning(
+                  "[TELEGRAM] Failed to resolve photo attachment: #{inspect(reason)}"
+                )
+
+                {text_acc, refs_acc}
+            end
+        end
+
+      _ ->
+        {text_acc, refs_acc}
+    end
+  end
+
+  defp build_attachment_ref(file_obj, filename, size, mime, api_client) do
+    with file_id when is_binary(file_id) <- normalize_binary(map_value(file_obj, :file_id)),
+         {:ok, file_path} <- resolve_file_path(api_client, file_id) do
+      {:ok,
+       %{
+         "type" => "attachment_ref",
+         "url" => "telegram://file/#{file_path}",
+         "mime_type" => mime,
+         "filename" => filename,
+         "size" => size
+       }}
+    else
+      _ -> {:error, :file_resolution_failed}
+    end
+  end
+
+  defp resolve_file_path(api_client, file_id) do
+    case api_client.get_file(file_id) do
+      {:ok, file} ->
+        file_path =
+          map_value(file, :file_path) ||
+            map_value(map_value(file, :result), :file_path)
+
+        case normalize_binary(file_path) do
+          nil -> {:error, :missing_file_path}
+          path -> {:ok, path}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+
+      _ ->
+        {:error, :invalid_file_response}
+    end
+  end
+
+  defp multimodal_extension?(ext, mime) do
+    Map.has_key?(@multimodal_extension_mime, ext) or String.starts_with?(mime, "text/")
+  end
+
+  defp normalize_mime(document, filename) do
+    ext = filename |> Path.extname() |> String.downcase()
+    declared = normalize_binary(map_value(document, :mime_type))
+
+    cond do
+      is_binary(declared) and declared != "" ->
+        declared
+
+      Map.has_key?(@multimodal_extension_mime, ext) ->
+        @multimodal_extension_mime[ext]
+
+      true ->
+        "application/octet-stream"
+    end
+  end
+
+  defp normalize_size(value) when is_integer(value) and value >= 0, do: value
+
+  defp normalize_size(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {parsed, ""} when parsed >= 0 -> parsed
+      _ -> 0
+    end
+  end
+
+  defp normalize_size(_), do: 0
+
+  defp append_text_meta(text_acc, filename, size, suffix) do
+    meta = "[Attachment: #{filename} (#{size} bytes)]#{suffix}"
+
+    [text_acc, meta]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
+  end
+
+  defp largest_photo(photos) do
+    photos
+    |> Enum.filter(&is_map/1)
+    |> Enum.max_by(
+      fn photo -> normalize_size(map_value(photo, :file_size)) end,
+      fn -> nil end
+    )
+  end
+
+  defp normalize_text(value) do
+    value
+    |> normalize_binary()
+    |> case do
+      nil -> ""
+      text -> text
+    end
+  end
+
+  defp normalize_binary(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      text -> text
+    end
+  end
+
+  defp normalize_binary(value) when is_atom(value),
+    do: value |> Atom.to_string() |> normalize_binary()
+
+  defp normalize_binary(value) when is_integer(value),
+    do: value |> Integer.to_string() |> normalize_binary()
+
+  defp normalize_binary(_), do: nil
+
+  defp sanitize_filename(filename) do
+    String.replace(filename, ~r/[<>&"'\x00-\x1F]/, "_")
   end
 
   @doc false

@@ -4,9 +4,17 @@ defmodule Pincer.Channels.Telegram.API do
   """
   @callback delete_webhook() :: {:ok, boolean()} | {:error, any()}
   @callback get_updates(opts :: keyword()) :: {:ok, [map()]} | {:error, any()}
-  @callback send_message(chat_id :: integer() | String.t(), text :: String.t(), opts :: keyword()) :: {:ok, any()} | {:error, any()}
-  @callback edit_message_text(chat_id :: integer() | String.t(), message_id :: integer(), text :: String.t(), opts :: keyword()) :: {:ok, any()} | {:error, any()}
-  @callback set_my_commands(commands :: [map()], opts :: keyword()) :: {:ok, boolean()} | {:error, any()}
+  @callback get_file(file_id :: String.t()) :: {:ok, map()} | {:error, any()}
+  @callback send_message(chat_id :: integer() | String.t(), text :: String.t(), opts :: keyword()) ::
+              {:ok, any()} | {:error, any()}
+  @callback edit_message_text(
+              chat_id :: integer() | String.t(),
+              message_id :: integer(),
+              text :: String.t(),
+              opts :: keyword()
+            ) :: {:ok, any()} | {:error, any()}
+  @callback set_my_commands(commands :: [map()], opts :: keyword()) ::
+              {:ok, boolean()} | {:error, any()}
 end
 
 defmodule Pincer.Channels.Telegram.API.Adapter do
@@ -20,6 +28,9 @@ defmodule Pincer.Channels.Telegram.API.Adapter do
 
   @impl true
   def get_updates(opts), do: Telegex.get_updates(opts)
+
+  @impl true
+  def get_file(file_id), do: Telegex.get_file(file_id)
 
   @impl true
   def send_message(chat_id, text, opts), do: Telegex.send_message(chat_id, text, opts)
