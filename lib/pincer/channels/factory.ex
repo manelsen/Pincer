@@ -68,8 +68,8 @@ defmodule Pincer.Channels.Factory do
   ## See Also
 
   - `Pincer.Channels.Supervisor` - Uses Factory to start channels
-  - `Pincer.Channel` - Behaviour that channels implement
-  - `Pincer.Config` - Configuration loading from YAML
+  - `Pincer.Ports.Channel` - Behaviour that channels implement
+  - `Pincer.Infra.Config` - Configuration loading from YAML
   """
 
   require Logger
@@ -84,7 +84,7 @@ defmodule Pincer.Channels.Factory do
   ## Parameters
 
     - `config` - Optional channel configuration map. If not provided, reads
-                from `Pincer.Config.get(:channels, %{})`
+                from `Pincer.Infra.Config.get(:channels, %{})`
 
   ## Returns
 
@@ -103,7 +103,7 @@ defmodule Pincer.Channels.Factory do
   @spec create_channel_specs(config :: map() | nil) :: [{module(), map()}]
   def create_channel_specs(config \\ nil) do
     config = case config do
-      nil -> Pincer.Config.get(:channels, %{})
+      nil -> Pincer.Infra.Config.get(:channels, %{})
       %{"channels" => c} -> c
       c -> c
     end

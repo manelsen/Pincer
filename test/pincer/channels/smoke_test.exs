@@ -22,7 +22,7 @@ defmodule Pincer.Channels.SmokeTest do
   end
 
   defmodule MockRegistry do
-    @behaviour Pincer.Core.Ports.ToolRegistry
+    @behaviour Pincer.Ports.ToolRegistry
     def list_tools, do: []
     def execute_tool(_, _, _), do: {:error, "Not implemented in smoke test"}
   end
@@ -100,17 +100,17 @@ defmodule Pincer.Channels.SmokeTest do
        end)
 
     # Subscribe to see what's happening
-    Pincer.PubSub.subscribe("session:#{session_id}")
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
 
     # Start the session workers
     ensure_started_and_allow(Telegram.Session, chat_id, TelegramAPIMock)
     
     # Assert session start
-    assert {:ok, pid} = Pincer.Session.Supervisor.start_session(session_id)
+    assert {:ok, pid} = Pincer.Core.Session.Supervisor.start_session(session_id)
     assert Process.alive?(pid)
 
     # Trigger process
-    assert {:ok, :started} = Pincer.Session.Server.process_input(session_id, "Please analyze this text")
+    assert {:ok, :started} = Pincer.Core.Session.Server.process_input(session_id, "Please analyze this text")
 
     # Assertions
     assert_receive {:agent_partial, "Hello"}, 5000
@@ -136,13 +136,13 @@ defmodule Pincer.Channels.SmokeTest do
          {:ok, %{}}
        end)
 
-    Pincer.PubSub.subscribe("session:#{session_id}")
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
     ensure_started_and_allow(Discord.Session, channel_id, DiscordAPIMock)
     
-    assert {:ok, pid} = Pincer.Session.Supervisor.start_session(session_id)
+    assert {:ok, pid} = Pincer.Core.Session.Supervisor.start_session(session_id)
     assert Process.alive?(pid)
 
-    assert {:ok, :started} = Pincer.Session.Server.process_input(session_id, "Please analyze this text")
+    assert {:ok, :started} = Pincer.Core.Session.Server.process_input(session_id, "Please analyze this text")
 
     assert_receive {:agent_partial, "Hello"}, 5000
     assert_receive {:agent_response, "Hello world!"}, 5000

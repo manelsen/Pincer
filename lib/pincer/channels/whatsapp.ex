@@ -6,7 +6,7 @@ defmodule Pincer.Channels.WhatsApp do
   stdio. Incoming text is routed to sessions and core command handlers.
   """
 
-  use Pincer.Channel
+  use Pincer.Ports.Channel
   require Logger
 
   alias Pincer.Core.AccessPolicy
@@ -14,12 +14,12 @@ defmodule Pincer.Channels.WhatsApp do
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.SessionScopePolicy
   alias Pincer.Core.UX
-  alias Pincer.Session.Server
+  alias Pincer.Core.Session.Server
 
   @default_bridge_module Pincer.Channels.WhatsApp.Bridge.Adapter
   @max_outbound_chunk_chars 3500
 
-  @impl Pincer.Channel
+  @impl Pincer.Ports.Channel
   def start_link(config) do
     normalized = normalize_map(config)
 
@@ -56,8 +56,8 @@ defmodule Pincer.Channels.WhatsApp do
            status_fn: read_fun(config, "status_fn", &default_status/1),
            set_model_fn: read_fun(config, "set_model_fn", &default_set_model/3),
            list_providers_fn:
-             read_fun(config, "list_providers_fn", &Pincer.LLM.Client.list_providers/0),
-           list_models_fn: read_fun(config, "list_models_fn", &Pincer.LLM.Client.list_models/1)
+             read_fun(config, "list_providers_fn", &Pincer.Ports.LLM.list_providers/0),
+           list_models_fn: read_fun(config, "list_models_fn", &Pincer.Ports.LLM.list_models/1)
          }}
 
       :ignore ->
@@ -73,7 +73,7 @@ defmodule Pincer.Channels.WhatsApp do
   @doc """
   Sends a message to a WhatsApp chat via bridge.
   """
-  @impl Pincer.Channel
+  @impl Pincer.Ports.Channel
   def send_message(chat_id, text, _opts \\ []) do
     try do
       GenServer.call(__MODULE__, {:send_message, to_string(chat_id), normalize_text(text)})
@@ -85,7 +85,7 @@ defmodule Pincer.Channels.WhatsApp do
   @doc """
   WhatsApp does not support message edits in this v1 adapter; falls back to send.
   """
-  @impl Pincer.Channel
+  @impl Pincer.Ports.Channel
   def update_message(chat_id, _message_id, text) do
     send_message(chat_id, text)
   end
@@ -638,9 +638,9 @@ defmodule Pincer.Channels.WhatsApp do
   end
 
   defp default_ensure_session_started(session_id) do
-    case Registry.lookup(Pincer.Session.Registry, session_id) do
+    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
       [] ->
-        case Pincer.Session.Supervisor.start_session(session_id) do
+        case Pincer.Core.Session.Supervisor.start_session(session_id) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok
           {:error, reason} -> {:error, reason}
@@ -660,7 +660,7 @@ defmodule Pincer.Channels.WhatsApp do
   end
 
   defp default_process_input(session_id, text), do: Server.process_input(session_id, text)
-  defp default_status(session_id), do: Server.get_status(session_id)
+  defp default_status(session_id), do: Pincer.Core.Session.Server.get_status(session_id)
 
   defp default_set_model(session_id, provider, model) do
     Server.set_model(session_id, provider, model)
