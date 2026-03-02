@@ -1,0 +1,34 @@
+defmodule Pincer.Core do
+  @moduledoc "The Absolute Domain Core of Pincer."
+  use Boundary,
+    deps: [Pincer.Ports, Pincer.Infra, Pincer.Utils],
+    exports: [
+      Session.Server,
+      Session.Supervisor,
+      Project.Server,
+      Project.Supervisor,
+      ProjectRouter,
+      ProjectOrchestrator,
+      Executor,
+      UX,
+      UX.MenuPolicy,
+      Pairing,
+      AccessPolicy,
+      SessionScopePolicy,
+      ChannelInteractionPolicy,
+      StreamingPolicy,
+      RetryPolicy,
+      Telemetry,
+      AuthProfiles,
+      Models.Registry,
+      LLM.FailoverPolicy,
+      LLM.CooldownStore,
+      LLM.RuntimeStatus,
+      LLM.SkillsSidecarPolicy,
+      Tooling.CommandProfile,
+      WorkspaceGuard,
+      Orchestration.Blackboard,
+      Orchestration.SubAgent,
+      Orchestration.Scheduler
+    ]
+end

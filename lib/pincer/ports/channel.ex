@@ -1,4 +1,4 @@
-defmodule Pincer.Channel do
+defmodule Pincer.Ports.Channel do
   @moduledoc """
   Behaviour defining the contract for communication channels in Pincer.
 
@@ -21,7 +21,7 @@ defmodule Pincer.Channel do
   GenServer scaffolding:
 
       defmodule Pincer.Channels.MyChannel do
-        use Pincer.Channel
+        use Pincer.Ports.Channel
 
         @impl true
         def init(config) do
@@ -29,7 +29,7 @@ defmodule Pincer.Channel do
           {:ok, %{config: config}}
         end
 
-        @impl Pincer.Channel
+        @impl Pincer.Ports.Channel
         def send_message(recipient_id, content) do
           # Send message to the external system
           :ok
@@ -54,7 +54,7 @@ defmodule Pincer.Channel do
 
   ## Session Integration
 
-  Channels should route incoming messages to `Pincer.Session.Server.process_input/2`:
+  Channels should route incoming messages to `Pincer.Core.Session.Server.process_input/2`:
 
       session_id = "telegram_\#{chat_id}"
       Server.process_input(session_id, text)
@@ -140,7 +140,7 @@ defmodule Pincer.Channel do
   @doc false
   defmacro __using__(_opts) do
     quote do
-      @behaviour Pincer.Channel
+      @behaviour Pincer.Ports.Channel
       use GenServer
       require Logger
 
