@@ -450,8 +450,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   alias Pincer.Core.AccessPolicy
   alias Pincer.Core.ChannelInteractionPolicy
   alias Pincer.Core.Pairing
-  alias Pincer.Core.ProjectBoard
-  alias Pincer.Core.ProjectOrchestrator
+  alias Pincer.Core.ProjectRouter
   alias Pincer.Core.RetryPolicy
   alias Pincer.Core.SessionScopePolicy
   alias Pincer.Core.Telemetry, as: CoreTelemetry
@@ -599,10 +598,14 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
             handle_command(chat_id, command, "", chat_type)
 
           :error ->
-            if maybe_handle_project_message(chat_id, chat_type, text) do
-              :ok
-            else
-              do_process_message(chat_id, text, chat_type)
+            session_id = session_id_for_chat(chat_id, chat_type)
+
+            case ProjectRouter.continue_if_collecting(session_id, text, has_attachments: false) do
+              {:handled, response} ->
+                Pincer.Channels.Telegram.send_message(chat_id, response)
+
+              :not_handled ->
+                do_process_message(chat_id, text, chat_type)
             end
         end
 
@@ -931,19 +934,12 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   defp handle_command(chat_id, "/kanban", _text, chat_type) do
     session_id = session_id_for_chat(chat_id, chat_type)
-
-    board =
-      case ProjectOrchestrator.board(session_id) do
-        {:ok, session_board} -> session_board
-        :not_found -> ProjectBoard.render()
-      end
-
-    Pincer.Channels.Telegram.send_message(chat_id, board)
+    Pincer.Channels.Telegram.send_message(chat_id, ProjectRouter.kanban(session_id))
   end
 
   defp handle_command(chat_id, "/project", text, chat_type) do
     session_id = session_id_for_chat(chat_id, chat_type)
-    response = ProjectOrchestrator.start(session_id, text)
+    response = ProjectRouter.project(session_id, text)
     Pincer.Channels.Telegram.send_message(chat_id, response)
   end
 
@@ -1150,19 +1146,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   defp normalize_chat_type(chat_type),
     do: chat_type |> to_string() |> String.trim() |> String.downcase()
-
-  defp maybe_handle_project_message(chat_id, chat_type, text) do
-    session_id = session_id_for_chat(chat_id, chat_type)
-
-    case ProjectOrchestrator.continue(session_id, text) do
-      {:handled, response} ->
-        Pincer.Channels.Telegram.send_message(chat_id, response)
-        true
-
-      :not_active ->
-        false
-    end
-  end
 
   defp session_id_for_chat(chat_id, chat_type) do
     channel_config = Application.get_env(:pincer, :telegram_channel_config, %{})
