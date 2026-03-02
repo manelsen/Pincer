@@ -27,13 +27,13 @@ defmodule Pincer.Tools.FileSystem do
   - **Allowed**: `lib/pincer.ex` (Relative path inside workspace)
   """
   @behaviour Pincer.Tool
+  alias Pincer.Core.WorkspaceGuard
   require Logger
 
   # 50 MB file-read limit. The practical ceiling is the LLM context window
   # (~500 KB of useful text), but we allow up to 50 MB so the agent can
   # handle large logs, datasets, and dumps without hitting an artificial wall.
   @max_file_size 52_428_800
-
   # Determine workspace root at runtime
   defp get_workspace_root, do: File.cwd!()
 
@@ -74,28 +74,13 @@ defmodule Pincer.Tools.FileSystem do
     end
   end
 
+  defp validate_path(path) when not is_binary(path), do: {:error, "Invalid path"}
+
   defp validate_path(path) do
-    cond do
-      String.contains?(path, "\0") ->
-        {:error, "Path contains null bytes"}
-      
-      String.contains?(path, "..") ->
-        {:error, "Path traversal (..) not allowed"}
-        
-      true ->
-        root = get_workspace_root()
-        # Resolve absolute path
-        full_path = Path.expand(path, root)
-        
-        # Check confinement: full_path must be the root itself or inside it.
-        # We append "/" to the root to prevent the prefix-collision attack where
-        # a sibling directory like "/workspace-evil" starts with "/workspace".
-        if full_path == root or String.starts_with?(full_path, root <> "/") do
-          {:ok, full_path}
-        else
-          {:error, "Access denied: Path outside workspace"}
-        end
-    end
+    WorkspaceGuard.confine_path(path,
+      root: get_workspace_root(),
+      reject_parent_segments: true
+    )
   end
 
   defp perform_action("list", path) do
@@ -109,13 +94,16 @@ defmodule Pincer.Tools.FileSystem do
     case File.stat(path) do
       {:ok, %{type: :regular, size: size}} when size > @max_file_size ->
         {:error, "File too large: #{size} bytes (limit: #{@max_file_size})"}
+
       {:ok, %{type: :regular}} ->
         case File.read(path) do
           {:ok, content} -> {:ok, content}
           {:error, reason} -> {:error, "Error reading: #{inspect(reason)}"}
         end
+
       {:ok, %{type: type}} ->
         {:error, "Cannot read non-file type: #{type}"}
+
       {:error, reason} ->
         {:error, "File not found or inaccessible: #{inspect(reason)}"}
     end

@@ -123,7 +123,8 @@ defmodule Pincer.MixProject do
       Core: [
         Pincer,
         Pincer.Tool,
-        Pincer.Core.Executor
+        Pincer.Core.Executor,
+        Pincer.Core.SubAgentProgress
       ],
       Session: [
         Pincer.Session.Server,
@@ -158,6 +159,7 @@ defmodule Pincer.MixProject do
         Pincer.Channel,
         Pincer.Channels.Telegram,
         Pincer.Channels.CLI,
+        Pincer.Channels.Webhook,
         Pincer.Channels.Factory,
         Pincer.Channels.Supervisor
       ],

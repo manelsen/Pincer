@@ -9,6 +9,7 @@ defmodule Pincer.Core.UX do
   @behaviour Pincer.Core.Ports.UserMenu
 
   @type command :: %{name: String.t(), description: String.t()}
+  @type shortcut_result :: {:ok, String.t()} | :error
 
   @commands [
     %{name: "menu", description: "Show command menu and shortcuts"},
@@ -17,6 +18,21 @@ defmodule Pincer.Core.UX do
     %{name: "ping", description: "Health check"}
   ]
 
+  @shortcut_routes %{
+    "menu" => "/menu",
+    "/menu" => "/menu",
+    "status" => "/status",
+    "/status" => "/status",
+    "models" => "/models",
+    "/models" => "/models",
+    "ping" => "/ping",
+    "/ping" => "/ping",
+    "help" => "/menu",
+    "/help" => "/menu",
+    "commands" => "/menu",
+    "/commands" => "/menu"
+  }
+
   @spec commands() :: [command()]
   def commands, do: @commands
 
@@ -24,7 +40,6 @@ defmodule Pincer.Core.UX do
   def help_text(_channel \\ :generic) do
     """
     Command Menu
-    ------------
     /menu   - Open this menu
     /status - Show session status
     /models - Switch provider/model
@@ -32,19 +47,44 @@ defmodule Pincer.Core.UX do
 
     Accessibility note:
     - Use short, explicit commands.
-    - Menu is always available via /menu.
+    - Type menu, status, models or ping with or without /.
+    - Menu button always opens /menu.
     """
     |> String.trim()
   end
 
+  @spec resolve_shortcut(String.t()) :: shortcut_result()
+  def resolve_shortcut(input) when is_binary(input) do
+    normalized =
+      input
+      |> String.trim()
+      |> String.downcase()
+
+    cond do
+      normalized == "" ->
+        :error
+
+      normalized == String.downcase(menu_button_label()) ->
+        {:ok, "/menu"}
+
+      true ->
+        case Map.get(@shortcut_routes, normalized) do
+          nil -> :error
+          command -> {:ok, command}
+        end
+    end
+  end
+
+  def resolve_shortcut(_), do: :error
+
   @spec unknown_command_hint() :: String.t()
   def unknown_command_hint do
-    "Try /menu, /ping, /models or /status."
+    "Use /menu, /status, /models or /ping."
   end
 
   @spec unknown_interaction_hint() :: String.t()
   def unknown_interaction_hint do
-    "Menu action unknown or expired. Use /menu to open it again."
+    "Unknown or expired menu action. Use /menu."
   end
 
   @spec menu_button_label() :: String.t()

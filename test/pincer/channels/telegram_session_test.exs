@@ -72,4 +72,20 @@ defmodule Pincer.Channels.Telegram.SessionTest do
     Pincer.PubSub.broadcast("session:telegram_main", {:agent_response, "Main scope reply"})
     Process.sleep(80)
   end
+
+  test "agent status is delivered as user-visible telegram message" do
+    chat_id = 45
+
+    APIMock
+    |> expect(:send_message, fn ^chat_id, "✅ Sub-Agent a1 finished.", _opts ->
+      {:ok, %{message_id: 900}}
+    end)
+
+    {:ok, pid} = Session.start_link(chat_id)
+    allow(APIMock, self(), pid)
+
+    send(pid, {:agent_status, "✅ Sub-Agent a1 finished."})
+
+    Process.sleep(80)
+  end
 end

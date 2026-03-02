@@ -61,10 +61,12 @@ defmodule Pincer.Tools.SafeShell do
 
   @behaviour Pincer.Tool
   alias Pincer.Connectors.MCP.Manager, as: MCPManager
+  alias Pincer.Core.WorkspaceGuard
   require Logger
 
   @max_command_length 1024
   @dangerous_chars ~r/[;&|`$<>]/
+  @multiline_or_line_continuation ~r/\\(?:\r\n|\n|\r)|[\r\n]/
 
   @type spec :: %{
           name: String.t(),
@@ -74,6 +76,42 @@ defmodule Pincer.Tools.SafeShell do
 
   @type execute_result ::
           {:ok, String.t()} | {:error, {:approval_required, String.t()} | String.t()}
+
+  @doc false
+  @spec approved_command_allowed?(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def approved_command_allowed?(command, opts \\ [])
+
+  def approved_command_allowed?(command, _opts) when not is_binary(command) do
+    {:error, "Invalid command"}
+  end
+
+  def approved_command_allowed?(command, opts) do
+    workspace_restrict = Keyword.get(opts, :workspace_restrict, true)
+
+    if not workspace_restrict do
+      :ok
+    else
+      workspace_root = opts |> Keyword.get(:workspace_root, File.cwd!()) |> Path.expand()
+      command = String.slice(command, 0, @max_command_length)
+
+      cond do
+        String.match?(command, @multiline_or_line_continuation) ->
+          {:error, "Detected multiline or line-continuation shell payload"}
+
+        String.match?(command, @dangerous_chars) ->
+          {:error, "Detected dangerous shell characters"}
+
+        true ->
+          case parse_and_validate(command,
+                 workspace_restrict: true,
+                 workspace_root: workspace_root
+               ) do
+            {:ok, _sanitized_command} -> :ok
+            {:error, reason} -> {:error, reason}
+          end
+      end
+    end
+  end
 
   @impl true
   def spec do
@@ -95,77 +133,188 @@ defmodule Pincer.Tools.SafeShell do
   end
 
   @impl true
-  def execute(%{"command" => command}) do
+  def execute(%{"command" => command} = args) do
+    workspace_restrict = restrict_to_workspace?(args)
+    workspace_root = workspace_root(args)
+
     # 1. Truncate
     command = String.slice(command, 0, @max_command_length)
-    
-    # 2. Check for dangerous characters globally
-    if String.match?(command, @dangerous_chars) do
-      audit_required(command, "Detected dangerous shell characters")
-    else
-      # 3. Parse and Validate
-      case parse_and_validate(command) do
-        {:ok, sanitized_command} ->
-          Logger.info("[SAFE-SHELL] Safe command: #{sanitized_command}")
-          call_mcp(sanitized_command)
-          
-        {:error, reason} ->
-          audit_required(command, reason)
-      end
+
+    cond do
+      String.match?(command, @multiline_or_line_continuation) ->
+        audit_required(command, "Detected multiline or line-continuation shell payload")
+
+      String.match?(command, @dangerous_chars) ->
+        # 2. Check for dangerous characters globally
+        audit_required(command, "Detected dangerous shell characters")
+
+      true ->
+        # 3. Parse and Validate
+        case parse_and_validate(command,
+               workspace_restrict: workspace_restrict,
+               workspace_root: workspace_root
+             ) do
+          {:ok, sanitized_command} ->
+            Logger.info("[SAFE-SHELL] Safe command: #{sanitized_command}")
+
+            call_mcp(sanitized_command,
+              workspace_restrict: workspace_restrict,
+              workspace_root: workspace_root
+            )
+
+          {:error, reason} ->
+            audit_required(command, reason)
+        end
     end
   end
 
-  defp parse_and_validate(command) do
+  defp parse_and_validate(command, opts) do
     tokens = String.split(command, ~r/\s+/, trim: true)
-    
+
     case tokens do
-      ["ls" | args] -> validate_generic_args("ls", args)
+      ["ls" | args] -> validate_generic_args("ls", args, opts)
       ["pwd"] -> {:ok, "pwd"}
       ["git", "status"] -> {:ok, "git status"}
-      ["git", "log" | _] -> {:ok, command} # Allow args for log? Maybe strict log only.
-      ["cat", path] -> validate_path_arg("cat", path)
-      ["head", path] -> validate_path_arg("head", path)
-      ["tail", path] -> validate_path_arg("tail", path)
+      ["git", "log" | args] -> validate_generic_args("git log", args, opts)
+      ["cat", path] -> validate_path_arg("cat", path, opts)
+      ["head", path] -> validate_path_arg("head", path, opts)
+      ["tail", path] -> validate_path_arg("tail", path, opts)
       ["du", "-sh"] -> {:ok, "du -sh"}
-      ["du", "-sh", path] -> validate_path_arg("du -sh", path)
+      ["du", "-sh", path] -> validate_path_arg("du -sh", path, opts)
       ["mix", "test"] -> {:ok, "mix test"}
       ["mix", "compile"] -> {:ok, "mix compile"}
-      ["find" | args] -> validate_generic_args("find", args)
-      ["grep" | _] -> {:error, "Grep requires approval"} # Grep is too complex to validate easily
+      ["find" | args] -> validate_generic_args("find", args, opts)
+      # Grep is too complex to validate easily
+      ["grep" | _] -> {:error, "Grep requires approval"}
       _ -> {:error, "Command not in whitelist or invalid arguments"}
     end
   end
 
-  defp validate_generic_args(cmd, args) do
-    # Ensure no args look like paths with .. or starts with / (maybe allow absolute? report says no strict rule but let's be safe)
-    # The report implementation suggested alphanumeric, dot, dash, slash, space.
-    # But String.split already removed spaces.
-    
-    arg_str = Enum.join(args, " ")
-    if String.contains?(arg_str, "..") do
-       {:error, "Arguments contain path traversal"}
+  defp validate_generic_args(cmd, args, opts) do
+    if Enum.any?(args, &unsafe_generic_arg?(&1, opts)) do
+      {:error, "Arguments contain unsafe path patterns"}
     else
-       {:ok, "#{cmd} #{arg_str}"}
+      {:ok, format_command(cmd, args)}
     end
   end
-  
-  defp validate_path_arg(cmd, path) do
-    if String.contains?(path, "..") do
-      {:error, "Path traversal detected"}
+
+  defp validate_path_arg(cmd, path, opts) do
+    if unsafe_path_arg?(path, opts) do
+      {:error, "Unsafe path argument"}
     else
       {:ok, "#{cmd} #{path}"}
     end
   end
+
+  defp unsafe_generic_arg?(arg, opts) when is_binary(arg) do
+    candidate = String.trim(arg)
+
+    cond do
+      candidate == "" ->
+        true
+
+      String.starts_with?(candidate, "-") ->
+        false
+
+      String.contains?(candidate, "=") ->
+        [_key, value] = String.split(candidate, "=", parts: 2)
+        unsafe_path_arg?(value, opts)
+
+      true ->
+        unsafe_path_arg?(candidate, opts)
+    end
+  end
+
+  defp unsafe_generic_arg?(_, _opts), do: true
+
+  defp unsafe_path_arg?(path, opts) when is_binary(path) do
+    candidate = String.trim(path)
+    workspace_restrict = Keyword.get(opts, :workspace_restrict, false)
+
+    candidate == "" or
+      String.contains?(candidate, "\0") or
+      String.contains?(candidate, "..") or
+      String.starts_with?(candidate, "/") or
+      String.starts_with?(candidate, "~") or
+      String.match?(candidate, ~r/^[A-Za-z]:[\\\/]/) or
+      workspace_escape?(candidate, opts, workspace_restrict)
+  end
+
+  defp unsafe_path_arg?(_path, _opts), do: true
+
+  defp workspace_escape?(_candidate, _opts, false), do: false
+
+  defp workspace_escape?(candidate, opts, true) do
+    workspace_root = opts |> Keyword.get(:workspace_root, File.cwd!()) |> Path.expand()
+
+    case WorkspaceGuard.confine_path(candidate,
+           root: workspace_root,
+           reject_parent_segments: true
+         ) do
+      {:ok, _safe_path} -> false
+      {:error, _reason} -> true
+    end
+  end
+
+  defp format_command(cmd, []), do: cmd
+  defp format_command(cmd, args), do: "#{cmd} #{Enum.join(args, " ")}"
 
   defp audit_required(command, reason) do
     Logger.warning("[SAFE-SHELL] AUDIT REQUIRED: #{command} (Reason: #{reason})")
     {:error, {:approval_required, command}}
   end
 
-  defp call_mcp(command) do
-    case MCPManager.execute_tool("run_command", %{"command" => command}) do
+  defp call_mcp(command, opts) do
+    payload =
+      if Keyword.get(opts, :workspace_restrict, false) do
+        %{
+          "command" => command,
+          "cwd" => opts |> Keyword.get(:workspace_root, File.cwd!()) |> Path.expand()
+        }
+      else
+        %{"command" => command}
+      end
+
+    case MCPManager.execute_tool("run_command", payload) do
       {:ok, result} -> {:ok, result}
       {:error, reason} -> {:error, "MCP Shell failed: #{inspect(reason)}"}
     end
   end
+
+  defp restrict_to_workspace?(args) do
+    case Map.get(args, "restrict_to_workspace") do
+      value when is_boolean(value) ->
+        value
+
+      _ ->
+        tools = Application.get_env(:pincer, :tools, %{})
+
+        case read_config_value(tools, ["restrict_to_workspace", "restrictToWorkspace"]) do
+          false -> false
+          _ -> true
+        end
+    end
+  end
+
+  defp workspace_root(args) do
+    case Map.get(args, "workspace_root") do
+      value when is_binary(value) and value != "" -> Path.expand(value)
+      _ -> File.cwd!()
+    end
+  end
+
+  defp read_config_value(map, keys) when is_map(map) and is_list(keys) do
+    Enum.find_value(keys, fn key ->
+      Map.get(map, key) ||
+        Enum.find_value(map, fn
+          {existing_key, value} when is_atom(existing_key) ->
+            if Atom.to_string(existing_key) == key, do: value
+
+          _ ->
+            nil
+        end)
+    end)
+  end
+
+  defp read_config_value(_map, _keys), do: nil
 end

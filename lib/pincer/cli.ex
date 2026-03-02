@@ -3,14 +3,16 @@ defmodule Pincer.CLI do
   CLI Frontend.
   Can run locally (Standalone) or connect to a remote server.
   """
+  alias Pincer.CLI.History
   require Logger
 
   @session_id "cli_user"
   @backend_name Pincer.Channels.CLI
+  @default_history_limit 10
 
   def main(args) do
     IO.puts(IO.ANSI.green() <> "=== Pincer CLI v0.2 (Distributed) ===" <> IO.ANSI.reset())
-    IO.puts("Type /q to exit.")
+    IO.puts("Type /q to exit. Use /history, /history N or /history clear.")
 
     # If there are arguments, assume they are the desired channels (e.g.: telegram)
     if args != [] do
@@ -86,22 +88,41 @@ defmodule Pincer.CLI do
         IO.puts(IO.ANSI.clear() <> IO.ANSI.home())
         loop(target_node)
 
+      {:history, limit} ->
+        print_history(limit)
+        loop(target_node)
+
+      :history_clear ->
+        clear_history()
+        loop(target_node)
+
       {:send, msg} ->
+        persist_input(msg)
         send_message(target_node, msg)
         await_response()
         loop(target_node)
     end
   end
 
+  @spec process_command(String.t()) ::
+          :quit | :clear | {:history, pos_integer()} | :history_clear | {:send, String.t()}
   def process_command("/quit"), do: :quit
   def process_command("/q"), do: :quit
   def process_command("/clear"), do: :clear
+  def process_command("/history"), do: {:history, @default_history_limit}
+  def process_command("/history clear"), do: :history_clear
+
+  def process_command("/history " <> raw_limit) do
+    {:history, parse_history_limit(raw_limit)}
+  end
+
   def process_command(msg), do: {:send, msg}
 
   def send_message(node, msg) do
     # Sends to the Backend on the target node as user INPUT
     target = if is_pid(node), do: node, else: {@backend_name, node}
     GenServer.cast(target, {:user_input, msg})
+    :ok
   end
 
   defp await_response do
@@ -121,6 +142,49 @@ defmodule Pincer.CLI do
         await_response()
     after
       60_000 -> IO.puts(IO.ANSI.red() <> "[Timeout] No response." <> IO.ANSI.reset())
+    end
+  end
+
+  defp parse_history_limit(raw_limit) do
+    case Integer.parse(String.trim(raw_limit)) do
+      {value, ""} when value > 0 -> value
+      _ -> @default_history_limit
+    end
+  end
+
+  defp print_history(limit) do
+    entries = History.recent(limit)
+
+    if entries == [] do
+      IO.puts(IO.ANSI.yellow() <> "[History] No entries yet." <> IO.ANSI.reset())
+    else
+      IO.puts(IO.ANSI.blue() <> "[History] Last #{length(entries)} entries:" <> IO.ANSI.reset())
+
+      entries
+      |> Enum.with_index(1)
+      |> Enum.each(fn {entry, idx} ->
+        IO.puts("#{idx}. #{entry}")
+      end)
+    end
+  end
+
+  defp clear_history do
+    case History.clear() do
+      :ok ->
+        IO.puts(IO.ANSI.yellow() <> "[History] Cleared." <> IO.ANSI.reset())
+
+      {:error, reason} ->
+        IO.puts(IO.ANSI.red() <> "[History] Clear failed: #{inspect(reason)}" <> IO.ANSI.reset())
+    end
+  end
+
+  defp persist_input(msg) do
+    case History.append(msg) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("[CLI] Failed to persist history entry: #{inspect(reason)}")
     end
   end
 end

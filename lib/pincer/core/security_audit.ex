@@ -8,6 +8,8 @@ defmodule Pincer.Core.SecurityAudit do
   - gateway bind risk
   """
 
+  alias Pincer.Connectors.MCP.SkillsSidecarPolicy
+
   @type severity :: :ok | :warn | :error
 
   @type check :: %{
@@ -25,9 +27,31 @@ defmodule Pincer.Core.SecurityAudit do
         }
 
   @default_config_file "config.yaml"
-  @token_channels MapSet.new(["telegram", "discord", "slack"])
+  @token_channels MapSet.new(["telegram", "discord", "slack", "webhook"])
   @dm_channels MapSet.new(["telegram", "discord"])
   @risky_binds MapSet.new(["0.0.0.0", "::", "[::]"])
+  @dangerous_flag_paths [
+    {"gateway.control_ui.allow_insecure_auth", true,
+     [
+       [:gateway, :control_ui, :allow_insecure_auth],
+       [:gateway, :controlUi, :allowInsecureAuth]
+     ]},
+    {"gateway.control_ui.dangerously_disable_device_auth", true,
+     [
+       [:gateway, :control_ui, :dangerously_disable_device_auth],
+       [:gateway, :controlUi, :dangerouslyDisableDeviceAuth]
+     ]},
+    {"hooks.gmail.allow_unsafe_external_content", true,
+     [
+       [:hooks, :gmail, :allow_unsafe_external_content],
+       [:hooks, :gmail, :allowUnsafeExternalContent]
+     ]},
+    {"tools.exec.apply_patch.workspace_only", false,
+     [
+       [:tools, :exec, :apply_patch, :workspace_only],
+       [:tools, :exec, :applyPatch, :workspaceOnly]
+     ]}
+  ]
 
   @spec run(keyword()) :: report()
   def run(opts \\ []) do
@@ -49,7 +73,10 @@ defmodule Pincer.Core.SecurityAudit do
       checks ++
         channel_auth_checks(config, env_fetcher) ++
         dm_policy_checks(config) ++
-        gateway_bind_checks(config)
+        gateway_bind_checks(config) ++
+        dangerous_flag_checks(config) ++
+        workspace_restriction_checks(config) ++
+        sidecar_isolation_checks(config)
 
     counts = counts(checks)
 
@@ -227,6 +254,150 @@ defmodule Pincer.Core.SecurityAudit do
     end
   end
 
+  defp dangerous_flag_checks(config) do
+    direct_flags =
+      Enum.reduce(@dangerous_flag_paths, [], fn {name, expected_value, candidate_paths}, acc ->
+        value = read_any_path(config, candidate_paths)
+
+        if value == expected_value do
+          [name | acc]
+        else
+          acc
+        end
+      end)
+
+    mapping_flags =
+      config
+      |> read_any_path([[:hooks, :mappings]])
+      |> case do
+        mappings when is_list(mappings) ->
+          mappings
+          |> Enum.with_index()
+          |> Enum.flat_map(fn {mapping, index} ->
+            flag =
+              read_any_path(mapping, [
+                [:allow_unsafe_external_content],
+                [:allowUnsafeExternalContent]
+              ])
+
+            if flag == true do
+              ["hooks.mappings[#{index}].allow_unsafe_external_content"]
+            else
+              []
+            end
+          end)
+
+        _ ->
+          []
+      end
+
+    (direct_flags ++ mapping_flags)
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.map(fn path ->
+      warn_check(
+        {:dangerous_flag, path},
+        "Dangerous config flag enabled: #{path}",
+        %{path: path}
+      )
+    end)
+  end
+
+  defp workspace_restriction_checks(config) do
+    value =
+      read_any_path(config, [
+        [:tools, :restrict_to_workspace],
+        [:tools, :restrictToWorkspace]
+      ])
+
+    case value do
+      false ->
+        [
+          error_check(
+            :tools_restrict_workspace,
+            "Workspace restriction disabled for tools runtime",
+            %{path: "tools.restrict_to_workspace", value: false}
+          )
+        ]
+
+      true ->
+        [
+          ok_check(
+            :tools_restrict_workspace,
+            "Workspace restriction enabled for tools runtime",
+            %{path: "tools.restrict_to_workspace", value: true}
+          )
+        ]
+
+      nil ->
+        [
+          ok_check(
+            :tools_restrict_workspace,
+            "Workspace restriction not explicitly set (secure default assumed)",
+            %{path: "tools.restrict_to_workspace", value: :default_true}
+          )
+        ]
+
+      _other ->
+        [
+          warn_check(
+            :tools_restrict_workspace,
+            "Workspace restriction has invalid value (expected boolean)",
+            %{path: "tools.restrict_to_workspace", value: inspect(value)}
+          )
+        ]
+    end
+  end
+
+  defp sidecar_isolation_checks(config) do
+    sidecar_cfg =
+      read_any_path(config, [
+        [:mcp, :servers, :skills_sidecar],
+        [:mcp, :servers, :skillsSidecar]
+      ])
+
+    case sidecar_cfg do
+      nil ->
+        [
+          ok_check(
+            :mcp_skills_sidecar_isolation,
+            "MCP skills_sidecar not configured (sidecar disabled)",
+            %{server: "skills_sidecar", status: :absent}
+          )
+        ]
+
+      cfg when is_map(cfg) ->
+        case SkillsSidecarPolicy.validate(cfg) do
+          :ok ->
+            [
+              ok_check(
+                :mcp_skills_sidecar_isolation,
+                "MCP skills_sidecar uses hardened isolation profile",
+                %{server: "skills_sidecar", status: :hardened}
+              )
+            ]
+
+          {:error, reason} ->
+            [
+              error_check(
+                :mcp_skills_sidecar_isolation,
+                "MCP skills_sidecar isolation is invalid",
+                %{server: "skills_sidecar", reason: inspect(reason)}
+              )
+            ]
+        end
+
+      _other ->
+        [
+          error_check(
+            :mcp_skills_sidecar_isolation,
+            "MCP skills_sidecar config must be a map/object",
+            %{server: "skills_sidecar", reason: :invalid_config}
+          )
+        ]
+    end
+  end
+
   defp channels(config) when is_map(config) do
     case read_field(config, :channels) do
       channels when is_map(channels) ->
@@ -302,7 +473,40 @@ defmodule Pincer.Core.SecurityAudit do
     Map.get(map, key) || Map.get(map, Atom.to_string(key))
   end
 
+  defp read_field(map, key) when is_map(map) and is_binary(key) do
+    Map.get(map, key) ||
+      Enum.find_value(map, fn
+        {existing_key, value} when is_atom(existing_key) ->
+          if Atom.to_string(existing_key) == key, do: value
+
+        _ ->
+          nil
+      end)
+  end
+
+  defp read_field(map, key) when is_map(map) do
+    Map.get(map, key)
+  end
+
   defp read_field(_, _), do: nil
+
+  defp read_any_path(_map, []), do: nil
+
+  defp read_any_path(map, [path | rest]) do
+    case read_nested_path(map, path) do
+      nil -> read_any_path(map, rest)
+      value -> value
+    end
+  end
+
+  defp read_nested_path(map, path) when is_list(path) do
+    Enum.reduce_while(path, map, fn key, current ->
+      case read_field(current, key) do
+        nil -> {:halt, nil}
+        value -> {:cont, value}
+      end
+    end)
+  end
 
   defp read_nested_field(map, [single]), do: read_field(map, single)
 

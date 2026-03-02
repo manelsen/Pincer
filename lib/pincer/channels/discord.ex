@@ -256,48 +256,50 @@ defmodule Pincer.Channels.Discord do
               if String.starts_with?(trimmed, "/") do
                 handle_command(msg, trimmed)
               else
-                if menu_shortcut?(trimmed) do
-                  handle_command(msg, "/menu")
-                else
-                  session_id = resolve_session_id(msg)
+                case UX.resolve_shortcut(trimmed) do
+                  {:ok, command} ->
+                    handle_command(msg, command)
 
-                  Logger.info(
-                    "[DISCORD] Message from #{msg.author.username} in #{msg.channel_id}"
-                  )
+                  :error ->
+                    session_id = resolve_session_id(msg)
 
-                  {attachment_text, attachment_refs} = process_attachments(msg.attachments)
-                  text_content = (trimmed <> "\n" <> attachment_text) |> String.trim()
-
-                  # Build the message content:
-                  # - plain string  when there are no multimodal attachments
-                  # - list of parts when there are PDFs/images (lazy refs resolved by Executor)
-                  full_content =
-                    if Enum.empty?(attachment_refs) do
-                      text_content
-                    else
-                      text_parts =
-                        if text_content != "",
-                          do: [%{"type" => "text", "text" => text_content}],
-                          else: []
-
-                      text_parts ++ attachment_refs
-                    end
-
-                  has_content =
-                    case full_content do
-                      s when is_binary(s) -> s != ""
-                      list when is_list(list) -> list != []
-                    end
-
-                  if has_content do
-                    ensure_brain_session_started(session_id)
-                    Pincer.Channels.Discord.Session.ensure_started(msg.channel_id)
-                    Server.process_input(session_id, full_content)
-                  else
-                    Logger.debug(
-                      "[DISCORD] Ignoring empty message without supported attachments."
+                    Logger.info(
+                      "[DISCORD] Message from #{msg.author.username} in #{msg.channel_id}"
                     )
-                  end
+
+                    {attachment_text, attachment_refs} = process_attachments(msg.attachments)
+                    text_content = (trimmed <> "\n" <> attachment_text) |> String.trim()
+
+                    # Build the message content:
+                    # - plain string  when there are no multimodal attachments
+                    # - list of parts when there are PDFs/images (lazy refs resolved by Executor)
+                    full_content =
+                      if Enum.empty?(attachment_refs) do
+                        text_content
+                      else
+                        text_parts =
+                          if text_content != "",
+                            do: [%{"type" => "text", "text" => text_content}],
+                            else: []
+
+                        text_parts ++ attachment_refs
+                      end
+
+                    has_content =
+                      case full_content do
+                        s when is_binary(s) -> s != ""
+                        list when is_list(list) -> list != []
+                      end
+
+                    if has_content do
+                      ensure_brain_session_started(session_id)
+                      Pincer.Channels.Discord.Session.ensure_started(msg.channel_id, session_id)
+                      Server.process_input(session_id, full_content)
+                    else
+                      Logger.debug(
+                        "[DISCORD] Ignoring empty message without supported attachments."
+                      )
+                    end
                 end
               end
 
@@ -322,12 +324,6 @@ defmodule Pincer.Channels.Discord do
         _ -> :noop
       end
     end
-
-    defp menu_shortcut?(text) when is_binary(text) do
-      text != "" and String.downcase(text) == String.downcase(UX.menu_button_label())
-    end
-
-    defp menu_shortcut?(_), do: false
 
     defp dm_pair_command?(msg, trimmed) do
       dm_event?(msg) and String.starts_with?(String.downcase(trimmed), "/pair")
@@ -733,18 +729,55 @@ defmodule Pincer.Channels.Discord do
     defp read_interaction_custom_id(_), do: nil
 
     defp send_interaction_response(interaction, response) do
-      case Pincer.Channels.Discord.api_client().create_interaction_response(
-             interaction.id,
-             interaction.token,
-             response
-           ) do
-        :ok ->
+      with {:ok, interaction_id} <- normalize_interaction_id(read_field(interaction, :id)),
+           {:ok, interaction_token} <-
+             normalize_interaction_token(read_field(interaction, :token)) do
+        case Pincer.Channels.Discord.api_client().create_interaction_response(
+               interaction_id,
+               interaction_token,
+               response
+             ) do
+          :ok ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error("[DISCORD] Failed to send interaction response: #{inspect(reason)}")
+        end
+      else
+        {:error, :invalid_interaction_id} ->
+          Logger.warning(
+            "[DISCORD] Ignoring interaction response: missing/invalid interaction id."
+          )
+
           :ok
 
-        {:error, reason} ->
-          Logger.error("[DISCORD] Failed to send interaction response: #{inspect(reason)}")
+        {:error, :invalid_interaction_token} ->
+          Logger.warning(
+            "[DISCORD] Ignoring interaction response: missing/invalid interaction token."
+          )
+
+          :ok
       end
     end
+
+    defp normalize_interaction_id(value) when is_integer(value) and value > 0,
+      do: {:ok, value}
+
+    defp normalize_interaction_id(value) when is_binary(value) do
+      case Integer.parse(String.trim(value)) do
+        {id, ""} when id > 0 -> {:ok, id}
+        _ -> {:error, :invalid_interaction_id}
+      end
+    end
+
+    defp normalize_interaction_id(_), do: {:error, :invalid_interaction_id}
+
+    defp normalize_interaction_token(value) when is_binary(value) do
+      token = String.trim(value)
+      if token == "", do: {:error, :invalid_interaction_token}, else: {:ok, token}
+    end
+
+    defp normalize_interaction_token(_), do: {:error, :invalid_interaction_token}
 
     # Extensions whose content is extracted inline as text (small, structured files).
     @text_extensions ~w(.md .txt .ex .exs .json .yaml .yml .py .js .ts .csv .xml .toml)

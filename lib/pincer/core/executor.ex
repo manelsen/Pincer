@@ -71,10 +71,48 @@ defmodule Pincer.Core.Executor do
   end
 
   @doc false
+  @spec resolve_attachment_url(String.t(), String.t() | nil) ::
+          {:ok, String.t()} | {:error, :invalid_attachment_url | :telegram_token_missing}
+  def resolve_attachment_url(url, token \\ nil)
+
+  def resolve_attachment_url("telegram://file/" <> file_path, token) do
+    normalized_path = String.trim(file_path)
+
+    cond do
+      normalized_path == "" ->
+        {:error, :invalid_attachment_url}
+
+      true ->
+        resolved_token =
+          token || Application.get_env(:telegex, :token) || System.get_env("TELEGRAM_BOT_TOKEN")
+
+        if is_binary(resolved_token) and String.trim(resolved_token) != "" do
+          {:ok, "https://api.telegram.org/file/bot#{resolved_token}/#{normalized_path}"}
+        else
+          {:error, :telegram_token_missing}
+        end
+    end
+  end
+
+  def resolve_attachment_url(url, _token) when is_binary(url), do: {:ok, url}
+  def resolve_attachment_url(_url, _token), do: {:error, :invalid_attachment_url}
+
+  @doc false
   def default_file_fetch(url) do
-    case Req.get(url, receive_timeout: 60_000, max_body_length: @max_inline_bytes) do
-      {:ok, %{status: 200, body: body}} when is_binary(body) -> {:ok, Base.encode64(body)}
-      {:ok, %{status: status}} -> {:error, "HTTP #{status}"}
+    with {:ok, resolved_url} <- resolve_attachment_url(url),
+         {:ok, response} <-
+           Req.get(resolved_url, receive_timeout: 60_000, max_body_length: @max_inline_bytes) do
+      case response do
+        %{status: 200, body: body} when is_binary(body) ->
+          {:ok, Base.encode64(body)}
+
+        %{status: status} ->
+          {:error, "HTTP #{status}"}
+
+        _ ->
+          {:error, :invalid_response}
+      end
+    else
       {:error, reason} -> {:error, reason}
     end
   end
@@ -406,12 +444,29 @@ defmodule Pincer.Core.Executor do
     receive do
       {:tool_approval, ^call_id, :granted} ->
         Logger.info("[EXECUTOR] Approval granted for #{command}")
+        workspace_restrict = restrict_to_workspace_enabled?()
+        workspace_root = File.cwd!()
 
-        case registry.execute_tool("run_command", %{"command" => command}, %{
-               "session_id" => session_id
-             }) do
-          {:ok, res} -> res
-          {:error, r} -> "Post-approval error: #{inspect(r)}"
+        case Pincer.Tools.SafeShell.approved_command_allowed?(command,
+               workspace_restrict: workspace_restrict,
+               workspace_root: workspace_root
+             ) do
+          :ok ->
+            case registry.execute_tool(
+                   "run_command",
+                   %{"command" => command, "cwd" => workspace_root},
+                   %{"session_id" => session_id}
+                 ) do
+              {:ok, res} -> res
+              {:error, r} -> "Post-approval error: #{inspect(r)}"
+            end
+
+          {:error, reason} ->
+            Logger.warning(
+              "[EXECUTOR] Approved command denied by workspace restriction policy: #{reason}"
+            )
+
+            "ERROR: Command denied by workspace restriction policy. #{reason}"
         end
 
       {:tool_approval, ^call_id, :denied} ->
@@ -422,6 +477,30 @@ defmodule Pincer.Core.Executor do
         "ERROR: Timeout waiting for user approval."
     end
   end
+
+  defp restrict_to_workspace_enabled? do
+    tools = Application.get_env(:pincer, :tools, %{})
+
+    case read_tools_setting(tools, ["restrict_to_workspace", "restrictToWorkspace"]) do
+      false -> false
+      _ -> true
+    end
+  end
+
+  defp read_tools_setting(map, keys) when is_map(map) and is_list(keys) do
+    Enum.find_value(keys, fn key ->
+      Map.get(map, key) ||
+        Enum.find_value(map, fn
+          {existing_key, value} when is_atom(existing_key) ->
+            if Atom.to_string(existing_key) == key, do: value
+
+          _ ->
+            nil
+        end)
+    end)
+  end
+
+  defp read_tools_setting(_map, _keys), do: nil
 
   # ---------------------------------------------------------------------------
   # Lazy attachment resolution
@@ -493,7 +572,22 @@ defmodule Pincer.Core.Executor do
     end
   end
 
+  defp resolve_part(%{"type" => "attachment_ref", "mime_type" => mime} = ref, _supports = false)
+       when is_binary(mime) do
+    if String.starts_with?(String.downcase(mime), "text/") do
+      resolve_text_attachment_for_text_only_provider(ref)
+    else
+      resolve_unsupported_attachment_ref(ref)
+    end
+  end
+
   defp resolve_part(%{"type" => "attachment_ref"} = ref, _supports = false) do
+    resolve_unsupported_attachment_ref(ref)
+  end
+
+  defp resolve_part(part, _supports), do: part
+
+  defp resolve_unsupported_attachment_ref(ref) do
     %{"filename" => filename, "size" => size} = ref
 
     %{
@@ -504,7 +598,45 @@ defmodule Pincer.Core.Executor do
     }
   end
 
-  defp resolve_part(part, _supports), do: part
+  defp resolve_text_attachment_for_text_only_provider(ref) do
+    %{"filename" => filename, "size" => size, "url" => url} = ref
+
+    if size > @max_inline_bytes do
+      %{
+        "type" => "text",
+        "text" =>
+          "[Arquivo texto '#{filename}' (#{size} bytes) maior que o limite de inlining (#{@max_inline_bytes} bytes).]"
+      }
+    else
+      case download_as_base64(url) do
+        {:ok, data} ->
+          case Base.decode64(data) do
+            {:ok, binary} ->
+              safe_text = binary_to_utf8(binary)
+              %{"type" => "text", "text" => "--- Content of #{filename} ---\n#{safe_text}"}
+
+            :error ->
+              %{
+                "type" => "text",
+                "text" => "[Falha ao decodificar arquivo texto '#{filename}' para UTF-8.]"
+              }
+          end
+
+        {:error, reason} ->
+          %{"type" => "text", "text" => "[Falha ao baixar '#{filename}': #{inspect(reason)}]"}
+      end
+    end
+  end
+
+  defp binary_to_utf8(binary) when is_binary(binary) do
+    if String.valid?(binary) do
+      binary
+    else
+      :unicode.characters_to_binary(binary, :latin1, :utf8)
+    end
+  rescue
+    _ -> binary
+  end
 
   defp download_as_base64(url) do
     fetcher =

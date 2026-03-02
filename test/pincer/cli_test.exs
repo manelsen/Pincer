@@ -16,6 +16,13 @@ defmodule Pincer.CLI.Test do
     test "retorna {:send, msg} para texto normal" do
       assert Pincer.CLI.process_command("Olá Pincer") == {:send, "Olá Pincer"}
     end
+
+    test "retorna comandos de histórico" do
+      assert Pincer.CLI.process_command("/history") == {:history, 10}
+      assert Pincer.CLI.process_command("/history 3") == {:history, 3}
+      assert Pincer.CLI.process_command("/history clear") == :history_clear
+      assert Pincer.CLI.process_command("/history nope") == {:history, 10}
+    end
   end
 
   # Teste de Integração (Mock Session)

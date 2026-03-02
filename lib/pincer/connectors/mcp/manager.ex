@@ -126,9 +126,13 @@ defmodule Pincer.Connectors.MCP.Manager do
   require Logger
   alias Pincer.Connectors.MCP.Client
   alias Pincer.Connectors.MCP.ConfigLoader
+  alias Pincer.Connectors.MCP.SidecarAudit
+  alias Pincer.Connectors.MCP.SkillsSidecarPolicy
   alias Pincer.Connectors.MCP.Transports.HTTP
   alias Pincer.Connectors.MCP.Transports.Stdio
   @default_get_tools_timeout 200
+  @skills_sidecar_tool_timeout_ms 15_000
+  @skills_sidecar_hard_kill_timeout_ms 100
 
   @doc """
   Starts the MCP Manager process.
@@ -234,6 +238,7 @@ defmodule Pincer.Connectors.MCP.Manager do
     mcp_config
     |> cfg_value("servers", %{})
     |> ConfigLoader.merge_static_and_dynamic(opts)
+    |> enforce_sidecar_policy()
   end
 
   @doc """
@@ -282,6 +287,62 @@ defmodule Pincer.Connectors.MCP.Manager do
   @spec execute_tool(String.t(), map()) :: {:ok, String.t()} | {:error, any()}
   def execute_tool(name, arguments) do
     GenServer.call(__MODULE__, {:execute, name, arguments}, 120_000)
+  end
+
+  @doc false
+  @spec audit_sidecar_result(String.t(), String.t(), integer(), any(), module(), map()) :: any()
+  def audit_sidecar_result(
+        server_name,
+        tool_name,
+        started_at_ms,
+        result,
+        audit_module \\ SidecarAudit,
+        arguments \\ %{}
+      )
+      when is_binary(server_name) and is_binary(tool_name) and is_integer(started_at_ms) do
+    if server_name == "skills_sidecar" do
+      duration_ms = max(System.monotonic_time(:millisecond) - started_at_ms, 0)
+      status = audit_module.status_from_result(result)
+      metadata = sidecar_audit_metadata(arguments)
+
+      _ =
+        audit_module.emit(
+          metadata.skill_id,
+          tool_name,
+          duration_ms,
+          status,
+          Map.drop(metadata, [:skill_id])
+        )
+    end
+
+    result
+  end
+
+  @doc false
+  @spec call_tool_with_timeout(String.t(), (-> any()), non_neg_integer(), non_neg_integer()) ::
+          any()
+  def call_tool_with_timeout(
+        server_name,
+        call_fun,
+        timeout_ms \\ @skills_sidecar_tool_timeout_ms,
+        kill_timeout_ms \\ @skills_sidecar_hard_kill_timeout_ms
+      )
+      when is_binary(server_name) and is_function(call_fun, 0) and is_integer(timeout_ms) and
+             timeout_ms >= 0 and is_integer(kill_timeout_ms) and kill_timeout_ms >= 0 do
+    if server_name == "skills_sidecar" do
+      task = Task.async(call_fun)
+
+      case Task.yield(task, timeout_ms) do
+        {:ok, result} ->
+          result
+
+        nil ->
+          _ = Task.shutdown(task, kill_timeout_ms)
+          {:error, :timeout}
+      end
+    else
+      call_fun.()
+    end
   end
 
   # Callbacks
@@ -384,24 +445,72 @@ defmodule Pincer.Connectors.MCP.Manager do
         {:reply, {:error, :tool_not_found}, state}
 
       info ->
-        case Client.call_tool(info.server_pid, name, args) do
-          {:ok, %{"result" => %{"content" => content}}} ->
-            # MCP returns a list of contents (text, image, etc)
-            text_content =
-              content
-              |> Enum.filter(fn c -> c["type"] == "text" end)
-              |> Enum.map(fn c -> c["text"] end)
-              |> Enum.join("
+        started_at_ms = System.monotonic_time(:millisecond)
+
+        result =
+          info.server_name
+          |> call_tool_with_timeout(fn -> Client.call_tool(info.server_pid, name, args) end)
+          |> case do
+            {:ok, %{"result" => %{"content" => content}}} ->
+              # MCP returns a list of contents (text, image, etc)
+              text_content =
+                content
+                |> Enum.filter(fn c -> c["type"] == "text" end)
+                |> Enum.map(fn c -> c["text"] end)
+                |> Enum.join("
 ")
 
-            {:reply, {:ok, text_content}, state}
+              {:ok, text_content}
 
-          {:ok, %{"error" => error}} ->
-            {:reply, {:error, error}, state}
+            {:ok, %{"error" => error}} ->
+              {:error, error}
 
-          error ->
-            {:reply, error, state}
-        end
+            error ->
+              error
+          end
+
+        audited_result =
+          audit_sidecar_result(info.server_name, name, started_at_ms, result, SidecarAudit, args)
+
+        {:reply, audited_result, state}
+    end
+  end
+
+  defp sidecar_audit_metadata(args) when is_map(args) do
+    %{
+      skill_id: normalize_audit_value(args, "skill_id", "skills_sidecar"),
+      skill_version: normalize_audit_value(args, "skill_version", "unknown"),
+      artifact_checksum: normalize_audit_value(args, "artifact_checksum", "unknown")
+    }
+  end
+
+  defp sidecar_audit_metadata(_args) do
+    %{
+      skill_id: "skills_sidecar",
+      skill_version: "unknown",
+      artifact_checksum: "unknown"
+    }
+  end
+
+  defp normalize_audit_value(args, key, default) do
+    value = Map.get(args, key) || Map.get(args, String.to_atom(key))
+
+    cond do
+      is_nil(value) ->
+        default
+
+      is_binary(value) ->
+        trimmed = String.trim(value)
+        if trimmed == "", do: default, else: trimmed
+
+      is_atom(value) ->
+        Atom.to_string(value)
+
+      is_integer(value) ->
+        Integer.to_string(value)
+
+      true ->
+        default
     end
   end
 
@@ -475,4 +584,24 @@ defmodule Pincer.Connectors.MCP.Manager do
   end
 
   defp normalize_env(_), do: []
+
+  defp enforce_sidecar_policy(servers) when is_map(servers) do
+    case Map.fetch(servers, "skills_sidecar") do
+      :error ->
+        servers
+
+      {:ok, cfg} ->
+        case SkillsSidecarPolicy.validate(cfg) do
+          :ok ->
+            servers
+
+          {:error, reason} ->
+            Logger.warning(
+              "MCP skills_sidecar disabled due to insecure isolation config: #{inspect(reason)}"
+            )
+
+            Map.delete(servers, "skills_sidecar")
+        end
+    end
+  end
 end

@@ -53,6 +53,16 @@ defmodule Pincer.SecurityAuditTest do
                SafeShell.execute(%{"command" => "ls > /tmp/out"})
     end
 
+    test "blocks shell line continuation (ls \\\\n-a)" do
+      assert {:error, {:approval_required, _}} =
+               SafeShell.execute(%{"command" => "ls \\\n-a"})
+    end
+
+    test "blocks multiline shell payload (ls\\ncat /etc/passwd)" do
+      assert {:error, {:approval_required, _}} =
+               SafeShell.execute(%{"command" => "ls\ncat /etc/passwd"})
+    end
+
     test "blocks commands not in whitelist" do
       assert {:error, {:approval_required, _}} =
                SafeShell.execute(%{"command" => "curl https://evil.com"})
@@ -61,6 +71,33 @@ defmodule Pincer.SecurityAuditTest do
     test "blocks path traversal in cat argument" do
       assert {:error, {:approval_required, _}} =
                SafeShell.execute(%{"command" => "cat ../../etc/passwd"})
+    end
+
+    test "blocks absolute path in cat argument" do
+      assert {:error, {:approval_required, _}} =
+               SafeShell.execute(%{"command" => "cat /etc/passwd"})
+    end
+
+    test "blocks absolute path in generic whitelisted command args" do
+      assert {:error, {:approval_required, _}} =
+               SafeShell.execute(%{"command" => "ls /etc"})
+    end
+
+    test "blocks symlink path that resolves outside workspace" do
+      sandbox_dir =
+        Path.join("trash", "safe_shell_symlink_escape_#{System.unique_integer([:positive])}")
+
+      link_path = Path.join(sandbox_dir, "passwd_link")
+
+      File.mkdir_p!(sandbox_dir)
+      assert :ok = File.ln_s("/etc/passwd", link_path)
+
+      on_exit(fn ->
+        File.rm_rf(sandbox_dir)
+      end)
+
+      assert {:error, {:approval_required, _}} =
+               SafeShell.execute(%{"command" => "cat #{link_path}"})
     end
 
     test "allows clean whitelisted command (ls -la)" do
@@ -72,7 +109,8 @@ defmodule Pincer.SecurityAuditTest do
         result = SafeShell.execute(%{"command" => "ls -la"})
         refute match?({:error, {:approval_required, _}}, result)
       catch
-        :exit, _ -> :ok   # reached MCP — command was accepted by the validator
+        # reached MCP — command was accepted by the validator
+        :exit, _ -> :ok
       end
     end
 
@@ -98,7 +136,9 @@ defmodule Pincer.SecurityAuditTest do
 
   describe "VULN-002: FileSystem — path confinement" do
     test "blocks explicit '..' traversal (../../etc/passwd)" do
-      assert {:error, msg} = FileSystem.execute(%{"action" => "read", "path" => "../../etc/passwd"})
+      assert {:error, msg} =
+               FileSystem.execute(%{"action" => "read", "path" => "../../etc/passwd"})
+
       assert msg =~ "traversal" or msg =~ "not allowed"
     end
 
@@ -143,6 +183,39 @@ defmodule Pincer.SecurityAuditTest do
     test "rejects reading a directory as a file" do
       assert {:error, _} = FileSystem.execute(%{"action" => "read", "path" => "lib"})
     end
+
+    test "blocks symlink target that escapes workspace root" do
+      sandbox_dir = Path.join("trash", "fs_symlink_escape_#{System.unique_integer([:positive])}")
+      link_path = Path.join(sandbox_dir, "passwd_link")
+
+      File.mkdir_p!(sandbox_dir)
+      assert :ok = File.ln_s("/etc/passwd", link_path)
+
+      on_exit(fn ->
+        File.rm_rf(sandbox_dir)
+      end)
+
+      assert {:error, msg} = FileSystem.execute(%{"action" => "read", "path" => link_path})
+      assert msg =~ "Access denied" or msg =~ "outside workspace"
+    end
+
+    test "blocks symlinked directory escape on descendant path" do
+      sandbox_dir =
+        Path.join("trash", "fs_symlink_dir_escape_#{System.unique_integer([:positive])}")
+
+      link_dir = Path.join(sandbox_dir, "etc_link")
+      escaped_file = Path.join(link_dir, "passwd")
+
+      File.mkdir_p!(sandbox_dir)
+      assert :ok = File.ln_s("/etc", link_dir)
+
+      on_exit(fn ->
+        File.rm_rf(sandbox_dir)
+      end)
+
+      assert {:error, msg} = FileSystem.execute(%{"action" => "read", "path" => escaped_file})
+      assert msg =~ "Access denied" or msg =~ "outside workspace"
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -151,29 +224,57 @@ defmodule Pincer.SecurityAuditTest do
 
   describe "VULN-003: Web tool — SSRF protection" do
     test "blocks localhost by hostname" do
-      assert {:error, msg} = Web.execute(%{"action" => "fetch", "url" => "http://localhost/admin"})
+      assert {:error, msg} =
+               Web.execute(%{"action" => "fetch", "url" => "http://localhost/admin"})
+
+      assert msg =~ "internal hosts" or msg =~ "not allowed"
+    end
+
+    test "blocks localhost with trailing dot" do
+      assert {:error, msg} =
+               Web.execute(%{"action" => "fetch", "url" => "http://localhost./admin"})
+
       assert msg =~ "internal hosts" or msg =~ "not allowed"
     end
 
     test "blocks 127.0.0.1 (IPv4 loopback)" do
-      assert {:error, msg} = Web.execute(%{"action" => "fetch", "url" => "http://127.0.0.1:12345/"})
+      assert {:error, msg} =
+               Web.execute(%{"action" => "fetch", "url" => "http://127.0.0.1:12345/"})
+
+      assert msg =~ "internal hosts" or msg =~ "not allowed"
+    end
+
+    test "blocks IPv4-mapped IPv6 loopback without raising" do
+      assert {:error, msg} =
+               Web.execute(%{"action" => "fetch", "url" => "http://[::ffff:127.0.0.1]/"})
+
       assert msg =~ "internal hosts" or msg =~ "not allowed"
     end
 
     test "blocks AWS IMDSv1 metadata endpoint" do
       assert {:error, msg} =
-               Web.execute(%{"action" => "fetch", "url" => "http://169.254.169.254/latest/meta-data/"})
+               Web.execute(%{
+                 "action" => "fetch",
+                 "url" => "http://169.254.169.254/latest/meta-data/"
+               })
+
       assert msg =~ "internal hosts" or msg =~ "not allowed"
     end
 
     test "blocks GCP metadata endpoint" do
       assert {:error, msg} =
-               Web.execute(%{"action" => "fetch", "url" => "http://metadata.google.internal/computeMetadata/v1/"})
+               Web.execute(%{
+                 "action" => "fetch",
+                 "url" => "http://metadata.google.internal/computeMetadata/v1/"
+               })
+
       assert msg =~ "internal hosts" or msg =~ "not allowed"
     end
 
     test "blocks private IP range 10.x.x.x" do
-      assert {:error, msg} = Web.execute(%{"action" => "fetch", "url" => "http://10.0.0.1/api/secrets"})
+      assert {:error, msg} =
+               Web.execute(%{"action" => "fetch", "url" => "http://10.0.0.1/api/secrets"})
+
       assert msg =~ "internal hosts" or msg =~ "not allowed"
     end
 
@@ -193,7 +294,9 @@ defmodule Pincer.SecurityAuditTest do
     end
 
     test "blocks ftp:// scheme" do
-      assert {:error, msg} = Web.execute(%{"action" => "fetch", "url" => "ftp://example.com/file"})
+      assert {:error, msg} =
+               Web.execute(%{"action" => "fetch", "url" => "ftp://example.com/file"})
+
       assert msg =~ "not allowed" or msg =~ "scheme"
     end
 
@@ -244,7 +347,13 @@ defmodule Pincer.SecurityAuditTest do
             "role" => "assistant",
             "content" => nil,
             "tool_calls" => [
-              %{"id" => "#{i}", "function" => %{"name" => "file_system", "arguments" => ~s({"path": "file#{i}.txt"})}}
+              %{
+                "id" => "#{i}",
+                "function" => %{
+                  "name" => "file_system",
+                  "arguments" => ~s({"path": "file#{i}.txt"})
+                }
+              }
             ]
           }
         end)
@@ -285,6 +394,7 @@ defmodule Pincer.SecurityAuditTest do
         |> Enum.flat_map(fn
           %{"tool_calls" => calls} when not is_nil(calls) ->
             Enum.map(calls, fn tc -> get_in(tc, ["function", "name"]) end)
+
           _ ->
             []
         end)
