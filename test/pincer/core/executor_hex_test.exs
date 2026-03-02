@@ -3,8 +3,8 @@ defmodule Pincer.Core.ExecutorHexTest do
   import Mox
 
   # Define mocks for the ports
-  Mox.defmock(Pincer.MockToolRegistry, for: Pincer.Core.Ports.ToolRegistry)
-  Mox.defmock(Pincer.MockLLMClient, for: Pincer.Core.Ports.LLM)
+  Mox.defmock(Pincer.MockToolRegistry, for: Pincer.Ports.ToolRegistry)
+  Mox.defmock(Pincer.MockLLMClient, for: Pincer.Ports.LLM)
 
   setup :verify_on_exit!
 
@@ -280,10 +280,10 @@ defmodule Pincer.Core.ExecutorHexTest do
       session_id = "tool_exec_restrict_workspace_session"
       history = [%{"role" => "user", "content" => "Run restricted approval flow"}]
 
-      Pincer.PubSub.subscribe("session:#{session_id}")
+      Pincer.Infra.PubSub.subscribe("session:#{session_id}")
 
       on_exit(fn ->
-        Pincer.PubSub.unsubscribe("session:#{session_id}")
+        Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
       end)
 
       Pincer.MockToolRegistry

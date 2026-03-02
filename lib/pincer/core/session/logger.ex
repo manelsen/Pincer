@@ -1,4 +1,4 @@
-defmodule Pincer.Session.Logger do
+defmodule Pincer.Core.Session.Logger do
   @moduledoc """
   Episodic Memory recorder for session interactions.
 
@@ -44,13 +44,13 @@ defmodule Pincer.Session.Logger do
   ## Examples
 
       # Log a user message
-      :ok = Pincer.Session.Logger.log("user_123", "user", "Hello, Pincer!")
+      :ok = Pincer.Core.Session.Logger.log("user_123", "user", "Hello, Pincer!")
 
       # Log an assistant response
-      :ok = Pincer.Session.Logger.log("user_123", "assistant", "Hello! How can I help?")
+      :ok = Pincer.Core.Session.Logger.log("user_123", "assistant", "Hello! How can I help?")
 
       # Log system-level information
-      :ok = Pincer.Session.Logger.log("user_123", "system", "Session started")
+      :ok = Pincer.Core.Session.Logger.log("user_123", "system", "Session started")
 
   ## Filename Sanitization
 
@@ -88,7 +88,7 @@ defmodule Pincer.Session.Logger do
   ## Examples
 
       # Basic usage
-      :ok = Pincer.Session.Logger.log("user_123", "user", "What's the weather?")
+      :ok = Pincer.Core.Session.Logger.log("user_123", "user", "What's the weather?")
 
       # After logging, file contains:
       # ## [2024-02-19 14:32:15.123456Z] USER

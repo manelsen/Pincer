@@ -5,12 +5,12 @@
 # 3. Simulate SubAgent work
 # 4. Read Blackboard
 
-IO.puts("Starting Pincer Orchestration Test...")
+IO.puts("Starting Pincer.Core.Orchestration Test...")
 Application.ensure_all_started(:pincer)
 
-alias Pincer.Orchestration.Blackboard
-alias Pincer.Tools.Orchestrator
-alias Pincer.Tools.BlackboardReader
+alias Pincer.Core.Orchestration.Blackboard
+alias Pincer.Adapters.Tools.Orchestrator
+alias Pincer.Adapters.Tools.BlackboardReader
 
 # 1. Ensure Blackboard is running
 case Process.whereis(Blackboard) do

@@ -1,130 +1,188 @@
 defmodule Pincer.Core.WorkspaceGuard do
   @moduledoc """
-  Shared path-confinement guard for workspace-scoped runtime operations.
-
-  The guard enforces:
-  - null-byte rejection
-  - optional explicit `..` traversal rejection
-  - workspace confinement by expanded path prefix
-  - symlink-escape blocking via nearest existing ancestor resolution
+  Domain-level security policy for paths and commands.
+  Centralizes safety rules for the unified executor.
   """
+  require Logger
+  alias Pincer.Core.Tooling.CommandProfile
 
   @outside_workspace_error "Access denied: Path outside workspace"
+  @max_command_length 1024
+  @dangerous_chars ~r/[;&|`$<>]/
+  @multiline_or_line_continuation ~r/\\(?:\r\n|\n|\r)|[\r\n]/
+
+  # --- Path Confinement ---
 
   @spec confine_path(String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
-  def confine_path(path, opts \\ [])
+  def confine_path(path, opts \\ []) do
+    if not is_binary(path) do
+      {:error, "Invalid path"}
+    else
+      reject_parent_segments = Keyword.get(opts, :reject_parent_segments, true)
+      root = opts |> Keyword.get(:root, File.cwd!()) |> Path.expand()
+      candidate = String.trim(path)
 
-  def confine_path(path, _opts) when not is_binary(path), do: {:error, "Invalid path"}
+      cond do
+        candidate == "" ->
+          {:error, "Invalid path"}
 
-  def confine_path(path, opts) do
-    reject_parent_segments = Keyword.get(opts, :reject_parent_segments, true)
-    root = opts |> Keyword.get(:root, File.cwd!()) |> Path.expand() |> canonical_root()
+        String.contains?(candidate, "\0") ->
+          {:error, "Path contains null bytes"}
 
-    cond do
-      String.contains?(path, "\0") ->
-        {:error, "Path contains null bytes"}
+        reject_parent_segments and parent_segment?(candidate) ->
+          {:error, "Path traversal (..) not allowed"}
 
-      reject_parent_segments and String.contains?(path, "..") ->
-        {:error, "Path traversal (..) not allowed"}
+        true ->
+          full_path = Path.expand(candidate, root)
 
-      true ->
-        full_path = Path.expand(path, root)
-
-        with :ok <- ensure_within_workspace(full_path, root),
-             :ok <- ensure_existing_ancestor_within_workspace(full_path, root) do
-          {:ok, full_path}
-        end
+          with :ok <- ensure_inside_root(full_path, root),
+               :ok <- ensure_symlink_chain_inside_root(full_path, root) do
+            {:ok, full_path}
+          else
+            {:error, _reason} -> {:error, @outside_workspace_error}
+          end
+      end
     end
   end
 
-  @spec outside_workspace_error() :: String.t()
-  def outside_workspace_error, do: @outside_workspace_error
-
-  defp canonical_root(root) do
-    case resolve_existing_path(root) do
-      {:ok, real_root} -> real_root
-      {:error, _reason} -> root
-    end
+  defp parent_segment?(path) when is_binary(path) do
+    path
+    |> String.replace("\\", "/")
+    |> String.split("/", trim: true)
+    |> Enum.any?(&(&1 == ".."))
   end
 
-  defp ensure_existing_ancestor_within_workspace(full_path, root) do
-    with {:ok, ancestor} <- existing_ancestor(full_path),
-         {:ok, real_ancestor} <- resolve_existing_path(ancestor),
-         :ok <- ensure_within_workspace(real_ancestor, root) do
+  defp ensure_inside_root(path, root) do
+    if path == root or String.starts_with?(path, root <> "/") do
       :ok
     else
-      {:error, @outside_workspace_error} = error -> error
-      {:error, _reason} -> :ok
+      {:error, :outside_workspace}
     end
   end
 
-  defp existing_ancestor(path) do
-    cond do
-      existing_path_or_symlink?(path) ->
-        {:ok, path}
+  # Detects symlink escapes without relying on File.realpath/1 (not available on older Elixir).
+  # It walks each existing segment and validates that resolved links remain under root.
+  defp ensure_symlink_chain_inside_root(path, root) do
+    relative = Path.relative_to(path, root)
+    segments = String.split(relative, "/", trim: true)
 
-      true ->
-        parent = Path.dirname(path)
+    segments
+    |> Enum.reduce_while(root, fn segment, current ->
+      next = Path.join(current, segment)
 
-        if parent == path do
-          {:error, :no_existing_ancestor}
-        else
-          existing_ancestor(parent)
-        end
-    end
-  end
+      case File.read_link(next) do
+        {:ok, link_target} ->
+          resolved = resolve_link_target(next, link_target)
 
-  defp existing_path_or_symlink?(path) do
-    File.exists?(path) or match?({:ok, %{type: :symlink}}, File.lstat(path))
-  end
-
-  defp resolve_existing_path(path) do
-    path
-    |> Path.expand()
-    |> Path.split()
-    |> Enum.reduce_while("", fn segment, current ->
-      next_path = append_path_segment(current, segment)
-
-      case File.lstat(next_path) do
-        {:ok, %{type: :symlink}} ->
-          case File.read_link(next_path) do
-            {:ok, target} ->
-              resolved_target =
-                if Path.type(target) == :absolute do
-                  Path.expand(target)
-                else
-                  Path.expand(target, Path.dirname(next_path))
-                end
-
-              {:cont, resolved_target}
-
-            {:error, reason} ->
-              {:halt, {:error, reason}}
+          case ensure_inside_root(resolved, root) do
+            :ok -> {:cont, resolved}
+            {:error, _reason} = error -> {:halt, error}
           end
 
-        {:ok, _other} ->
-          {:cont, next_path}
+        {:error, :enoent} ->
+          # Non-existing leaf/segment: no symlink to validate beyond this point.
+          {:halt, :ok}
 
-        {:error, reason} ->
-          {:halt, {:error, reason}}
+        {:error, :einval} ->
+          {:cont, next}
+
+        {:error, _reason} ->
+          {:cont, next}
       end
     end)
     |> case do
       {:error, _reason} = error -> error
-      resolved when is_binary(resolved) -> {:ok, resolved}
+      _ -> :ok
     end
   end
 
-  defp append_path_segment("", "/"), do: "/"
-  defp append_path_segment("", segment), do: segment
-  defp append_path_segment("/", segment), do: Path.join("/", segment)
-  defp append_path_segment(current, segment), do: Path.join(current, segment)
+  defp resolve_link_target(link_path, link_target) when is_binary(link_target) do
+    case Path.type(link_target) do
+      :absolute ->
+        Path.expand(link_target)
 
-  defp ensure_within_workspace(path, root) do
-    if path == root or String.starts_with?(path, root <> "/") do
-      :ok
+      :relative ->
+        Path.expand(link_target, Path.dirname(link_path))
+
+      _ ->
+        Path.expand(link_target)
+    end
+  end
+
+  # --- Command Security Policy ---
+
+  @spec command_allowed?(String.t(), keyword()) :: :ok | {:error, String.t()}
+  def command_allowed?(command, opts \\ []) do
+    if not is_binary(command) do
+      {:error, "Invalid command"}
     else
-      {:error, @outside_workspace_error}
+      workspace_root = opts |> Keyword.get(:workspace_root, File.cwd!()) |> Path.expand()
+      command = String.slice(command, 0, @max_command_length)
+
+      cond do
+        String.match?(command, @multiline_or_line_continuation) ->
+          {:error, "Detected multiline or line-continuation shell payload"}
+
+        String.match?(command, @dangerous_chars) ->
+          {:error, "Detected dangerous shell characters"}
+
+        true ->
+          case validate_command_structure(command, workspace_root) do
+            :ok -> :ok
+            {:error, reason} -> {:error, reason}
+          end
+      end
     end
   end
+
+  defp validate_command_structure(command, workspace_root) do
+    tokens = String.split(command, ~r/\s+/, trim: true)
+
+    case tokens do
+      ["ls" | _] ->
+        :ok
+
+      ["pwd"] ->
+        :ok
+
+      ["git", "status"] ->
+        :ok
+
+      ["git", "log" | _] ->
+        :ok
+
+      ["cat", path] ->
+        validate_workspace_path_arg(path, workspace_root)
+
+      ["head", path] ->
+        validate_workspace_path_arg(path, workspace_root)
+
+      ["tail", path] ->
+        validate_workspace_path_arg(path, workspace_root)
+
+      ["mix", "test"] ->
+        :ok
+
+      ["mix", "compile"] ->
+        :ok
+
+      _ ->
+        prefixes = CommandProfile.dynamic_command_prefixes(workspace_root: workspace_root)
+
+        if Enum.any?(prefixes, fn prefix -> Enum.take(tokens, length(prefix)) == prefix end) do
+          :ok
+        else
+          {:error, "Command not in whitelist"}
+        end
+    end
+  end
+
+  defp validate_workspace_path_arg(path, workspace_root) when is_binary(path) do
+    case confine_path(path, root: workspace_root, reject_parent_segments: true) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp validate_workspace_path_arg(_path, _workspace_root), do: {:error, "Invalid path"}
 end

@@ -26,6 +26,14 @@ defmodule Pincer.Core.WorkspaceGuardTest do
              WorkspaceGuard.confine_path(link_path, root: root)
   end
 
+  test "confine_path/2 blocks sibling path prefix collision outside workspace" do
+    root = File.cwd!()
+    sibling = Path.dirname(root) <> "/" <> Path.basename(root) <> "-evil/secret.txt"
+
+    assert {:error, "Access denied: Path outside workspace"} =
+             WorkspaceGuard.confine_path(sibling, root: root)
+  end
+
   test "confine_path/2 accepts a path inside workspace" do
     root = File.cwd!()
     assert {:ok, safe} = WorkspaceGuard.confine_path("mix.exs", root: root)

@@ -7,7 +7,7 @@ defmodule Pincer.Core.Onboard do
   CLI and other surfaces should call this module as an adapter boundary.
   """
 
-  @behaviour Pincer.Core.Ports.Onboarding
+  @behaviour Pincer.Ports.Onboarding
 
   @channels_requiring_token MapSet.new(["telegram", "discord", "slack"])
 

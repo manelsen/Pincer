@@ -1,9 +1,9 @@
-defmodule Pincer.Project.ServerTest do
+defmodule Pincer.Core.Project.ServerTest do
   use ExUnit.Case, async: false
   import Mox
 
-  alias Pincer.Project.Server
-  alias Pincer.Orchestration.Blackboard
+  alias Pincer.Core.Project.Server
+  alias Pincer.Core.Orchestration.Blackboard
 
   setup :set_mox_from_context
 
