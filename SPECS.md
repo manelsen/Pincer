@@ -14,6 +14,84 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 
 ---
 
+## Incremento 2026-03-02 (Normalizacao de Exports em Boundaries)
+
+### Objetivo
+- Corrigir regressao de declaracao de `exports` em boundaries que causou warnings massivos de:
+  - `unknown module ... is listed as an export`
+  - `forbidden reference ... is not exported by its owner boundary`
+
+### Escopo
+- Ajustar somente:
+  - `lib/pincer/core.ex`
+  - `lib/pincer/infra.ex`
+  - `lib/pincer/ports.ex`
+
+### Regras
+- Dentro de um `defmodule` que usa `Boundary`, a lista `exports` deve usar aliases relativos ao boundary dono.
+- Exemplo em `defmodule Pincer.Core`:
+  - correto: `Session.Server`
+  - incorreto: `Pincer.Core.Session.Server`
+
+### Criterios de aceite
+1. Os exports dos tres boundaries acima usam aliases relativos.
+2. Teste de regressao cobre o padrao e falha quando alias absoluto do proprio boundary reaparece.
+3. `mix compile` nao emite mais warnings de `unknown module Pincer.<Boundary>.Pincer...` para esses arquivos.
+
+---
+
+## Incremento 2026-03-02 (Warnings de Boundary no Startup)
+
+### Objetivo
+- Eliminar warnings recorrentes de compilacao/startup:
+  - `Mix.Tasks.Pincer.* is not included in any boundary`
+  - `HtmlEntities is not included in any boundary`
+
+### Escopo
+- Classificacao manual de mix tasks para boundary dedicado de tooling.
+- Namespacing do decoder HTML usado no tool web para dentro de boundary existente.
+
+### Interface/Contrato
+- Boundary de tooling:
+  - `Pincer.Mix` com `top_level?: true` e `check: [in: false, out: false]`.
+- Mix tasks:
+  - `Mix.Tasks.Pincer.Chat|Doctor|Onboard|SecurityAudit|Server` usam
+    `use Boundary, classify_to: Pincer.Mix`.
+- Decoder HTML:
+  - substituir `HtmlEntities` top-level por `Pincer.Adapters.Tools.Web.HtmlEntities`.
+
+### Criterios de aceite
+1. `mix compile` nao emite mais os dois warnings acima.
+2. `mix pincer.server service restart` nao registra esses warnings no `journalctl`.
+3. Teste de regressao cobre classificacao das tasks e namespacing do decoder.
+
+---
+
+## Incremento 2026-03-02 (Resiliencia do Cron Scheduler + Repo Config)
+
+### Objetivo
+- Impedir crash-loop do `Pincer.Adapters.Cron.Scheduler` quando o schema de cron ainda nao foi migrado.
+- Corrigir configuracao de `ecto_repos` para usar o repo real do projeto (`Pincer.Infra.Repo`).
+
+### Escopo
+- `lib/pincer/adapters/cron/scheduler.ex`
+- `config/config.exs`
+- testes de regressao em `test/pincer/adapters/cron/scheduler_test.exs` e `test/pincer/config/db_paths_test.exs`
+
+### Regras
+- No tick do scheduler, erro de banco `no such table: cron_jobs` nao pode derrubar o processo.
+- Scheduler deve permanecer vivo e registrar warning acionavel (uma vez por ciclo de vida do processo) enquanto o schema estiver ausente.
+- Fluxo normal de dispatch/reschedule de jobs deve permanecer inalterado.
+- `:ecto_repos` deve apontar para `Pincer.Infra.Repo`.
+
+### Criterios de aceite
+1. Teste prova que `:tick` com erro `no such table: cron_jobs` nao encerra o scheduler.
+2. Teste prova que fluxo normal ainda despacha e reschedule jobs.
+3. Teste de config valida `Application.get_env(:pincer, :ecto_repos) == [Pincer.Infra.Repo]`.
+4. `mix compile` e `mix test` dos arquivos alterados passam.
+
+---
+
 ## 0. Incremento 2026-02-22 (Onboard + DB em `./db`)
 
 ### Objetivo

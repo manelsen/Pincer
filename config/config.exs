@@ -1,7 +1,7 @@
 import Config
 
 config :pincer,
-  ecto_repos: [Pincer.Repo]
+  ecto_repos: [Pincer.Infra.Repo]
 
 config :telegex,
   token: System.get_env("TELEGRAM_BOT_TOKEN"),
@@ -74,7 +74,7 @@ config :logger, :handlers, [
   }
 ]
 
-config :pincer, Pincer.Repo, log: false
+config :pincer, Pincer.Infra.Repo, log: false
 
 config :nostrum,
   token: System.get_env("DISCORD_BOT_TOKEN") || "DISCORD_TOKEN_REQUIRED_FOR_CHANNEL",
