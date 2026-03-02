@@ -1,0 +1,21 @@
+services:
+  pincer-server:
+    container_name: pincer-server
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_UID: ${UID:-1000}
+        APP_GID: ${GID:-1000}
+    env_file:
+      - .env
+    environment:
+      MIX_ENV: prod
+    restart: unless-stopped
+    volumes:
+      - ./config.yaml:/app/config.yaml:ro
+      - ./.env:/app/.env:ro
+      - ./db:/app/db
+      - ./logs:/app/logs
+      - ./sessions:/app/sessions
+      - ./memory:/app/memory

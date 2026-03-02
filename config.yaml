@@ -10,6 +10,15 @@ channels:
     adapter: "Pincer.Channels.Telegram"
     enabled: true
     token_env: "TELEGRAM_BOT_TOKEN"
+    dm_policy:
+      mode: "pairing"
+  webhook:
+    adapter: "Pincer.Channels.Webhook"
+    enabled: false
+    token_env: "PINCER_WEBHOOK_TOKEN"
+    session_mode: "per_sender"
+    default_source: "external"
+    default_session_id: "webhook_main"
 database:
   adapter: "Ecto.Adapters.SQLite3"
   database: "db/pincer_mvp.db"
@@ -32,3 +41,5 @@ mcp:
     github:
       args: ["-y", "@modelcontextprotocol/server-github"]
       command: "npx"
+tools:
+  restrict_to_workspace: true

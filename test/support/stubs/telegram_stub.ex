@@ -4,6 +4,9 @@ defmodule Pincer.Test.Stubs.Telegram do
   @impl true
   def get_updates(_opts), do: {:ok, []}
 
+  @impl true
+  def get_file(_file_id), do: {:ok, %{file_path: "test/file.txt"}}
+
   # Non-behaviour helper kept for compatibility with legacy test helpers.
   def get_me, do: {:ok, %{id: 123, username: "test_bot"}}
 

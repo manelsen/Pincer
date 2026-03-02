@@ -104,6 +104,12 @@ defmodule Pincer.Channels.Telegram.Session do
   end
 
   @impl true
+  def handle_info({:agent_status, text}, state) do
+    Pincer.Channels.Telegram.send_message(state.chat_id, text)
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info({:agent_thinking, _text}, state) do
     Telegex.send_chat_action(state.chat_id, "typing")
     {:noreply, state}
