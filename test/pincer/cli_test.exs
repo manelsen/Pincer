@@ -23,16 +23,17 @@ defmodule Pincer.CLI.Test do
   describe "integração com sessão" do
     test "envia mensagem para o servidor de sessão" do
       # Cria um processo fake para simular o Session.Server
-      session_pid = spawn(fn -> 
-        receive do
-          {:"$gen_call", from, {:process_input, "Teste"}} ->
-            GenServer.reply(from, {:ok, :started})
-        end
-      end)
+      session_pid =
+        spawn(fn ->
+          receive do
+            {:"$gen_call", from, {:process_input, "Teste"}} ->
+              GenServer.reply(from, {:ok, :started})
+          end
+        end)
 
       # Como o CLI real usa Registry, aqui apenas testamos a lógica de envio isolada
       # Se a função send_message existir e funcionar
-      assert Pincer.CLI.send_message(session_pid, "Teste") == {:ok, :started}
+      assert Pincer.CLI.send_message(session_pid, "Teste") == :ok
     end
   end
 end

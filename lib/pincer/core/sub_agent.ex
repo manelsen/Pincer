@@ -1,14 +1,14 @@
 defmodule Pincer.Core.SubAgent do
   @moduledoc """
-  Gerencia a execução de tarefas assíncronas (ferramentas) disparadas pelo Agente de Sessão.
-  Permite que o Pincer continue "acordado" enquanto realiza trabalhos pesados.
+  Manages the execution of asynchronous tasks (tools) triggered by the Session Agent.
+  Allows Pincer to stay "awake" while performing heavy work.
   """
   use Task, restart: :temporary
   require Logger
 
   @doc """
-  Inicia a execução de uma ferramenta em background.
-  Notifica o processo chamador (Session) quando concluir.
+  Starts the execution of a tool in background.
+  Notifies the caller process (Session) when complete.
   """
   def start_task(session_pid, tool_call) do
     Task.start(fn ->
@@ -16,17 +16,20 @@ defmodule Pincer.Core.SubAgent do
     end)
   end
 
-  defp execute(session_pid, %{"id" => call_id, "function" => %{"name" => name, "arguments" => args_json}} = _call) do
-    Logger.info("Sub-agente iniciando tarefa: #{name} (ID: #{call_id})")
+  defp execute(
+         session_pid,
+         %{"id" => call_id, "function" => %{"name" => name, "arguments" => args_json}} = _call
+       ) do
+    Logger.info("Sub-agent starting task: #{name} (ID: #{call_id})")
 
-    # Decodifica argumentos se necessário
+    # Decodes arguments if needed
     args =
       case Jason.decode(args_json) do
         {:ok, decoded} -> decoded
         _ -> args_json
       end
 
-    # 1. Tenta ferramentas nativas
+    # 1. Try native tools
     module = find_native_tool_module(name)
 
     result =
@@ -34,29 +37,33 @@ defmodule Pincer.Core.SubAgent do
         module ->
           case module.execute(args) do
             {:ok, content} -> content
-            {:error, reason} -> "Erro na ferramenta nativa #{name}: #{inspect(reason)}"
+            {:error, reason} -> "Error in native tool #{name}: #{inspect(reason)}"
           end
 
-        # 2. Tenta ferramentas MCP
+        # 2. Try MCP tools
         true ->
           case Pincer.Connectors.MCP.Manager.execute_tool(name, args) do
             {:ok, content} -> content
-            {:error, :tool_not_found} -> "Ferramenta #{name} não encontrada."
-            {:error, reason} -> "Erro na ferramenta MCP #{name}: #{inspect(reason)}"
+            {:error, :tool_not_found} -> "Tool #{name} not found."
+            {:error, reason} -> "Error in MCP tool #{name}: #{inspect(reason)}"
           end
       end
 
-    # Envia o resultado de volta para a Sessão via mensagem Cast ou Call
-    send(session_pid, {:tool_result, %{
-      "role" => "tool",
-      "tool_call_id" => call_id,
-      "name" => name,
-      "content" => result
-    }})
+    # Sends the result back to the Session via Cast or Call message
+    send(
+      session_pid,
+      {:tool_result,
+       %{
+         "role" => "tool",
+         "tool_call_id" => call_id,
+         "name" => name,
+         "content" => result
+       }}
+    )
   end
 
   defp find_native_tool_module(name) do
-    # Lista fixa temporária
+    # Temporary fixed list
     tools = [
       Pincer.Tools.FileSystem,
       Pincer.Tools.Config,

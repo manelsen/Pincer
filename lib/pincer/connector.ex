@@ -1,34 +1,34 @@
 defmodule Pincer.Connector do
   @moduledoc """
-  Behavior para conectores de mensageria do Pincer.
-  Define a interface que todo conector deve implementar.
+  Behavior for Pincer messaging connectors.
+  Defines the interface that every connector must implement.
   """
 
   @doc """
-  Envia uma mensagem para o usuário.
+  Sends a message to the user.
   """
   @callback send_message(destination :: any(), content :: String.t(), opts :: keyword()) ::
               {:ok, any()} | {:error, any()}
 
   @doc """
-  Edita uma mensagem existente.
+  Edits an existing message.
   """
   @callback edit_message(message_ref :: any(), content :: String.t(), opts :: keyword()) ::
               {:ok, any()} | {:error, any()}
 
   @doc """
-  Responde a uma mensagem/interação.
+  Replies to a message/interaction.
   """
   @callback reply_to(context :: any(), content :: String.t(), opts :: keyword()) ::
               {:ok, any()} | {:error, any()}
 
   @doc """
-  Retorna o identificador único do usuário no contexto atual.
+  Returns the unique user identifier in the current context.
   """
   @callback user_id(context :: any()) :: String.t()
 
   @doc """
-  Retorna o identificador da sessão baseado no contexto.
+  Returns the session identifier based on the context.
   """
   @callback session_id(context :: any()) :: String.t()
 end

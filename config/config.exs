@@ -9,15 +9,75 @@ config :telegex,
 
 config :pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite
 
-config :nx, default_backend: EXLA.Backend
+config :pincer, :llm_providers, %{
+  "google" => %{
+    adapter: Pincer.LLM.Providers.Google,
+    env_key: "GOOGLE_API_KEY",
+    default_model: "gemini-2.0-flash",
+    # Gemini suporta leitura nativa de PDFs e imagens via inlineData.
+    supports_files: true
+  },
+  "openrouter" => %{
+    adapter: Pincer.LLM.Providers.OpenRouter,
+    env_key: "OPENROUTER_API_KEY",
+    default_model: "openrouter/free"
+  },
+  "opencode_zen" => %{
+    adapter: Pincer.LLM.Providers.OpencodeZen,
+    env_key: "OPENCODE_ZEN_API_KEY",
+    default_model: "kimi-k2.5-free"
+  },
+  "z_ai" => %{
+    adapter: Pincer.LLM.Providers.Zhipu,
+    env_key: "Z_AI_API_KEY",
+    default_model: "glm-4.7"
+  },
+  "z_ai_coding" => %{
+    adapter: Pincer.LLM.Providers.Zhipu,
+    base_url: "https://api.z.ai/api/coding/paas/v4/chat/completions",
+    env_key: "Z_AI_CODING_API_KEY",
+    default_model: "glm-4.7"
+  },
+  "moonshot" => %{
+    adapter: Pincer.LLM.Providers.Moonshot,
+    env_key: "MOONSHOT_API_KEY",
+    default_model: "moonshot-v1-auto"
+  },
+  "moonshot_coding" => %{
+    adapter: Pincer.LLM.Providers.Moonshot,
+    env_key: "MOONSHOT_CODING_API_KEY",
+    default_model: "moonshot-v1-auto"
+  }
+}
 
-# Configuração de Logs (Sinal Puro no CLI)
+config :pincer, :default_llm_provider, "openrouter"
+
+# Configuração de Logs
+config :logger,
+  level: :info
+
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
-  metadata: [:request_id],
-  level: :warning
+  metadata: [:request_id]
 
-config :pincer, Pincer.Repo,
-  log: false
+# Handlers de log (Console e Arquivo)
+config :logger, :handlers, [
+  %{
+    id: :file_log,
+    module: :logger_std_h,
+    config: %{
+      type: {:file, ~c"logs/server.log"},
+      max_no_bytes: 10_000_000,
+      max_no_files: 5,
+      compress_on_rotate: true
+    }
+  }
+]
+
+config :pincer, Pincer.Repo, log: false
+
+config :nostrum,
+  token: System.get_env("DISCORD_BOT_TOKEN") || "DISCORD_TOKEN_REQUIRED_FOR_CHANNEL",
+  gateway_intents: [:guild_messages, :message_content, :direct_messages]
 
 import_config "#{config_env()}.exs"

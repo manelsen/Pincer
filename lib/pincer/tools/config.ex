@@ -1,6 +1,6 @@
 defmodule Pincer.Tools.Config do
   @moduledoc """
-  Ferramentas para gerenciar a configuração do Pincer em tempo real.
+  Tools for managing Pincer configuration in real time.
   """
   @behaviour Pincer.Tool
   require Logger
@@ -9,13 +9,14 @@ defmodule Pincer.Tools.Config do
   def spec do
     %{
       name: "change_model",
-      description: "Altera o modelo padrão do Pincer no arquivo de configuração.",
+      description: "Changes Pincer's default model in the configuration file.",
       parameters: %{
         type: "object",
         properties: %{
           model_id: %{
             type: "string",
-            description: "O ID do modelo (ex: 'kimi-k2.5-free', 'glm-5-free', 'stepfun/step-3.5-flash:free')"
+            description:
+              "O ID do modelo (ex: 'kimi-k2.5-free', 'glm-5-free', 'stepfun/step-3.5-flash:free')"
           },
           provider: %{
             type: "string",
@@ -34,9 +35,10 @@ defmodule Pincer.Tools.Config do
 
     case Pincer.Config.set_model(model_id, provider) do
       {:ok, mid, p} ->
-        {:ok, "Modelo alterado com sucesso para #{mid} no provedor #{p}."}
+        {:ok, "Model changed successfully to #{mid} on provider #{p}."}
+
       {:error, reason} ->
-        {:error, "Erro ao alterar modelo: #{inspect(reason)}"}
+        {:error, "Error changing model: #{inspect(reason)}"}
     end
   end
 end

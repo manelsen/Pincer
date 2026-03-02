@@ -1,31 +1,51 @@
 defmodule Mix.Tasks.Pincer.Server do
   @moduledoc """
-  Inicia o Servidor Pincer (Nó Persistente).
-  Uso: mix pincer.server
+  Starts the Pincer Server (Persistent Node).
+  Usage: mix pincer.server
   """
   use Mix.Task
 
-  def run(_args) do
-    # Configura o nó para ser distribuído
+  def run(args) do
+    # Configure the node to be distributed
     start_node()
 
+    if args != [] do
+      IO.puts(
+        IO.ANSI.yellow() <>
+          "Active Channel Filter (Server): #{Enum.join(args, ", ")}" <> IO.ANSI.reset()
+      )
+
+      Application.put_env(:pincer, :enabled_channels, args)
+    end
+
     IO.puts(IO.ANSI.green() <> "=== Pincer Server (Immortal Node) ===" <> IO.ANSI.reset())
-    IO.puts("Nó: #{Node.self()}")
+    IO.puts("Node: #{Node.self()}")
     IO.puts("Cookie: #{Node.get_cookie()}")
-    
-    # Inicia a aplicação completa
+
+    # Start the full application
     Mix.Task.run("app.start", [])
-    
-    # Mantém o processo vivo
+
+    # Keep the process alive
     Process.sleep(:infinity)
   end
 
   defp start_node do
-    # Tenta iniciar como pincer_server@localhost (ou hostname)
-    # Requer que o epmd esteja rodando (mix inicia automaticamente)
     unless Node.alive?() do
-      {:ok, _} = Node.start(:"pincer_server@localhost", :shortnames)
-      Node.set_cookie(Node.self(), :pincer_secret)
+      case Node.start(:pincer_server@localhost, :shortnames) do
+        {:ok, _} ->
+          Node.set_cookie(Node.self(), :pincer_secret)
+
+        {:error, {:already_started, _}} ->
+          # Already running, that's fine
+          :ok
+
+        {:error, _reason} ->
+          # If error (e.g., name in use by another BEAM), try a random name
+          suffix = :crypto.strong_rand_bytes(4) |> Base.encode16()
+          name = :"pincer_server_#{suffix}@localhost"
+          {:ok, _} = Node.start(name, :shortnames)
+          Node.set_cookie(Node.self(), :pincer_secret)
+      end
     end
   end
 end
