@@ -47,7 +47,8 @@ defmodule Pincer.Core.Pairing do
           create_pending(channel, sender_id, key, now, opts)
         else
           announce_pairing_code(channel, sender_id, pending.code, pending.expires_at_ms,
-            reused: true
+            reused: true,
+            issued_at_ms: pending.issued_at_ms
           )
 
           {:ok, %{code: pending.code, expires_at_ms: pending.expires_at_ms}}
@@ -173,7 +174,7 @@ defmodule Pincer.Core.Pairing do
     }
 
     put_pending(key, pending)
-    announce_pairing_code(channel, sender_id, code, expires_at_ms)
+    announce_pairing_code(channel, sender_id, code, expires_at_ms, issued_at_ms: now)
     {:ok, %{code: code, expires_at_ms: expires_at_ms}}
   end
 
@@ -465,14 +466,19 @@ defmodule Pincer.Core.Pairing do
 
   defp truthy?(_value), do: true
 
-  defp announce_pairing_code(channel, sender_id, code, expires_at_ms, opts \\ []) do
+  defp announce_pairing_code(channel, sender_id, code, expires_at_ms, opts) do
     reused? = Keyword.get(opts, :reused, false)
+    issued_at_ms = Keyword.get(opts, :issued_at_ms, System.system_time(:millisecond))
     normalized_channel = normalize_channel(channel)
     normalized_sender = normalize_sender(sender_id)
     action = if reused?, do: "reused", else: "issued"
+    ttl_ms = max(expires_at_ms - issued_at_ms, 0)
+    ttl_seconds = div(ttl_ms, 1000)
+    expires_at_iso = format_timestamp_ms(expires_at_ms)
+    command = "/pair #{code}"
 
     Logger.warning(
-      "[PAIRING] #{action} channel=#{normalized_channel} sender=#{normalized_sender} code=#{code} expires_at_ms=#{expires_at_ms}"
+      "[PAIRING] #{action} channel=#{normalized_channel} sender=#{normalized_sender} code=#{code} expires_at=#{expires_at_iso} ttl_s=#{ttl_seconds} command=#{command}"
     )
 
     payload = %{
@@ -480,12 +486,24 @@ defmodule Pincer.Core.Pairing do
       sender_id: normalized_sender,
       code: code,
       expires_at_ms: expires_at_ms,
+      expires_at_iso: expires_at_iso,
+      ttl_seconds: ttl_seconds,
+      command: command,
       reused: reused?
     }
 
     safe_broadcast_pairing_code(payload)
     :ok
   end
+
+  defp format_timestamp_ms(ms) when is_integer(ms) do
+    case DateTime.from_unix(ms, :millisecond) do
+      {:ok, datetime} -> DateTime.to_iso8601(datetime)
+      _ -> Integer.to_string(ms)
+    end
+  end
+
+  defp format_timestamp_ms(ms), do: to_string(ms)
 
   defp safe_broadcast_pairing_code(payload) when is_map(payload) do
     PubSub.broadcast("session:cli:admin", {:pairing_code, payload})

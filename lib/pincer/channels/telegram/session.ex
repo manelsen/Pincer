@@ -5,7 +5,9 @@ defmodule Pincer.Channels.Telegram.Session do
   """
   use GenServer
   require Logger
+  alias Pincer.Core.ProjectRouter
   alias Pincer.Core.StreamingPolicy
+  alias Pincer.Session.Server
 
   def start_link(%{chat_id: chat_id} = args) do
     GenServer.start_link(__MODULE__, args, name: via_tuple(chat_id))
@@ -94,19 +96,20 @@ defmodule Pincer.Channels.Telegram.Session do
   def handle_info({:agent_response, text}, state) do
     {stream_state, action} = StreamingPolicy.on_final(streaming_state(state), text)
     deliver_final(state.chat_id, action)
+    maybe_advance_project_flow(state)
     {:noreply, put_streaming_state(state, stream_state)}
   end
 
   @impl true
   def handle_info({:agent_error, text}, state) do
     Pincer.Channels.Telegram.send_message(state.chat_id, "❌ <b>Agent Error</b>: #{text}")
+    maybe_recover_project_flow(state)
     {:noreply, state}
   end
 
   @impl true
   def handle_info({:agent_status, text}, state) do
-    Pincer.Channels.Telegram.send_message(state.chat_id, text)
-    {:noreply, state}
+    {:noreply, deliver_status(state, text)}
   end
 
   @impl true
@@ -151,6 +154,96 @@ defmodule Pincer.Channels.Telegram.Session do
     end
   end
 
+  defp deliver_status(state, text) do
+    if subagent_status?(text) do
+      deliver_subagent_status(state, text)
+    else
+      Pincer.Channels.Telegram.send_message(state.chat_id, text)
+      state
+    end
+  end
+
+  defp deliver_subagent_status(%{status_message_id: nil} = state, text) do
+    case Pincer.Channels.Telegram.send_message(state.chat_id, text) do
+      {:ok, message_id} ->
+        %{state | status_message_id: message_id, status_message_text: text}
+
+      _ ->
+        state
+    end
+  end
+
+  defp deliver_subagent_status(
+         %{status_message_id: _message_id, status_message_text: text} = state,
+         text
+       ) do
+    state
+  end
+
+  defp deliver_subagent_status(%{status_message_id: message_id} = state, text) do
+    case Pincer.Channels.Telegram.update_message(state.chat_id, message_id, text) do
+      :ok ->
+        %{state | status_message_text: text}
+
+      {:error, _reason} ->
+        case Pincer.Channels.Telegram.send_message(state.chat_id, text) do
+          {:ok, new_message_id} ->
+            %{state | status_message_id: new_message_id, status_message_text: text}
+
+          _ ->
+            state
+        end
+    end
+  end
+
+  defp maybe_advance_project_flow(state) do
+    case ProjectRouter.on_agent_response(state.session_id) do
+      {:next, progress} ->
+        Pincer.Channels.Telegram.send_message(
+          state.chat_id,
+          "Project Runner: #{progress.status_message}"
+        )
+
+        _ = Server.process_input(state.session_id, progress.prompt)
+        :ok
+
+      {:completed, progress} ->
+        Pincer.Channels.Telegram.send_message(
+          state.chat_id,
+          "Project Runner: #{progress.status_message}"
+        )
+
+        :ok
+
+      :noop ->
+        :ok
+    end
+  end
+
+  defp maybe_recover_project_flow(state) do
+    case ProjectRouter.on_agent_error(state.session_id) do
+      {:retry, progress} ->
+        Pincer.Channels.Telegram.send_message(
+          state.chat_id,
+          "Project Runner: #{progress.status_message}"
+        )
+
+        _ = Server.process_input(state.session_id, progress.prompt)
+        :ok
+
+      {:paused, progress} ->
+        Pincer.Channels.Telegram.send_message(
+          state.chat_id,
+          "Project Runner: #{progress.status_message}"
+        )
+
+        :ok
+
+      :noop ->
+        :ok
+    end
+  end
+
   defp streaming_state(state) do
     %{
       message_id: state.message_id,
@@ -168,6 +261,12 @@ defmodule Pincer.Channels.Telegram.Session do
     }
   end
 
+  defp subagent_status?(text) when is_binary(text) do
+    String.contains?(text, "Sub-Agent")
+  end
+
+  defp subagent_status?(_), do: false
+
   defp default_session_id(chat_id), do: "telegram_#{chat_id}"
 
   defp normalize_session_id(_chat_id, session_id) when is_binary(session_id) and session_id != "",
@@ -179,6 +278,14 @@ defmodule Pincer.Channels.Telegram.Session do
   defp unsubscribe_session(session_id), do: Pincer.PubSub.unsubscribe("session:#{session_id}")
 
   defp state(chat_id, session_id) do
-    Map.merge(%{chat_id: chat_id, session_id: session_id}, StreamingPolicy.initial_state())
+    Map.merge(
+      %{
+        chat_id: chat_id,
+        session_id: session_id,
+        status_message_id: nil,
+        status_message_text: nil
+      },
+      StreamingPolicy.initial_state()
+    )
   end
 end

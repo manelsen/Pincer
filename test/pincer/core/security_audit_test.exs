@@ -110,6 +110,33 @@ defmodule Pincer.Core.SecurityAuditTest do
              end)
     end
 
+    test "evaluates whatsapp dm policy without forcing token_env" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        channels:
+          whatsapp:
+            enabled: true
+            dm_policy:
+              mode: "open"
+        """
+      )
+
+      report = SecurityAudit.run(root: tmp, env_fetcher: fn _ -> nil end)
+
+      assert report.status == :warn
+
+      assert Enum.any?(report.checks, fn check ->
+               check.id == {:dm_policy, "whatsapp"} and check.severity == :warn
+             end)
+
+      refute Enum.any?(report.checks, fn check ->
+               check.id == {:channel_auth, "whatsapp"} and check.severity == :error
+             end)
+    end
+
     test "warns on risky gateway bind configuration" do
       tmp = tmp_dir!()
 

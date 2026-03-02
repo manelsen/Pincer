@@ -269,6 +269,7 @@ defmodule Pincer.Channels.Discord do
                          ) do
                       {:handled, response} ->
                         Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
+                        maybe_start_project_execution(msg.channel_id, session_id)
 
                       :not_handled ->
                         Logger.info(
@@ -459,12 +460,14 @@ defmodule Pincer.Channels.Discord do
       session_id = resolve_session_id(msg)
       response = ProjectRouter.project(session_id)
       Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
+      maybe_start_project_execution(msg.channel_id, session_id)
     end
 
     defp handle_command(msg, "/project " <> details) do
       session_id = resolve_session_id(msg)
       response = ProjectRouter.project(session_id, details)
       Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
+      maybe_start_project_execution(msg.channel_id, session_id)
     end
 
     defp handle_command(msg, "/pair") do
@@ -575,6 +578,7 @@ defmodule Pincer.Channels.Discord do
       }
 
       send_interaction_response(interaction, response)
+      maybe_start_project_execution(read_field(interaction, :channel_id), session_id)
     end
 
     defp build_status_content(session_id) do
@@ -765,6 +769,34 @@ defmodule Pincer.Channels.Discord do
         }
       }
     end
+
+    defp maybe_start_project_execution(channel_id, session_id)
+         when not is_nil(channel_id) and is_binary(session_id) do
+      case ProjectRouter.kickoff(session_id) do
+        {:ok, kickoff} ->
+          ensure_brain_session_started(session_id)
+          Pincer.Channels.Discord.Session.ensure_started(channel_id, session_id)
+
+          Pincer.Channels.Discord.send_message(
+            "#{channel_id}",
+            "Project Runner: #{kickoff.status_message}"
+          )
+
+          _ = Server.process_input(session_id, kickoff.prompt)
+          :ok
+
+        :not_ready ->
+          :ok
+
+        :already_started ->
+          :ok
+
+        :completed ->
+          :ok
+      end
+    end
+
+    defp maybe_start_project_execution(_channel_id, _session_id), do: :ok
 
     defp ensure_brain_session_started(session_id) do
       case Registry.lookup(Pincer.Session.Registry, session_id) do

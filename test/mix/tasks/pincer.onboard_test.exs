@@ -22,9 +22,10 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
   end
 
   test "non-interactive run creates config and folders" do
-    capture_io(fn ->
-      Mix.Task.run(@task, ["--non-interactive", "--yes"])
-    end)
+    output =
+      capture_io(fn ->
+        Mix.Task.run(@task, ["--non-interactive", "--yes"])
+      end)
 
     assert File.exists?("config.yaml")
     assert File.dir?("db")
@@ -35,6 +36,8 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
 
     {:ok, config} = YamlElixir.read_from_file("config.yaml")
     assert config["database"]["database"] == "db/pincer_mvp.db"
+    assert output =~ "npm install --prefix infrastructure/whatsapp"
+    assert output =~ "channels.whatsapp.enabled=true"
   end
 
   test "db-path flag overrides database output" do

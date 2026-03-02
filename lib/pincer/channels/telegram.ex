@@ -450,6 +450,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   alias Pincer.Core.AccessPolicy
   alias Pincer.Core.ChannelInteractionPolicy
   alias Pincer.Core.Pairing
+  alias Pincer.Core.ProjectOrchestrator
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.RetryPolicy
   alias Pincer.Core.SessionScopePolicy
@@ -602,7 +603,8 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
             case ProjectRouter.continue_if_collecting(session_id, text, has_attachments: false) do
               {:handled, response} ->
-                Pincer.Channels.Telegram.send_message(chat_id, response)
+                send_project_message(chat_id, session_id, response)
+                maybe_start_project_execution(chat_id, chat_type, session_id)
 
               :not_handled ->
                 do_process_message(chat_id, text, chat_type)
@@ -940,7 +942,8 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp handle_command(chat_id, "/project", text, chat_type) do
     session_id = session_id_for_chat(chat_id, chat_type)
     response = ProjectRouter.project(session_id, text)
-    Pincer.Channels.Telegram.send_message(chat_id, response)
+    send_project_message(chat_id, session_id, response)
+    maybe_start_project_execution(chat_id, chat_type, session_id)
   end
 
   defp handle_command(chat_id, "/pair", text, chat_type) do
@@ -1165,6 +1168,67 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
       [_] ->
         :ok
+    end
+  end
+
+  defp maybe_start_project_execution(chat_id, _chat_type, session_id) do
+    case ProjectRouter.kickoff(session_id) do
+      {:ok, kickoff} ->
+        ensure_session_started(session_id)
+        Pincer.Channels.Telegram.Session.ensure_started(chat_id, session_id)
+
+        Pincer.Channels.Telegram.send_message(
+          chat_id,
+          "Project Runner: #{kickoff.status_message}"
+        )
+
+        dispatch_project_task(session_id, kickoff.prompt)
+
+      :not_ready ->
+        :ok
+
+      :already_started ->
+        :ok
+
+      :completed ->
+        :ok
+    end
+  end
+
+  defp dispatch_project_task(session_id, prompt) when is_binary(prompt) do
+    case Server.process_input(session_id, prompt) do
+      {:ok, _status} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("[TELEGRAM] Project task dispatch failed: #{inspect(reason)}")
+
+      other ->
+        Logger.debug("[TELEGRAM] Project task dispatch result: #{inspect(other)}")
+    end
+  end
+
+  defp send_project_message(chat_id, session_id, response) do
+    case project_reply_markup(session_id) do
+      nil ->
+        Pincer.Channels.Telegram.send_message(chat_id, response)
+
+      reply_markup ->
+        Pincer.Channels.Telegram.send_message(chat_id, response, reply_markup: reply_markup)
+    end
+  end
+
+  defp project_reply_markup(session_id) do
+    case ProjectOrchestrator.phase(session_id) do
+      :await_kind ->
+        %{
+          keyboard: [[%{text: "software"}, %{text: "nao-software"}]],
+          resize_keyboard: true,
+          one_time_keyboard: true
+        }
+
+      _ ->
+        nil
     end
   end
 

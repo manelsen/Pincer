@@ -169,6 +169,49 @@ defmodule Pincer.LLM.RetryPolicyTest do
     assert_received {:retry_policy_call, :transport_timeout_then_ok, 2}
   end
 
+  test "emits runtime status payload while waiting retry backoff" do
+    put_provider_scenario(:http_503_then_ok)
+    Process.put(:session_pid, self())
+
+    on_exit(fn ->
+      Process.delete(:session_pid)
+    end)
+
+    assert {:ok, %{"content" => "ok"}} = Client.chat_completion([])
+
+    assert_receive {:llm_runtime_status, status}, 1000
+    assert status.kind == :retry_wait
+    assert status.reason == "HTTP 503"
+    assert is_integer(status.wait_ms)
+    assert status.retries_left >= 1
+  end
+
+  test "emits runtime failover status when retry budget is exhausted" do
+    put_provider_scenario(:always_503)
+    Process.put(:session_pid, self())
+
+    on_exit(fn ->
+      Process.delete(:session_pid)
+    end)
+
+    Application.put_env(:pincer, :llm_retry,
+      max_retries: 1,
+      initial_backoff: 1,
+      max_backoff: 1,
+      max_elapsed_ms: 2_000,
+      jitter_ratio: 0.0
+    )
+
+    assert {:error, {:http_error, 503, _}} = Client.chat_completion([])
+
+    statuses = collect_runtime_statuses([], 1_500)
+
+    assert Enum.any?(statuses, fn status ->
+             status.kind == :failover and status.failover_action == :stop and
+               status.reason == "HTTP 503"
+           end)
+  end
+
   test "respects retry_after delay when provided" do
     put_provider_scenario(:retry_after_then_ok)
 
@@ -238,5 +281,17 @@ defmodule Pincer.LLM.RetryPolicyTest do
         scenario: scenario
       }
     })
+  end
+
+  defp collect_runtime_statuses(acc, timeout_ms) when timeout_ms <= 0, do: Enum.reverse(acc)
+
+  defp collect_runtime_statuses(acc, timeout_ms) do
+    receive do
+      {:llm_runtime_status, status} ->
+        collect_runtime_statuses([status | acc], timeout_ms)
+    after
+      timeout_ms ->
+        Enum.reverse(acc)
+    end
   end
 end

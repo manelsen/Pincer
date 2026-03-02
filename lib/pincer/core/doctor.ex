@@ -27,7 +27,7 @@ defmodule Pincer.Core.Doctor do
 
   @default_config_file "config.yaml"
   @channels_requiring_token MapSet.new(["telegram", "discord", "slack"])
-  @dm_capable_channels MapSet.new(["telegram", "discord"])
+  @dm_capable_channels MapSet.new(["telegram", "discord", "whatsapp"])
 
   @doc """
   Runs doctor checks and returns a structured report.

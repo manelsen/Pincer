@@ -75,6 +75,33 @@ defmodule Pincer.Core.DoctorTest do
              end)
     end
 
+    test "evaluates dm policy for whatsapp without requiring token_env" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        channels:
+          whatsapp:
+            enabled: true
+            dm_policy:
+              mode: "open"
+        """
+      )
+
+      report = Doctor.run(root: tmp, env_fetcher: fn _ -> nil end)
+
+      assert report.status == :warn
+
+      assert Enum.any?(report.checks, fn check ->
+               check.id == {:dm_policy, "whatsapp"} and check.severity == :warn
+             end)
+
+      refute Enum.any?(report.checks, fn check ->
+               check.id == {:channel_token, "whatsapp"} and check.severity == :error
+             end)
+    end
+
     test "returns ok for valid config, secure dm policy and available tokens" do
       tmp = tmp_dir!()
 

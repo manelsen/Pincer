@@ -250,7 +250,8 @@ defmodule Pincer.Channels.TelegramTest do
          ]}
       end)
       |> expect(:send_message, fn 902, text, _opts ->
-        assert text =~ "Kanban Board"
+        assert text =~ "Kanban indisponivel para esta sessao"
+        assert text =~ "/project"
         {:ok, %{message_id: 614}}
       end)
 
@@ -355,8 +356,11 @@ defmodule Pincer.Channels.TelegramTest do
         assert text =~ "Project Manager"
         {:ok, %{message_id: 616}}
       end)
-      |> expect(:send_message, fn 904, text, _opts ->
+      |> expect(:send_message, fn 904, text, opts ->
         assert text =~ "tipo do projeto"
+        keyboard = opts[:reply_markup][:keyboard]
+        assert is_list(keyboard)
+        assert keyboard == [[%{text: "software"}, %{text: "nao-software"}]]
         {:ok, %{message_id: 617}}
       end)
 

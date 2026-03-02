@@ -88,4 +88,25 @@ defmodule Pincer.Channels.Telegram.SessionTest do
 
     Process.sleep(80)
   end
+
+  test "sub-agent status updates reuse the same telegram message via edit" do
+    chat_id = 46
+
+    APIMock
+    |> expect(:send_message, fn ^chat_id, "⚙️ Sub-Agent a1 running: web.", _opts ->
+      {:ok, %{message_id: 910}}
+    end)
+    |> expect(:edit_message_text, fn ^chat_id, 910, "✅ Sub-Agent a1 finished.", opts ->
+      assert opts[:parse_mode] == "HTML"
+      {:ok, %{}}
+    end)
+
+    {:ok, pid} = Session.start_link(chat_id)
+    allow(APIMock, self(), pid)
+
+    send(pid, {:agent_status, "⚙️ Sub-Agent a1 running: web."})
+    send(pid, {:agent_status, "✅ Sub-Agent a1 finished."})
+
+    Process.sleep(80)
+  end
 end

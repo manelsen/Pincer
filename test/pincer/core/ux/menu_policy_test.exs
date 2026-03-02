@@ -15,6 +15,8 @@ defmodule Pincer.Core.UX.MenuPolicyTest do
                "menu",
                "status",
                "models",
+               "kanban",
+               "project",
                "ping"
              ]
     end

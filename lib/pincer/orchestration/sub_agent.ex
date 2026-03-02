@@ -75,6 +75,7 @@ defmodule Pincer.Orchestration.SubAgent do
 
   use GenServer
   require Logger
+  alias Pincer.Core.LLM.RuntimeStatus
   alias Pincer.Core.Executor
   alias Pincer.Orchestration.Blackboard
 
@@ -160,6 +161,13 @@ defmodule Pincer.Orchestration.SubAgent do
   @impl GenServer
   def handle_info({:sme_tool_use, tools}, state) do
     Blackboard.post(state.id, "Using tool: #{tools}")
+    {:noreply, state}
+  end
+
+  @doc false
+  @impl GenServer
+  def handle_info({:llm_runtime_status, payload}, state) when is_map(payload) do
+    Blackboard.post(state.id, "LLM_STATUS: " <> RuntimeStatus.format(payload))
     {:noreply, state}
   end
 
