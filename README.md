@@ -1,21 +1,42 @@
 # Pincer
 
-**TODO: Add description**
+> **Autonomous AI Agents on the BEAM**
 
-## Installation
+Pincer is a sophisticated AI agent framework built on Elixir/OTP, emphasizing fault tolerance, security, and multi-agent orchestration via the Model Context Protocol (MCP) and a Blackboard pattern.
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `pincer` to your list of dependencies in `mix.exs`:
+## 🚀 Quick Start
 
-```elixir
-def deps do
-  [
-    {:pincer, "~> 0.1.0"}
-  ]
-end
+1. **Install Dependencies**:
+   ```bash
+   mix deps.get
+   ```
+
+2. **Onboard**:
+   ```bash
+   mix pincer.onboard
+   ```
+
+3. **Start Chatting**:
+   ```bash
+   mix pincer.chat
+   ```
+
+## 📚 Documentation
+
+All agentic instructions and project protocols have been moved to the `.local/` directory for cleaner workspace management.
+
+- See `.local/GEMINI.md` for a comprehensive overview.
+- See `.local/AGENTS.md` for the development protocol.
+
+## 🧪 Testing
+
+```bash
+mix test
 ```
 
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/pincer>.
+---
 
+<p align="center">
+  <strong>Built with 🔨 in Elixir</strong><br>
+  <sub>Because agents deserve better than Python threads.</sub>
+</p>
