@@ -6,7 +6,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
     1. Executor: resolves `attachment_ref` parts from history before calling the LLM.
     2. Google provider: translates resolved Pincer parts into Gemini-format parts.
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   import Mox
 
   alias Pincer.Core.Executor
@@ -14,10 +14,31 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
 
   # The Executor hex-test already defines these mocks; guard against duplicate defmock.
   # We reuse them here by just importing Mox.
-  Mox.defmock(Pincer.MultimodalMockLLMClient, for: Pincer.Core.Ports.LLM)
-  Mox.defmock(Pincer.MultimodalMockToolRegistry, for: Pincer.Core.Ports.ToolRegistry)
+  Mox.defmock(Pincer.MultimodalMockLLMClient, for: Pincer.Ports.LLM)
+  Mox.defmock(Pincer.MultimodalMockToolRegistry, for: Pincer.Ports.ToolRegistry)
 
   setup :verify_on_exit!
+
+  setup do
+    original_providers = Application.get_env(:pincer, :llm_providers)
+    original_default = Application.get_env(:pincer, :default_llm_provider)
+
+    on_exit(fn ->
+      if is_nil(original_providers) do
+        Application.delete_env(:pincer, :llm_providers)
+      else
+        Application.put_env(:pincer, :llm_providers, original_providers)
+      end
+
+      if is_nil(original_default) do
+        Application.delete_env(:pincer, :default_llm_provider)
+      else
+        Application.put_env(:pincer, :default_llm_provider, original_default)
+      end
+    end)
+
+    :ok
+  end
 
   # ---------------------------------------------------------------------------
   # Helpers

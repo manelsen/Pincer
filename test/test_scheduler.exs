@@ -2,8 +2,8 @@
 IO.puts("Starting Scheduler Test...")
 Application.ensure_all_started(:pincer)
 
-alias Pincer.PubSub
-alias Pincer.Session.Server
+alias Pincer.Infra.PubSub
+alias Pincer.Core.Session.Server
 
 # 1. Setup Environment
 session_id = "sched_test_#{:os.system_time(:seconds)}"
@@ -16,7 +16,7 @@ File.write!(heartbeat_file, """
 """)
 
 # 2. Subscribe to Session Events
-Pincer.PubSub.subscribe("session:#{session_id}")
+Pincer.Infra.PubSub.subscribe("session:#{session_id}")
 
 # 3. Start Session (which starts Scheduler)
 IO.puts("Starting Session #{session_id}...")
@@ -27,7 +27,7 @@ Process.sleep(1000)
 
 # Force Tick
 IO.puts("Forcing Scheduler Tick...")
-send(Pincer.Orchestration.Scheduler, :tick)
+send(Pincer.Core.Orchestration.Scheduler, :tick)
 
 # 4. Wait for Trigger
 IO.puts("Waiting for scheduled task trigger...")

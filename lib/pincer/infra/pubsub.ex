@@ -1,4 +1,4 @@
-defmodule Pincer.PubSub do
+defmodule Pincer.Infra.PubSub do
   @moduledoc """
   A lightweight, local PubSub event bus built on Elixir's Registry.
 
@@ -10,7 +10,7 @@ defmodule Pincer.PubSub do
 
   ```
   ┌─────────────┐     broadcast     ┌───────────────────┐
-  │    Core     │ ────────────────> │   Pincer.PubSub   │
+  │    Core     │ ────────────────> │   Pincer.Infra.PubSub   │
   │  (Domain)   │                   │     Registry      │
   └─────────────┘                   └─────────┬─────────┘
                                               │
@@ -36,15 +36,15 @@ defmodule Pincer.PubSub do
   PubSub should be started in your application's supervision tree:
 
       children = [
-        {Registry, keys: :duplicate, name: Pincer.PubSub.Registry},
+        {Registry, keys: :duplicate, name: Pincer.Infra.PubSub.Registry},
         # or use child_spec:
-        Pincer.PubSub,
+        Pincer.Infra.PubSub,
       ]
 
   ## Examples
 
       # Subscribe to a session's events
-      Pincer.PubSub.subscribe("session:telegram:123")
+      Pincer.Infra.PubSub.subscribe("session:telegram:123")
 
       # Process receives messages in handle_info
       def handle_info({:pubsub, topic, message}, state) do
@@ -53,7 +53,7 @@ defmodule Pincer.PubSub do
       end
 
       # Broadcast to all subscribers
-      Pincer.PubSub.broadcast("session:telegram:123", {:response, "Hello!"})
+      Pincer.Infra.PubSub.broadcast("session:telegram:123", {:response, "Hello!"})
 
   ## Performance
 
@@ -61,7 +61,7 @@ defmodule Pincer.PubSub do
   - Direct message sending (no serialization overhead)
   - O(n) broadcast where n = number of subscribers on topic
   """
-  @registry_name Pincer.PubSub.Registry
+  @registry_name Pincer.Infra.PubSub.Registry
 
   @doc """
   Returns the child specification for starting PubSub under a supervisor.
@@ -76,7 +76,7 @@ defmodule Pincer.PubSub do
   ## Examples
 
       children = [
-        Pincer.PubSub,
+        Pincer.Infra.PubSub,
         # ... other children
       ]
 
@@ -109,11 +109,11 @@ defmodule Pincer.PubSub do
   ## Examples
 
       # Subscribe to a session's events
-      Pincer.PubSub.subscribe("session:telegram:123")
+      Pincer.Infra.PubSub.subscribe("session:telegram:123")
       # => {:ok, #Reference<...>}
 
       # Subscribe to system-wide broadcasts
-      Pincer.PubSub.subscribe("system:broadcast")
+      Pincer.Infra.PubSub.subscribe("system:broadcast")
 
   ## Message Format
 
@@ -152,14 +152,14 @@ defmodule Pincer.PubSub do
   ## Examples
 
       # Send a response to session subscribers
-      Pincer.PubSub.broadcast("session:telegram:123", {:response, "Hello, world!"})
+      Pincer.Infra.PubSub.broadcast("session:telegram:123", {:response, "Hello, world!"})
       # => :ok
 
       # Broadcast to multiple potential listeners
-      Pincer.PubSub.broadcast("system:broadcast", {:shutdown, :maintenance})
+      Pincer.Infra.PubSub.broadcast("system:broadcast", {:shutdown, :maintenance})
 
       # Custom message format
-      Pincer.PubSub.broadcast("session:cli:admin", %{
+      Pincer.Infra.PubSub.broadcast("session:cli:admin", %{
         type: :progress,
         current: 50,
         total: 100

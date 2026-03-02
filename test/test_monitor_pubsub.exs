@@ -1,8 +1,8 @@
 # test_monitor_pubsub.exs
 Application.ensure_all_started(:pincer)
-alias Pincer.PubSub
+alias Pincer.Infra.PubSub
 
-IO.puts("Monitoring Pincer PubSub...")
+IO.puts("Monitoring Pincer.Infra.PubSub...")
 
 # Monitor cli_user
 PubSub.subscribe("session:cli_user")

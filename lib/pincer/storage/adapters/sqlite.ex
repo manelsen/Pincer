@@ -44,7 +44,7 @@ defmodule Pincer.Storage.Adapters.SQLite do
 
   @behaviour Pincer.Storage.Port
 
-  alias Pincer.Repo
+  alias Pincer.Infra.Repo
   alias Pincer.Storage.Message
   import Ecto.Query
   require Logger
@@ -116,6 +116,15 @@ defmodule Pincer.Storage.Adapters.SQLite do
       error ->
         error
     end
+  end
+
+  @impl true
+  def delete_messages(session_id) do
+    Message
+    |> where([m], m.session_id == ^session_id)
+    |> Repo.delete_all()
+
+    :ok
   end
 
   @doc """

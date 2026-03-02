@@ -1,8 +1,8 @@
 defmodule Pincer.LLM.HotSwapIntegrationTest do
   use ExUnit.Case, async: false
 
-  alias Pincer.Session.Server
-  alias Pincer.PubSub
+  alias Pincer.Core.Session.Server
+  alias Pincer.Infra.PubSub
 
   defmodule IntegrationMockAdapter do
     @behaviour Pincer.LLM.Provider

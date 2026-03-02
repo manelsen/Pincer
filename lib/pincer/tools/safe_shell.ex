@@ -1,4 +1,4 @@
-defmodule Pincer.Tools.SafeShell do
+defmodule Pincer.Adapters.Tools.SafeShell do
   @moduledoc """
   A security-conscious shell command execution tool with strict command parsing and validation.
 
@@ -47,20 +47,19 @@ defmodule Pincer.Tools.SafeShell do
   ### Examples
 
       # Safe command - executes immediately
-      iex> Pincer.Tools.SafeShell.execute(%{"command" => "ls -la"})
+      iex> Pincer.Adapters.Tools.SafeShell.execute(%{"command" => "ls -la"})
       {:ok, "total 48..."}
 
       # Blocked: Command Chaining
-      iex> Pincer.Tools.SafeShell.execute(%{"command" => "ls; cat /etc/passwd"})
+      iex> Pincer.Adapters.Tools.SafeShell.execute(%{"command" => "ls; cat /etc/passwd"})
       {:error, {:approval_required, "ls; cat /etc/passwd"}}
 
       # Blocked: Path Traversal
-      iex> Pincer.Tools.SafeShell.execute(%{"command" => "cat ../config.exs"})
+      iex> Pincer.Adapters.Tools.SafeShell.execute(%{"command" => "cat ../config.exs"})
       {:error, {:approval_required, "cat ../config.exs"}}
   """
 
-  @behaviour Pincer.Tool
-  alias Pincer.Connectors.MCP.Manager, as: MCPManager
+  @behaviour Pincer.Ports.Tool
   alias Pincer.Core.Tooling.CommandProfile
   alias Pincer.Core.WorkspaceGuard
   require Logger
@@ -308,9 +307,9 @@ defmodule Pincer.Tools.SafeShell do
         %{"command" => command}
       end
 
-    case MCPManager.execute_tool("run_command", payload) do
+    case Pincer.Ports.ToolRegistry.execute_tool("run_command", payload) do
       {:ok, result} -> {:ok, result}
-      {:error, reason} -> {:error, "MCP Shell failed: #{inspect(reason)}"}
+      {:error, reason} -> {:error, "Shell execution failed: #{inspect(reason)}"}
     end
   end
 

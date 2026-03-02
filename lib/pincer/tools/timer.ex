@@ -1,8 +1,8 @@
-defmodule Pincer.Tools.Timer do
+defmodule Pincer.Adapters.Tools.Timer do
   @moduledoc """
   Tool for Pincer to schedule reminders or volatile (one-off) tasks in the near future.
   """
-  @behaviour Pincer.Tool
+  @behaviour Pincer.Ports.Tool
 
   def spec do
     %{
@@ -32,7 +32,7 @@ defmodule Pincer.Tools.Timer do
       Process.sleep(sec * 1000)
 
       # Looks up the session PID
-      session_tuple = Registry.lookup(Pincer.Session.Registry, sid)
+      session_tuple = Registry.lookup(Pincer.Core.Session.Registry, sid)
 
       case session_tuple do
         [{pid, _}] ->

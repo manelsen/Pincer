@@ -1,7 +1,7 @@
-defmodule Pincer.Tools.WebVisibilityTest do
+defmodule Pincer.Adapters.Tools.WebVisibilityTest do
   use ExUnit.Case, async: true
 
-  alias Pincer.Tools.WebVisibility
+  alias Pincer.Adapters.Tools.WebVisibility
 
   describe "sanitize_html/1" do
     test "removes hidden elements by attribute/class/style and HTML comments" do

@@ -22,13 +22,13 @@ defmodule Pincer.LLM.Client do
 
   ## Examples
 
-      iex> Pincer.LLM.Client.chat_completion([
+      iex> Pincer.Ports.LLM.chat_completion([
       ...>   %{"role" => "user", "content" => "Hello!"}
       ...> ], provider: "openrouter")
       {:ok, %{"role" => "assistant", "content" => "Hello! How can I help you?"}}
   """
 
-  @behaviour Pincer.Core.Ports.LLM
+  @behaviour Pincer.Ports.LLM
   require Logger
   alias Pincer.Core.AuthProfiles
   alias Pincer.Core.LLM.CooldownStore
@@ -58,7 +58,7 @@ defmodule Pincer.LLM.Client do
   """
   @spec chat_completion([message()], keyword()) :: chat_result()
   def chat_completion(messages, opts \\ []) do
-    registry = Application.get_env(:pincer, :llm_providers, %{})
+    registry = provider_registry()
 
     # Setup default provider (fallback to first available if none specified)
     default_provider_key =
@@ -161,7 +161,7 @@ defmodule Pincer.LLM.Client do
   """
   @spec stream_completion([message()], keyword()) :: {:ok, Enumerable.t()} | {:error, any()}
   def stream_completion(messages, opts \\ []) do
-    registry = Application.get_env(:pincer, :llm_providers, %{})
+    registry = provider_registry()
 
     default_provider_key =
       Application.get_env(
@@ -984,6 +984,13 @@ defmodule Pincer.LLM.Client do
   end
 
   defp maybe_route_around_cooldown(provider_id, _registry, _), do: provider_id
+
+  defp provider_registry do
+    case Application.get_env(:pincer, :llm_providers, %{}) do
+      registry when is_map(registry) -> registry
+      _ -> %{}
+    end
+  end
 
   defp maybe_clear_provider_cooldown(failover_state) when is_map(failover_state) do
     case Map.get(failover_state, :current_provider) do

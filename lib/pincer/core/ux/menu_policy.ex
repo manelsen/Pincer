@@ -18,7 +18,7 @@ defmodule Pincer.Core.UX.MenuPolicy do
   def registerable_commands(channel, commands) when is_list(commands) do
     spec = channel_spec(channel)
 
-    {accepted, issues, dropped, _seen} =
+    {accepted_rev, issues_rev, dropped, _seen} =
       Enum.reduce(commands, {[], [], 0, MapSet.new()}, fn command, {acc, issues, dropped, seen} ->
         name = extract_field(command, :name)
         description = extract_field(command, :description)
@@ -28,16 +28,16 @@ defmodule Pincer.Core.UX.MenuPolicy do
 
         cond do
           normalized_name == "" ->
-            {acc, issues ++ ["missing name"], dropped + 1, seen}
+            {acc, ["missing name" | issues], dropped + 1, seen}
 
           not Regex.match?(spec.name_regex, normalized_name) ->
-            {acc, issues ++ ["invalid name '#{normalized_name}'"], dropped + 1, seen}
+            {acc, ["invalid name '#{normalized_name}'" | issues], dropped + 1, seen}
 
           MapSet.member?(seen, normalized_name) ->
-            {acc, issues ++ ["duplicate name '#{normalized_name}'"], dropped + 1, seen}
+            {acc, ["duplicate name '#{normalized_name}'" | issues], dropped + 1, seen}
 
           normalized_description == "" ->
-            {acc, issues ++ ["empty description for '#{normalized_name}'"], dropped + 1, seen}
+            {acc, ["empty description for '#{normalized_name}'" | issues], dropped + 1, seen}
 
           true ->
             {desc, desc_issue} = limit_description(normalized_description, spec.max_description)
@@ -47,10 +47,13 @@ defmodule Pincer.Core.UX.MenuPolicy do
               description: desc
             }
 
-            issues = if desc_issue, do: issues ++ [desc_issue], else: issues
-            {acc ++ [entry], issues, dropped, MapSet.put(seen, normalized_name)}
+            issues = if desc_issue, do: [desc_issue | issues], else: issues
+            {[entry | acc], issues, dropped, MapSet.put(seen, normalized_name)}
         end
       end)
+
+    accepted = Enum.reverse(accepted_rev)
+    issues = Enum.reverse(issues_rev)
 
     {capped, overflow} = cap_commands(accepted, spec.max_commands)
 

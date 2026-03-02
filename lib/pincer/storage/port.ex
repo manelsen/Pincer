@@ -67,4 +67,9 @@ defmodule Pincer.Storage.Port do
   """
   @callback save_message(session_id :: String.t(), role :: String.t(), content :: String.t()) ::
               {:ok, term()} | {:error, term()}
+
+  @doc """
+  Deletes all messages for a given session.
+  """
+  @callback delete_messages(session_id :: String.t()) :: :ok | {:error, term()}
 end

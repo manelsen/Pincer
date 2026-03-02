@@ -1,7 +1,7 @@
-defmodule Pincer.Tools.SafeShellDynamicProfileTest do
+defmodule Pincer.Adapters.Tools.SafeShellDynamicProfileTest do
   use ExUnit.Case, async: true
 
-  alias Pincer.Tools.SafeShell
+  alias Pincer.Adapters.Tools.SafeShell
 
   describe "dynamic stack profile integration" do
     test "allows npm test when node stack is detected" do

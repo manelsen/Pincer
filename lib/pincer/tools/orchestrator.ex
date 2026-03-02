@@ -1,4 +1,4 @@
-defmodule Pincer.Tools.Orchestrator do
+defmodule Pincer.Adapters.Tools.Orchestrator do
   @moduledoc """
   Tool for dispatching autonomous Sub-Agents to work on goals asynchronously.
 
@@ -27,10 +27,10 @@ defmodule Pincer.Tools.Orchestrator do
   ## Examples
 
       # Dispatch an agent for code review
-      Pincer.Tools.Orchestrator.execute(%{"goal" => "Review all files in lib/ for TODO comments"})
+      Pincer.Adapters.Tools.Orchestrator.execute(%{"goal" => "Review all files in lib/ for TODO comments"})
 
       # Dispatch an agent for monitoring
-      Pincer.Tools.Orchestrator.execute(%{"goal" => "Watch test.log for ERROR patterns"})
+      Pincer.Adapters.Tools.Orchestrator.execute(%{"goal" => "Watch test.log for ERROR patterns"})
 
   ## Security Considerations
 
@@ -40,14 +40,14 @@ defmodule Pincer.Tools.Orchestrator do
 
   ## See Also
 
-  - `Pincer.Tools.BlackboardReader` - Read messages from dispatched agents
-  - `Pincer.Orchestration.SubAgent` - Sub-Agent implementation
-  - `Pincer.Orchestration.Blackboard` - Message bus for agent communication
+  - `Pincer.Adapters.Tools.BlackboardReader` - Read messages from dispatched agents
+  - `Pincer.Core.Orchestration.SubAgent` - Sub-Agent implementation
+  - `Pincer.Core.Orchestration.Blackboard` - Message bus for agent communication
   """
 
-  @behaviour Pincer.Tool
-  alias Pincer.Orchestration.SubAgent
-  alias Pincer.Orchestration.Blackboard
+  @behaviour Pincer.Ports.Tool
+  alias Pincer.Core.Orchestration.SubAgent
+  alias Pincer.Core.Orchestration.Blackboard
 
   @type spec :: %{
           name: String.t(),
@@ -98,7 +98,7 @@ defmodule Pincer.Tools.Orchestrator do
 
   Creates and starts a new Sub-Agent process that will work autonomously on
   the specified goal. The agent will report progress and results to the
-  Blackboard, which can be monitored using `Pincer.Tools.BlackboardReader`.
+  Blackboard, which can be monitored using `Pincer.Adapters.Tools.BlackboardReader`.
 
   ## Parameters
 
@@ -112,10 +112,10 @@ defmodule Pincer.Tools.Orchestrator do
 
   ## Examples
 
-      iex> Pincer.Tools.Orchestrator.execute(%{"goal" => "Find all TODO comments"})
+      iex> Pincer.Adapters.Tools.Orchestrator.execute(%{"goal" => "Find all TODO comments"})
       {:ok, "Sub-Agent detached successfully. ID: agent_a1b2c3. Monitor the Blackboard for updates."}
 
-      iex> Pincer.Tools.Orchestrator.execute(%{})
+      iex> Pincer.Adapters.Tools.Orchestrator.execute(%{})
       ** (FunctionClauseError) no function clause matching
 
   ## Implementation Notes
@@ -138,7 +138,7 @@ defmodule Pincer.Tools.Orchestrator do
   end
 end
 
-defmodule Pincer.Tools.BlackboardReader do
+defmodule Pincer.Adapters.Tools.BlackboardReader do
   @moduledoc """
   Tool for reading messages from the Sub-Agent Blackboard.
 
@@ -166,10 +166,10 @@ defmodule Pincer.Tools.BlackboardReader do
   ## Examples
 
       # Read all messages from the Blackboard
-      Pincer.Tools.BlackboardReader.execute(%{})
+      Pincer.Adapters.Tools.BlackboardReader.execute(%{})
 
       # Limit to last 5 messages
-      Pincer.Tools.BlackboardReader.execute(%{"limit" => 5})
+      Pincer.Adapters.Tools.BlackboardReader.execute(%{"limit" => 5})
 
   ## Output Format
 
@@ -180,12 +180,12 @@ defmodule Pincer.Tools.BlackboardReader do
 
   ## See Also
 
-  - `Pincer.Tools.Orchestrator` - Dispatch new Sub-Agents
-  - `Pincer.Orchestration.Blackboard` - Blackboard implementation
+  - `Pincer.Adapters.Tools.Orchestrator` - Dispatch new Sub-Agents
+  - `Pincer.Core.Orchestration.Blackboard` - Blackboard implementation
   """
 
-  @behaviour Pincer.Tool
-  alias Pincer.Orchestration.Blackboard
+  @behaviour Pincer.Ports.Tool
+  alias Pincer.Core.Orchestration.Blackboard
 
   @type message :: %{
           agent_id: String.t(),
@@ -253,10 +253,10 @@ defmodule Pincer.Tools.BlackboardReader do
 
   ## Examples
 
-      iex> Pincer.Tools.BlackboardReader.execute(%{})
+      iex> Pincer.Adapters.Tools.BlackboardReader.execute(%{})
       {:ok, "[agent_abc @ 2026-02-20 14:30:00Z]: Task started\\n[agent_abc @ 2026-02-20 14:31:00Z]: Found 5 items"}
 
-      iex> Pincer.Tools.BlackboardReader.execute(%{"limit" => 5})
+      iex> Pincer.Adapters.Tools.BlackboardReader.execute(%{"limit" => 5})
       {:ok, "[agent_xyz @ 2026-02-20 15:00:00Z]: Analysis complete"}
 
   ## Note
