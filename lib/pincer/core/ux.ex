@@ -15,6 +15,8 @@ defmodule Pincer.Core.UX do
     %{name: "menu", description: "Show command menu and shortcuts"},
     %{name: "status", description: "Show current session status"},
     %{name: "models", description: "Switch AI provider and model"},
+    %{name: "kanban", description: "Show project kanban board"},
+    %{name: "project", description: "Show project planning board"},
     %{name: "ping", description: "Health check"}
   ]
 
@@ -25,6 +27,12 @@ defmodule Pincer.Core.UX do
     "/status" => "/status",
     "models" => "/models",
     "/models" => "/models",
+    "kanban" => "/kanban",
+    "/kanban" => "/kanban",
+    "project" => "/project",
+    "/project" => "/project",
+    "projeto" => "/project",
+    "/projeto" => "/project",
     "ping" => "/ping",
     "/ping" => "/ping",
     "help" => "/menu",
@@ -43,11 +51,13 @@ defmodule Pincer.Core.UX do
     /menu   - Open this menu
     /status - Show session status
     /models - Switch provider/model
+    /kanban - Show sprint kanban board
+    /project - Open project planning board
     /ping   - Check if the bot is alive
 
     Accessibility note:
     - Use short, explicit commands.
-    - Type menu, status, models or ping with or without /.
+    - Type menu, status, models, kanban, project or ping with or without /.
     - Menu button always opens /menu.
     """
     |> String.trim()
@@ -79,7 +89,7 @@ defmodule Pincer.Core.UX do
 
   @spec unknown_command_hint() :: String.t()
   def unknown_command_hint do
-    "Use /menu, /status, /models or /ping."
+    "Use /menu, /status, /models, /kanban, /project or /ping."
   end
 
   @spec unknown_interaction_hint() :: String.t()

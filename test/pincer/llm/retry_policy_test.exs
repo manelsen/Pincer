@@ -13,6 +13,9 @@ defmodule Pincer.LLM.RetryPolicyTest do
       send(self(), {:retry_policy_call, config[:scenario], call_number})
 
       case {config[:scenario], call_number} do
+        {:http_400, _} ->
+          {:error, {:http_error, 400, "bad request"}}
+
         {:http_503_then_ok, 1} ->
           {:error, {:http_error, 503, "upstream"}}
 
@@ -105,6 +108,56 @@ defmodule Pincer.LLM.RetryPolicyTest do
 
     assert_received {:retry_policy_call, :http_401, 1}
     refute_received {:retry_policy_call, :http_401, 2}
+  end
+
+  test "handles terminal HTTP 400 without crashing when retry/cooldown configs are malformed lists" do
+    original_llm_cooldown = Application.get_env(:pincer, :llm_cooldown)
+    original_auth_profile_cooldown = Application.get_env(:pincer, :auth_profile_cooldown)
+    original_auth_key = System.get_env("TEST_RETRY_AUTH_PRIMARY")
+
+    on_exit(fn ->
+      if is_nil(original_llm_cooldown) do
+        Application.delete_env(:pincer, :llm_cooldown)
+      else
+        Application.put_env(:pincer, :llm_cooldown, original_llm_cooldown)
+      end
+
+      if is_nil(original_auth_profile_cooldown) do
+        Application.delete_env(:pincer, :auth_profile_cooldown)
+      else
+        Application.put_env(:pincer, :auth_profile_cooldown, original_auth_profile_cooldown)
+      end
+
+      if is_nil(original_auth_key) do
+        System.delete_env("TEST_RETRY_AUTH_PRIMARY")
+      else
+        System.put_env("TEST_RETRY_AUTH_PRIMARY", original_auth_key)
+      end
+    end)
+
+    System.put_env("TEST_RETRY_AUTH_PRIMARY", "test-auth-key")
+
+    Application.put_env(:pincer, :llm_providers, %{
+      "retry_provider" => %{
+        adapter: RetryAdapter,
+        default_model: "retry-model",
+        scenario: :http_400,
+        auth_profiles: [%{name: "primary", env_key: "TEST_RETRY_AUTH_PRIMARY"}]
+      }
+    })
+
+    Application.put_env(:pincer, :llm_retry, [%{"max_retries" => 0}])
+    Application.put_env(:pincer, :llm_cooldown, [%{"durations_ms" => %{"http_400" => 1_000}}])
+
+    Application.put_env(:pincer, :auth_profile_cooldown, [
+      %{"durations_ms" => %{"http_400" => 1_000}}
+    ])
+
+    assert {:error, {:http_error, 400, "bad request"}} =
+             Client.chat_completion([], provider: "retry_provider")
+
+    assert_received {:retry_policy_call, :http_400, 1}
+    refute_received {:retry_policy_call, :http_400, 2}
   end
 
   test "retries transient transport timeout and succeeds" do

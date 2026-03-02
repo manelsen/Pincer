@@ -21,6 +21,7 @@ RUN mix deps.compile
 COPY lib ./lib
 COPY priv ./priv
 COPY config.yaml ./config.yaml
+COPY TODO.md ./TODO.md
 COPY README.md ./README.md
 COPY LICENSE ./LICENSE
 COPY IDENTITY.md ./IDENTITY.md
@@ -57,6 +58,7 @@ COPY --from=builder /app/config /app/config
 COPY --from=builder /app/mix.exs /app/mix.exs
 COPY --from=builder /app/mix.lock /app/mix.lock
 COPY --from=builder /app/config.yaml /app/config.yaml
+COPY --from=builder /app/TODO.md /app/TODO.md
 COPY --from=builder /app/README.md /app/README.md
 COPY --from=builder /app/LICENSE /app/LICENSE
 COPY --from=builder /app/IDENTITY.md /app/IDENTITY.md

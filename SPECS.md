@@ -1484,3 +1484,228 @@ config = ~y"""
   2. `docker compose up -d pincer-server` sobe container em execução;
   3. logs do container exibem bootstrap do servidor Pincer sem crash imediato;
   4. `docker compose down` encerra o serviço sem perda dos dados persistidos em `db/` e `logs/`.
+
+### Robustez de Tool Calls + UX Telegram Native-First (SPR-073)
+- Objetivo:
+  - eliminar `FunctionClauseError` no executor quando providers retornam `tool_calls.function.arguments` em formato não textual (ex.: mapa já decodificado);
+  - reduzir ruído visual no Telegram mobile removendo teclado persistente duplicado de `Menu` por padrão;
+  - manter compatibilidade retroativa para tool calls em JSON string.
+- Interfaces públicas afetadas:
+  - `Pincer.Core.Executor` (normalização de tool call antes da execução)
+  - `Pincer.Channels.Telegram.menu_reply_markup/0`
+- Regras v1:
+  - executor deve aceitar argumentos de tool call em múltiplos formatos:
+    - JSON string (`"{\"k\":\"v\"}"`)
+    - mapa (`%{"k" => "v"}` / `%{k: "v"}`)
+    - `nil` (normaliza para `%{}`)
+  - tool call malformado não deve derrubar o ciclo de execução; deve retornar erro funcional no conteúdo da mensagem `tool`;
+  - no Telegram, `menu_reply_markup/0` deve operar em modo native-first por padrão:
+    - remover teclado custom inferior (`remove_keyboard: true`);
+    - manter comandos nativos (`/menu`, `/status`, etc.) como affordance principal.
+- Critérios de aceite:
+  1. fluxo com `tool_calls` contendo `arguments` como mapa não gera `FunctionClauseError`;
+  2. executor continua funcionando para `arguments` em JSON string;
+  3. respostas de fallback no Telegram deixam de exibir teclado persistente inferior por padrão;
+  4. cobertura de testes para os dois contratos (executor + Telegram markup).
+
+### Robustez de Histórico de Tools + Cooldown Config Fail-Safe (FIX-074)
+- Objetivo:
+  - evitar falha de provedor (`400 Tool type cannot be empty`) no segundo turno de execução de ferramentas;
+  - impedir `FunctionClauseError` em fluxos de falha terminal quando configs de cooldown/retry chegam em formato de lista não-keyword.
+- Interfaces públicas afetadas:
+  - `Pincer.Core.Executor` (montagem de `assistant.tool_calls` no histórico reenviado)
+  - `Pincer.LLM.Client` (normalização de leitura de `:llm_retry`)
+  - `Pincer.Core.LLM.CooldownStore` (normalização de leitura de `:llm_cooldown`)
+  - `Pincer.Core.AuthProfiles` (normalização de leitura de `:auth_profile_cooldown`)
+- Regras v1:
+  - `tool_calls` persistidos pelo executor devem sempre incluir `"type": "function"` quando ausente no delta;
+  - leitura de config com shape lista deve ser fail-safe:
+    - listas keyword continuam suportadas;
+    - listas não-keyword não podem explodir `Keyword.get/3`;
+    - em caso inválido, usar defaults.
+- Critérios de aceite:
+  1. ciclo de tool call em streaming preserva/enriquece `tool_calls.type` antes da próxima chamada ao LLM;
+  2. cenário com erro HTTP terminal (`400`) não gera `FunctionClauseError` mesmo com `:llm_cooldown`/`:auth_profile_cooldown`/`:llm_retry` em lista não-keyword;
+  3. suíte de regressão cobre os dois contratos acima.
+
+### Pairing Persistente + Fluxo Out-of-Band (FIX-075)
+- Objetivo:
+  - tornar o estado de pairing persistente entre reinícios do processo/container;
+  - remover auto-liberação por código exibido no mesmo canal bloqueado;
+  - aproximar UX de pairing do fluxo OpenClaw (código obtido fora do chat bloqueado).
+- Interfaces públicas afetadas:
+  - `Pincer.Core.Pairing` (persistência de pending/pairs e emissão de código para operador)
+  - `Pincer.Core.AccessPolicy.authorize_dm/3` (mensagem de pairing sem revelar código)
+  - mensagens de ajuda em comandos `/pair` de Telegram/Discord.
+- Regras v1:
+  - pairing deve persistir em store local baseado em arquivo (`dets`) por padrão;
+  - `Pairing.reset/0` deve limpar estado em memória e no store persistente;
+  - em `dm_policy: pairing`, mensagem de bloqueio:
+    - não deve conter o código numérico;
+    - deve orientar solicitação de código ao operador e uso de `/pair <codigo>`;
+  - código deve continuar disponível ao operador via logs/evento administrativo out-of-band.
+- Critérios de aceite:
+  1. após aprovação de pairing, o sender continua pareado após recriação das tabelas runtime;
+  2. mensagem de negação do `AccessPolicy` em `pairing` não expõe código de 6 dígitos;
+  3. testes cobrem persistência e contrato de UX sem código no canal bloqueado.
+
+### `/models` orientado a `config.yaml` (FIX-076)
+- Objetivo:
+  - alinhar o comando `/models` com a fonte de verdade operacional (`config.yaml`);
+  - evitar listagem de providers/modelos vindos apenas de defaults estáticos de build;
+  - manter compatibilidade com fallback legado quando `llm` não estiver disponível.
+- Interfaces públicas afetadas:
+  - `Pincer.LLM.Client.list_providers/0`
+  - `Pincer.LLM.Client.list_models/1`
+- Regras v1:
+  - `/models` deve priorizar a estrutura carregada de `config.yaml` via `Application.get_env(:pincer, :llm)`;
+  - ao derivar registry de `:llm`:
+    - ignorar a chave seletora `provider`;
+    - considerar apenas entradas de provider cujo valor seja mapa;
+  - se `:llm` estiver ausente/inválido/vazio, manter fallback para `:llm_providers`.
+- Critérios de aceite:
+  1. `list_providers/0` retorna apenas providers definidos sob `llm.<provider>` em `config.yaml` quando `:llm` está presente;
+  2. `list_models/1` resolve `default_model`/`models`/`model_list` a partir de `:llm` quando disponível;
+  3. fallback legado para `:llm_providers` permanece funcional quando `:llm` não está disponível.
+
+### SafeShell com Perfil Dinâmico por Stack (SPR-074 / AutoClaude v1)
+- Objetivo:
+  - iniciar integração das melhorias do Auto-Claude com um perfil dinâmico de comandos do `SafeShell`;
+  - manter postura fail-closed e validação de path existente;
+  - habilitar comandos úteis por stack detectada no workspace, sem abrir superfície ampla.
+- Interfaces públicas afetadas:
+  - `Pincer.Core.Tooling.CommandProfile` (novo)
+  - `Pincer.Tools.SafeShell.approved_command_allowed?/2`
+  - `Pincer.Tools.SafeShell.execute/1` (validação dinâmica)
+- Regras v1:
+  - detecção de stack por artefatos no workspace (`mix.exs`, `package.json`, `Cargo.toml`, `pyproject.toml`/`requirements*.txt`);
+  - perfil dinâmico v1 com comandos adicionais estritamente permitidos:
+    - `elixir`: `mix format`, `mix pincer.security_audit`, `mix pincer.doctor`
+    - `node`: `npm test`
+    - `rust`: `cargo test`, `cargo check`
+    - `python`: `pytest`
+  - comandos dinâmicos devem passar pela mesma validação de args/path já existente (`unsafe_generic_arg?/2`);
+  - ausência de stack compatível mantém comportamento atual (fallback para whitelist estático).
+- Critérios de aceite:
+  1. comandos dinâmicos válidos são aceitos somente quando a stack correspondente é detectada no `workspace_root`;
+  2. comandos dinâmicos continuam bloqueando args/path inseguros (absoluto, traversal, symlink escape etc.);
+  3. sem artefatos de stack, comandos dinâmicos não são aceitos (fail-closed);
+  4. cobertura de testes para `CommandProfile` e para integração no `SafeShell`.
+
+### SafeShell com Scripts Dinâmicos do Projeto (SPR-075 / AutoClaude v2)
+- Objetivo:
+  - expandir a integração Auto-Claude no `SafeShell` para considerar scripts reais do workspace;
+  - reduzir prompts de aprovação para comandos legítimos e específicos do projeto;
+  - manter validação de args/path e fail-closed.
+- Interfaces públicas afetadas:
+  - `Pincer.Core.Tooling.CommandProfile.dynamic_command_prefixes/1`
+  - `Pincer.Tools.SafeShell.approved_command_allowed?/2`
+- Regras v1:
+  - detectar scripts `npm run <script>` em `package.json` (`scripts` map);
+  - detectar targets de `make <target>` em `Makefile` (targets simples com sufixo `:`);
+  - adicionar somente prefixes explícitos derivados do workspace atual;
+  - JSON inválido, `scripts` malformado ou ausência de arquivo devem degradar para lista vazia (sem crash).
+- Critérios de aceite:
+  1. `npm run <script>` é aceito apenas quando `<script>` existe no `package.json` local;
+  2. `make <target>` é aceito apenas quando `<target>` existe no `Makefile` local;
+  3. scripts/targets inexistentes continuam bloqueados com aprovação;
+  4. args perigosos continuam bloqueados mesmo em comandos dinâmicos de script.
+
+### SafeShell com Runners de Scripts e Shell Scripts Locais (SPR-076 / AutoClaude v3)
+- Objetivo:
+  - ampliar a integração Auto-Claude no `SafeShell` para cobrir runners comuns de scripts Node;
+  - reduzir aprovações em workflows de projeto com `yarn`, `pnpm` e `bun`;
+  - permitir execução de shell scripts locais do root do workspace com postura fail-closed.
+- Interfaces públicas afetadas:
+  - `Pincer.Core.Tooling.CommandProfile.dynamic_command_prefixes/1`
+  - `Pincer.Tools.SafeShell.approved_command_allowed?/2`
+- Regras v1:
+  - derivar scripts de `package.json` (`scripts` map) e permitir:
+    - `yarn run <script>`
+    - `pnpm run <script>`
+    - `bun run <script>`
+    - (mantém `npm run <script>` já existente);
+  - detectar shell scripts locais do root com nomes seguros (`*.sh`, `*.bash`) e permitir apenas `./<script>`;
+  - não aceitar nomes inválidos (vazios, com whitespace, com segmentos de path ou formatos inseguros);
+  - ausência/erro de leitura de arquivos deve degradar para lista vazia sem crash.
+- Critérios de aceite:
+  1. `yarn run <script>`, `pnpm run <script>` e `bun run <script>` só são aceitos se `<script>` existir no `package.json` local;
+  2. `./<script>.sh` e `./<script>.bash` só são aceitos quando o arquivo existir no root do workspace;
+  3. script/runner inexistente continua bloqueado com aprovação;
+  4. args perigosos continuam bloqueados mesmo nesses comandos dinâmicos.
+
+### Auto-envio de artefatos Markdown ao usuário (FIX-077)
+- Objetivo:
+  - garantir que todo artefato `.md` produzido/atualizado durante execução de tools seja enviado automaticamente ao usuário;
+  - remover dependência de instruções em prompt para divulgação de documentos gerados.
+- Interfaces públicas afetadas:
+  - `Pincer.Core.Executor.run/4`
+  - `Pincer.Core.Executor.execute_tool_via_registry/4`
+- Regras v1:
+  - iniciar snapshot de arquivos markdown (`*.md`) no começo do ciclo do executor;
+  - após cada execução de tool, detectar markdown novo ou modificado no workspace;
+  - para cada arquivo detectado, emitir atualização de status para sessão contendo:
+    - path relativo do arquivo;
+    - conteúdo markdown (com truncamento seguro quando muito grande);
+  - falhas de leitura/snapshot não podem quebrar o ciclo do executor (fail-safe).
+- Critérios de aceite:
+  1. quando uma tool cria ou altera `.md`, o usuário recebe mensagem automática sem novo prompt;
+  2. markdown sem mudança não gera reenvio redundante no mesmo ciclo;
+  3. fluxo de execução de tools continua funcional e coberto por teste de regressão no executor.
+
+### Kanban Operacional por Comando (`/kanban` e `/project`) (SPR-077)
+- Objetivo:
+  - entregar visualização operacional do projeto por comando sem depender de prompt;
+  - expor quadro com contexto DDD/TDD para orientar execução de sprint;
+  - garantir paridade de acesso em Telegram e Discord.
+- Interfaces públicas afetadas:
+  - `Pincer.Core.ProjectBoard` (novo)
+  - `Pincer.Core.UX.commands/0`
+  - `Pincer.Core.UX.resolve_shortcut/1`
+  - `Pincer.Channels.Telegram.handle_command/4`
+  - `Pincer.Channels.Discord.handle_command/2` e `handle_slash_command/1`
+- Regras v1:
+  - `/kanban` retorna board renderizado a partir de `TODO.md`:
+    - contagem de itens concluídos (`- [x]`) e pendentes (`- [ ]`);
+    - lista curta de pendentes e concluídos recentes;
+    - seção explícita de fluxo DDD/TDD (`Spec -> Contract -> Red -> Green -> Refactor -> Review -> Done`);
+  - `/project` atua como alias inicial para `/kanban` (mesmo conteúdo v1);
+  - leitura de `TODO.md` ausente/inválida deve falhar de forma amigável sem crash.
+- Critérios de aceite:
+  1. `kanban`/`/kanban` e `project`/`/project` resolvem por shortcut no core UX;
+  2. Telegram e Discord respondem aos comandos com board textual;
+  3. testes cobrem parser/render do board e roteamento básico de comando nos canais.
+
+### Container Runtime com `TODO.md` para `/kanban` (FIX-078)
+- Objetivo:
+  - garantir que o board de `/kanban` e `/project` funcione também no container;
+  - evitar fallback "Kanban unavailable: TODO.md not found in workspace" em runtime Docker.
+- Interfaces públicas afetadas:
+  - `Dockerfile` (builder/runtime artifacts)
+- Regras v1:
+  - incluir `TODO.md` no estágio de build;
+  - copiar `TODO.md` para a imagem final de runtime.
+- Critérios de aceite:
+  1. container final possui `/app/TODO.md`;
+  2. `Pincer.Core.ProjectBoard.render/0` executado dentro do container retorna board (não fallback de arquivo ausente).
+
+### Orientação Explícita DDD/TDD no `/project` (SPR-078)
+- Objetivo:
+  - tornar o comando `/project` um painel de orientação prática de execução;
+  - explicitar no texto os checkpoints de DDD e TDD para cada ciclo de implementação;
+  - manter `/kanban` como visão enxuta de progresso.
+- Interfaces públicas afetadas:
+  - `Pincer.Core.ProjectBoard.render/1`
+  - `Pincer.Channels.Telegram.handle_command/4`
+  - `Pincer.Channels.Discord.handle_command/2`
+- Regras v1:
+  - `/kanban` permanece mostrando quadro operacional (done/pending + fluxo);
+  - `/project` passa a mostrar:
+    - board operacional;
+    - seção `DDD Checklist` com itens mínimos de domínio/contrato;
+    - seção `TDD Checklist` com itens mínimos `Red -> Green -> Refactor`;
+    - seção `Next Action` orientando o próximo passo operacional.
+- Critérios de aceite:
+  1. `/project` responde com texto contendo `DDD Checklist` e `TDD Checklist`;
+  2. `/kanban` continua funcional sem se tornar verboso;
+  3. testes cobrem renderização diferenciada e roteamento de `project` em Telegram/Discord.

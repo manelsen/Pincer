@@ -91,9 +91,11 @@ defmodule Pincer.Channels.DiscordTest do
       APIMock
       |> expect(:bulk_overwrite_global_commands, fn commands ->
         assert is_list(commands)
-        assert length(commands) == 4
+        assert length(commands) == 6
         assert Enum.any?(commands, &(&1.name == "ping"))
         assert Enum.any?(commands, &(&1.name == "menu"))
+        assert Enum.any?(commands, &(&1.name == "kanban"))
+        assert Enum.any?(commands, &(&1.name == "project"))
         {:ok, %{}}
       end)
 
@@ -189,6 +191,43 @@ defmodule Pincer.Channels.DiscordTest do
         author: %{bot: false, username: "tester"},
         content: "status",
         channel_id: 889,
+        guild_id: 777,
+        attachments: []
+      }
+
+      Pincer.Channels.Discord.Consumer.handle_event({:MESSAGE_CREATE, message, nil})
+    end
+
+    test "plain kanban text routes to /kanban for board visualization" do
+      APIMock
+      |> expect(:create_message, fn 890, content, _opts ->
+        assert content =~ "Kanban Board"
+        {:ok, %{id: 125}}
+      end)
+
+      message = %{
+        author: %{bot: false, username: "tester"},
+        content: "kanban",
+        channel_id: 890,
+        guild_id: 777,
+        attachments: []
+      }
+
+      Pincer.Channels.Discord.Consumer.handle_event({:MESSAGE_CREATE, message, nil})
+    end
+
+    test "plain project text routes to /project with DDD/TDD guidance" do
+      APIMock
+      |> expect(:create_message, fn 891, content, _opts ->
+        assert content =~ "DDD Checklist"
+        assert content =~ "TDD Checklist"
+        {:ok, %{id: 126}}
+      end)
+
+      message = %{
+        author: %{bot: false, username: "tester"},
+        content: "project",
+        channel_id: 891,
         guild_id: 777,
         attachments: []
       }
