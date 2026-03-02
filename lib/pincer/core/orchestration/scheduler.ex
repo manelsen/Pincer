@@ -1,4 +1,4 @@
-defmodule Pincer.Orchestration.Scheduler do
+defmodule Pincer.Core.Orchestration.Scheduler do
   @moduledoc """
   A time-based task orchestrator that executes recurring tasks defined in `HEARTBEAT.md`.
 
@@ -60,7 +60,7 @@ defmodule Pincer.Orchestration.Scheduler do
   ## Examples
 
       # Start the Scheduler for a session
-      {:ok, _pid} = Pincer.Orchestration.Scheduler.start_link(
+      {:ok, _pid} = Pincer.Core.Orchestration.Scheduler.start_link(
         session_id: "session_123"
       )
 
@@ -124,7 +124,7 @@ defmodule Pincer.Orchestration.Scheduler do
 
   ## Examples
 
-      iex> Pincer.Orchestration.Scheduler.start_link(session_id: "session_abc")
+      iex> Pincer.Core.Orchestration.Scheduler.start_link(session_id: "session_abc")
       {:ok, #PID<0.150.0>}
 
   """
@@ -216,7 +216,7 @@ defmodule Pincer.Orchestration.Scheduler do
   defp trigger_task(session_id, description) do
     Logger.info("[SCHEDULER] 🚀 Triggering task: #{description}")
 
-    case Registry.lookup(Pincer.Session.Registry, session_id) do
+    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
       [{pid, _}] ->
         send(pid, {:scheduler_trigger, description})
 

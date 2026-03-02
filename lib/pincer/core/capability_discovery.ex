@@ -6,7 +6,7 @@ defmodule Pincer.Core.CapabilityDiscovery do
   and stays provider/channel-agnostic.
   """
 
-  @behaviour Pincer.Core.Ports.CapabilityDiscovery
+  @behaviour Pincer.Ports.CapabilityDiscovery
 
   @capabilities [
     %{

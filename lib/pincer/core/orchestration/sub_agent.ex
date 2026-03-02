@@ -1,4 +1,4 @@
-defmodule Pincer.Orchestration.SubAgent do
+defmodule Pincer.Core.Orchestration.SubAgent do
   @moduledoc """
   An autonomous background agent that executes tasks independently and reports results.
 
@@ -44,18 +44,18 @@ defmodule Pincer.Orchestration.SubAgent do
   ## Examples
 
       # Spawn a SubAgent to analyze a codebase
-      {:ok, pid} = Pincer.Orchestration.SubAgent.start_link(
+      {:ok, pid} = Pincer.Core.Orchestration.SubAgent.start_link(
         goal: "Analyze the authentication module and list all security vulnerabilities",
         id: "security_audit_001"
       )
 
       # Spawn with default auto-generated ID
-      {:ok, pid} = Pincer.Orchestration.SubAgent.start_link(
+      {:ok, pid} = Pincer.Core.Orchestration.SubAgent.start_link(
         goal: "Read the README.md and summarize the project purpose"
       )
 
       # Check results via Blackboard
-      {messages, last_id} = Pincer.Orchestration.Blackboard.fetch_new(0)
+      {messages, last_id} = Pincer.Core.Orchestration.Blackboard.fetch_new(0)
 
   ## Lifecycle
 
@@ -77,7 +77,7 @@ defmodule Pincer.Orchestration.SubAgent do
   require Logger
   alias Pincer.Core.LLM.RuntimeStatus
   alias Pincer.Core.Executor
-  alias Pincer.Orchestration.Blackboard
+  alias Pincer.Core.Orchestration.Blackboard
 
   @type option :: {:goal, String.t()} | {:id, String.t()}
   @type state :: %{id: String.t(), goal: String.t()}
@@ -96,10 +96,10 @@ defmodule Pincer.Orchestration.SubAgent do
 
   ## Examples
 
-      iex> Pincer.Orchestration.SubAgent.start_link(goal: "Count lines in lib/")
+      iex> Pincer.Core.Orchestration.SubAgent.start_link(goal: "Count lines in lib/")
       {:ok, #PID<0.123.0>}
 
-      iex> Pincer.Orchestration.SubAgent.start_link(
+      iex> Pincer.Core.Orchestration.SubAgent.start_link(
       ...>   goal: "Find all TODOs",
       ...>   id: "todo_finder"
       ...> )

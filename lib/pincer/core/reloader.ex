@@ -11,30 +11,34 @@ defmodule Pincer.Core.Reloader do
 
   @impl true
   def init(_opts) do
+    # Força o início da aplicação de monitoramento de arquivos
+    Application.ensure_all_started(:file_system)
     fs_module = Module.concat([FileSystem])
+    
+    Logger.info("[RELOADER] Initializing Code Watcher...")
 
-    if Mix.env() == :dev and Code.ensure_loaded?(fs_module) do
+    if Code.ensure_loaded?(fs_module) do
       # Trap exits so we don't die if the watcher dies
       Process.flag(:trap_exit, true)
 
-      # Starts the watcher in the lib/ folder (absolute path)
-      lib_path = Path.expand("lib")
+      # Usa o diretório absoluto do projeto
+      root_path = File.cwd!()
+      lib_path = Path.join(root_path, "lib")
+      Logger.info("[RELOADER] Watching path: #{lib_path}")
 
       case apply(fs_module, :start_link, [[dirs: [lib_path]]]) do
         {:ok, watcher_pid} ->
           apply(fs_module, :subscribe, [watcher_pid])
-          Logger.debug("[RELOADER] File watcher active at: #{lib_path}")
+          Logger.info("[RELOADER] File watcher ACTIVE.")
           {:ok, %{watcher_pid: watcher_pid, timer: nil}}
 
         error ->
-          Logger.warning(
-            "[RELOADER] Could not start watcher (inotify-tools may be missing): #{inspect(error)}"
-          )
-
-          :ignore
+          Logger.error("[RELOADER] FAILED to start watcher: #{inspect(error)}")
+          {:stop, :watcher_failed}
       end
     else
-      :ignore
+      Logger.error("[RELOADER] FileSystem module NOT FOUND. Hot-reload will not work.")
+      {:stop, :missing_dependencies}
     end
   end
 
@@ -74,7 +78,7 @@ defmodule Pincer.Core.Reloader do
             Logger.info("[RELOADER] Success! Hot-reloaded #{length(changed_beams)} modules.")
 
             # Notify all live sessions to hot-swap their system prompts
-            Pincer.PubSub.broadcast("system:updates", {:system_update_prompt})
+            Pincer.Infra.PubSub.broadcast("system:updates", {:system_update_prompt})
           end
 
         :error ->

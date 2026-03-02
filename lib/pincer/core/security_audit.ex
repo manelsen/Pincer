@@ -8,7 +8,7 @@ defmodule Pincer.Core.SecurityAudit do
   - gateway bind risk
   """
 
-  alias Pincer.Connectors.MCP.SkillsSidecarPolicy
+  alias Pincer.Core.LLM.SkillsSidecarPolicy
 
   @type severity :: :ok | :warn | :error
 
