@@ -69,7 +69,7 @@ defmodule Pincer.Channels.Discord.SessionTest do
 
     Process.sleep(50)
 
-    Pincer.PubSub.broadcast("session:discord_main", {:agent_response, "Main scope reply"})
+    Pincer.Infra.PubSub.broadcast("session:discord_main", {:agent_response, "Main scope reply"})
     Process.sleep(80)
   end
 

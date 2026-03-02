@@ -5,7 +5,7 @@ defmodule Pincer.Channels.WhatsApp.Session do
 
   use GenServer
   alias Pincer.Core.ProjectRouter
-  alias Pincer.Session.Server
+  alias Pincer.Core.Session.Server
 
   def start_link(%{chat_id: chat_id} = args) do
     GenServer.start_link(__MODULE__, args, name: via_tuple(chat_id))
@@ -16,14 +16,14 @@ defmodule Pincer.Channels.WhatsApp.Session do
   end
 
   defp via_tuple(chat_id),
-    do: {:via, Registry, {Pincer.Session.Registry, "whatsapp_session_worker_#{chat_id}"}}
+    do: {:via, Registry, {Pincer.Core.Session.Registry, "whatsapp_session_worker_#{chat_id}"}}
 
   def ensure_started(chat_id, session_id \\ nil)
 
   def ensure_started(chat_id, session_id) do
     session_id = normalize_session_id(chat_id, session_id)
 
-    case Registry.lookup(Pincer.Session.Registry, "whatsapp_session_worker_#{chat_id}") do
+    case Registry.lookup(Pincer.Core.Session.Registry, "whatsapp_session_worker_#{chat_id}") do
       [] ->
         case Pincer.Channels.WhatsApp.SessionSupervisor.start_session(chat_id, session_id) do
           {:ok, pid} ->
@@ -108,8 +108,8 @@ defmodule Pincer.Channels.WhatsApp.Session do
 
   defp normalize_session_id(chat_id, _), do: default_session_id(chat_id)
 
-  defp subscribe_session(session_id), do: Pincer.PubSub.subscribe("session:#{session_id}")
-  defp unsubscribe_session(session_id), do: Pincer.PubSub.unsubscribe("session:#{session_id}")
+  defp subscribe_session(session_id), do: Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+  defp unsubscribe_session(session_id), do: Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
 
   defp maybe_advance_project_flow(state) do
     case ProjectRouter.on_agent_response(state.session_id) do

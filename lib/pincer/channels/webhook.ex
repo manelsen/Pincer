@@ -3,10 +3,10 @@ defmodule Pincer.Channels.Webhook do
   Universal receive-only webhook channel.
 
   This channel exposes `ingest/2` as a generic entrypoint for external events
-  and routes accepted payloads into `Pincer.Session.Server`.
+  and routes accepted payloads into `Pincer.Core.Session.Server`.
   """
 
-  use Pincer.Channel
+  use Pincer.Ports.Channel
   require Logger
 
   @default_source "external"
@@ -30,7 +30,7 @@ defmodule Pincer.Channels.Webhook do
   preserve a fail-closed posture.
   """
   @spec start_link(map()) :: GenServer.on_start() | :ignore
-  @impl Pincer.Channel
+  @impl Pincer.Ports.Channel
   def start_link(config) do
     case resolve_token(config) do
       {:ok, token} ->
@@ -333,12 +333,12 @@ defmodule Pincer.Channels.Webhook do
   end
 
   defp default_ensure_session_started(session_id) do
-    case Registry.lookup(Pincer.Session.Registry, session_id) do
+    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
       [{_, _}] ->
         :ok
 
       [] ->
-        case Pincer.Session.Supervisor.start_session(session_id) do
+        case Pincer.Core.Session.Supervisor.start_session(session_id) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok
           {:error, reason} -> {:error, reason}
@@ -347,6 +347,6 @@ defmodule Pincer.Channels.Webhook do
   end
 
   defp default_process_input(session_id, text) do
-    Pincer.Session.Server.process_input(session_id, text)
+    Pincer.Core.Session.Server.process_input(session_id, text)
   end
 end

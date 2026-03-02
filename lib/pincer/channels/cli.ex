@@ -70,7 +70,7 @@ defmodule Pincer.Channels.CLI do
   """
 
   use GenServer
-  @behaviour Pincer.Channel
+  @behaviour Pincer.Ports.Channel
   require Logger
 
   @doc """
@@ -92,7 +92,7 @@ defmodule Pincer.Channels.CLI do
       Pincer.Channels.CLI.start_link(%{})
   """
   @spec start_link(config :: map()) :: GenServer.on_start()
-  @impl Pincer.Channel
+  @impl Pincer.Ports.Channel
   def start_link(_config) do
     GenServer.start_link(__MODULE__, %{frontend_pid: nil}, name: __MODULE__)
   end
@@ -126,15 +126,16 @@ defmodule Pincer.Channels.CLI do
   @impl GenServer
   def init(state) do
     Logger.info("CLI Channel Enabled.")
-    Pincer.PubSub.subscribe("session:cli_user")
+    Pincer.Infra.PubSub.subscribe("session:cli_user")
+    Pincer.Infra.PubSub.subscribe("system:delivery")
     {:ok, state}
   end
 
   @impl GenServer
   def handle_call(:attach, {from_pid, _tag}, state) do
-    case Registry.lookup(Pincer.Session.Registry, "cli_user") do
+    case Registry.lookup(Pincer.Core.Session.Registry, "cli_user") do
       [{_, _}] -> :ok
-      [] -> Pincer.Session.Server.start_link(session_id: "cli_user")
+      [] -> Pincer.Core.Session.Server.start_link(session_id: "cli_user")
     end
 
     {:reply, :ok, %{state | frontend_pid: from_pid}}
@@ -143,7 +144,7 @@ defmodule Pincer.Channels.CLI do
   @doc """
   Sends a message to the CLI frontend.
 
-  This implements the `Pincer.Channel.send_message/2` callback. The message
+  This implements the `Pincer.Ports.Channel.send_message/2` callback. The message
   is dispatched to the attached frontend via `:dispatch` cast.
 
   ## Parameters
@@ -160,7 +161,7 @@ defmodule Pincer.Channels.CLI do
       Pincer.Channels.CLI.send_message("cli_user", "Hello from the agent!")
   """
   @spec send_message(chat_id :: String.t(), text :: String.t()) :: :ok
-  @impl Pincer.Channel
+  @impl Pincer.Ports.Channel
   def send_message(_chat_id, text) do
     GenServer.cast(__MODULE__, {:dispatch, text})
     :ok
@@ -169,7 +170,7 @@ defmodule Pincer.Channels.CLI do
   @doc false
   @impl true
   def handle_cast({:user_input, text}, state) do
-    Pincer.Session.Server.process_input("cli_user", text)
+    Pincer.Core.Session.Server.process_input("cli_user", text)
     {:noreply, state}
   end
 
@@ -179,6 +180,13 @@ defmodule Pincer.Channels.CLI do
   end
 
   @impl GenServer
+  def handle_info({:deliver_message, session_id, message}, state) do
+    if session_id == "cli_user" do
+      send_message(session_id, message)
+    end
+    {:noreply, state}
+  end
+
   def handle_info({:agent_response, text}, state) do
     send_to_frontend(state, text)
     {:noreply, state}

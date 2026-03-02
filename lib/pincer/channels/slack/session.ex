@@ -22,7 +22,7 @@ defmodule Pincer.Channels.Slack.Session do
   @impl true
   def init(channel_id) do
     session_id = "slack_#{channel_id}"
-    Pincer.PubSub.subscribe("session:#{session_id}")
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
     {:ok, %{channel_id: channel_id, session_id: session_id}}
   end
 
