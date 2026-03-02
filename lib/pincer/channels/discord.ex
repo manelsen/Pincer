@@ -234,6 +234,7 @@ defmodule Pincer.Channels.Discord do
     alias Pincer.Core.ChannelInteractionPolicy
     alias Pincer.Core.Pairing
     alias Pincer.Core.ProjectBoard
+    alias Pincer.Core.ProjectOrchestrator
     alias Pincer.Core.SessionScopePolicy
     alias Pincer.Core.UX
     alias Pincer.Session.Server
@@ -264,42 +265,58 @@ defmodule Pincer.Channels.Discord do
                   :error ->
                     session_id = resolve_session_id(msg)
 
-                    Logger.info(
-                      "[DISCORD] Message from #{msg.author.username} in #{msg.channel_id}"
-                    )
+                    case maybe_handle_project_message(
+                           msg.channel_id,
+                           msg.attachments,
+                           session_id,
+                           trimmed
+                         ) do
+                      :handled ->
+                        :ok
 
-                    {attachment_text, attachment_refs} = process_attachments(msg.attachments)
-                    text_content = (trimmed <> "\n" <> attachment_text) |> String.trim()
+                      :not_handled ->
+                        Logger.info(
+                          "[DISCORD] Message from #{msg.author.username} in #{msg.channel_id}"
+                        )
 
-                    # Build the message content:
-                    # - plain string  when there are no multimodal attachments
-                    # - list of parts when there are PDFs/images (lazy refs resolved by Executor)
-                    full_content =
-                      if Enum.empty?(attachment_refs) do
-                        text_content
-                      else
-                        text_parts =
-                          if text_content != "",
-                            do: [%{"type" => "text", "text" => text_content}],
-                            else: []
+                        {attachment_text, attachment_refs} = process_attachments(msg.attachments)
+                        text_content = (trimmed <> "\n" <> attachment_text) |> String.trim()
 
-                        text_parts ++ attachment_refs
-                      end
+                        # Build the message content:
+                        # - plain string  when there are no multimodal attachments
+                        # - list of parts when there are PDFs/images (lazy refs resolved by Executor)
+                        full_content =
+                          if Enum.empty?(attachment_refs) do
+                            text_content
+                          else
+                            text_parts =
+                              if text_content != "",
+                                do: [%{"type" => "text", "text" => text_content}],
+                                else: []
 
-                    has_content =
-                      case full_content do
-                        s when is_binary(s) -> s != ""
-                        list when is_list(list) -> list != []
-                      end
+                            text_parts ++ attachment_refs
+                          end
 
-                    if has_content do
-                      ensure_brain_session_started(session_id)
-                      Pincer.Channels.Discord.Session.ensure_started(msg.channel_id, session_id)
-                      Server.process_input(session_id, full_content)
-                    else
-                      Logger.debug(
-                        "[DISCORD] Ignoring empty message without supported attachments."
-                      )
+                        has_content =
+                          case full_content do
+                            s when is_binary(s) -> s != ""
+                            list when is_list(list) -> list != []
+                          end
+
+                        if has_content do
+                          ensure_brain_session_started(session_id)
+
+                          Pincer.Channels.Discord.Session.ensure_started(
+                            msg.channel_id,
+                            session_id
+                          )
+
+                          Server.process_input(session_id, full_content)
+                        else
+                          Logger.debug(
+                            "[DISCORD] Ignoring empty message without supported attachments."
+                          )
+                        end
                     end
                 end
               end
@@ -434,14 +451,24 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_command(msg, "/kanban") do
-      Pincer.Channels.Discord.send_message("#{msg.channel_id}", ProjectBoard.render())
+      session_id = resolve_session_id(msg)
+
+      Pincer.Channels.Discord.send_message(
+        "#{msg.channel_id}",
+        render_kanban_for_session(session_id)
+      )
     end
 
     defp handle_command(msg, "/project") do
-      Pincer.Channels.Discord.send_message(
-        "#{msg.channel_id}",
-        ProjectBoard.render(view: :project)
-      )
+      session_id = resolve_session_id(msg)
+      response = ProjectOrchestrator.start(session_id)
+      Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
+    end
+
+    defp handle_command(msg, "/project " <> details) do
+      session_id = resolve_session_id(msg)
+      response = ProjectOrchestrator.start(session_id, details)
+      Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
     end
 
     defp handle_command(msg, "/pair") do
@@ -533,21 +560,52 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_kanban_command(interaction) do
+      session_id = resolve_session_id(interaction)
+
       response = %{
         type: 4,
-        data: %{content: ProjectBoard.render()}
+        data: %{content: render_kanban_for_session(session_id)}
       }
 
       send_interaction_response(interaction, response)
     end
 
     defp handle_project_command(interaction) do
+      session_id = resolve_session_id(interaction)
+
       response = %{
         type: 4,
-        data: %{content: ProjectBoard.render(view: :project)}
+        data: %{content: ProjectOrchestrator.start(session_id)}
       }
 
       send_interaction_response(interaction, response)
+    end
+
+    defp maybe_handle_project_message(channel_id, attachments, session_id, trimmed) do
+      cond do
+        not is_binary(trimmed) or String.trim(trimmed) == "" ->
+          :not_handled
+
+        is_list(attachments) and attachments != [] ->
+          :not_handled
+
+        true ->
+          case ProjectOrchestrator.continue(session_id, trimmed) do
+            {:handled, response} ->
+              Pincer.Channels.Discord.send_message("#{channel_id}", response)
+              :handled
+
+            :not_active ->
+              :not_handled
+          end
+      end
+    end
+
+    defp render_kanban_for_session(session_id) do
+      case ProjectOrchestrator.board(session_id) do
+        {:ok, session_board} -> session_board
+        :not_found -> ProjectBoard.render()
+      end
     end
 
     defp build_status_content(session_id) do
