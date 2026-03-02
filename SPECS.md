@@ -1709,3 +1709,34 @@ config = ~y"""
   1. `/project` responde com texto contendo `DDD Checklist` e `TDD Checklist`;
   2. `/kanban` continua funcional sem se tornar verboso;
   3. testes cobrem renderização diferenciada e roteamento de `project` em Telegram/Discord.
+
+### Orquestração Multi-Agente Adaptativa em `/project` (SPR-079)
+- Objetivo:
+  - transformar `/project` em fluxo de descoberta guiada por um gestor de projeto;
+  - suportar projetos de software e não-software sem impor DDD/TDD em casos inadequados;
+  - expor kanban por sessão a partir do plano gerado no fluxo de projeto.
+- Interfaces públicas afetadas:
+  - `Pincer.Core.ProjectOrchestrator` (novo)
+  - `Pincer.Channels.Telegram.UpdatesProvider.handle_command/4`
+  - `Pincer.Channels.Discord.Consumer.handle_command/2`
+  - `Pincer.Core.ProjectBoard.render/1` (reuso para fallback)
+- Regras v1:
+  - `/project` inicia um wizard textual com etapas mínimas:
+    - objetivo;
+    - tipo de projeto (`software` ou `nao-software`);
+    - contexto/escopo;
+    - critério de sucesso.
+  - ao concluir o wizard, o gestor compõe plano multi-agente:
+    - `Architect`: escopo e critérios;
+    - `Coder`: backlog inicial acionável;
+    - `Reviewer`: checklist de validação.
+  - para `software`, manter orientação DDD/TDD no plano;
+  - para `nao-software`, usar trilha de pesquisa/validação sem jargão de engenharia de software.
+  - `/kanban` deve mostrar board por sessão quando existir plano ativo;
+    se não existir, manter fallback atual baseado em `TODO.md`.
+- Critérios de aceite:
+  1. `/project` deixa de ser saída estática e passa a solicitar requisitos;
+  2. mensagens subsequentes do usuário, durante o wizard, avançam o estado do projeto;
+  3. projetos não-software não exibem `DDD Checklist`/`TDD Checklist`;
+  4. `/kanban` apresenta itens do projeto da sessão quando disponível;
+  5. testes cobrem fluxo guiado, adaptação por tipo e integração nos canais.

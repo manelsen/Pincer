@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Project Manager Multi-Agent Wizard (SPR-079)**
+  - Added `Pincer.Core.ProjectOrchestrator` with session-scoped project discovery wizard:
+    - objective
+    - project type (`software` vs `nao-software`)
+    - scope/context
+    - success criteria
+  - Added adaptive multi-agent planning output (`Architect`, `Coder`, `Reviewer`) after discovery.
+  - Added session kanban rendering from orchestrated project plans via `ProjectOrchestrator.board/2`.
+  - Telegram and Discord now:
+    - route `/project` to the interactive project manager wizard;
+    - capture follow-up free text while project discovery is active;
+    - route `/kanban` to session board when a plan exists, with fallback to global `TODO.md`.
+
 - **Project Guidance View for `/project` (SPR-078)**
   - Added `view` support to `Pincer.Core.ProjectBoard.render/1` with:
     - `:kanban` (concise operational board)
