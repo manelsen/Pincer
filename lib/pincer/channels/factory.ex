@@ -130,7 +130,7 @@ defmodule Pincer.Channels.Factory do
       module_name = cfg["adapter"]
       module = Module.concat([module_name])
 
-      Logger.info("Enabling Channel: #{name} (#{module_name})")
+      Logger.info("✅ CHANNEL ENABLED: #{name} (Adapter: #{module_name})")
 
       {module, cfg}
     end)
