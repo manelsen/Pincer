@@ -22,7 +22,9 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
       Logger.warning("Incomplete provider configuration for #{__MODULE__}. Using MOCK mode.")
       {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your API Key."}, nil}
     else
-      body = build_request_body(messages, model, tools, config, false)
+      # Clean messages to avoid Groq/OpenAI schema validation errors (like null tool_calls)
+      clean_messages = Enum.map(messages, &clean_message/1)
+      body = build_request_body(clean_messages, model, tools, config, false)
 
       headers = config[:headers] || []
 
@@ -48,7 +50,8 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     # OpenAI-compatible streaming path has shown provider-specific incompatibilities
     # in production (SSE framing and Req collectable mismatch). For stability,
     # fallback to single-shot completion and convert it into one synthetic stream chunk.
-    case chat_completion(messages, model, config, tools) do
+    clean_messages = Enum.map(messages, &clean_message/1)
+    case chat_completion(clean_messages, model, config, tools) do
       {:ok, message, _usage} ->
         {:ok, message_to_stream_chunks(message)}
 
@@ -278,6 +281,19 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
   end
 
   defp infer_models_url(_), do: ""
+
+  defp clean_message(msg) when is_map(msg) do
+    msg
+    |> Enum.reject(fn
+      {"tool_calls", nil} -> true
+      {"tool_calls", []} -> true
+      {:tool_calls, nil} -> true
+      {:tool_calls, []} -> true
+      {_, nil} -> true
+      _ -> false
+    end)
+    |> Map.new()
+  end
 
   defp retry_after_metadata(response) do
     case Req.Response.get_header(response, "retry-after") do

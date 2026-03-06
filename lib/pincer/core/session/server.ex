@@ -223,6 +223,33 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
+  def handle_info({:llm_runtime_status, %{kind: :failover} = meta}, state) do
+    if state.verbose do
+      msg = "🔄 **Failover**: Swapping to `#{meta.provider}/#{meta.model}` due to `#{meta.reason}`"
+      publish(state.session_id, {:agent_response, msg})
+    end
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:llm_runtime_status, _meta}, state) do
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:executor_failed, reason}, state) do
+    Logger.error("[SESSION] #{state.session_id} Executor failed: #{inspect(reason)}")
+    
+    error_msg = case reason do
+      {:http_error, code, body} -> "❌ **LLM Error (#{code})**: #{extract_error_message(body)}"
+      other -> "❌ **Executor Error**: #{inspect(other)}"
+    end
+
+    publish(state.session_id, {:agent_response, error_msg})
+    {:noreply, %{state | status: :idle, worker_pid: nil}}
+  end
+
+  @impl true
   def handle_info(msg, state) do
     Logger.debug("[SESSION] #{state.session_id} received unexpected message: #{inspect(msg)}")
     {:noreply, state}
@@ -381,6 +408,15 @@ defmodule Pincer.Core.Session.Server do
        %{state | history: new_history, worker_pid: pid, status: :working}}
     end
   end
+
+  defp extract_error_message(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, %{"error" => %{"message" => msg}}} -> msg
+      _ -> body
+    end
+  end
+
+  defp extract_error_message(body), do: inspect(body)
 
   defp publish(session_id, event) do
     PubSub.broadcast("session:#{session_id}", event)
