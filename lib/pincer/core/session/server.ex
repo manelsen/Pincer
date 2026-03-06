@@ -195,8 +195,10 @@ defmodule Pincer.Core.Session.Server do
 
       :error ->
         # Lógica padrão de chat (Butler ou Executor)
-        {:reply, _reply, new_state} = process_standard_input(combined_input, state)
-        {:noreply, new_state}
+        case process_standard_input(combined_input, state) do
+          {:reply, _reply, new_state} -> {:noreply, new_state}
+          _ -> {:noreply, state}
+        end
     end
   end
 

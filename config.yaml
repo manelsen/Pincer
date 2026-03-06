@@ -18,8 +18,8 @@ channels:
     dm_policy:
       mode: "pairing"
     bridge:
-      command: "node"
-      args: ["infrastructure/whatsapp/baileys_bridge.js"]
+      command: "./infrastructure/whatsapp/whatsapp_bridge"
+      args: []
       auth_dir: "sessions/whatsapp"
       qr_ascii: true
       qr_ascii_small: true
@@ -41,6 +41,12 @@ llm:
   openrouter:
     base_url: "https://openrouter.ai/api/v1/chat/completions"
     default_model: "openrouter/free"
+  groq:
+    base_url: "https://api.groq.com/openai/v1/chat/completions"
+    default_model: "llama-3.3-70b-versatile"
+  groq_whisper:
+    base_url: "https://api.groq.com/openai/v1/audio/transcriptions"
+    default_model: "whisper-large-v3-turbo"
   provider: "z_ai"
   z_ai:
     base_url: "https://api.z.ai/api/coding/paas/v4/chat/completions"
