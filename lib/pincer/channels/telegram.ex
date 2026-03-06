@@ -147,7 +147,7 @@ defmodule Pincer.Channels.Telegram do
   def send_message(chat_id, text, opts \\ []) do
     html_text =
       if Keyword.get(opts, :skip_reasoning_strip, false) do
-        markdown_to_html(text)
+        text |> format_reasoning() |> markdown_to_html()
       else
         text |> strip_reasoning() |> markdown_to_html()
       end
@@ -161,7 +161,7 @@ defmodule Pincer.Channels.Telegram do
   def update_message(chat_id, message_id, text, opts \\ []) do
     html_text =
       if Keyword.get(opts, :skip_reasoning_strip, false) do
-        markdown_to_html(text)
+        text |> format_reasoning() |> markdown_to_html()
       else
         text |> strip_reasoning() |> markdown_to_html()
       end
@@ -244,6 +244,17 @@ defmodule Pincer.Channels.Telegram do
   end
 
   defp strip_reasoning(other), do: other
+
+  # Wraps reasoning blocks in a stylized blockquote for clear visualization
+  defp format_reasoning(text) when is_binary(text) do
+    text
+    |> String.replace(~r/<thought>(.*?)<\/thought>/is, "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>")
+    |> String.replace(~r/<thinking>(.*?)<\/thinking>/is, "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>")
+    # Handle cases where LLM doesn't close the tag or starts with it
+    |> String.replace(~r/^.*?think>\s*(.*?)$/is, "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>")
+  end
+
+  defp format_reasoning(other), do: other
 
   @doc """
   Converts standard Markdown and/or safe HTML into Telegram-compatible HTML.
