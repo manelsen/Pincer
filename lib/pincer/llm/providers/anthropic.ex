@@ -24,7 +24,8 @@ defmodule Pincer.LLM.Providers.Anthropic do
       Logger.warning("Incomplete provider configuration for Anthropic. Using MOCK mode.")
 
       {:ok,
-       %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your Anthropic API Key."}}
+       %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your Anthropic API Key."},
+       nil}
     else
       # 1. Extract System prompt (Anthropic requires it at the root)
       {system_messages, chat_messages} =
@@ -35,10 +36,24 @@ defmodule Pincer.LLM.Providers.Anthropic do
       # 2. Format Body
       body = %{
         model: model,
-        # Anthropic requires max_tokens
-        max_tokens: config[:max_tokens] || 4096,
         messages: chat_messages
       }
+
+      budget = case config[:thinking_level] do
+        "low"    -> 4_000
+        "medium" -> 10_000
+        "high"   -> 20_000
+        _        -> nil
+      end
+
+      body = if budget do
+        Map.put(body, :thinking, %{type: "enabled", budget_tokens: budget})
+      else
+        body
+      end
+
+      max_tokens = max(config[:max_tokens] || 4096, (budget || 0) + 1)
+      body = Map.put(body, :max_tokens, max_tokens)
 
       body = if system_prompt != "", do: Map.put(body, :system, system_prompt), else: body
 
@@ -92,15 +107,26 @@ defmodule Pincer.LLM.Providers.Anthropic do
     # Anthropic streaming is not wired yet in this adapter.
     # Fallback to single-shot completion and emit one stream chunk.
     case chat_completion(messages, model, config, tools) do
-      {:ok, %{"content" => content}} ->
+      {:ok, %{"content" => content}, _usage} ->
         {:ok, [%{"choices" => [%{"delta" => %{"content" => content || ""}}]}]}
 
-      {:ok, _other} ->
+      {:ok, _other, _usage} ->
         {:ok, [%{"choices" => [%{"delta" => %{"content" => ""}}]}]}
 
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  @impl true
+  def list_models(_config) do
+    {:ok, [
+      "claude-3-5-sonnet-latest",
+      "claude-3-5-haiku-latest",
+      "claude-3-opus-latest",
+      "claude-3-sonnet-20240229",
+      "claude-3-haiku-20240307"
+    ]}
   end
 
   defp handle_response(%Req.Response{status: 200, body: body}) do
@@ -132,7 +158,9 @@ defmodule Pincer.LLM.Providers.Anthropic do
     message =
       if Enum.empty?(tool_uses), do: message, else: Map.put(message, "tool_calls", tool_uses)
 
-    {:ok, message}
+    usage = body["usage"]
+
+    {:ok, message, usage}
   end
 
   defp handle_response(%Req.Response{status: status, body: body}) do
