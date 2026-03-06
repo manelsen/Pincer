@@ -148,11 +148,15 @@ defmodule Pincer.Core.ProjectRouter do
         in_t = Map.get(state.token_usage_total || %{}, "prompt_tokens", 0)
         out_t = Map.get(state.token_usage_total || %{}, "completion_tokens", 0)
 
+        thinking = state.thinking_level || "off"
+        reasoning = if state.reasoning_visible, do: "visible", else: "hidden"
+
         {:ok,
          """
          Sessão: #{session_id}
          Modelo: #{provider}/#{model}
          Tokens esta sessão: #{in_t} in · #{out_t} out
+         Thinking: #{thinking} | Reasoning: #{reasoning}
          Status: #{status}
          """}
 
