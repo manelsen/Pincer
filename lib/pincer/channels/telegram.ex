@@ -145,12 +145,12 @@ defmodule Pincer.Channels.Telegram do
           {:ok, integer()} | {:error, any()}
   @impl Pincer.Ports.Channel
   def send_message(chat_id, text, opts \\ []) do
-    # 1. Pipeline: Strip Reasoning -> Convert Markdown to HTML
     html_text =
-      text
-      |> strip_reasoning()
-      |> markdown_to_html()
-
+      if Keyword.get(opts, :skip_reasoning_strip, false) do
+        markdown_to_html(text)
+      else
+        text |> strip_reasoning() |> markdown_to_html()
+      end
     do_send_message(chat_id, html_text, Keyword.put(opts, :parse_mode, "HTML"))
   end
 
@@ -158,11 +158,13 @@ defmodule Pincer.Channels.Telegram do
   Updates an existing Telegram message.
   """
   @impl Pincer.Ports.Channel
-  def update_message(chat_id, message_id, text) do
+  def update_message(chat_id, message_id, text, opts \\ []) do
     html_text =
-      text
-      |> strip_reasoning()
-      |> markdown_to_html()
+      if Keyword.get(opts, :skip_reasoning_strip, false) do
+        markdown_to_html(text)
+      else
+        text |> strip_reasoning() |> markdown_to_html()
+      end
 
     case Pincer.Channels.Telegram.api_client().edit_message_text(chat_id, message_id, html_text,
            parse_mode: "HTML"
@@ -279,7 +281,6 @@ defmodule Pincer.Channels.Telegram do
     # 1. Pre-processing
     prepared =
       text
-      |> strip_reasoning()
       |> String.replace("\r\n", "\n")
 
     # 2. Sequential Protection (Fencing) for Hybrid HTML Support
@@ -948,11 +949,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp handle_command(chat_id, "/models", _text, _chat_type) do
     providers = Pincer.Ports.LLM.list_providers()
     buttons = build_provider_buttons(providers)
-
     if buttons == [] do
       interaction_unavailable(chat_id)
     else
-      Pincer.Channels.Telegram.send_message(chat_id, "🔧 <b>Select AI Provider:</b>",
+      Pincer.Channels.Telegram.send_message(chat_id, "🔧 <b>Selecione o Provider:</b>",
         reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: buttons}
       )
     end
@@ -991,6 +991,90 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     end
   end
 
+  defp handle_command(chat_id, "/new", _text, chat_type) do
+    session_id = session_id_for_chat(chat_id, chat_type)
+    ensure_session_started(session_id)
+    case Pincer.Core.Session.Server.reset(session_id) do
+      :ok ->
+        Pincer.Channels.Telegram.send_message(chat_id, "🔄 Sessão reiniciada.")
+      _ ->
+        Pincer.Channels.Telegram.send_message(chat_id, "❌ Não foi possível reiniciar a sessão.")
+    end
+  end
+
+  defp handle_command(chat_id, "/reset", text, chat_type), do: handle_command(chat_id, "/new", text, chat_type)
+
+  defp handle_command(chat_id, "/model", text, chat_type) do
+    session_id = session_id_for_chat(chat_id, chat_type)
+    ensure_session_started(session_id)
+    case String.split(String.trim(text), "/", parts: 2) do
+      [provider, model] when provider != "" and model != "" ->
+        Pincer.Core.Session.Server.set_model(session_id, provider, model)
+        Pincer.Channels.Telegram.send_message(
+          chat_id, "✅ Modelo: <code>#{provider}/#{model}</code>")
+      _ ->
+        Pincer.Channels.Telegram.send_message(
+          chat_id, "Uso: /model <provider/modelo>\nEx: /model openrouter/mistral-7b")
+    end
+  end
+
+  defp handle_command(chat_id, "/think", text, chat_type) do
+    session_id = session_id_for_chat(chat_id, chat_type)
+    ensure_session_started(session_id)
+    level = text |> String.trim() |> String.downcase()
+    valid = ["off", "low", "medium", "high"]
+    if level in valid do
+      Pincer.Core.Session.Server.set_thinking(session_id, level)
+      Pincer.Channels.Telegram.send_message(chat_id, "🧠 Thinking: <code>#{level}</code>")
+    else
+      Pincer.Channels.Telegram.send_message(
+        chat_id, "Uso: /think off|low|medium|high")
+    end
+  end
+
+  defp handle_command(chat_id, "/reasoning", text, chat_type) do
+    session_id = session_id_for_chat(chat_id, chat_type)
+    ensure_session_started(session_id)
+    case String.trim(text) |> String.downcase() do
+      "on" ->
+        Pincer.Core.Session.Server.set_reasoning_visible(session_id, true)
+        Pincer.Channels.Telegram.send_message(chat_id, "👁 Reasoning: visível")
+      "off" ->
+        Pincer.Core.Session.Server.set_reasoning_visible(session_id, false)
+        Pincer.Channels.Telegram.send_message(chat_id, "🙈 Reasoning: oculto (strip ativado)")
+      _ ->
+        Pincer.Channels.Telegram.send_message(chat_id, "Uso: /reasoning on|off")
+    end
+  end
+
+  defp handle_command(chat_id, "/verbose", text, chat_type) do
+    session_id = session_id_for_chat(chat_id, chat_type)
+    ensure_session_started(session_id)
+    case String.trim(text) |> String.downcase() do
+      "on" ->
+        Pincer.Core.Session.Server.set_verbose(session_id, true)
+        Pincer.Channels.Telegram.send_message(chat_id, "🔊 Verbose: on")
+      "off" ->
+        Pincer.Core.Session.Server.set_verbose(session_id, false)
+        Pincer.Channels.Telegram.send_message(chat_id, "🔇 Verbose: off")
+      _ ->
+        Pincer.Channels.Telegram.send_message(chat_id, "Uso: /verbose on|off")
+    end
+  end
+
+  defp handle_command(chat_id, "/usage", text, chat_type) do
+    session_id = session_id_for_chat(chat_id, chat_type)
+    ensure_session_started(session_id)
+    display = text |> String.trim() |> String.downcase()
+    valid = ["off", "tokens", "full"]
+    if display in valid do
+      Pincer.Core.Session.Server.set_usage(session_id, display)
+      Pincer.Channels.Telegram.send_message(chat_id, "📊 Usage display: <code>#{display}</code>")
+    else
+      Pincer.Channels.Telegram.send_message(chat_id, "Uso: /usage off|tokens|full")
+    end
+  end
+
   defp handle_command(chat_id, cmd, _text, _chat_type) do
     Pincer.Channels.Telegram.send_message(
       chat_id,
@@ -1002,21 +1086,35 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   @doc false
   defp handle_callback(chat_id, chat_type, payload, message_id) do
     case ChannelInteractionPolicy.parse(:telegram, payload) do
-      {:ok, {:select_provider, provider_id}} ->
+      {:ok, {:page, provider_id, page}} ->
         models = Pincer.Ports.LLM.list_models(provider_id)
-
-        buttons =
-          build_model_buttons(provider_id, models)
-          |> with_back_to_providers_button()
-
+        session_id = session_id_for_chat(chat_id, chat_type)
+        current_model = current_model_for_session(session_id)
+        buttons = Pincer.Core.UX.ModelKeyboard.build_keyboard(:telegram, provider_id, models, page, current_model)
         if buttons == [] do
           interaction_unavailable(chat_id)
         else
           edit_callback_message(
-            chat_id,
-            message_id,
-            "🤖 **Select Model for #{provider_id}:**",
-            reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: buttons}
+            chat_id, message_id,
+            "🤖 <b>Modelos de #{provider_id} (página #{page}):</b>",
+            reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: buttons},
+            parse_mode: "HTML"
+          )
+        end
+
+      {:ok, {:select_provider, provider_id}} ->
+        models = Pincer.Ports.LLM.list_models(provider_id)
+        session_id = session_id_for_chat(chat_id, chat_type)
+        current_model = current_model_for_session(session_id)
+        buttons = Pincer.Core.UX.ModelKeyboard.build_keyboard(:telegram, provider_id, models, 1, current_model)
+        if buttons == [] do
+          interaction_unavailable(chat_id)
+        else
+          edit_callback_message(
+            chat_id, message_id,
+            "🤖 <b>Selecione o Modelo para #{provider_id}:</b>",
+            reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: buttons},
+            parse_mode: "HTML"
           )
         end
 
@@ -1030,8 +1128,8 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         edit_callback_message(
           chat_id,
           message_id,
-          "✅ **Model configured!**\nSession: `#{session_id}`\nProvider: `#{provider_id}`\nModel: `#{model}`",
-          []
+          "✅ <b>Model configured!</b>\nSession: <code>#{session_id}</code>\nProvider: <code>#{provider_id}</code>\nModel: <code>#{model}</code>",
+          parse_mode: "HTML"
         )
 
       {:ok, :back_to_providers} ->
@@ -1044,8 +1142,9 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
           edit_callback_message(
             chat_id,
             message_id,
-            "🔧 **Select AI Provider:**",
-            reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: buttons}
+            "🔧 <b>Selecione o Provider:</b>",
+            reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: buttons},
+            parse_mode: "HTML"
           )
         end
 
@@ -1260,34 +1359,12 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     |> Enum.reverse()
   end
 
-  defp build_model_buttons(provider_id, models) do
-    models
-    |> Enum.reduce([], fn model, acc ->
-      case ChannelInteractionPolicy.model_selector_id(:telegram, provider_id, model) do
-        {:ok, callback_data} ->
-          [[%{text: model, callback_data: callback_data}] | acc]
-
-        {:error, :payload_too_large} ->
-          Logger.warning(
-            "[TELEGRAM] Skipping model button with oversized callback payload: #{inspect(model)}"
-          )
-
-          acc
-
-        {:error, _reason} ->
-          acc
-      end
-    end)
-    |> Enum.reverse()
-  end
-
-  defp with_back_to_providers_button(buttons) do
-    case ChannelInteractionPolicy.back_to_providers_id(:telegram) do
-      {:ok, callback_data} ->
-        buttons ++ [[%{text: "⬅️ Back", callback_data: callback_data}]]
-
-      {:error, _reason} ->
-        buttons
+  defp current_model_for_session(session_id) do
+    case Pincer.Core.Session.Server.get_status(session_id) do
+      {:ok, %{model_override: %{model: model}}} -> model
+      _ -> nil
     end
+  rescue
+    _ -> nil
   end
 end
