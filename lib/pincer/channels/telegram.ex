@@ -1213,10 +1213,12 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   @doc false
   defp handle_callback(chat_id, chat_type, payload, message_id) do
+    session_id = session_id_for_chat(chat_id, chat_type)
+    ensure_session_started(session_id)
+
     case ChannelInteractionPolicy.parse(:telegram, payload) do
       {:ok, {:page, provider_id, page}} ->
         models = Pincer.Ports.LLM.list_models(provider_id)
-        session_id = session_id_for_chat(chat_id, chat_type)
         current_model = current_model_for_session(session_id)
         buttons = Pincer.Core.UX.ModelKeyboard.build_keyboard(:telegram, provider_id, models, page, current_model)
         if buttons == [] do
@@ -1232,7 +1234,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
       {:ok, {:select_provider, provider_id}} ->
         models = Pincer.Ports.LLM.list_models(provider_id)
-        session_id = session_id_for_chat(chat_id, chat_type)
         current_model = current_model_for_session(session_id)
         buttons = Pincer.Core.UX.ModelKeyboard.build_keyboard(:telegram, provider_id, models, 1, current_model)
         if buttons == [] do
@@ -1247,8 +1248,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         end
 
       {:ok, {:select_model, provider_id, model}} ->
-        session_id = session_id_for_chat(chat_id, chat_type)
-
         ensure_session_started(session_id)
 
         Server.set_model(session_id, provider_id, model)
