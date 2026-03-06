@@ -474,7 +474,8 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   @base_poll_interval 1000
   @max_poll_interval 30_000
-  @max_attachment_bytes 20_971_520
+  @max_attachment_bytes 104_857_600
+  @groq_max_audio_bytes 25_165_824
   @multimodal_extension_mime %{
     ".pdf" => "application/pdf",
     ".png" => "image/png",
@@ -795,16 +796,22 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     with {:ok, file_path} <- resolve_file_path(api_client, file_id),
          token <- Application.get_env(:telegex, :token),
          url <- "https://api.telegram.org/file/bot#{token}/#{file_path}",
-         {:ok, response} <- Req.get(url, receive_timeout: 60_000) do
+         {:ok, response} <- Req.get(url, receive_timeout: 300_000) do
       
       case response do
         %{status: 200, body: body} when is_binary(body) ->
           # Save temp file
           temp_file = "/tmp/pincer_audio_#{file_id}"
           File.write!(temp_file, body)
-          
-          # Call LLM Port for transcription
-          result = Pincer.Ports.LLM.transcribe_audio(temp_file, provider: "groq_whisper")
+          file_size = byte_size(body)
+
+          result = if file_size > @groq_max_audio_bytes do
+            Logger.info("[TELEGRAM] Audio file too large for Groq (#{file_size} bytes). Splitting...")
+            process_large_audio(temp_file, file_id)
+          else
+            # Call LLM Port for transcription
+            Pincer.Ports.LLM.transcribe_audio(temp_file, provider: "groq_whisper")
+          end
           
           # Clean up
           File.rm(temp_file)
@@ -814,6 +821,38 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       end
     else
       _ -> {:error, :transcription_failed}
+    end
+  end
+
+  defp process_large_audio(input_file, file_id) do
+    # Create a temporary directory for chunks
+    chunk_prefix = "/tmp/pincer_chunk_#{file_id}"
+    
+    # Split audio into 10 minute segments (-f segment -segment_time 600)
+    # Using mp3 as target format for safety
+    case System.cmd("ffmpeg", ["-i", input_file, "-f", "segment", "-segment_time", "600", "-c", "copy", "#{chunk_prefix}_%03d.mp3"]) do
+      {_, 0} ->
+        # List chunks
+        chunks = Path.wildcard("#{chunk_prefix}_*.mp3") |> Enum.sort()
+        
+        Logger.info("[TELEGRAM] Audio split into #{length(chunks)} chunks.")
+
+        texts = chunks |> Enum.map(fn chunk ->
+          case Pincer.Ports.LLM.transcribe_audio(chunk, provider: "groq_whisper") do
+            {:ok, text} -> text
+            _ -> "[Transcription of chunk failed]"
+          end
+        end)
+
+        # Cleanup chunks
+        Enum.each(chunks, &File.rm/1)
+
+        {:ok, Enum.join(texts, " ")}
+
+      {error, _} ->
+        Logger.error("[TELEGRAM] ffmpeg split failed: #{inspect(error)}")
+        # Fallback: try to transcribe original file anyway, maybe it's just on the edge
+        Pincer.Ports.LLM.transcribe_audio(input_file, provider: "groq_whisper")
     end
   end
 
