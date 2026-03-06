@@ -24,7 +24,7 @@ defmodule Pincer.LLM.Providers.Google do
 
     if is_nil(api_key) or api_key == "" do
       Logger.warning("Incomplete provider configuration for Google. Using MOCK mode.")
-      {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your Google API Key."}}
+      {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your Google API Key."}, nil}
     else
       {system_msgs, chat_msgs} = Enum.split_with(messages, fn m -> m["role"] == "system" end)
 
@@ -73,10 +73,10 @@ defmodule Pincer.LLM.Providers.Google do
     # Native Gemini streaming is not wired yet in this adapter.
     # Fallback to single-shot completion and emit one stream chunk.
     case chat_completion(messages, model, config, tools) do
-      {:ok, %{"content" => content}} ->
+      {:ok, %{"content" => content}, _usage} ->
         {:ok, [%{"choices" => [%{"delta" => %{"content" => content || ""}}]}]}
 
-      {:ok, _other} ->
+      {:ok, _other, _usage} ->
         {:ok, [%{"choices" => [%{"delta" => %{"content" => ""}}]}]}
 
       {:error, reason} ->
@@ -125,16 +125,37 @@ defmodule Pincer.LLM.Providers.Google do
         |> Enum.map(& &1["text"])
         |> Enum.join("")
 
-      {:ok, %{"role" => "assistant", "content" => text}}
+      {:ok, %{"role" => "assistant", "content" => text}, nil}
     else
       Logger.error("Empty candidates in Gemini response: #{inspect(body)}")
       {:error, :empty_response}
     end
   end
 
-  defp handle_response(%Req.Response{status: status, body: body}) do
-    error_msg = inspect(body)
-    Logger.error("HTTP Error from Google (#{status}): #{error_msg}")
-    {:error, {:http_error, status, error_msg}}
+  @impl true
+  def list_models(config) do
+    api_key = config[:api_key]
+
+    if is_nil(api_key) or api_key == "" do
+      {:ok, ["gemini-1.5-flash"]}
+    else
+      url = "https://generativelanguage.googleapis.com/v1beta/models"
+
+      case Req.get(url, params: [key: api_key], receive_timeout: 10_000) do
+        {:ok, %{status: 200, body: %{"models" => models}}} when is_list(models) ->
+          # Clean prefix 'models/' and filter for those supporting generateContent
+          list =
+            models
+            |> Enum.filter(fn m -> "generateContent" in (m["supportedGenerationMethods"] || []) end)
+            |> Enum.map(fn m -> String.replace(m["name"] || "", "models/", "") end)
+            |> Enum.reject(&(&1 == ""))
+            |> Enum.sort()
+
+          {:ok, list}
+
+        _ ->
+          {:error, :fetch_failed}
+      end
+    end
   end
 end

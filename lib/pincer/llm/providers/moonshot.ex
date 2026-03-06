@@ -21,6 +21,12 @@ defmodule Pincer.LLM.Providers.Moonshot do
     Pincer.LLM.Providers.OpenAICompat.stream_completion(messages, model, config, tools)
   end
 
+  @impl true
+  def list_models(config) do
+    config = normalize_config(config)
+    Pincer.LLM.Providers.OpenAICompat.list_models(config)
+  end
+
   defp normalize_config(config) do
     config = Map.put_new(config, :base_url, "https://api.moonshot.ai/v1/chat/completions")
 

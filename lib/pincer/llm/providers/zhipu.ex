@@ -21,6 +21,12 @@ defmodule Pincer.LLM.Providers.Zhipu do
     Pincer.LLM.Providers.OpenAICompat.stream_completion(messages, model, config, tools)
   end
 
+  @impl true
+  def list_models(config) do
+    config = normalize_config(config)
+    Pincer.LLM.Providers.OpenAICompat.list_models(config)
+  end
+
   # Zhipu GLM API uses the same schema, so we leverage the base compat adapter
   # and only inject provider-specific settings here.
   defp normalize_config(config) do
