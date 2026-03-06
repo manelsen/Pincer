@@ -174,9 +174,12 @@ defmodule Pincer.Infra.Config do
         Application.put_env(:pincer, :tokens, final_tokens)
 
         if llm_config = config["llm"] do
-          Application.put_env(:pincer, :llm, llm_config)
+          # Merge YAML config into existing Application env (from config.exs)
+          current_llm = Application.get_env(:pincer, :llm, %{})
+          merged_llm = Map.merge(current_llm, llm_config)
+          Application.put_env(:pincer, :llm, merged_llm)
 
-          provider = llm_config["provider"] || "openrouter"
+          provider = merged_llm["provider"] || merged_llm[:provider] || "openrouter"
           IO.puts("LLM Provider: #{provider}")
         end
 
@@ -350,6 +353,12 @@ defmodule Pincer.Infra.Config do
       openrouter:
         base_url: "#{config["llm"]["openrouter"]["base_url"]}"
         default_model: "#{config["llm"]["openrouter"]["default_model"]}"
+      groq:
+        base_url: "#{config["llm"]["groq"]["base_url"]}"
+        default_model: "#{config["llm"]["groq"]["default_model"]}"
+      groq_whisper:
+        base_url: "#{config["llm"]["groq_whisper"]["base_url"]}"
+        default_model: "#{config["llm"]["groq_whisper"]["default_model"]}"
 
     #{mcp_section}
     """
