@@ -193,6 +193,11 @@ defmodule Pincer.Core.Executor do
             )
         end
 
+      {:error, {:missing_credentials, env_key}} ->
+        msg = "❌ **Credentials Missing**: The environment variable `#{env_key}` is not set or is empty. Please configure it in your `.env` file and restart the server."
+        Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:agent_response, msg})
+        {:error, :missing_credentials}
+
       {:error, reason} ->
         Logger.error("[EXECUTOR] LLM streaming failed: #{inspect(reason)}")
 
@@ -325,6 +330,11 @@ defmodule Pincer.Core.Executor do
 
       {:ok, other} ->
         {:error, {:invalid_chat_response, other}}
+
+      {:error, {:missing_credentials, env_key}} ->
+        msg = "❌ **Credentials Missing**: The environment variable `#{env_key}` is not set or is empty."
+        Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:agent_response, msg})
+        {:error, :missing_credentials}
 
       {:error, reason} ->
         {:error, reason}
