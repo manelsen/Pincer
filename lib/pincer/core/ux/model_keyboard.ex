@@ -19,7 +19,7 @@ defmodule Pincer.Core.UX.ModelKeyboard do
   end
 
   @spec build_model_row(atom(), String.t(), String.t(), String.t() | nil) :: map() | nil
-  def build_model_row(channel, provider_id, model_label, current_model) do
+  def build_model_row(channel, provider_id, model_label, current_model) when is_binary(model_label) do
     # Strip (FREE) tag if present to get the real model ID
     model_id = String.replace(model_label, " (FREE)", "")
     
