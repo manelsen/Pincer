@@ -136,9 +136,15 @@ defmodule Pincer.Core.Session.Server do
 
   @impl true
   def handle_info({:executor_finished, final_history, response, usage}, state) do
+    usage = usage || %{}
+    
+    # Normaliza chaves do usage (podem vir como strings ou átomos dependendo do provedor/mock)
+    prompt_tokens = usage["prompt_tokens"] || usage[:prompt_tokens] || 0
+    completion_tokens = usage["completion_tokens"] || usage[:completion_tokens] || 0
+
     new_totals = %{
-      "prompt_tokens" => state.token_usage_total["prompt_tokens"] + (if usage, do: usage["prompt_tokens"] || 0, else: 0),
-      "completion_tokens" => state.token_usage_total["completion_tokens"] + (if usage, do: usage["completion_tokens"] || 0, else: 0)
+      "prompt_tokens" => state.token_usage_total["prompt_tokens"] + prompt_tokens,
+      "completion_tokens" => state.token_usage_total["completion_tokens"] + completion_tokens
     }
 
     publish(state.session_id, {:agent_response, response, usage})
