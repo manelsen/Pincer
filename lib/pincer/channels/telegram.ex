@@ -674,12 +674,19 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
           {:ok, :butler_notified} ->
             :ok
 
+          {:ok, :buffered} ->
+            :ok
+
           {:ok, :queued} ->
             :ok
 
-          {:ok, response} ->
+          {:ok, response} when is_binary(response) ->
             Logger.info("[TELEGRAM] Got immediate response, sending back to chat_id: #{chat_id}")
             Pincer.Channels.Telegram.send_message(chat_id, response)
+
+          {:ok, other} ->
+            Logger.debug("[TELEGRAM] Ignoring process_input success with payload: #{inspect(other)}")
+            :ok
 
           _ ->
             :ok
