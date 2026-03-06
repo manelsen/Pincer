@@ -54,4 +54,10 @@ defmodule Pincer.LLM.Provider do
   Fetches available models from the provider's API.
   """
   @callback list_models(config :: map()) :: {:ok, [String.t()]} | {:error, any()}
+
+  @doc """
+  Transcribes an audio file into text.
+  """
+  @callback transcribe_audio(file_path :: String.t(), model :: String.t(), config :: map()) :: 
+              {:ok, String.t()} | {:error, any()}
 end

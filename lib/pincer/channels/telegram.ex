@@ -745,7 +745,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   def prepare_input_content(_message, _api_client), do: :empty
 
   defp has_supported_attachments?(message) when is_map(message) do
-    has_document?(message) or has_photo?(message)
+    has_document?(message) or has_photo?(message) or has_audio?(message)
   end
 
   defp has_supported_attachments?(_), do: false
@@ -759,13 +759,62 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     end
   end
 
+  defp has_audio?(message) do
+    is_map(map_value(message, :voice)) or is_map(map_value(message, :audio))
+  end
+
   defp extract_attachment_parts(message, api_client) do
     {text_acc, refs_acc} =
       {"", []}
       |> maybe_collect_document(message, api_client)
       |> maybe_collect_photo(message, api_client)
+      |> maybe_collect_audio(message, api_client)
 
     {String.trim(text_acc), refs_acc}
+  end
+
+  defp maybe_collect_audio({text_acc, refs_acc}, message, api_client) do
+    audio_obj = map_value(message, :voice) || map_value(message, :audio)
+
+    case audio_obj do
+      obj when is_map(obj) ->
+        file_id = map_value(obj, :file_id)
+        # For audio/voice, we try to transcribe it immediately if a whisper provider is available
+        case handle_audio_transcription(file_id, api_client) do
+          {:ok, transcribed_text} ->
+            {text_acc <> "\n" <> transcribed_text, refs_acc}
+          _ ->
+            {text_acc <> "\n[Audio content - transcription failed]", refs_acc}
+        end
+      _ ->
+        {text_acc, refs_acc}
+    end
+  end
+
+  defp handle_audio_transcription(file_id, api_client) do
+    with {:ok, file_path} <- resolve_file_path(api_client, file_id),
+         token <- Application.get_env(:telegex, :token),
+         url <- "https://api.telegram.org/file/bot#{token}/#{file_path}",
+         {:ok, response} <- Req.get(url, receive_timeout: 60_000) do
+      
+      case response do
+        %{status: 200, body: body} when is_binary(body) ->
+          # Save temp file
+          temp_file = "/tmp/pincer_audio_#{file_id}"
+          File.write!(temp_file, body)
+          
+          # Call LLM Port for transcription
+          result = Pincer.Ports.LLM.transcribe_audio(temp_file, provider: "groq_whisper")
+          
+          # Clean up
+          File.rm(temp_file)
+          result
+
+        _ -> {:error, :download_failed}
+      end
+    else
+      _ -> {:error, :transcription_failed}
+    end
   end
 
   defp maybe_collect_document({text_acc, refs_acc}, message, api_client) do
