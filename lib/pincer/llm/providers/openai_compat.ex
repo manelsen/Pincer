@@ -260,6 +260,9 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     end
   end
 
+  @impl true
+  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
+
   defp infer_models_url(chat_url) when is_binary(chat_url) do
     cond do
       String.contains?(chat_url, "/chat/completions") ->

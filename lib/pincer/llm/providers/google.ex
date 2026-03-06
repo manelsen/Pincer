@@ -158,4 +158,7 @@ defmodule Pincer.LLM.Providers.Google do
       end
     end
   end
+
+  @impl true
+  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
 end
