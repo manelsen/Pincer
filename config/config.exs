@@ -52,6 +52,11 @@ config :pincer, :llm_providers, %{
     adapter: Pincer.LLM.Providers.Groq,
     env_key: "GROQ_API_KEY",
     default_model: "llama-3.3-70b-versatile"
+  },
+  "groq_whisper" => %{
+    adapter: Pincer.LLM.Providers.GroqWhisper,
+    env_key: "GROQ_API_KEY",
+    default_model: "whisper-large-v3-turbo"
   }
 }
 
