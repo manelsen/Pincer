@@ -126,7 +126,8 @@ defmodule Pincer.LLM.Client do
           )
 
         {:error, :missing_credentials} ->
-          {:error, :missing_credentials}
+          env_key = config[:env_key] || "API_KEY"
+          {:error, {:missing_credentials, env_key}}
 
         {:error, :all_profiles_cooling_down} ->
           {:error, :all_profiles_cooling_down}
@@ -299,7 +300,8 @@ defmodule Pincer.LLM.Client do
           )
 
         {:error, :missing_credentials} ->
-          {:error, :missing_credentials}
+          env_key = config[:env_key] || "API_KEY"
+          {:error, {:missing_credentials, env_key}}
 
         {:error, :all_profiles_cooling_down} ->
           {:error, :all_profiles_cooling_down}
