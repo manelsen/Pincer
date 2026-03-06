@@ -81,7 +81,7 @@ defmodule Pincer.Channels.Telegram.Session do
     state =
       case action do
         {:render_preview, preview_text} ->
-          message_id = render_preview(state.chat_id, stream_state.message_id, preview_text)
+          message_id = render_preview(state.chat_id, state.session_id, stream_state.message_id, preview_text)
 
           put_streaming_state(state, StreamingPolicy.mark_rendered(stream_state, message_id, now))
 
@@ -93,11 +93,28 @@ defmodule Pincer.Channels.Telegram.Session do
   end
 
   @impl true
-  def handle_info({:agent_response, text}, state) do
-    {stream_state, action} = StreamingPolicy.on_final(streaming_state(state), text)
-    deliver_final(state.chat_id, action)
+  def handle_info({:agent_response, text, usage}, state) do
+    display =
+      try do
+        case Pincer.Core.Session.Server.get_status(state.session_id) do
+          {:ok, %{usage_display: d}} -> d
+          _ -> "off"
+        end
+      catch
+        :exit, _reason -> "off"
+      end
+
+    text_with_usage = text <> format_usage_line(usage, display)
+
+    {stream_state, action} = StreamingPolicy.on_final(streaming_state(state), text_with_usage)
+    deliver_final(state.chat_id, state.session_id, action)
     maybe_advance_project_flow(state)
     {:noreply, put_streaming_state(state, stream_state)}
+  end
+
+  @impl true
+  def handle_info({:agent_response, text}, state) do
+    handle_info({:agent_response, text, nil}, state)
   end
 
   @impl true
@@ -121,36 +138,61 @@ defmodule Pincer.Channels.Telegram.Session do
   @impl true
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp render_preview(chat_id, nil, text) do
-    case Pincer.Channels.Telegram.send_message(chat_id, text) do
+  defp format_usage_line(nil, _display), do: ""
+  defp format_usage_line(_usage, "off"), do: ""
+  defp format_usage_line(usage, "tokens") do
+    in_t = usage["prompt_tokens"] || 0
+    out_t = usage["completion_tokens"] || 0
+    "\n\n<i>📊 #{in_t} in · #{out_t} out</i>"
+  end
+  defp format_usage_line(usage, "full") do
+    total = (usage["prompt_tokens"] || 0) + (usage["completion_tokens"] || 0)
+    "\n\n<i>📊 total: #{total} tokens</i>"
+  end
+
+  defp send_opts_for_session(session_id) do
+    try do
+      case Pincer.Core.Session.Server.get_status(session_id) do
+        {:ok, %{reasoning_visible: true}} -> [skip_reasoning_strip: true]
+        _ -> []
+      end
+    catch
+      :exit, _reason -> []
+    end
+  rescue
+    _ -> []
+  end
+
+  defp render_preview(chat_id, session_id, nil, text) do
+    case Pincer.Channels.Telegram.send_message(chat_id, text, send_opts_for_session(session_id)) do
       {:ok, mid} -> mid
       _ -> nil
     end
   end
 
-  defp render_preview(chat_id, message_id, text) do
-    case Pincer.Channels.Telegram.update_message(chat_id, message_id, text) do
+  defp render_preview(chat_id, session_id, message_id, text) do
+    case Pincer.Channels.Telegram.update_message(chat_id, message_id, text, send_opts_for_session(session_id)) do
       :ok ->
         message_id
 
       {:error, _reason} ->
-        case Pincer.Channels.Telegram.send_message(chat_id, text) do
+        case Pincer.Channels.Telegram.send_message(chat_id, text, send_opts_for_session(session_id)) do
           {:ok, new_message_id} -> new_message_id
           _ -> nil
         end
     end
   end
 
-  defp deliver_final(_chat_id, :noop), do: :ok
+  defp deliver_final(_chat_id, _session_id, :noop), do: :ok
 
-  defp deliver_final(chat_id, {:send_final, text}) do
-    Pincer.Channels.Telegram.send_message(chat_id, text)
+  defp deliver_final(chat_id, session_id, {:send_final, text}) do
+    Pincer.Channels.Telegram.send_message(chat_id, text, send_opts_for_session(session_id))
   end
 
-  defp deliver_final(chat_id, {:edit_final, message_id, text}) do
-    case Pincer.Channels.Telegram.update_message(chat_id, message_id, text) do
+  defp deliver_final(chat_id, session_id, {:edit_final, message_id, text}) do
+    case Pincer.Channels.Telegram.update_message(chat_id, message_id, text, send_opts_for_session(session_id)) do
       :ok -> :ok
-      {:error, _reason} -> Pincer.Channels.Telegram.send_message(chat_id, text)
+      {:error, _reason} -> Pincer.Channels.Telegram.send_message(chat_id, text, send_opts_for_session(session_id))
     end
   end
 

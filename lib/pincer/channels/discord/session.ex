@@ -95,11 +95,16 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   @impl true
-  def handle_info({:agent_response, text}, state) do
+  def handle_info({:agent_response, text, _usage}, state) do
     {stream_state, action} = StreamingPolicy.on_final(streaming_state(state), text)
     deliver_final(state.channel_id, action)
     maybe_advance_project_flow(state)
     {:noreply, put_streaming_state(state, stream_state)}
+  end
+
+  @impl true
+  def handle_info({:agent_response, text}, state) do
+    handle_info({:agent_response, text, nil}, state)
   end
 
   @impl true
