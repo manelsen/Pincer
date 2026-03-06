@@ -604,15 +604,21 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
        when not is_nil(callback_query) do
     data = map_value(callback_query, :data)
     message = map_value(callback_query, :message)
-    chat = map_value(message, :chat)
-    chat_id = map_value(chat, :id)
-    chat_type = map_value(chat, :type)
-    message_id = map_value(message, :message_id)
 
-    if is_binary(data) and not is_nil(chat_id) and is_integer(message_id) do
+    # Robust extraction of chat and message IDs
+    {chat_id, chat_type, message_id} = 
+      case message do
+        msg when is_map(msg) ->
+          chat = map_value(msg, :chat)
+          {map_value(chat, :id), map_value(chat, :type), map_value(msg, :message_id)}
+        _ ->
+          {nil, nil, nil}
+      end
+
+    if is_binary(data) and not is_nil(chat_id) and not is_nil(message_id) do
       handle_callback(chat_id, chat_type, data, message_id)
     else
-      Logger.warning("[TELEGRAM] Ignoring malformed callback query: #{inspect(callback_query)}")
+      Logger.warning("[TELEGRAM] Ignoring malformed callback query: data=#{inspect(data)}, chat_id=#{inspect(chat_id)}, mid=#{inspect(message_id)}")
     end
   end
 
