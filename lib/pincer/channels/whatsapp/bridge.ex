@@ -22,8 +22,8 @@ defmodule Pincer.Channels.WhatsApp.Bridge.Adapter do
   @behaviour Pincer.Channels.WhatsApp.Bridge
   require Logger
 
-  @default_command "node"
-  @default_args ["infrastructure/whatsapp/baileys_bridge.js"]
+  @default_command "./infrastructure/whatsapp/whatsapp_bridge"
+  @default_args []
 
   @impl true
   def start_link(opts) when is_list(opts) do
