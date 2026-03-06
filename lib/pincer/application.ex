@@ -110,6 +110,7 @@ defmodule Pincer.Application do
     repo_config = Pincer.Infra.Config.get(:repo)
 
     IO.puts("Starting Bot...")
+    IO.puts("Enabled channels whitelist: #{inspect(Application.get_env(:pincer, :enabled_channels))}")
 
     children = [
       Pincer.Infra.PubSub,

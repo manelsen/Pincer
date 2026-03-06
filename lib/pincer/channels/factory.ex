@@ -113,12 +113,18 @@ defmodule Pincer.Channels.Factory do
     config
     |> Enum.filter(fn {name, cfg} ->
       enabled_in_yaml = cfg["enabled"] == true
-
-      if whitelist do
+      
+      result = if whitelist do
         Enum.member?(whitelist, name)
       else
         enabled_in_yaml
       end
+
+      unless result do
+        Logger.debug("Channel disabled or not in whitelist: #{name} (yaml_enabled=#{enabled_in_yaml})")
+      end
+
+      result
     end)
     |> Enum.map(fn {name, cfg} ->
       module_name = cfg["adapter"]
