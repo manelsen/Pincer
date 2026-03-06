@@ -29,6 +29,7 @@ defmodule Pincer.Core.Executor do
 
   @doc false
   def run(session_pid, session_id, history, opts) do
+    Logger.metadata(session_id: session_id)
     Logger.info("[EXECUTOR] Starting cycle for #{session_id}")
 
     deps = resolve_dependencies(opts)
