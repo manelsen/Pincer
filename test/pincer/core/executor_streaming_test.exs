@@ -60,7 +60,7 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     assert_receive {:agent_stream_token, "!"}, 2000
 
     # Finally, the finished message
-    assert_receive {:executor_finished, _history, "Hello world!"}, 2000
+    assert_receive {:executor_finished, _history, "Hello world!", _usage}, 2000
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

@@ -10,7 +10,7 @@ defmodule Pincer.LLM.ClientAuthProfilesTest do
     @impl true
     def chat_completion(_messages, _model, config, _tools) do
       send(self(), {:auth_profile_adapter_config, config})
-      {:ok, %{"role" => "assistant", "content" => "ok"}}
+      {:ok, %{"role" => "assistant", "content" => "ok"}, nil}
     end
 
     @impl true
@@ -66,7 +66,7 @@ defmodule Pincer.LLM.ClientAuthProfilesTest do
   end
 
   test "uses primary auth profile by default" do
-    assert {:ok, %{"content" => "ok"}} = Client.chat_completion([])
+    assert {:ok, %{"content" => "ok"}, _usage} = Client.chat_completion([])
 
     assert_received {:auth_profile_adapter_config, config}
     assert config[:api_key] == "primary-key"
@@ -84,7 +84,7 @@ defmodule Pincer.LLM.ClientAuthProfilesTest do
 
     assert AuthProfiles.cooling_down?("auth_provider", "primary")
 
-    assert {:ok, %{"content" => "ok"}} = Client.chat_completion([])
+    assert {:ok, %{"content" => "ok"}, _usage} = Client.chat_completion([])
 
     assert_received {:auth_profile_adapter_config, config}
     assert config[:api_key] == "backup-key"
@@ -108,7 +108,7 @@ defmodule Pincer.LLM.ClientAuthProfilesTest do
 
     Application.put_env(:pincer, :default_llm_provider, "legacy_provider")
 
-    assert {:ok, %{"content" => "ok"}} = Client.chat_completion([])
+    assert {:ok, %{"content" => "ok"}, _usage} = Client.chat_completion([])
     assert_received {:auth_profile_adapter_config, config}
     refute Map.has_key?(config, :auth_profile)
   end

@@ -111,7 +111,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
           file_fetcher: fake_fetcher
         )
 
-      assert_receive {:executor_finished, _, "Summary done"}, 2_000
+      assert_receive {:executor_finished, _, "Summary done", _usage}, 2_000
 
       # Restore env
       Application.delete_env(:pincer, :default_llm_provider)
@@ -162,7 +162,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
           file_fetcher: no_fetch
         )
 
-      assert_receive {:executor_finished, _, "OK"}, 2_000
+      assert_receive {:executor_finished, _, _, _usage}, 2_000
 
       Application.delete_env(:pincer, :default_llm_provider)
       Application.delete_env(:pincer, :llm_providers)
@@ -206,7 +206,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
           file_fetcher: fetcher
         )
 
-      assert_receive {:executor_finished, _, "Handled"}, 2_000
+      assert_receive {:executor_finished, _, "Handled", _usage}, 2_000
 
       Application.delete_env(:pincer, :default_llm_provider)
       Application.delete_env(:pincer, :llm_providers)
@@ -253,7 +253,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
           file_fetcher: never_called
         )
 
-      assert_receive {:executor_finished, _, "Noted"}, 2_000
+      assert_receive {:executor_finished, _, "Noted", _usage}, 2_000
 
       Application.delete_env(:pincer, :default_llm_provider)
       Application.delete_env(:pincer, :llm_providers)
@@ -296,7 +296,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
           file_fetcher: failing_fetcher
         )
 
-      assert_receive {:executor_finished, _, "Handled"}, 2_000
+      assert_receive {:executor_finished, _, "Handled", _usage}, 2_000
 
       Application.delete_env(:pincer, :default_llm_provider)
       Application.delete_env(:pincer, :llm_providers)
@@ -322,7 +322,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
           llm_client: Pincer.MultimodalMockLLMClient
         )
 
-      assert_receive {:executor_finished, _, "Hi!"}, 2_000
+      assert_receive {:executor_finished, _, _, _usage}, 2_000
     end
 
     test "attachment_ref is preserved in session history (not mutated to inline_data)" do
@@ -351,7 +351,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
           file_fetcher: fn _url -> {:ok, Base.encode64("data")} end
         )
 
-      assert_receive {:executor_finished, final_history, _}, 2_000
+      assert_receive {:executor_finished, final_history, _, _usage}, 2_000
 
       # The history returned to the session must keep the lazy ref, not base64 data.
       original_msg = Enum.find(final_history, &(&1["role"] == "user"))

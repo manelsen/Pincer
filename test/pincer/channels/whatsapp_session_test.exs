@@ -81,7 +81,7 @@ defmodule Pincer.Channels.WhatsAppSessionTest do
     chat_id = "551199333333"
     {:ok, pid} = Session.start_link(chat_id)
 
-    send(pid, {:agent_response, "Only final"})
+    send(pid, {:agent_response, "Only final", nil})
 
     assert_receive {:bridge_send, ^chat_id, "Only final"}, 500
   end
@@ -95,7 +95,7 @@ defmodule Pincer.Channels.WhatsAppSessionTest do
 
     Process.sleep(50)
 
-    Pincer.Infra.PubSub.broadcast("session:whatsapp_main", {:agent_response, "Main scope reply"})
+    Pincer.Infra.PubSub.broadcast("session:whatsapp_main", {:agent_response, "Main scope reply", nil})
 
     assert_receive {:bridge_send, ^chat_id, "Main scope reply"}, 500
   end
@@ -134,7 +134,16 @@ defmodule Pincer.Channels.WhatsAppSessionTest do
   defp stop_channel do
     case Process.whereis(Pincer.Channels.WhatsApp) do
       nil -> :ok
-      pid -> GenServer.stop(pid)
+      pid -> 
+        if Process.alive?(pid) do
+          try do
+            GenServer.stop(pid)
+          catch
+            :exit, _ -> :ok
+          end
+        else
+          :ok
+        end
     end
   end
 end

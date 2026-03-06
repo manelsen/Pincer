@@ -100,6 +100,6 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
     Server.set_model(session_id, "pass", "new-model")
 
     # 5. Should receive the success response soon (much faster than 429 retries)
-    assert_receive {:agent_response, "Swapped Successfully!"}, 5000
+    assert_receive {:agent_response, "Swapped Successfully!", _usage}, 5000
   end
 end

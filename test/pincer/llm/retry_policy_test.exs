@@ -40,14 +40,14 @@ defmodule Pincer.LLM.RetryPolicyTest do
           {:error, {:http_error, 429, "rate", %{retry_after: retry_after}}}
 
         _ ->
-          {:ok, %{"role" => "assistant", "content" => "ok"}}
+          {:ok, %{"role" => "assistant", "content" => "ok"}, nil}
       end
     end
 
     @impl true
     def stream_completion(messages, model, config, tools) do
       case chat_completion(messages, model, config, tools) do
-        {:ok, _} -> {:ok, [%{"choices" => [%{"delta" => %{"content" => "stream-ok"}}]}]}
+        {:ok, _, _} -> {:ok, [%{"choices" => [%{"delta" => %{"content" => "stream-ok"}}]}]}
         {:error, reason} -> {:error, reason}
       end
     end
@@ -94,7 +94,7 @@ defmodule Pincer.LLM.RetryPolicyTest do
   test "retries transient HTTP 503 and succeeds" do
     put_provider_scenario(:http_503_then_ok)
 
-    assert {:ok, %{"content" => "ok"}} = Client.chat_completion([])
+    assert {:ok, %{"content" => "ok"}, _usage} = Client.chat_completion([])
 
     assert_received {:retry_policy_call, :http_503_then_ok, 1}
     assert_received {:retry_policy_call, :http_503_then_ok, 2}
@@ -163,7 +163,7 @@ defmodule Pincer.LLM.RetryPolicyTest do
   test "retries transient transport timeout and succeeds" do
     put_provider_scenario(:transport_timeout_then_ok)
 
-    assert {:ok, %{"content" => "ok"}} = Client.chat_completion([])
+    assert {:ok, %{"content" => "ok"}, _usage} = Client.chat_completion([])
 
     assert_received {:retry_policy_call, :transport_timeout_then_ok, 1}
     assert_received {:retry_policy_call, :transport_timeout_then_ok, 2}
@@ -177,7 +177,7 @@ defmodule Pincer.LLM.RetryPolicyTest do
       Process.delete(:session_pid)
     end)
 
-    assert {:ok, %{"content" => "ok"}} = Client.chat_completion([])
+    assert {:ok, %{"content" => "ok"}, _usage} = Client.chat_completion([])
 
     assert_receive {:llm_runtime_status, status}, 1000
     assert status.kind == :retry_wait
@@ -216,7 +216,7 @@ defmodule Pincer.LLM.RetryPolicyTest do
     put_provider_scenario(:retry_after_then_ok)
 
     started_at = System.monotonic_time(:millisecond)
-    assert {:ok, %{"content" => "ok"}} = Client.chat_completion([])
+    assert {:ok, %{"content" => "ok"}, _usage} = Client.chat_completion([])
     elapsed = System.monotonic_time(:millisecond) - started_at
 
     assert_received {:retry_policy_call, :retry_after_then_ok, 1}
@@ -263,7 +263,7 @@ defmodule Pincer.LLM.RetryPolicyTest do
     put_provider_scenario(:retry_after_date_then_ok)
 
     started_at = System.monotonic_time(:millisecond)
-    assert {:ok, %{"content" => "ok"}} = Client.chat_completion([])
+    assert {:ok, %{"content" => "ok"}, _usage} = Client.chat_completion([])
     elapsed = System.monotonic_time(:millisecond) - started_at
 
     assert_received {:retry_policy_call, :retry_after_date_then_ok, 1}
