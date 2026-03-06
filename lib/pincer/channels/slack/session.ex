@@ -27,10 +27,15 @@ defmodule Pincer.Channels.Slack.Session do
   end
 
   @impl true
-  def handle_info({:agent_response, response}, state) do
+  def handle_info({:agent_response, response, _usage}, state) do
     Logger.info("[SLACK SESSION] Sending response to channel: #{state.channel_id}")
     Pincer.Channels.Slack.send_message(state.channel_id, response)
     {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:agent_response, response}, state) do
+    handle_info({:agent_response, response, nil}, state)
   end
 
   @impl true

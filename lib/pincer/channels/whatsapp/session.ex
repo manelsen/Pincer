@@ -72,10 +72,15 @@ defmodule Pincer.Channels.WhatsApp.Session do
   def handle_cast({:bind_session, _invalid_session_id}, state), do: {:noreply, state}
 
   @impl true
-  def handle_info({:agent_response, text}, state) do
+  def handle_info({:agent_response, text, _usage}, state) do
     Pincer.Channels.WhatsApp.send_message(state.chat_id, text)
     maybe_advance_project_flow(state)
     {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:agent_response, text}, state) do
+    handle_info({:agent_response, text, nil}, state)
   end
 
   @impl true

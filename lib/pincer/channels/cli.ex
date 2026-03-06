@@ -187,9 +187,14 @@ defmodule Pincer.Channels.CLI do
     {:noreply, state}
   end
 
-  def handle_info({:agent_response, text}, state) do
+  def handle_info({:agent_response, text, _usage}, state) do
     send_to_frontend(state, text)
     {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:agent_response, text}, state) do
+    handle_info({:agent_response, text, nil}, state)
   end
 
   def handle_info({:agent_status, text}, state) do
