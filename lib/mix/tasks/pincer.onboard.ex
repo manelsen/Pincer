@@ -16,9 +16,24 @@ defmodule Mix.Tasks.Pincer.Onboard do
 
   @shortdoc "Initialize config and workspace files"
 
+  @security_warning """
+  ⚠️  AVISO DE SEGURANÇA — leia antes de continuar.
+
+  Pincer é um projeto em desenvolvimento. Com ferramentas habilitadas, o agente
+  pode ler arquivos, executar comandos e fazer requisições HTTP.
+  Um prompt malicioso pode induzir ações não desejadas.
+
+  Recomendações mínimas:
+  - Habilite apenas as ferramentas que você precisa.
+  - Não deixe secrets em arquivos acessíveis ao agente.
+  - Em ambientes multi-usuário, use sessões isoladas por usuário.
+  - Execute regularmente: mix pincer.security_audit
+  """
+
   @switches [
     non_interactive: :boolean,
     yes: :boolean,
+    accept_risk: :boolean,
     db_path: :string,
     provider: :string,
     model: :string,
@@ -38,6 +53,8 @@ defmodule Mix.Tasks.Pincer.Onboard do
       Mix.raise("Invalid flags for pincer.onboard: #{invalid_flags}")
     end
 
+    require_risk_acknowledgement(opts)
+
     mode = parse_mode!(opts[:mode])
     base_config = resolve_base_config(Onboard.defaults())
     onboarding_config = resolve_config(base_config, opts)
@@ -53,6 +70,29 @@ defmodule Mix.Tasks.Pincer.Onboard do
 
       :remote ->
         run_remote_assisted!(onboarding_config, opts, capabilities || [])
+    end
+  end
+
+  defp require_risk_acknowledgement(opts) do
+    cond do
+      opts[:accept_risk] ->
+        :ok
+      opts[:non_interactive] ->
+        Mix.shell().info(@security_warning)
+        :ok
+      true ->
+        Mix.shell().info(@security_warning)
+        answer =
+          Mix.shell()
+          |> then(& &1.prompt("Entendido? [s/N]: "))
+          |> to_string()
+          |> String.trim()
+          |> String.downcase()
+
+        if answer not in ["s", "sim"] do
+          Mix.raise("Onboarding abortado pelo usuário.")
+        end
+        :ok
     end
   end
 
@@ -89,13 +129,64 @@ defmodule Mix.Tasks.Pincer.Onboard do
 
     db_default = opts[:db_path] || get_in(config, ["database", "database"])
     provider_default = opts[:provider] || get_in(config, ["llm", "provider"])
-    model_default = opts[:model] || get_in(config, ["llm", provider_default, "default_model"])
 
     db_path = prompt_with_default("Database path", db_default)
-    provider = prompt_with_default("LLM provider", provider_default)
-    model = prompt_with_default("Default model", model_default)
+    
+    provider = if opts[:provider] do
+      opts[:provider]
+    else
+      prompt_provider_choice(provider_default)
+    end
+    
+    model = if opts[:model] do
+      opts[:model]
+    else
+      prompt_model_for_provider(provider)
+    end
 
     apply_overrides(config, db_path: db_path, provider: provider, model: model)
+  end
+
+  defp prompt_provider_choice(_default) do
+    Mix.shell().info("\nSelecione o provider LLM:")
+    Mix.shell().info("  1) openrouter      (OpenRouter — acesso a vários modelos)")
+    Mix.shell().info("  2) z_ai            (Z.AI / ZhiPu — gratuito)")
+    Mix.shell().info("  3) opencode_zen    (OpenCode Zen — Kimi gratuito)")
+    Mix.shell().info("  4) google          (Google Gemini)")
+    Mix.shell().info("  5) moonshot        (Moonshot / Kimi)")
+    Mix.shell().info("  6) anthropic       (Claude)")
+    Mix.shell().info("  7) Outro (digitar)")
+    
+    answer = Mix.shell().prompt("Escolha [1-7]: ") |> to_string() |> String.trim()
+    
+    case answer do
+      "1" -> "openrouter"
+      "2" -> "z_ai"
+      "3" -> "opencode_zen"
+      "4" -> "google"
+      "5" -> "moonshot"
+      "6" -> "anthropic"
+      "7" -> prompt_with_default("Digite o provider_id", "openrouter")
+      _ -> "openrouter"
+    end
+  end
+
+  defp prompt_model_for_provider(provider) do
+    case provider do
+      "openrouter" ->
+        Mix.shell().info("\nModelos disponíveis para openrouter:")
+        Mix.shell().info("  1) openrouter/free (padrão)")
+        Mix.shell().info("  2) openrouter/mistral-7b")
+        Mix.shell().info("  3) Outro (digitar)")
+        case Mix.shell().prompt("Escolha [1-3]: ") |> to_string() |> String.trim() do
+          "1" -> "openrouter/free"
+          "2" -> "openrouter/mistral-7b"
+          "3" -> prompt_with_default("Digite o model_id", "openrouter/free")
+          _ -> "openrouter/free"
+        end
+      _ ->
+        prompt_with_default("Default model for #{provider}", "default")
+    end
   end
 
   defp prompt_with_default(label, default) do
