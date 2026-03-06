@@ -155,7 +155,11 @@ defmodule Pincer.Core.Executor do
     long_term_memory = Process.get(:long_term_memory, "")
     current_time = DateTime.utc_now() |> DateTime.to_string()
 
-    augmented_history = augment_history(history, long_term_memory, current_time)
+    # 1. Prune history to stay within context/payload limits
+    {pruned_history, pruned?} = prune_history(history)
+    if pruned?, do: send(session_pid, {:sme_status, :executor, "⚠️ **Context Pruned**: History exceeded 40 messages and was truncated to stay within API limits."})
+
+    augmented_history = augment_history(pruned_history, long_term_memory, current_time)
 
     # Resolve lazy attachment_ref parts based on what the active provider supports.
     # We resolve a fresh copy here (not modifying the history kept in state) so that
@@ -172,7 +176,7 @@ defmodule Pincer.Core.Executor do
     case deps.llm_client.stream_completion(ready_history, [tools: tools_spec] ++ client_opts) do
       {:ok, stream} ->
         try do
-          handle_stream(stream, history, session_id, session_pid, depth, model_override, deps)
+          handle_stream(stream, pruned_history, session_id, session_pid, depth, model_override, deps)
         rescue
           error in Protocol.UndefinedError ->
             Logger.warning(
@@ -182,7 +186,7 @@ defmodule Pincer.Core.Executor do
             fallback_chat_completion(
               error,
               ready_history,
-              history,
+              pruned_history,
               session_id,
               session_pid,
               depth,
@@ -231,6 +235,16 @@ defmodule Pincer.Core.Executor do
       _ ->
         history
     end
+  end
+
+  @max_history_window 40
+
+  defp prune_history(history) when length(history) <= @max_history_window, do: {history, false}
+
+  defp prune_history([system_msg | rest]) do
+    # Keep the system prompt at the beginning, but only take the latest N messages from the rest
+    pruned_rest = Enum.take(rest, -(@max_history_window - 1))
+    {[system_msg | pruned_rest], true}
   end
 
   defp handle_stream(stream, history, session_id, session_pid, depth, model_override, deps) do
