@@ -143,17 +143,17 @@ defmodule Pincer.Core.ProjectRouter do
       {:ok, state} ->
         provider = if state.model_override, do: state.model_override.provider, else: "Default"
         model = if state.model_override, do: state.model_override.model, else: "Default"
-        status = if state.status == :working, do: "🏗️ Busy", else: "😴 Idle"
+        status = if state.status == :working, do: "working", else: "idle"
+
+        in_t = Map.get(state.token_usage_total || %{}, "prompt_tokens", 0)
+        out_t = Map.get(state.token_usage_total || %{}, "completion_tokens", 0)
 
         {:ok,
          """
-         📊 *Session Status*
-         ━━━━━━━━━━━━━━━
-         🆔 *ID*: `#{session_id}`
-         📡 *Status*: #{status}
-         🏢 *Provider*: `#{provider}`
-         🤖 *Model*: `#{model}`
-         📜 *History*: #{length(state.history)} messages
+         Sessão: #{session_id}
+         Modelo: #{provider}/#{model}
+         Tokens esta sessão: #{in_t} in · #{out_t} out
+         Status: #{status}
          """}
 
       _ ->
