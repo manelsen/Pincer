@@ -42,8 +42,13 @@ defmodule Mix.Tasks.Pincer.Server do
     IO.puts("Node: #{Node.self()}")
     IO.puts("Cookie: #{Node.get_cookie()}")
 
-    # Start the full application
-    Mix.Task.run("app.start", [])
+    # Start the full application and all its dependencies
+    case Application.ensure_all_started(:pincer) do
+      {:ok, _} ->
+        IO.puts(IO.ANSI.cyan() <> ">>> Pincer Application STARTED <<<" <> IO.ANSI.reset())
+      {:error, reason} ->
+        IO.puts(IO.ANSI.red() <> "!!! FAILED TO START PINCER: #{inspect(reason)}" <> IO.ANSI.reset())
+    end
 
     # Keep the process alive
     Process.sleep(:infinity)
