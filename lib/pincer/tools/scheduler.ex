@@ -9,6 +9,18 @@ defmodule Pincer.Adapters.Tools.Scheduler do
   def spec do
     [
       %{
+        name: "schedule_reminder",
+        description: "Schedules a one-time task or reminder in a given amount of seconds.",
+        parameters: %{
+          type: "object",
+          properties: %{
+            message: %{type: "string", description: "What to do or remember."},
+            seconds: %{type: "integer", description: "Seconds from now to trigger."}
+          },
+          required: ["message", "seconds"]
+        }
+      },
+      %{
         name: "schedule_cron_job",
         description:
           "Schedules a RECURRING routine (e.g., every day, every hour) using Cron notation. DO NOT use for one-time reminders like 'in X minutes'.",
@@ -42,6 +54,18 @@ defmodule Pincer.Adapters.Tools.Scheduler do
         }
       }
     ]
+  end
+
+  def execute(%{
+        "tool_name" => "schedule_reminder",
+        "message" => message,
+        "seconds" => seconds,
+        "session_id" => sid
+      }) do
+    case Pincer.Core.Cron.schedule(sid, message, seconds) do
+      {:ok, _} -> {:ok, "Reminder scheduled for #{seconds} seconds from now."}
+      _ -> {:error, "Failed to schedule reminder."}
+    end
   end
 
   def execute(%{
