@@ -21,6 +21,12 @@ defmodule Pincer.LLM.Providers.Qwen do
     Pincer.LLM.Providers.OpenAICompat.stream_completion(messages, model, config, tools)
   end
 
+  @impl true
+  def list_models(config) do
+    config = normalize_config(config)
+    Pincer.LLM.Providers.OpenAICompat.list_models(config)
+  end
+
   defp normalize_config(config) do
     config =
       config
