@@ -9,7 +9,7 @@ defmodule Pincer.LLM.ClientTest do
     @impl true
     def chat_completion(messages, model, config, tools) do
       send(self(), {:mock_called, messages, model, config, tools})
-      {:ok, %{"role" => "assistant", "content" => "MockAdapter response"}}
+      {:ok, %{"role" => "assistant", "content" => "MockAdapter response"}, nil}
     end
 
     @impl true
@@ -23,7 +23,7 @@ defmodule Pincer.LLM.ClientTest do
 
     @impl true
     def chat_completion(_messages, _model, _config, _tools) do
-      {:ok, %{"role" => "assistant", "content" => "fallback-chat"}}
+      {:ok, %{"role" => "assistant", "content" => "fallback-chat"}, nil}
     end
 
     @impl true
@@ -78,7 +78,7 @@ defmodule Pincer.LLM.ClientTest do
     test "delegates to default provider when no provider is specified" do
       messages = [%{"role" => "user", "content" => "Hello"}]
 
-      assert {:ok, resp} = Client.chat_completion(messages)
+      assert {:ok, resp, _usage} = Client.chat_completion(messages)
       assert resp["content"] == "MockAdapter response"
 
       assert_received {:mock_called, ^messages, "test-model", config, []}
@@ -89,7 +89,7 @@ defmodule Pincer.LLM.ClientTest do
     test "delegates to specific provider and model when provided" do
       messages = [%{"role" => "user", "content" => "Hi there"}]
 
-      assert {:ok, resp} =
+      assert {:ok, resp, _usage} =
                Client.chat_completion(messages, provider: "test_provider", model: "custom-model")
 
       assert resp["content"] == "MockAdapter response"
@@ -100,7 +100,7 @@ defmodule Pincer.LLM.ClientTest do
     test "falls back to mock response for unknown provider" do
       messages = [%{"role" => "user", "content" => "Hi"}]
 
-      assert {:ok, resp} = Client.chat_completion(messages, provider: "non_existent")
+      assert {:ok, resp, _usage} = Client.chat_completion(messages, provider: "non_existent")
       assert String.contains?(resp["content"], "[MOCK]")
     end
   end

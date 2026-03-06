@@ -32,7 +32,7 @@ defmodule Pincer.Channels.Discord.SessionTest do
     allow(APIMock, self(), pid)
 
     send(pid, {:agent_partial, "Hello"})
-    send(pid, {:agent_response, "Hello world!"})
+    send(pid, {:agent_response, "Hello world!", nil})
 
     Process.sleep(80)
   end
@@ -48,7 +48,7 @@ defmodule Pincer.Channels.Discord.SessionTest do
     {:ok, pid} = Session.start_link(channel_id)
     allow(APIMock, self(), pid)
 
-    send(pid, {:agent_response, "Only final"})
+    send(pid, {:agent_response, "Only final", nil})
 
     Process.sleep(80)
   end
@@ -69,7 +69,7 @@ defmodule Pincer.Channels.Discord.SessionTest do
 
     Process.sleep(50)
 
-    Pincer.Infra.PubSub.broadcast("session:discord_main", {:agent_response, "Main scope reply"})
+    Pincer.Infra.PubSub.broadcast("session:discord_main", {:agent_response, "Main scope reply", nil})
     Process.sleep(80)
   end
 

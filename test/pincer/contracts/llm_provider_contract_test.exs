@@ -27,10 +27,10 @@ defmodule Pincer.Contracts.LLMProviderContractTest do
 
   test "provider adapters respect tuple contract without raising on empty config" do
     Enum.each(@provider_modules, fn provider_module ->
-      chat_result = provider_module.chat_completion(@messages, "test-model", %{}, [])
-      assert match?({:ok, _}, chat_result) or match?({:error, _}, chat_result)
+      chat_result = provider_module.chat_completion(@messages, "model", %{}, [])
+      assert match?({:ok, _, _}, chat_result) or match?({:error, _}, chat_result)
 
-      stream_result = provider_module.stream_completion(@messages, "test-model", %{}, [])
+      stream_result = provider_module.stream_completion(@messages, "model", %{}, [])
       assert match?({:ok, _}, stream_result) or match?({:error, _}, stream_result)
     end)
   end

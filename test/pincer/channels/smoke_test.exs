@@ -116,7 +116,7 @@ defmodule Pincer.Channels.SmokeTest do
     assert_receive {:agent_partial, "Hello"}, 5000
     assert_receive {:agent_partial, " world"}, 5000
     assert_receive {:agent_partial, "!"}, 5000
-    assert_receive {:agent_response, "Hello world!"}, 5000
+    assert_receive {:agent_response, "Hello world!", _usage}, 5000
 
     # Wait for debounced UI updates to finish
     Process.sleep(1200)
@@ -145,7 +145,7 @@ defmodule Pincer.Channels.SmokeTest do
     assert {:ok, :started} = Pincer.Core.Session.Server.process_input(session_id, "Please analyze this text")
 
     assert_receive {:agent_partial, "Hello"}, 5000
-    assert_receive {:agent_response, "Hello world!"}, 5000
+    assert_receive {:agent_response, "Hello world!", _usage}, 5000
 
     Process.sleep(1200)
   end
