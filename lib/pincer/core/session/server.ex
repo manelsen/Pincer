@@ -326,8 +326,8 @@ defmodule Pincer.Core.Session.Server do
     if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
 
     new_buffer = state.input_buffer ++ [input]
-    # Wait 800ms for more chunks before flushing
-    new_timer = Process.send_after(self(), :flush_input, 800)
+    # Wait 1200ms for more chunks before flushing (safer for high latency)
+    new_timer = Process.send_after(self(), :flush_input, 1200)
 
     {:reply, {:ok, :buffered}, %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
   end
