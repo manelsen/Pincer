@@ -129,6 +129,9 @@ defmodule Pincer.LLM.Providers.Anthropic do
     ]}
   end
 
+  @impl true
+  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
+
   defp handle_response(%Req.Response{status: 200, body: body}) do
     # Translate Anthropic response back to OpenAI Message format
     content_blocks = body["content"] || []

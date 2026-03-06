@@ -27,6 +27,9 @@ defmodule Pincer.LLM.Providers.Zhipu do
     Pincer.LLM.Providers.OpenAICompat.list_models(config)
   end
 
+  @impl true
+  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
+
   # Zhipu GLM API uses the same schema, so we leverage the base compat adapter
   # and only inject provider-specific settings here.
   defp normalize_config(config) do

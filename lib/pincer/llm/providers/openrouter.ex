@@ -50,6 +50,9 @@ defmodule Pincer.LLM.Providers.OpenRouter do
     end
   end
 
+  @impl true
+  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
+
   defp normalize_config(config) do
     config = Map.put_new(config, :base_url, "https://openrouter.ai/api/v1/chat/completions")
 

@@ -8,6 +8,7 @@ defmodule Pincer.Ports.LLM do
               {:ok, Enumerable.t()} | {:error, term()}
   @callback list_providers() :: [%{id: String.t(), name: String.t()}]
   @callback list_models(String.t()) :: [String.t()]
+  @callback transcribe_audio(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
 
   # --- Dispatcher ---
 
@@ -19,4 +20,8 @@ defmodule Pincer.Ports.LLM do
   def stream_completion(history, opts \\ []), do: adapter().stream_completion(history, opts)
   def list_providers, do: adapter().list_providers()
   def list_models(provider_id), do: adapter().list_models(provider_id)
+
+  def transcribe_audio(file_path, opts \\ []) do
+    adapter().transcribe_audio(file_path, opts)
+  end
 end

@@ -13,8 +13,8 @@ defmodule Pincer.LLM.Providers.GroqWhisper do
     # We need to send as multipart form data
     multipart =
       Multipart.new()
-      |> Multipart.add_file("file", file_path)
-      |> Multipart.add_part("model", model)
+      |> Multipart.add_part(Multipart.Part.file_content_part("file", File.read!(file_path), filename: Path.basename(file_path)))
+      |> Multipart.add_part(Multipart.Part.text_part("model", model))
 
     case Req.post(url,
            auth: {:bearer, api_key},
