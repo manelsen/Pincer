@@ -108,7 +108,7 @@ defmodule Pincer.Core.Reloader do
     {:noreply, %{state | watcher_pid: nil}}
   end
 
-  def handle_info({:EXIT, pid, :normal}, state) do
+  def handle_info({:EXIT, _pid, :normal}, state) do
     # Silence normal exits to avoid log noise during reloads
     {:noreply, state}
   end
