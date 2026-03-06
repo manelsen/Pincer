@@ -155,9 +155,10 @@ defmodule Mix.Tasks.Pincer.Onboard do
     Mix.shell().info("  4) google          (Google Gemini)")
     Mix.shell().info("  5) moonshot        (Moonshot / Kimi)")
     Mix.shell().info("  6) anthropic       (Claude)")
-    Mix.shell().info("  7) Outro (digitar)")
+    Mix.shell().info("  7) groq            (Groq — Ultra fast inference)")
+    Mix.shell().info("  8) Outro (digitar)")
     
-    answer = Mix.shell().prompt("Escolha [1-7]: ") |> to_string() |> String.trim()
+    answer = Mix.shell().prompt("Escolha [1-8]: ") |> to_string() |> String.trim()
     
     case answer do
       "1" -> "openrouter"
@@ -166,7 +167,8 @@ defmodule Mix.Tasks.Pincer.Onboard do
       "4" -> "google"
       "5" -> "moonshot"
       "6" -> "anthropic"
-      "7" -> prompt_with_default("Digite o provider_id", "openrouter")
+      "7" -> "groq"
+      "8" -> prompt_with_default("Digite o provider_id", "openrouter")
       _ -> "openrouter"
     end
   end
