@@ -36,7 +36,7 @@ defmodule Pincer.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :os_mon],
+      extra_applications: [:logger],
       mod: {Pincer.Application, []}
     ]
   end
