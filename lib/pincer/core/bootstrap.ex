@@ -69,7 +69,7 @@ defmodule Pincer.Core.Bootstrap do
     """
 
     case LLM.chat_completion([%{"role" => "system", "content" => prompt}]) do
-      {:ok, %{"content" => content}} ->
+      {:ok, %{"content" => content}, _usage} ->
         clean_content =
           content
           |> String.replace(~r/^```json\n/, "")

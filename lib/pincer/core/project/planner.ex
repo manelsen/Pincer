@@ -39,7 +39,7 @@ defmodule Pincer.Core.Project.Planner do
     messages = [%{"role" => "system", "content" => prompt}]
 
     case LLM.chat_completion(messages) do
-      {:ok, %{"content" => content}} ->
+      {:ok, %{"content" => content}, _usage} ->
         tasks = 
           content
           |> String.split("\n")

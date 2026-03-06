@@ -132,7 +132,7 @@ defmodule Pincer.Core.Project.Server do
     {:noreply, %{state | status: :running, worker_pid: pid, monitor_ref: ref}}
   end
 
-  def handle_info({:executor_finished, _final_history, _result}, state) do
+  def handle_info({:executor_finished, _final_history, _result, _usage}, state) do
     if state.monitor_ref, do: Process.demonitor(state.monitor_ref, [:flush])
 
     Blackboard.post(

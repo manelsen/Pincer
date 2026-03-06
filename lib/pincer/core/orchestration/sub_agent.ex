@@ -143,7 +143,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
 
   @doc false
   @impl GenServer
-  def handle_info({:executor_finished, _history, response}, state) do
+  def handle_info({:executor_finished, _history, response, _usage}, state) do
     Logger.info("[SubAgent #{state.id}] Finished. Posting result.")
     Blackboard.post(state.id, "FINISHED: #{response}")
     {:stop, :normal, state}

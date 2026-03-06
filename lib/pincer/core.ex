@@ -12,6 +12,8 @@ defmodule Pincer.Core do
       Executor,
       UX,
       UX.MenuPolicy,
+      UX.ModelKeyboard,
+      Cron,
       Pairing,
       AccessPolicy,
       SessionScopePolicy,
