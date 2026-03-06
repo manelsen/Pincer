@@ -10,15 +10,15 @@ defmodule Pincer.LLM.Providers.GroqWhisper do
     api_key = config[:api_key]
     url = "https://api.groq.com/openai/v1/audio/transcriptions"
 
-    # We need to send as multipart form data
-    multipart =
-      Multipart.new()
-      |> Multipart.add_part(Multipart.Part.file_content_field("file", File.read!(file_path), Path.basename(file_path)))
-      |> Multipart.add_part(Multipart.Part.text_field("model", model))
+    # Req 0.5.x expects a list of {name, value} or {name, {value, options}}
+    multipart_parts = [
+      file: {File.read!(file_path), filename: "audio.mp3"},
+      model: model
+    ]
 
     case Req.post(url,
            auth: {:bearer, api_key},
-           body: multipart,
+           form_multipart: multipart_parts,
            receive_timeout: 60_000
          ) do
       {:ok, %{status: 200, body: %{"text" => text}}} ->
