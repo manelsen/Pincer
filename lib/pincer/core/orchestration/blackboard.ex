@@ -177,9 +177,10 @@ defmodule Pincer.Core.Orchestration.Blackboard do
   end
 
   defp fallback_usage do
-    if Process.whereis(:memsup) do
+    memsup = String.to_atom("memsup")
+    if Process.whereis(memsup) do
       try do
-        {total, allocated, _} = apply(:memsup, :get_memory_data, [])
+        {total, allocated, _} = apply(memsup, :get_memory_data, [])
         allocated / total
       rescue
         _ -> 0.0
