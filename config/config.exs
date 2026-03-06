@@ -47,6 +47,11 @@ config :pincer, :llm_providers, %{
     adapter: Pincer.LLM.Providers.Moonshot,
     env_key: "MOONSHOT_CODING_API_KEY",
     default_model: "moonshot-v1-auto"
+  },
+  "groq" => %{
+    adapter: Pincer.LLM.Providers.Groq,
+    env_key: "GROQ_API_KEY",
+    default_model: "llama-3.3-70b-versatile"
   }
 }
 
