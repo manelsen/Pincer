@@ -235,13 +235,15 @@ defmodule Pincer.Channels.Telegram do
   end
 
   # Removes thinking blocks common in reasoning models (DeepSeek, Gemini, etc.)
-  defp strip_reasoning(text) do
+  defp strip_reasoning(text) when is_binary(text) do
     text
     |> String.replace(~r/<thought>.*?<\/thought>/is, "")
     |> String.replace(~r/<thinking>.*?<\/thinking>/is, "")
     |> String.replace(~r/^.*?think>\s*/is, "")
     |> String.trim()
   end
+
+  defp strip_reasoning(other), do: other
 
   @doc """
   Converts standard Markdown and/or safe HTML into Telegram-compatible HTML.

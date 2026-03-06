@@ -248,7 +248,7 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     end
   end
 
-  defp infer_models_url(chat_url) do
+  defp infer_models_url(chat_url) when is_binary(chat_url) do
     cond do
       String.contains?(chat_url, "/chat/completions") ->
         String.replace(chat_url, "/chat/completions", "/models")
@@ -261,6 +261,8 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
         chat_url |> String.split("/") |> Enum.slice(0..-2//-1) |> Enum.join("/") |> Kernel.<>("/models")
     end
   end
+
+  defp infer_models_url(_), do: ""
 
   defp retry_after_metadata(response) do
     case Req.Response.get_header(response, "retry-after") do
