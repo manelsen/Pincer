@@ -90,6 +90,7 @@ defmodule Pincer.Adapters.Cron.Scheduler do
 
     Logger.info("[Scheduler] Cron Scheduler started. First tick in #{tick_interval}ms.")
 
+    send(self(), :tick)
     schedule_next_tick(tick_interval)
     {:ok, state}
   end

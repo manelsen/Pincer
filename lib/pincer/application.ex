@@ -21,9 +21,6 @@ defmodule Pincer.Application do
       ├── Pincer.Infra.Repo
       │   Database connection pool (Ecto)
       │
-      ├── Pincer.Core.Cron
-      │   Scheduled task management
-      │
       ├── Pincer.Core.Heartbeat
       │   Periodic health checks and maintenance
       │
@@ -119,7 +116,6 @@ defmodule Pincer.Application do
       Pincer.Core.Orchestration.Blackboard,
       {Finch, name: Pincer.Finch},
       {Pincer.Infra.Repo, repo_config},
-      Pincer.Core.Cron,
       Pincer.Core.Heartbeat,
       {Registry, keys: :duplicate, name: Pincer.Dispatcher.Registry},
       {DynamicSupervisor, strategy: :one_for_one, name: Pincer.MCP.Supervisor},
