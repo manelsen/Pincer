@@ -56,6 +56,12 @@ defmodule Pincer.Core.Reloader do
   end
 
   @impl true
+  def handle_info({:file_event, _watcher_pid, _event}, state) do
+    # Ignore control events or other non-path events from FileSystem
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info(:recompile, state) do
     Logger.debug("[RELOADER] Change detected. Recompiling...")
 
