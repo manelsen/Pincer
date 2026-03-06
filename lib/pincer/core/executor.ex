@@ -35,12 +35,14 @@ defmodule Pincer.Core.Executor do
 
     model_override = Keyword.get(opts, :model_override)
     long_term_memory = Keyword.get(opts, :long_term_memory, "")
+    workspace_path = Keyword.get(opts, :workspace_path, File.cwd!())
 
     Process.put(:session_pid, session_pid)
     Process.put(:session_id, session_id)
+    Process.put(:workspace_path, workspace_path)
     Process.put(:long_term_memory, long_term_memory)
     Process.put(:executor_deps, deps)
-    init_markdown_tracker()
+    init_markdown_tracker(workspace_path)
 
     try do
       case run_loop(history, session_id, session_pid, 0, model_override, deps) do
@@ -429,7 +431,8 @@ defmodule Pincer.Core.Executor do
 
     args = parse_tool_arguments(raw_arguments)
 
-    context = %{"session_id" => session_id}
+    workspace_path = Process.get(:workspace_path)
+    context = %{"session_id" => session_id, "workspace_path" => workspace_path}
 
     result =
       case registry.execute_tool(name, args, context) do
@@ -477,7 +480,7 @@ defmodule Pincer.Core.Executor do
       {:tool_approval, ^call_id, :granted} ->
         Logger.info("[EXECUTOR] Approval granted for #{command}")
         workspace_restrict = restrict_to_workspace_enabled?()
-        workspace_root = File.cwd!()
+        workspace_root = Process.get(:workspace_path) || File.cwd!()
 
         case Pincer.Core.WorkspaceGuard.command_allowed?(command,
                workspace_restrict: workspace_restrict,
@@ -851,8 +854,8 @@ defmodule Pincer.Core.Executor do
 
   defp normalize_tool_call_type(_), do: nil
 
-  defp init_markdown_tracker do
-    root = File.cwd!() |> Path.expand()
+  defp init_markdown_tracker(workspace_path) do
+    root = Path.expand(workspace_path)
     Process.put(:executor_markdown_root, root)
     Process.put(:executor_markdown_snapshot, markdown_snapshot(root))
   rescue

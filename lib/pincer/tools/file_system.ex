@@ -61,11 +61,13 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   @impl true
-  def execute(args) do
+  def execute(args, context \\ %{}) do
     action = Map.get(args, "action")
     raw_path = Map.get(args, "path", ".")
+    
+    workspace_root = Map.get(context, "workspace_path") || get_workspace_root()
 
-    with {:ok, safe_path} <- validate_path(raw_path) do
+    with {:ok, safe_path} <- validate_path(raw_path, workspace_root) do
       perform_action(action, safe_path)
     else
       {:error, reason} ->
@@ -74,11 +76,11 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     end
   end
 
-  defp validate_path(path) when not is_binary(path), do: {:error, "Invalid path"}
+  defp validate_path(path, _root) when not is_binary(path), do: {:error, "Invalid path"}
 
-  defp validate_path(path) do
+  defp validate_path(path, root) do
     WorkspaceGuard.confine_path(path,
-      root: get_workspace_root(),
+      root: root,
       reject_parent_segments: true
     )
   end
