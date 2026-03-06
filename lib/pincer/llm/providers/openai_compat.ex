@@ -181,6 +181,18 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     case body do
       %{"choices" => [%{"message" => message} | _]} ->
         usage = body["usage"]
+        
+        # OpenRouter and some providers send reasoning in separate fields
+        reasoning = message["reasoning"] || message["thought"]
+        
+        message = if is_binary(reasoning) and reasoning != "" do
+          content = message["content"] || ""
+          # Prepend reasoning wrapped in tags so Pincer's UI can handle it
+          Map.put(message, "content", "<thinking>\n#{reasoning}\n</thinking>\n\n#{content}")
+        else
+          message
+        end
+
         {:ok, message, usage}
 
       error_body when is_map(error_body) ->
