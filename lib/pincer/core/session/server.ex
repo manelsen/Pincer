@@ -24,14 +24,11 @@ defmodule Pincer.Core.Session.Server do
   @impl true
   def init(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
+    workspace_path = "workspaces/#{session_id}"
+    File.mkdir_p!(workspace_path)
 
     # 1. Recupera mensagens persistidas
     persisted = Storage.get_messages(session_id)
-
-    history =
-      if Enum.empty?(persisted),
-        do: [%{"role" => "system", "content" => get_system_prompt()}],
-        else: [%{"role" => "system", "content" => get_system_prompt()} | persisted]
 
     # 2. Inscrição em tópicos PubSub
     PubSub.subscribe("session:#{session_id}")
@@ -41,7 +38,8 @@ defmodule Pincer.Core.Session.Server do
     state = %{
       mode: :normal,
       session_id: session_id,
-      history: history,
+      workspace_path: workspace_path,
+      history: [],
       status: :idle,
       worker_pid: nil,
       last_blackboard_id: 0,
@@ -51,18 +49,28 @@ defmodule Pincer.Core.Session.Server do
       reasoning_visible: false,
       verbose: false,
       usage_display: "off",
-      token_usage_total: %{"prompt_tokens" => 0, "completion_tokens" => 0}
+      token_usage_total: %{"prompt_tokens" => 0, "completion_tokens" => 0},
+      input_buffer: [],
+      debounce_timer: nil
     }
 
-    # 4. Catch-up assíncrono para não travar o boot
+    # 4. Carrega histórico final
+    history =
+      if Enum.empty?(persisted),
+        do: [%{"role" => "system", "content" => get_system_prompt(state)}],
+        else: [%{"role" => "system", "content" => get_system_prompt(state)} | persisted]
+
+    state = %{state | history: history}
+
+    # 5. Catch-up assíncrono para não travar o boot
     send(self(), :recovery_catch_up)
 
-    # 5. Bootstrap Handshake (se for a primeira vez ou BOOTSTRAP.md existir)
+    # 6. Bootstrap Handshake (se for a primeira vez ou BOOTSTRAP.md existir)
     if Enum.empty?(persisted) and File.exists?(@bootstrap_file) do
       send(self(), :trigger_bootstrap)
     end
 
-    # 6. Heartbeat para manter Blackboard atualizado
+    # 7. Heartbeat para manter Blackboard atualizado
     Process.send_after(self(), :heartbeat, 5000)
 
     {:ok, state}
@@ -93,7 +101,7 @@ defmodule Pincer.Core.Session.Server do
   def handle_info(:trigger_bootstrap, state) do
     # Deixamos o próprio LLM decidir como se apresentar baseado no BOOTSTRAP.md
     # mas forçamos um início se o histórico estiver vazio
-    history_with_prompt = [%{"role" => "system", "content" => get_system_prompt()}]
+    history_with_prompt = [%{"role" => "system", "content" => get_system_prompt(state)}]
 
     Task.start(fn ->
       evaluate_blackboard_update(
@@ -153,6 +161,37 @@ defmodule Pincer.Core.Session.Server do
   @impl true
   def handle_info({:agent_response, _content}, state) do
     {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(:flush_input, state) do
+    combined_input = 
+      state.input_buffer
+      |> Enum.map(&content_to_text/1)
+      |> Enum.join("\n")
+
+    # Reset buffer and timer
+    state = %{state | input_buffer: [], debounce_timer: nil}
+
+    case Pincer.Core.ProjectRouter.parse(combined_input) do
+      {:ok, cmd, args} ->
+        Task.start(fn ->
+          case Pincer.Core.ProjectRouter.handle_command(cmd, args, state.session_id) do
+            {:ok, id} ->
+              publish(state.session_id, {:agent_response, "🚀 Projeto iniciado com ID: `#{id}`"})
+
+            _ ->
+              publish(state.session_id, {:agent_response, "✅ Comando #{cmd} executado."})
+          end
+        end)
+
+        {:noreply, state}
+
+      :error ->
+        # Lógica padrão de chat (Butler ou Executor)
+        {:reply, _reply, new_state} = process_standard_input(combined_input, state)
+        {:noreply, new_state}
+    end
   end
 
   @impl true
@@ -241,7 +280,7 @@ defmodule Pincer.Core.Session.Server do
     Pincer.Ports.Storage.delete_messages(state.session_id)
 
     # 2. Reseta RAM (mantém apenas o system prompt inicial)
-    new_history = [%{"role" => "system", "content" => get_system_prompt()}]
+    new_history = [%{"role" => "system", "content" => get_system_prompt(state)}]
 
     # 3. Dispara Bootstrap novamente
     send(self(), :trigger_bootstrap)
@@ -283,26 +322,14 @@ defmodule Pincer.Core.Session.Server do
 
   @impl true
   def handle_call({:process_input, input}, _from, state) do
-    text = content_to_text(input)
+    # Cancel previous timer if exists
+    if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
 
-    case Pincer.Core.ProjectRouter.parse(text) do
-      {:ok, cmd, args} ->
-        Task.start(fn ->
-          case Pincer.Core.ProjectRouter.handle_command(cmd, args, state.session_id) do
-            {:ok, id} ->
-              publish(state.session_id, {:agent_response, "🚀 Projeto iniciado com ID: `#{id}`"})
+    new_buffer = state.input_buffer ++ [input]
+    # Wait 800ms for more chunks before flushing
+    new_timer = Process.send_after(self(), :flush_input, 800)
 
-            _ ->
-              publish(state.session_id, {:agent_response, "✅ Comando #{cmd} executado."})
-          end
-        end)
-
-        {:reply, {:ok, :started}, state}
-
-      :error ->
-        # Lógica padrão de chat (Butler ou Executor)
-        process_standard_input(input, state)
-    end
+    {:reply, {:ok, :buffered}, %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
   end
 
   # --- Boilerplate & Standard Flow ---
@@ -322,7 +349,10 @@ defmodule Pincer.Core.Session.Server do
 
       {:reply, {:ok, :butler_notified}, %{state | history: new_history}}
     else
-      executor_opts = [model_override: state.model_override]
+      executor_opts = [
+        model_override: state.model_override,
+        workspace_path: state.workspace_path
+      ]
       {:ok, pid} = Executor.start(self(), state.session_id, new_history, executor_opts)
 
       {:reply, {:ok, :started},
@@ -337,11 +367,14 @@ defmodule Pincer.Core.Session.Server do
   # (Restante das funções auxiliares mantidas para compatibilidade...)
   # get_system_prompt, content_to_text, is_just_chat?, quick_assistant_reply, evaluate_blackboard_update, etc.
 
-  defp get_system_prompt do
+  defp get_system_prompt(state) do
+    workspace = state.workspace_path
+    
+    # Check if local files exist in workspace, fallback to globals
+    identity = read_config_file(Path.join(workspace, @identity_file), @identity_file)
+    soul = read_config_file(Path.join(workspace, @soul_file), @soul_file)
+    user = read_config_file(Path.join(workspace, @user_file), @user_file)
     bootstrap = if File.exists?(@bootstrap_file), do: File.read!(@bootstrap_file), else: ""
-    identity = if File.exists?(@identity_file), do: File.read!(@identity_file), else: ""
-    soul = if File.exists?(@soul_file), do: File.read!(@soul_file), else: ""
-    user = if File.exists?(@user_file), do: File.read!(@user_file), else: ""
 
     prompt = """
     #{if bootstrap != "", do: "!!! BOOTSTRAP MODE ACTIVE !!!\n#{bootstrap}\n", else: ""}
@@ -357,6 +390,14 @@ defmodule Pincer.Core.Session.Server do
     """
 
     String.trim(prompt)
+  end
+
+  defp read_config_file(workspace_path, global_path) do
+    cond do
+      File.exists?(workspace_path) -> File.read!(workspace_path)
+      File.exists?(global_path) -> File.read!(global_path)
+      true -> ""
+    end
   end
 
   defp content_to_text(c) when is_binary(c), do: c

@@ -133,9 +133,9 @@ defmodule Pincer.Adapters.Tools.SafeShell do
   end
 
   @impl true
-  def execute(%{"command" => command} = args) do
+  def execute(%{"command" => command} = args, context \\ %{}) do
     workspace_restrict = restrict_to_workspace?(args)
-    workspace_root = workspace_root(args)
+    workspace_root = Map.get(context, "workspace_path") || workspace_root(args)
 
     # 1. Truncate
     command = String.slice(command, 0, @max_command_length)
