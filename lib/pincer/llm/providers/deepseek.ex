@@ -22,4 +22,10 @@ defmodule Pincer.LLM.Providers.DeepSeek do
     config = Map.put_new(config, :base_url, "https://api.deepseek.com/chat/completions")
     Pincer.LLM.Providers.OpenAICompat.stream_completion(messages, model, config, tools)
   end
+
+  @impl true
+  def list_models(config) do
+    config = Map.put_new(config, :base_url, "https://api.deepseek.com/chat/completions")
+    Pincer.LLM.Providers.OpenAICompat.list_models(config)
+  end
 end
