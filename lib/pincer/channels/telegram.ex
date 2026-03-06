@@ -783,6 +783,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         # For audio/voice, we try to transcribe it immediately if a whisper provider is available
         case handle_audio_transcription(file_id, api_client) do
           {:ok, transcribed_text} ->
+            # Send feedback message so the user can see what was understood
+            chat_id = map_value(map_value(message, :chat), :id)
+            if chat_id, do: Pincer.Channels.Telegram.send_message(chat_id, "🎤 <i>\"#{transcribed_text}\"</i>")
+
             {text_acc <> "\n" <> transcribed_text, refs_acc}
           _ ->
             {text_acc <> "\n[Audio content - transcription failed]", refs_acc}
