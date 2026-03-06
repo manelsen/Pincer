@@ -149,10 +149,81 @@ defmodule Pincer.LLM.Client do
   @doc """
   Returns available models for a specific provider from the model-selection
   registry (config.yaml `llm` with fallback to `:llm_providers`).
+  
+  Attempts dynamic discovery from provider API with 1-hour cache.
   """
   @spec list_models(String.t()) :: [String.t()]
   def list_models(provider_id) do
-    ModelRegistry.list_models(provider_id, model_selection_registry())
+    cache_key = {:models, provider_id}
+    
+    case get_cached_models(cache_key) do
+      {:ok, models} -> 
+        models
+      :miss ->
+        models = fetch_models_from_provider(provider_id)
+        put_cached_models(cache_key, models)
+        models
+    end
+  end
+
+  defp fetch_models_from_provider(provider_id) do
+    registry = provider_registry()
+    config = registry[provider_id]
+
+    if is_nil(config) or provider_id == "mock" do
+      ModelRegistry.list_models(provider_id, model_selection_registry())
+    else
+      adapter = config[:adapter]
+      requested_profile = nil # Default profile for listing
+
+      case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
+        {:ok, auth_selection} ->
+          config_with_auth = auth_selection.config
+          
+          case apply(adapter, :list_models, [config_with_auth]) do
+            {:ok, models} when is_list(models) and models != [] -> 
+              models
+            _ -> 
+              ModelRegistry.list_models(provider_id, model_selection_registry())
+          end
+        _ ->
+          ModelRegistry.list_models(provider_id, model_selection_registry())
+      end
+    end
+  end
+
+  # Simple ETS-based cache for 1 hour
+  @cache_table :pincer_llm_cache
+  @cache_ttl_seconds 3600
+
+  defp get_cached_models(key) do
+    ensure_cache_table()
+    case :ets.lookup(@cache_table, key) do
+      [{^key, models, expiry}] ->
+        if System.system_time(:second) < expiry do
+          {:ok, models}
+        else
+          :ets.delete(@cache_table, key)
+          :miss
+        end
+      [] -> :miss
+    end
+  end
+
+  defp put_cached_models(key, models) do
+    ensure_cache_table()
+    expiry = System.system_time(:second) + @cache_ttl_seconds
+    :ets.insert(@cache_table, {key, models, expiry})
+  end
+
+  defp ensure_cache_table do
+    if :ets.whereis(@cache_table) == :undefined do
+      try do
+        :ets.new(@cache_table, [:named_table, :public, :set, {:read_concurrency, true}])
+      rescue
+        _ -> :ok
+      end
+    end
   end
 
   @doc """
@@ -254,11 +325,16 @@ defmodule Pincer.LLM.Client do
     result = apply(adapter, action, [messages, model, config, tools])
 
     case result do
-      {:ok, result} ->
+      {:ok, message, usage} ->
+        maybe_clear_provider_cooldown(failover_state)
+        maybe_clear_auth_profile_cooldown(auth_context)
+        {:ok, message, usage}
+
+      {:ok, stream} ->
         maybe_clear_provider_cooldown(failover_state)
         maybe_clear_auth_profile_cooldown(auth_context)
 
-        case normalize_success(action, result) do
+        case normalize_success(action, stream) do
           {:ok, normalized} ->
             {:ok, normalized}
 
@@ -772,7 +848,7 @@ defmodule Pincer.LLM.Client do
            failover_state,
            auth_context
          ) do
-      {:ok, message} ->
+      {:ok, message, _usage} ->
         {:ok, chat_message_to_stream_chunks(message)}
 
       {:error, fallback_reason} ->
@@ -843,7 +919,7 @@ defmodule Pincer.LLM.Client do
   defp chat_message_to_stream_chunks(_), do: [%{"choices" => [%{"delta" => %{"content" => ""}}]}]
 
   defp simulate_response(_messages) do
-    {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your LLM providers."}}
+    {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your LLM providers."}, nil}
   end
 
   defp drain_model_changed(provider, model) do

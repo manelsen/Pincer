@@ -18,7 +18,7 @@ history = [%{"role" => "user", "content" => "List files in current dir."}]
 
 # Wait for completion
 receive do
-  {:executor_finished, _history, response} ->
+  {:executor_finished, _history, response, _usage} ->
     IO.puts("[SUCCESS] Whitelisted command executed. Response length: #{String.length(response)}")
     # IO.puts("Response: #{response}")
 after
@@ -54,7 +54,7 @@ end
 
 # Check if command executed
 receive do
-  {:agent_response, _res} ->
+  {:agent_response, _res, _usage} ->
     IO.puts("[SUCCESS] Command executed after approval.")
     if not File.exists?("tmp_test_file") do
         IO.puts("[SUCCESS] File 'tmp_test_file' was actually deleted.")

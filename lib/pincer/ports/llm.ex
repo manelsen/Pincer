@@ -1,7 +1,9 @@
 defmodule Pincer.Ports.LLM do
   @moduledoc "Port for Large Language Model operations."
 
-  @callback chat_completion(list(map()), keyword()) :: {:ok, map()} | {:error, term()}
+  @type usage :: %{String.t() => non_neg_integer()}
+
+  @callback chat_completion(list(map()), keyword()) :: {:ok, map(), usage() | nil} | {:error, term()}
   @callback stream_completion(list(map()), keyword()) ::
               {:ok, Enumerable.t()} | {:error, term()}
   @callback list_providers() :: [%{id: String.t(), name: String.t()}]

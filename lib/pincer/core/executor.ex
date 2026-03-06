@@ -44,8 +44,8 @@ defmodule Pincer.Core.Executor do
 
     try do
       case run_loop(history, session_id, session_pid, 0, model_override, deps) do
-        {:ok, final_history, response} ->
-          send(session_pid, {:executor_finished, final_history, response})
+        {:ok, final_history, response, usage} ->
+          send(session_pid, {:executor_finished, final_history, response, usage})
 
         {:error, reason} ->
           send(session_pid, {:executor_failed, reason})
@@ -144,6 +144,12 @@ defmodule Pincer.Core.Executor do
         do: [provider: model_override.provider, model: model_override.model],
         else: []
 
+    client_opts = if thinking = Map.get(model_override || %{}, :thinking_level) do
+      Keyword.put(client_opts, :thinking_level, thinking)
+    else
+      client_opts
+    end
+
     long_term_memory = Process.get(:long_term_memory, "")
     current_time = DateTime.utc_now() |> DateTime.to_string()
 
@@ -241,7 +247,8 @@ defmodule Pincer.Core.Executor do
       session_pid,
       depth,
       model_override,
-      deps
+      deps,
+      nil
     )
   end
 
@@ -296,7 +303,7 @@ defmodule Pincer.Core.Executor do
     Logger.warning("[EXECUTOR] Streaming fallback reason: #{inspect(stream_reason)}")
 
     case deps.llm_client.chat_completion(ready_history, [tools: tools_spec] ++ client_opts) do
-      {:ok, message} when is_map(message) ->
+      {:ok, message, usage} when is_map(message) ->
         assistant_msg = %{
           "role" => "assistant",
           "content" => message["content"],
@@ -310,7 +317,8 @@ defmodule Pincer.Core.Executor do
           session_pid,
           depth,
           model_override,
-          deps
+          deps,
+          usage
         )
 
       {:ok, other} ->
@@ -328,7 +336,8 @@ defmodule Pincer.Core.Executor do
          session_pid,
          depth,
          model_override,
-         deps
+         deps,
+         usage
        ) do
     case assistant_msg do
       %{"tool_calls" => tool_calls} when is_list(tool_calls) and tool_calls != [] ->
@@ -358,7 +367,7 @@ defmodule Pincer.Core.Executor do
           "[EXECUTOR] LLM stream finished. Text length: #{String.length(content || "")}"
         )
 
-        {:ok, history ++ [assistant_msg], content}
+        {:ok, history ++ [assistant_msg], content, usage}
 
       _ ->
         {:error, {:invalid_assistant_message, assistant_msg}}

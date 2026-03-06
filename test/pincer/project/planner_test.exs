@@ -41,7 +41,7 @@ defmodule Pincer.Core.Project.PlannerTest do
   test "build_plan/1 decomposes objective into tasks via LLM" do
     Pincer.LLM.ClientMock
     |> expect(:chat_completion, fn _msgs, _model, _config, _tools ->
-      {:ok, %{"content" => "Architect: Spec\nTester: Red\nCoder: Green\nTester: Refactor"}}
+      {:ok, %{"content" => "Architect: Spec\nTester: Red\nCoder: Green\nTester: Refactor"}, nil}
     end)
 
     assert {:ok, tasks} = Planner.build_plan("Test Project")
