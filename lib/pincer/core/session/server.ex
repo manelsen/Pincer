@@ -46,7 +46,12 @@ defmodule Pincer.Core.Session.Server do
       worker_pid: nil,
       last_blackboard_id: 0,
       subagent_progress_tracker: %{},
-      model_override: nil
+      model_override: nil,
+      thinking_level: nil,
+      reasoning_visible: false,
+      verbose: false,
+      usage_display: "off",
+      token_usage_total: %{"prompt_tokens" => 0, "completion_tokens" => 0}
     }
 
     # 4. Catch-up assíncrono para não travar o boot
@@ -122,9 +127,14 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
-  def handle_info({:executor_finished, final_history, response}, state) do
-    publish(state.session_id, {:agent_response, response})
-    {:noreply, %{state | history: final_history, status: :idle, worker_pid: nil}}
+  def handle_info({:executor_finished, final_history, response, usage}, state) do
+    new_totals = %{
+      "prompt_tokens" => state.token_usage_total["prompt_tokens"] + (if usage, do: usage["prompt_tokens"] || 0, else: 0),
+      "completion_tokens" => state.token_usage_total["completion_tokens"] + (if usage, do: usage["completion_tokens"] || 0, else: 0)
+    }
+
+    publish(state.session_id, {:agent_response, response, usage})
+    {:noreply, %{state | history: final_history, status: :idle, worker_pid: nil, token_usage_total: new_totals}}
   end
 
   @impl true
@@ -134,9 +144,14 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
-  def handle_info({:agent_response, _content}, state) do
+  def handle_info({:agent_response, _content, _usage}, state) do
     # Ignora a cópia do broadcast que volta via PubSub, 
     # já que o histórico é atualizado via :assistant_reply_finished ou :executor_finished
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:agent_response, _content}, state) do
     {:noreply, state}
   end
 
@@ -242,6 +257,26 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
+  def handle_call({:set_thinking, level}, _from, state) do
+    {:reply, :ok, %{state | thinking_level: level}}
+  end
+
+  @impl true
+  def handle_call({:set_reasoning_visible, visible}, _from, state) do
+    {:reply, :ok, %{state | reasoning_visible: visible}}
+  end
+
+  @impl true
+  def handle_call({:set_verbose, verbose}, _from, state) do
+    {:reply, :ok, %{state | verbose: verbose}}
+  end
+
+  @impl true
+  def handle_call({:set_usage, level}, _from, state) do
+    {:reply, :ok, %{state | usage_display: level}}
+  end
+
+  @impl true
   def handle_call({:process_input, input}, _from, state) do
     text = content_to_text(input)
 
@@ -336,9 +371,9 @@ defmodule Pincer.Core.Session.Server do
 
   defp quick_assistant_reply(pid, sid, hist, _in, mo) do
     case LLM.chat_completion(hist, if(mo, do: [provider: mo.provider, model: mo.model], else: [])) do
-      {:ok, %{"content" => resp}} ->
+      {:ok, %{"content" => resp}, usage} ->
         send(pid, {:assistant_reply_finished, resp})
-        PubSub.broadcast("session:#{sid}", {:agent_response, resp})
+        PubSub.broadcast("session:#{sid}", {:agent_response, resp, usage})
 
       _ ->
         :ok
@@ -348,10 +383,10 @@ defmodule Pincer.Core.Session.Server do
   defp evaluate_blackboard_update(pid, sid, hist, mo) do
     # Simula avaliação se o usuário deve ser interrompido
     case LLM.chat_completion(hist, if(mo, do: [provider: mo.provider, model: mo.model], else: [])) do
-      {:ok, %{"content" => resp}} ->
+      {:ok, %{"content" => resp}, usage} ->
         if String.upcase(resp) != "IGNORE" do
           send(pid, {:assistant_reply_finished, resp})
-          PubSub.broadcast("session:#{sid}", {:agent_response, resp})
+          PubSub.broadcast("session:#{sid}", {:agent_response, resp, usage})
         end
 
       _ ->
@@ -374,4 +409,16 @@ defmodule Pincer.Core.Session.Server do
   def set_model(id, provider, model) do
     GenServer.call(via_tuple(id), {:set_model, provider, model})
   end
+
+  def set_thinking(id, level),
+    do: GenServer.call(via_tuple(id), {:set_thinking, level})
+
+  def set_reasoning_visible(id, visible),
+    do: GenServer.call(via_tuple(id), {:set_reasoning_visible, visible})
+
+  def set_verbose(id, verbose),
+    do: GenServer.call(via_tuple(id), {:set_verbose, verbose})
+
+  def set_usage(id, level),
+    do: GenServer.call(via_tuple(id), {:set_usage, level})
 end

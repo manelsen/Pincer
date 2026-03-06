@@ -441,7 +441,13 @@ defmodule Pincer.Channels.Discord do
 
     defp handle_command(msg, "/models") do
       providers = Pincer.Ports.LLM.list_providers()
-      buttons = providers |> build_provider_buttons() |> with_menu_button()
+      buttons = build_provider_buttons(providers)
+      
+      buttons = case ChannelInteractionPolicy.menu_id(:discord) do
+        {:ok, id} -> buttons ++ [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
+        _ -> buttons
+      end
+
       components = chunk_buttons(buttons)
 
       Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔧 **Select AI Provider:**",
@@ -516,6 +522,109 @@ defmodule Pincer.Channels.Discord do
       end
     end
 
+    defp handle_command(msg, "/new") do
+      session_id = resolve_session_id(msg)
+      ensure_brain_session_started(session_id)
+      case Pincer.Core.Session.Server.reset(session_id) do
+        :ok ->
+          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔄 Sessão reiniciada.")
+        _ ->
+          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "❌ Não foi possível reiniciar a sessão.")
+      end
+    end
+
+    defp handle_command(msg, "/reset"), do: handle_command(msg, "/new")
+
+    defp handle_command(msg, "/model") do
+      Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /model <provider/modelo>\nEx: /model openrouter/mistral-7b")
+    end
+
+    defp handle_command(msg, "/model " <> text) do
+      session_id = resolve_session_id(msg)
+      ensure_brain_session_started(session_id)
+      case String.split(String.trim(text), "/", parts: 2) do
+        [provider, model] when provider != "" and model != "" ->
+          Pincer.Core.Session.Server.set_model(session_id, provider, model)
+          Pincer.Channels.Discord.send_message(
+            "#{msg.channel_id}", "✅ Modelo: `#{provider}/#{model}`")
+        _ ->
+          Pincer.Channels.Discord.send_message(
+            "#{msg.channel_id}", "Uso: /model <provider/modelo>\nEx: /model openrouter/mistral-7b")
+      end
+    end
+
+    defp handle_command(msg, "/think") do
+      Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /think off|low|medium|high")
+    end
+
+    defp handle_command(msg, "/think " <> text) do
+      session_id = resolve_session_id(msg)
+      ensure_brain_session_started(session_id)
+      level = text |> String.trim() |> String.downcase()
+      valid = ["off", "low", "medium", "high"]
+      if level in valid do
+        Pincer.Core.Session.Server.set_thinking(session_id, level)
+        Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🧠 Thinking: `#{level}`")
+      else
+        Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /think off|low|medium|high")
+      end
+    end
+
+    defp handle_command(msg, "/reasoning") do
+      Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /reasoning on|off")
+    end
+
+    defp handle_command(msg, "/reasoning " <> text) do
+      session_id = resolve_session_id(msg)
+      ensure_brain_session_started(session_id)
+      case String.trim(text) |> String.downcase() do
+        "on" ->
+          Pincer.Core.Session.Server.set_reasoning_visible(session_id, true)
+          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "👁 Reasoning: visível")
+        "off" ->
+          Pincer.Core.Session.Server.set_reasoning_visible(session_id, false)
+          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🙈 Reasoning: oculto (strip ativado)")
+        _ ->
+          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /reasoning on|off")
+      end
+    end
+
+    defp handle_command(msg, "/verbose") do
+      Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /verbose on|off")
+    end
+
+    defp handle_command(msg, "/verbose " <> text) do
+      session_id = resolve_session_id(msg)
+      ensure_brain_session_started(session_id)
+      case String.trim(text) |> String.downcase() do
+        "on" ->
+          Pincer.Core.Session.Server.set_verbose(session_id, true)
+          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔊 Verbose: on")
+        "off" ->
+          Pincer.Core.Session.Server.set_verbose(session_id, false)
+          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔇 Verbose: off")
+        _ ->
+          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /verbose on|off")
+      end
+    end
+
+    defp handle_command(msg, "/usage") do
+      Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /usage off|tokens|full")
+    end
+
+    defp handle_command(msg, "/usage " <> text) do
+      session_id = resolve_session_id(msg)
+      ensure_brain_session_started(session_id)
+      display = text |> String.trim() |> String.downcase()
+      valid = ["off", "tokens", "full"]
+      if display in valid do
+        Pincer.Core.Session.Server.set_usage(session_id, display)
+        Pincer.Channels.Discord.send_message("#{msg.channel_id}", "📊 Usage display: `#{display}`")
+      else
+        Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /usage off|tokens|full")
+      end
+    end
+
     defp handle_command(msg, cmd) do
       Pincer.Channels.Discord.send_message(
         "#{msg.channel_id}",
@@ -546,11 +655,17 @@ defmodule Pincer.Channels.Discord do
 
     defp handle_models_command(interaction) do
       providers = Pincer.Ports.LLM.list_providers()
-      buttons = providers |> build_provider_buttons() |> with_menu_button()
+      buttons = build_provider_buttons(providers)
+
+      buttons = case ChannelInteractionPolicy.menu_id(:discord) do
+        {:ok, id} -> buttons ++ [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
+        _ -> buttons
+      end
+
       components = chunk_buttons(buttons)
 
       response = %{
-        type: 4,
+        type: 7,
         data: %{
           content: "🔧 **Select AI Provider:**",
           components: components
@@ -639,12 +754,37 @@ defmodule Pincer.Channels.Discord do
     defp handle_interaction(interaction) do
       # Defer formatting: Nostrum interactions usually need to be ACKed
       case ChannelInteractionPolicy.parse(:discord, read_interaction_custom_id(interaction)) do
+        {:ok, {:page, provider_id, page}} ->
+          models = Pincer.Ports.LLM.list_models(provider_id)
+          session_id = resolve_session_id(interaction)
+          current_model = current_model_for_session(session_id)
+          
+          # build_keyboard returns list of lines [[btn]], we need a flat list for chunk_buttons
+          # or just pass it as is if it's already structured for Discord ActionRows.
+          # Actually, Discord needs ActionRows. build_keyboard returns [[btn]], which is perfect.
+          rows = Pincer.Core.UX.ModelKeyboard.build_keyboard(:discord, provider_id, models, page, current_model)
+          
+          # rows is [[map]], chunk_buttons expects [map]. We flatten it.
+          buttons = List.flatten(rows)
+          components = chunk_buttons(buttons)
+
+          response = %{
+            type: 7,
+            data: %{
+              content: "🤖 **Models for #{provider_id} (page #{page}):**",
+              components: components
+            }
+          }
+
+          send_interaction_response(interaction, response)
+
         {:ok, {:select_provider, provider_id}} ->
           models = Pincer.Ports.LLM.list_models(provider_id)
+          session_id = resolve_session_id(interaction)
+          current_model = current_model_for_session(session_id)
 
-          buttons =
-            models |> build_model_buttons(provider_id) |> with_back_button() |> with_menu_button()
-
+          rows = Pincer.Core.UX.ModelKeyboard.build_keyboard(:discord, provider_id, models, 1, current_model)
+          buttons = List.flatten(rows)
           components = chunk_buttons(buttons)
 
           response = %{
@@ -678,8 +818,12 @@ defmodule Pincer.Channels.Discord do
 
         {:ok, :back_to_providers} ->
           providers = Pincer.Ports.LLM.list_providers()
+          buttons = build_provider_buttons(providers)
 
-          buttons = providers |> build_provider_buttons() |> with_menu_button()
+          buttons = case ChannelInteractionPolicy.menu_id(:discord) do
+            {:ok, id} -> buttons ++ [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
+            _ -> buttons
+          end
 
           components = chunk_buttons(buttons)
 
@@ -709,69 +853,26 @@ defmodule Pincer.Channels.Discord do
       end
     end
 
-    defp build_model_buttons(provider_id, models) do
-      models
-      |> Enum.reduce([], fn model, acc ->
-        case ChannelInteractionPolicy.model_selector_id(:discord, provider_id, model) do
-          {:ok, custom_id} ->
-            [
-              %{
-                type: 2,
-                style: 1,
-                label: model,
-                custom_id: custom_id
-              }
-              | acc
-            ]
-
-          {:error, :payload_too_large} ->
-            Logger.warning(
-              "[DISCORD] Skipping model button with oversized custom_id: #{inspect(model)}"
-            )
-
-            acc
-
-          {:error, _reason} ->
-            acc
-        end
-      end)
-      |> Enum.reverse()
-    end
-
-    defp with_back_button(buttons) do
-      case ChannelInteractionPolicy.back_to_providers_id(:discord) do
-        {:ok, custom_id} ->
-          buttons ++ [%{type: 2, style: 2, label: "⬅️ Back", custom_id: custom_id}]
-
-        {:error, _reason} ->
-          buttons
+    defp current_model_for_session(session_id) do
+      case Pincer.Core.Session.Server.get_status(session_id) do
+        {:ok, %{model_override: %{model: model}}} -> model
+        _ -> nil
       end
-    end
-
-    defp with_menu_button(buttons) do
-      if Enum.any?(buttons, &(Map.get(&1, :custom_id) == "show_menu")) do
-        buttons
-      else
-        buttons ++ [menu_button()]
-      end
-    end
-
-    defp menu_button do
-      custom_id =
-        case ChannelInteractionPolicy.menu_id(:discord) do
-          {:ok, id} -> id
-          {:error, _reason} -> "show_menu"
-        end
-
-      %{type: 2, style: 2, label: UX.menu_button_label(), custom_id: custom_id}
+    rescue
+      _ -> nil
     end
 
     defp unknown_interaction_response do
+      menu_btn = case ChannelInteractionPolicy.menu_id(:discord) do
+        {:ok, id} -> [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
+        _ -> []
+      end
+
       %{
         type: 7,
         data: %{
           content: "❓ #{UX.unknown_interaction_hint()}\n#{UX.unknown_command_hint()}",
-          components: chunk_buttons([menu_button()])
+          components: chunk_buttons(menu_btn)
         }
       }
     end
