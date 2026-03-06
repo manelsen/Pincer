@@ -19,14 +19,14 @@ defmodule Pincer.LLM.ClientTelemetryTest do
           {:error, {:http_error, 503, "upstream"}}
 
         _ ->
-          {:ok, %{"role" => "assistant", "content" => "ok"}}
+          {:ok, %{"role" => "assistant", "content" => "ok"}, nil}
       end
     end
 
     @impl true
     def stream_completion(messages, model, config, tools) do
       case chat_completion(messages, model, config, tools) do
-        {:ok, _} -> {:ok, [%{"choices" => [%{"delta" => %{"content" => "ok"}}]}]}
+        {:ok, _, _} -> {:ok, [%{"choices" => [%{"delta" => %{"content" => "ok"}}]}]}
         {:error, reason} -> {:error, reason}
       end
     end
@@ -120,7 +120,7 @@ defmodule Pincer.LLM.ClientTelemetryTest do
       max_elapsed_ms: 100
     )
 
-    assert {:ok, %{"content" => "ok"}} = Client.chat_completion([])
+    assert {:ok, %{"content" => "ok"}, _usage} = Client.chat_completion([])
 
     assert_receive {:telemetry, [:pincer, :retry], %{count: 1, wait_ms: 1}, metadata}
     assert metadata.class == :http_5xx

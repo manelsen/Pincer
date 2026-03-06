@@ -49,4 +49,9 @@ defmodule Pincer.LLM.Provider do
               tools :: [tool()]
             ) ::
               {:ok, Enumerable.t()} | {:error, term()}
+
+  @doc """
+  Fetches available models from the provider's API.
+  """
+  @callback list_models(config :: map()) :: {:ok, [String.t()]} | {:error, any()}
 end

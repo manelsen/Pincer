@@ -17,14 +17,14 @@ defmodule Pincer.LLM.ReactiveClientTest do
             Process.put(:fail_count, 1)
             {:error, {:http_error, 429, "Rate limited"}}
           else
-            {:ok, %{"role" => "assistant", "content" => "Success after retry"}}
+            {:ok, %{"role" => "assistant", "content" => "Success after retry"}, nil}
           end
 
         :always_fail ->
           {:error, {:http_error, 429, "Rate limited"}}
 
         :success ->
-          {:ok, %{"role" => "assistant", "content" => "Success with #{config[:name]}"}}
+          {:ok, %{"role" => "assistant", "content" => "Success with #{config[:name]}"}, nil}
       end
     end
 
@@ -83,7 +83,7 @@ defmodule Pincer.LLM.ReactiveClientTest do
     # (instead of waiting for the initial 2s backoff)
     result = Task.await(task, 1000)
 
-    assert {:ok, %{"content" => "Success with Provider 2"}} = result
+    assert {:ok, %{"content" => "Success with Provider 2"}, _usage} = result
   end
 
   test "concurrent model changes during backoff apply the latest selection" do
@@ -113,6 +113,6 @@ defmodule Pincer.LLM.ReactiveClientTest do
 
     result = Task.await(task, 1000)
 
-    assert {:ok, %{"content" => "Success with Provider 3"}} = result
+    assert {:ok, %{"content" => "Success with Provider 3"}, _usage} = result
   end
 end

@@ -40,7 +40,7 @@ defmodule Pincer.Core.ExecutorHexTest do
         )
 
       # 4. Assert we receive the finished message
-      assert_receive {:executor_finished, _new_history, "Hello from Mock LLM"}, 2000
+      assert_receive {:executor_finished, _new_history, "Hello from Mock LLM", _usage}, 2000
     end
 
     test "executes tools via registry" do
@@ -101,7 +101,7 @@ defmodule Pincer.Core.ExecutorHexTest do
         )
 
       assert_receive {:sme_tool_use, "my_tool"}, 2000
-      assert_receive {:executor_finished, _, "Done"}, 2000
+      assert_receive {:executor_finished, _, "Done", _usage}, 2000
     end
 
     test "auto-sends markdown artifacts created by tool execution" do
@@ -162,7 +162,7 @@ defmodule Pincer.Core.ExecutorHexTest do
       assert markdown_notice =~ rel_path
       assert markdown_notice =~ "# Project Brief"
 
-      assert_receive {:executor_finished, _, "Done"}, 2000
+      assert_receive {:executor_finished, _, "Done", _usage}, 2000
     end
 
     test "does not auto-send markdown notice when no markdown changed" do
@@ -208,7 +208,7 @@ defmodule Pincer.Core.ExecutorHexTest do
         )
 
       refute_receive {:sme_status, :executor, _}, 300
-      assert_receive {:executor_finished, _, "Done"}, 2000
+      assert_receive {:executor_finished, _, "Done", _usage}, 2000
     end
 
     test "accepts tool_call arguments already decoded as map in streamed deltas" do
@@ -259,7 +259,7 @@ defmodule Pincer.Core.ExecutorHexTest do
         )
 
       assert_receive {:sme_tool_use, "web"}, 2000
-      assert_receive {:executor_finished, _, "Done map args"}, 2000
+      assert_receive {:executor_finished, _, "Done map args", _usage}, 2000
       refute_receive {:executor_failed, _}
     end
 
@@ -332,7 +332,7 @@ defmodule Pincer.Core.ExecutorHexTest do
       assert_receive {:approval_requested, "call_restrict_1", "cat /etc/passwd"}, 2000
       send(executor_pid, {:tool_approval, "call_restrict_1", :granted})
 
-      assert_receive {:executor_finished, _, "Done"}, 2000
+      assert_receive {:executor_finished, _, "Done", _usage}, 2000
     end
   end
 end

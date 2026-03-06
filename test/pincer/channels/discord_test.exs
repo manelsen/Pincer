@@ -91,7 +91,7 @@ defmodule Pincer.Channels.DiscordTest do
       APIMock
       |> expect(:bulk_overwrite_global_commands, fn commands ->
         assert is_list(commands)
-        assert length(commands) == 6
+        assert length(commands) == 11
         assert Enum.any?(commands, &(&1.name == "ping"))
         assert Enum.any?(commands, &(&1.name == "menu"))
         assert Enum.any?(commands, &(&1.name == "kanban"))

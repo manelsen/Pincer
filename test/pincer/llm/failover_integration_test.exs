@@ -19,7 +19,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
           {:error, {:http_error, 503, "upstream"}}
 
         {"p2", "x1", :chain_to_provider} ->
-          {:ok, %{"role" => "assistant", "content" => "ok:p2:x1"}}
+          {:ok, %{"role" => "assistant", "content" => "ok:p2:x1"}, nil}
 
         {"p1", "m1", :terminal_401} ->
           {:error, {:http_error, 401, "unauthorized"}}
@@ -32,7 +32,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
     @impl true
     def stream_completion(messages, model, config, tools) do
       case chat_completion(messages, model, config, tools) do
-        {:ok, %{"content" => content}} ->
+        {:ok, %{"content" => content}, _usage} ->
           {:ok, [%{"choices" => [%{"delta" => %{"content" => content}}]}]}
 
         {:error, reason} ->
@@ -51,7 +51,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
 
       case {provider_id, model, config[:scenario]} do
         {"p2", "x1", :stream_chain_to_provider} ->
-          {:ok, %{"role" => "assistant", "content" => "chat-ok:p2:x1"}}
+          {:ok, %{"role" => "assistant", "content" => "chat-ok:p2:x1"}, nil}
 
         {_, _, :stream_chain_to_provider} ->
           {:error, {:http_error, 500, "chat path should not be used"}}
@@ -138,7 +138,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
       }
     })
 
-    assert {:ok, %{"content" => "ok:p2:x1"}} = Client.chat_completion([], provider: "p1")
+    assert {:ok, %{"content" => "ok:p2:x1"}, _usage} = Client.chat_completion([], provider: "p1")
 
     assert_received {:failover_attempt, "p1", "m1"}
     assert_received {:failover_attempt, "p1", "m2"}
@@ -196,7 +196,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
       }
     })
 
-    assert {:ok, %{"content" => "ok:p2:x1"}} = Client.chat_completion([])
+    assert {:ok, %{"content" => "ok:p2:x1"}, _usage} = Client.chat_completion([])
 
     assert_received {:failover_attempt, "p1", "m1"}
     assert_received {:failover_attempt, "p1", "m2"}
@@ -204,7 +204,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
 
     flush_failover_attempts()
 
-    assert {:ok, %{"content" => "ok:p2:x1"}} = Client.chat_completion([])
+    assert {:ok, %{"content" => "ok:p2:x1"}, _usage} = Client.chat_completion([])
 
     # Second request should start directly on p2 because p1 is cooling down.
     assert_received {:failover_attempt, "p2", "x1"}
