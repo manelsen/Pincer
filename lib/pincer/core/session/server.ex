@@ -169,7 +169,7 @@ defmodule Pincer.Core.Session.Server do
 
   # --- Maestro Logic: Processing Blackboard ---
 
-  defp process_blackboard_messages(messages, new_last_id, state, opts \\ []) do
+  defp process_blackboard_messages(messages, new_last_id, state, opts) do
     broadcast? = Keyword.get(opts, :broadcast?, true)
 
     {progress_notifications, progress_tracker, needs_review?} =
