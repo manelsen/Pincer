@@ -229,7 +229,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
     """
 
     case LLM.chat_completion([%{"role" => "system", "content" => archive_instruction}]) do
-      {:ok, %{"content" => new_memory}} ->
+      {:ok, %{"content" => new_memory}, _usage} ->
         clean_memory = sanitize_markdown(new_memory)
         File.write(@memory_file, clean_memory)
         Logger.info("[ARCHIVIST] ✅ MEMORY.md updated!")
@@ -254,7 +254,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
     """
 
     case LLM.chat_completion([%{"role" => "system", "content" => snippet_instruction}]) do
-      {:ok, %{"content" => response}} ->
+      {:ok, %{"content" => response}, _usage} ->
         snippets =
           response
           |> String.split("\n")
@@ -289,7 +289,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
     """
 
     case LLM.chat_completion([%{"role" => "system", "content" => graph_instruction}]) do
-      {:ok, %{"content" => response}} ->
+      {:ok, %{"content" => response}, _usage} ->
         case String.split(response, "BUG_FIX:") do
           [_, data] ->
             [bug, fix, file] = data |> String.split("|") |> Enum.map(&String.trim/1)
