@@ -10,6 +10,7 @@ defmodule Pincer.Core.ChannelInteractionPolicy do
   @type parse_result ::
           {:ok, {:select_provider, String.t()}}
           | {:ok, {:select_model, String.t(), String.t()}}
+          | {:ok, {:page, String.t(), pos_integer()}}
           | {:ok, :back_to_providers}
           | {:ok, :show_menu}
           | {:error, :invalid_payload | :payload_too_large | :invalid_channel}
@@ -84,6 +85,17 @@ defmodule Pincer.Core.ChannelInteractionPolicy do
 
       _ ->
         {:error, :invalid_payload}
+    end
+  end
+
+  defp do_parse("page:" <> rest) do
+    case String.split(rest, ":", parts: 2) do
+      [provider_id, page_str] ->
+        case Integer.parse(page_str) do
+          {page, ""} when page >= 1 -> {:ok, {:page, provider_id, page}}
+          _ -> {:error, :invalid_payload}
+        end
+      _ -> {:error, :invalid_payload}
     end
   end
 
