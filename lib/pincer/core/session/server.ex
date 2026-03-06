@@ -24,6 +24,7 @@ defmodule Pincer.Core.Session.Server do
   @impl true
   def init(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
+    Logger.metadata(session_id: session_id)
     workspace_path = "workspaces/#{session_id}"
     File.mkdir_p!(workspace_path)
 

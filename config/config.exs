@@ -64,11 +64,12 @@ config :pincer, :default_llm_provider, "openrouter"
 
 # Configuração de Logs
 config :logger,
-  level: :info
+  level: :info,
+  colors: [enabled: true, info: :cyan, warn: :yellow, error: :red, debug: :magenta]
 
 config :logger, :console,
-  format: "$time $metadata[$level] $message\n",
-  metadata: [:request_id]
+  format: {Pincer.Utils.LoggerFormatter, :format},
+  metadata: [:session_id, :project_id, :module]
 
 # Handlers de log (Console e Arquivo)
 config :logger, :handlers, [
