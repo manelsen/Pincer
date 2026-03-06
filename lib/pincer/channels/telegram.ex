@@ -761,7 +761,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp has_audio?(message) do
-    is_map(map_value(message, :voice)) or is_map(map_value(message, :audio))
+    is_map(map_value(message, :voice)) or 
+    is_map(map_value(message, :audio)) or 
+    is_map(map_value(message, :video)) or 
+    is_map(map_value(message, :video_note))
   end
 
   defp extract_attachment_parts(message, api_client) do
@@ -775,13 +778,20 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp maybe_collect_audio({text_acc, refs_acc}, message, api_client) do
-    audio_obj = map_value(message, :voice) || map_value(message, :audio)
+    audio_obj = 
+      map_value(message, :voice) || 
+      map_value(message, :audio) || 
+      map_value(message, :video) || 
+      map_value(message, :video_note)
 
     case audio_obj do
       obj when is_map(obj) ->
         file_id = map_value(obj, :file_id)
-        # For audio/voice, we try to transcribe it immediately if a whisper provider is available
-        case handle_audio_transcription(file_id, api_client) do
+        # Check for video types to set proper extension
+        ext = if map_value(message, :video) || map_value(message, :video_note), do: ".mp4", else: ".mp3"
+        
+        # For audio/voice/video, we try to transcribe it immediately if a whisper provider is available
+        case handle_audio_transcription(file_id, ext, api_client) do
           {:ok, transcribed_text} ->
             # Send feedback message so the user can see what was understood
             chat_id = map_value(map_value(message, :chat), :id)
@@ -789,14 +799,14 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
             {text_acc <> "\n" <> transcribed_text, refs_acc}
           _ ->
-            {text_acc <> "\n[Audio content - transcription failed]", refs_acc}
+            {text_acc <> "\n[Media content - transcription failed]", refs_acc}
         end
       _ ->
         {text_acc, refs_acc}
     end
   end
 
-  defp handle_audio_transcription(file_id, api_client) do
+  defp handle_audio_transcription(file_id, ext, api_client) do
     with {:ok, file_path} <- resolve_file_path(api_client, file_id),
          token <- Application.get_env(:telegex, :token),
          url <- "https://api.telegram.org/file/bot#{token}/#{file_path}",
@@ -804,13 +814,13 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       
       case response do
         %{status: 200, body: body} when is_binary(body) ->
-          # Save temp file
-          temp_file = "/tmp/pincer_audio_#{file_id}"
+          # Save temp file with correct extension
+          temp_file = "/tmp/pincer_media_#{file_id}#{ext}"
           File.write!(temp_file, body)
           file_size = byte_size(body)
 
           result = if file_size > @groq_max_audio_bytes do
-            Logger.info("[TELEGRAM] Audio file too large for Groq (#{file_size} bytes). Splitting...")
+            Logger.info("[TELEGRAM] Media file too large for Groq (#{file_size} bytes). Splitting...")
             process_large_audio(temp_file, file_id)
           else
             # Call LLM Port for transcription
