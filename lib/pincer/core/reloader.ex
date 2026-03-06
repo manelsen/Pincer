@@ -108,6 +108,11 @@ defmodule Pincer.Core.Reloader do
     {:noreply, %{state | watcher_pid: nil}}
   end
 
+  def handle_info({:EXIT, pid, :normal}, state) do
+    # Silence normal exits to avoid log noise during reloads
+    {:noreply, state}
+  end
+
   def handle_info({:EXIT, pid, reason}, state) do
     Logger.debug("[RELOADER] Another linked process #{inspect(pid)} exited: #{inspect(reason)}")
     {:noreply, state}
