@@ -43,4 +43,7 @@ defmodule Pincer.LLM.Providers.OpencodeZen do
         error
     end
   end
+
+  @impl true
+  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
 end

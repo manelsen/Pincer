@@ -27,6 +27,9 @@ defmodule Pincer.LLM.Providers.Qwen do
     Pincer.LLM.Providers.OpenAICompat.list_models(config)
   end
 
+  @impl true
+  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
+
   defp normalize_config(config) do
     config =
       config
