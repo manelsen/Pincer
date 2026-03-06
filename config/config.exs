@@ -89,6 +89,8 @@ config :pincer, Pincer.Infra.Repo, log: false
 
 config :pincer, :webhook_token, System.get_env("PINCER_WEBHOOK_TOKEN", "")
 
+config :pincer, :log_mcp, false
+
 config :nostrum,
   token: System.get_env("DISCORD_BOT_TOKEN") || "DISCORD_TOKEN_REQUIRED_FOR_CHANNEL",
   gateway_intents: [:guild_messages, :message_content, :direct_messages]
