@@ -17,7 +17,12 @@ defmodule Pincer.Core.UX do
     %{name: "models", description: "Switch AI provider and model"},
     %{name: "kanban", description: "Show project kanban board"},
     %{name: "project", description: "Open project manager wizard"},
-    %{name: "ping", description: "Health check"}
+    %{name: "ping", description: "Health check"},
+    %{name: "new", description: "Reinicia a sessão atual"},
+    %{name: "reset", description: "Alias para /new"},
+    %{name: "model", description: "Troca o modelo: /model <provider/modelo>"},
+    %{name: "think", description: "Nível de thinking: /think off|low|medium|high"},
+    %{name: "reasoning", description: "Exibir reasoning: /reasoning on|off"}
   ]
 
   @shortcut_routes %{
@@ -38,7 +43,17 @@ defmodule Pincer.Core.UX do
     "help" => "/menu",
     "/help" => "/menu",
     "commands" => "/menu",
-    "/commands" => "/menu"
+    "/commands" => "/menu",
+    "new" => "/new",
+    "/new" => "/new",
+    "reset" => "/new",
+    "/reset" => "/new",
+    "model" => "/model",
+    "/model" => "/model",
+    "think" => "/think",
+    "/think" => "/think",
+    "reasoning" => "/reasoning",
+    "/reasoning" => "/reasoning"
   }
 
   @spec commands() :: [command()]
@@ -54,6 +69,7 @@ defmodule Pincer.Core.UX do
     /kanban - Show session kanban board
     /project - Start/resume project manager wizard
     /ping   - Check if the bot is alive
+    /new    - Reinicia a sessão
 
     Accessibility note:
     - Use short, explicit commands.
