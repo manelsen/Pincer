@@ -84,8 +84,8 @@ defmodule Pincer.Core.Session.Server do
           "[SESSION] #{state.session_id} Caught up with #{length(messages)} missed messages."
         )
 
-        # Processa as mensagens como se tivessem acabado de chegar
-        process_blackboard_messages(messages, new_last_id, state)
+        # Durante o boot, processamos mas NÃO notificamos canais externos (silencioso)
+        process_blackboard_messages(messages, new_last_id, state, broadcast?: false)
     end
   end
 
@@ -116,7 +116,7 @@ defmodule Pincer.Core.Session.Server do
         {:noreply, state}
 
       {messages, new_last_id} ->
-        process_blackboard_messages(messages, new_last_id, state)
+        process_blackboard_messages(messages, new_last_id, state, broadcast?: true)
     end
   end
 
@@ -169,14 +169,18 @@ defmodule Pincer.Core.Session.Server do
 
   # --- Maestro Logic: Processing Blackboard ---
 
-  defp process_blackboard_messages(messages, new_last_id, state) do
+  defp process_blackboard_messages(messages, new_last_id, state, opts \\ []) do
+    broadcast? = Keyword.get(opts, :broadcast?, true)
+
     {progress_notifications, progress_tracker, needs_review?} =
       SubAgentProgress.notifications(messages, state.subagent_progress_tracker)
 
-    # Notifica o usuário sobre o progresso dos operários
-    Enum.each(progress_notifications, fn message ->
-      publish(state.session_id, {:agent_status, message})
-    end)
+    # Notifica o usuário sobre o progresso dos operários (apenas se broadcast for true)
+    if broadcast? do
+      Enum.each(progress_notifications, fn message ->
+        publish(state.session_id, {:agent_status, message})
+      end)
+    end
 
     updates =
       messages
@@ -206,7 +210,8 @@ defmodule Pincer.Core.Session.Server do
     new_history = state.history ++ [system_msg]
 
     # Se estiver ocioso e algo importante aconteceu, o Maestro avalia se deve falar algo
-    if state.status == :idle and needs_review? do
+    # Apenas se broadcast for true (evita que o bot comece a falar sozinho durante o boot)
+    if broadcast? and state.status == :idle and needs_review? do
       Task.start(fn ->
         evaluate_blackboard_update(self(), state.session_id, new_history, state.model_override)
       end)
