@@ -20,7 +20,7 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
 
     if is_nil(api_key) or api_key == "" or is_nil(base_url) or base_url == "" do
       Logger.warning("Incomplete provider configuration for #{__MODULE__}. Using MOCK mode.")
-      {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your API Key."}}
+      {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your API Key."}, nil}
     else
       body = build_request_body(messages, model, tools, config, false)
 
@@ -49,7 +49,7 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     # in production (SSE framing and Req collectable mismatch). For stability,
     # fallback to single-shot completion and convert it into one synthetic stream chunk.
     case chat_completion(messages, model, config, tools) do
-      {:ok, message} ->
+      {:ok, message, _usage} ->
         {:ok, message_to_stream_chunks(message)}
 
       {:error, reason} ->
@@ -180,7 +180,8 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
   defp handle_response(%Req.Response{status: 200, body: body}) do
     case body do
       %{"choices" => [%{"message" => message} | _]} ->
-        {:ok, message}
+        usage = body["usage"]
+        {:ok, message, usage}
 
       error_body when is_map(error_body) ->
         Logger.error("Unexpected response format: #{inspect(error_body)}")
@@ -208,6 +209,56 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
 
       _ ->
         {:error, {:http_error, status, error_msg}}
+    end
+  end
+
+  @impl true
+  def list_models(config) do
+    api_key = config[:api_key]
+    base_url = config[:base_url]
+
+    if is_nil(api_key) or api_key == "" or is_nil(base_url) or base_url == "" do
+      {:ok, ["mock-model"]}
+    else
+      models_url = infer_models_url(base_url)
+      headers = config[:headers] || []
+
+      case Req.get(models_url,
+             auth: {:bearer, api_key},
+             headers: headers,
+             receive_timeout: 10_000,
+             retry: :safe_transient
+           ) do
+        {:ok, %{status: 200, body: %{"data" => data}}} when is_list(data) ->
+          models =
+            data
+            |> Enum.map(& &1["id"])
+            |> Enum.reject(&is_nil/1)
+            |> Enum.sort()
+
+          {:ok, models}
+
+        {:ok, response} ->
+          Logger.warning("[LLM] Unexpected response listing models from #{models_url}: #{response.status}")
+          {:error, :unexpected_response}
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  defp infer_models_url(chat_url) do
+    cond do
+      String.contains?(chat_url, "/chat/completions") ->
+        String.replace(chat_url, "/chat/completions", "/models")
+
+      String.ends_with?(chat_url, "/v1") ->
+        chat_url <> "/models"
+
+      true ->
+        # Fallback assumption
+        chat_url |> String.split("/") |> Enum.slice(0..-2//-1) |> Enum.join("/") |> Kernel.<>("/models")
     end
   end
 
