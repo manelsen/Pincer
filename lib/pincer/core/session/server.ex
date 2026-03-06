@@ -207,6 +207,20 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
+  def handle_info({:system_update_prompt}, state) do
+    Logger.info("[SESSION] #{state.session_id} hot-swapping system prompt...")
+    
+    new_history = case state.history do
+      [%{"role" => "system"} | rest] ->
+        [%{"role" => "system", "content" => get_system_prompt(state)} | rest]
+      other ->
+        other
+    end
+
+    {:noreply, %{state | history: new_history}}
+  end
+
+  @impl true
   def handle_info(msg, state) do
     Logger.debug("[SESSION] #{state.session_id} received unexpected message: #{inspect(msg)}")
     {:noreply, state}
