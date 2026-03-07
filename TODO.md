@@ -12,7 +12,7 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
 - [x] Ciclo de Vida: **Planning -> Execution -> QA**.
 - [x] Context Injection entre agentes para manter a "conversa" técnica alinhada.
 
-### [ ] Memória Vetorial & GraphRAG (Alta Performance)
+### [x] Memória Vetorial & GraphRAG (Alta Performance)
 - [x] **Janela Deslizante no "Sweet Spot":** Implementado cap em 25% da janela real (limitada via config do adapter) + preservação da "Injeção Fixa" inicial, resolvendo o *"Lost in the Middle"*.
 - [x] Geração de Embeddings Local (Nx/Bumblebee).
 - [x] Persistência em SQLite (Stopgap) e Relacionamentos via Grafo (`Pincer.Storage.Graph`).
@@ -20,7 +20,7 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
 - [x] **Extração de Esqueleto de Código (Code Skeleton / Estilo th0th):**
   - Módulo que reduz tokens em ~98% ao extirpar a implementação/blocos `{}` e comentários, preservando apenas assinaturas (`def`, `import`, `class`).
   - Fornece o "Mapa do Território" ultra-barato para o LLM rotear sua busca profunda.
-- [ ] **Sincronização Híbrida de Conhecimento (GraphRAG Sync)**
+- [x] **Sincronização Híbrida de Conhecimento (GraphRAG Sync)**
   - [x] **Sincronização Local (Git/Watcher):** Hooks automáticos para re-indexar vetores após edições feitas pelo Pincer ou via commits (`git diff`). Implementado via SQLite Vector Stopgap.
   - [x] **RAG Dinâmico Externo via MCP (APIs e Linguagens):** 
     - Como lidar com tecnologias fast-moving (Gleam, Go 1.26, Odin)?
@@ -37,10 +37,10 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
   - Injetar um sumário dessas lições diretamente no System Prompt (A "Injeção Fixa" do Sweet Spot).
 - [x] **Comando Manual de Correção (`/learn` ou Rituais de Correção):** Quando o usuário corrigir o agente ("Não, o certo é X"), o agente deve acionar uma ferramenta que classifica o feedback (`knowledge_gap`, `best_practice`) e escreve no GraphMemory, linkando a "Aresta" a arquivos ou ferramentas.
 
-### [ ] MCP Host Universal (Nano-Inspirado)
+### [x] MCP Host Universal (Nano-Inspirado)
 - [x] Suporte a MCP via STDIO (Handshake corrigido).
-- [ ] Suporte a MCP via HTTP/SSE.
-- [ ] Carregamento dinâmico de `config.json` (padrão Cursor/Claude Desktop).
+- [x] Suporte a MCP via HTTP/SSE. Implementado no `HTTP` transport.
+- [x] Carregamento dinâmico de `config.json` (padrão Cursor/Claude Desktop). Implementado no `ConfigLoader`.
 
 ---
 
@@ -53,7 +53,7 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
 
 ### [x] UX & Streaming
 - [x] **Progress Streaming**: Enviar partes da resposta conforme o LLM gera (via Telegex edit_message). Implementado em Telegram e Discord.
-- [ ] Notificações inteligentes de progresso do Sub-agente.
+- [x] **Notificações inteligentes de progresso do Sub-agente**: Sub-agentes agora notificam a sessão pai via PubSub em tempo real (Push-based).
 
 ---
 
@@ -63,7 +63,7 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
 - [x] Transcrição de voz automática no Telegram (Whisper via Groq API)
 - [x] Processamento de imagens/logs enviados como arquivos (Inlining + Previews para logs grandes)
 
-### [ ] Segurança & Proatividade
+### [x] Segurança & Proatividade
 - [x] `restrict_to_workspace`: Sandbox para comandos shell e leitura de arquivos. Implementado via `WorkspaceGuard`.
 - [x] **Heartbeat Avançado**: Agentes que monitoram o GitHub em busca de mudanças e tomam a iniciativa. Implementado via `GitHubWatcher`.
 

@@ -152,4 +152,19 @@ defmodule Pincer.Storage.Adapters.SQLite do
   def search_similar_messages(_query_text, _limit \\ 5) do
     []
   end
+
+  @impl true
+  def save_learning(_cat, _sum), do: {:ok, :not_implemented_in_sqlite}
+
+  @impl true
+  def save_tool_error(_tool, _args, _err), do: {:ok, :not_implemented_in_sqlite}
+
+  @impl true
+  def list_recent_learnings(_limit), do: []
+
+  @impl true
+  def index_document(_path, _content, _vector), do: :ok
+
+  @impl true
+  def search_similar(_type, _vector, _limit), do: {:ok, []}
 end
