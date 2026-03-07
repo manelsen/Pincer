@@ -11,7 +11,7 @@ defmodule Pincer.Core.Reloader do
 
   @impl true
   def init(_opts) do
-    # Força o início da aplicação de monitoramento de arquivos
+    # Ensure the file-system monitoring application is started
     Application.ensure_all_started(:file_system)
     fs_module = Module.concat([FileSystem])
     
@@ -21,7 +21,7 @@ defmodule Pincer.Core.Reloader do
       # Trap exits so we don't die if the watcher dies
       Process.flag(:trap_exit, true)
 
-      # Usa o diretório absoluto do projeto
+      # Use the project's absolute directory
       root_path = File.cwd!()
       lib_path = Path.join(root_path, "lib")
       Logger.info("[RELOADER] Watching path: #{lib_path}")

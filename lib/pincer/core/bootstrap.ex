@@ -28,18 +28,31 @@ defmodule Pincer.Core.Bootstrap do
     }
   ]
 
+  @doc "Returns the full list of bootstrap identity questions."
   def questions, do: @questions
+
+  @doc "Returns the first question in the bootstrap sequence."
   def first_question, do: List.first(@questions)
 
+  @doc "Returns the next question after `current_id`, or `nil` if at the end."
   def next_question(current_id) do
     index = Enum.find_index(@questions, fn q -> q.id == current_id end)
     Enum.at(@questions, index + 1)
   end
 
+  @doc "Returns `true` if `current_id` is the last question in the sequence."
   def last_question?(current_id) do
     List.last(@questions).id == current_id
   end
 
+  @doc """
+  Consolidates user responses into persona files via LLM.
+
+  Sends the collected bootstrap answers to the LLM to generate
+  IDENTITY.md, SOUL.md, and USER.md as a JSON map.
+
+  Returns `{:ok, %{"identity" => ..., "soul" => ..., "user" => ...}}` or `{:error, reason}`.
+  """
   def consolidate(responses) do
     prompt = """
     You are a Systems and Behavior Architect. Your mission is to forge the identity of an Elixir Agent called Pincer.

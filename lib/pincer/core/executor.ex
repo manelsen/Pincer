@@ -729,8 +729,8 @@ defmodule Pincer.Core.Executor do
       %{
         "type" => "text",
         "text" =>
-          "[Arquivo: #{filename} — #{size} bytes — maior que o limite de inlining (#{@max_inline_bytes} bytes). " <>
-            "Use uma ferramenta de leitura de arquivos ou reduza o tamanho do documento.]"
+          "[File: #{filename} — #{size} bytes — exceeds inline limit (#{@max_inline_bytes} bytes). " <>
+            "Use a file-reading tool or reduce the document size.]"
       }
     else
       case download_as_base64(url) do
@@ -743,7 +743,7 @@ defmodule Pincer.Core.Executor do
             "[EXECUTOR] Failed to download attachment '#{filename}': #{inspect(reason)}"
           )
 
-          %{"type" => "text", "text" => "[Falha ao baixar '#{filename}': #{inspect(reason)}]"}
+          %{"type" => "text", "text" => "[Failed to download '#{filename}': #{inspect(reason)}]"}
       end
     end
   end
@@ -769,8 +769,8 @@ defmodule Pincer.Core.Executor do
     %{
       "type" => "text",
       "text" =>
-        "[Arquivo '#{filename}' (#{size} bytes) não processado — o provider ativo não suporta leitura de arquivos. " <>
-          "Troque para um modelo com suporte multimodal (ex: Gemini) para ler PDFs e imagens.]"
+        "[File '#{filename}' (#{size} bytes) not processed — the active provider does not support file reading. " <>
+          "Switch to a multimodal model (e.g. Gemini) to read PDFs and images.]"
     }
   end
 
@@ -794,12 +794,12 @@ defmodule Pincer.Core.Executor do
             :error ->
               %{
                 "type" => "text",
-                "text" => "[Falha ao decodificar arquivo texto '#{filename}' para UTF-8.]"
+                "text" => "[Failed to decode text file '#{filename}' to UTF-8.]"
               }
           end
 
         {:error, reason} ->
-          %{"type" => "text", "text" => "[Falha ao baixar '#{filename}': #{inspect(reason)}]"}
+          %{"type" => "text", "text" => "[Failed to download '#{filename}': #{inspect(reason)}]"}
       end
     else
       case download_as_base64(url) do
@@ -812,12 +812,12 @@ defmodule Pincer.Core.Executor do
             :error ->
               %{
                 "type" => "text",
-                "text" => "[Falha ao decodificar arquivo texto '#{filename}' para UTF-8.]"
+                "text" => "[Failed to decode text file '#{filename}' to UTF-8.]"
               }
           end
 
         {:error, reason} ->
-          %{"type" => "text", "text" => "[Falha ao baixar '#{filename}': #{inspect(reason)}]"}
+          %{"type" => "text", "text" => "[Failed to download '#{filename}': #{inspect(reason)}]"}
       end
     end
   end

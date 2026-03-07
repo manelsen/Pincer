@@ -1,6 +1,6 @@
 defmodule Pincer.AI.Embeddings do
   @moduledoc """
-  Gerencia o modelo de embeddings local via Nx.Serving.
+  Manages the local embeddings model via Nx.Serving.
   """
   require Logger
 
@@ -8,7 +8,7 @@ defmodule Pincer.AI.Embeddings do
 
   def start_link(_opts) do
     if Code.ensure_loaded?(Bumblebee) do
-      Logger.info("Carregando modelo de embeddings: #{@model_repo}")
+      Logger.info("Loading embeddings model: #{@model_repo}")
       {:ok, model_info} = apply(Bumblebee, :load_model, [{:hf, @model_repo}])
       {:ok, tokenizer} = apply(Bumblebee, :load_tokenizer, [{:hf, @model_repo}])
 
@@ -17,7 +17,7 @@ defmodule Pincer.AI.Embeddings do
 
       apply(Nx.Serving, :start_link, [[serving: serving, name: :pincer_embeddings]])
     else
-      Logger.warning("Bumblebee não está carregado. Embeddings locais desativados.")
+      Logger.warning("Bumblebee is not loaded. Local embeddings disabled.")
       :ignore
     end
   end

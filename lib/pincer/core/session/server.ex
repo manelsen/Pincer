@@ -32,14 +32,14 @@ defmodule Pincer.Core.Session.Server do
 
     AgentPaths.ensure_workspace!(workspace_path, ensure_opts)
 
-    # 1. Recupera mensagens persistidas
+    # 1. Retrieve persisted messages
     persisted = Storage.get_messages(session_id)
 
-    # 2. Inscrição em tópicos PubSub
+    # 2. Subscribe to PubSub topics
     PubSub.subscribe("session:#{session_id}")
     PubSub.subscribe("system:updates")
 
-    # 3. Estado inicial
+    # 3. Initial state
     state = %{
       mode: :normal,
       session_id: session_id,
@@ -63,7 +63,7 @@ defmodule Pincer.Core.Session.Server do
       debounce_timer: nil
     }
 
-    # 4. Carrega histórico final
+    # 4. Build final history
     history =
       if Enum.empty?(persisted),
         do: [%{"role" => "system", "content" => get_system_prompt(state)}],
@@ -71,15 +71,15 @@ defmodule Pincer.Core.Session.Server do
 
     state = %{state | history: history}
 
-    # 5. Catch-up assíncrono para não travar o boot
+    # 5. Asynchronous catch-up to avoid blocking boot
     send(self(), :recovery_catch_up)
 
-    # 6. Bootstrap Handshake (se for a primeira vez ou BOOTSTRAP.md existir)
+    # 6. Bootstrap Handshake (first-time session or BOOTSTRAP.md still active)
     if Enum.empty?(persisted) and bootstrap_active?(workspace_path) do
       send(self(), :trigger_bootstrap)
     end
 
-    # 7. Heartbeat para manter Blackboard atualizado
+    # 7. Heartbeat for periodic Blackboard polling
     Process.send_after(self(), :heartbeat, 5000)
 
     {:ok, state}
@@ -91,7 +91,7 @@ defmodule Pincer.Core.Session.Server do
   def handle_info(:recovery_catch_up, state) do
     Logger.info("[SESSION] #{state.session_id} Maestro performing recovery catch-up...")
 
-    # Lê tudo do Blackboard que aconteceu desde a última vez que este agente esteve vivo
+    # Read everything from Blackboard that happened since this agent was last alive
     case Blackboard.fetch_new(state.last_blackboard_id, scope: state.blackboard_scope) do
       {[], _} ->
         {:noreply, state}
@@ -101,15 +101,15 @@ defmodule Pincer.Core.Session.Server do
           "[SESSION] #{state.session_id} Caught up with #{length(messages)} missed messages."
         )
 
-        # Durante o boot, processamos mas NÃO notificamos canais externos (silencioso)
+        # During boot, process silently without broadcasting to external channels
         process_blackboard_messages(messages, new_last_id, state, broadcast?: false)
     end
   end
 
   @impl true
   def handle_info(:trigger_bootstrap, state) do
-    # Deixamos o próprio LLM decidir como se apresentar baseado no BOOTSTRAP.md
-    # mas forçamos um início se o histórico estiver vazio
+    # Let the LLM decide how to introduce itself based on BOOTSTRAP.md;
+    # force a start if the history is empty
     history_with_prompt = [%{"role" => "system", "content" => get_system_prompt(state)}]
 
     Task.start(fn ->
@@ -149,7 +149,7 @@ defmodule Pincer.Core.Session.Server do
     usage = usage || %{}
     persist_assistant_response(state.session_id, response)
 
-    # Normaliza chaves do usage (podem vir como strings ou átomos dependendo do provedor/mock)
+    # Normalize usage keys (may arrive as strings or atoms depending on provider/mock)
     prompt_tokens = usage["prompt_tokens"] || usage[:prompt_tokens] || 0
     completion_tokens = usage["completion_tokens"] || usage[:completion_tokens] || 0
 
@@ -178,8 +178,8 @@ defmodule Pincer.Core.Session.Server do
 
   @impl true
   def handle_info({:agent_response, _content, _usage}, state) do
-    # Ignora a cópia do broadcast que volta via PubSub, 
-    # já que o histórico é atualizado via :assistant_reply_finished ou :executor_finished
+    # Ignore the broadcast copy returned via PubSub;
+    # history is already updated via :assistant_reply_finished or :executor_finished
     {:noreply, state}
   end
 
@@ -203,17 +203,17 @@ defmodule Pincer.Core.Session.Server do
         Task.start(fn ->
           case Pincer.Core.ProjectRouter.handle_command(cmd, args, state.session_id) do
             {:ok, id} ->
-              publish(state.session_id, {:agent_response, "🚀 Projeto iniciado com ID: `#{id}`"})
+              publish(state.session_id, {:agent_response, "🚀 Project started with ID: `#{id}`"})
 
             _ ->
-              publish(state.session_id, {:agent_response, "✅ Comando #{cmd} executado."})
+              publish(state.session_id, {:agent_response, "✅ Command #{cmd} executed."})
           end
         end)
 
         {:noreply, state}
 
       :error ->
-        # Lógica padrão de chat (Butler ou Executor)
+        # Standard chat logic (Butler or Executor)
         case process_standard_input(combined_input, state) do
           {:reply, _reply, new_state} -> {:noreply, new_state}
           _ -> {:noreply, state}
@@ -223,7 +223,7 @@ defmodule Pincer.Core.Session.Server do
 
   @impl true
   def handle_info({:agent_status, _status}, state) do
-    # Ignora atualizações de status (ex: "Digitando...") no servidor de sessão
+    # Ignore status updates (e.g. "Typing...") at the session server level
     {:noreply, state}
   end
 
@@ -292,7 +292,7 @@ defmodule Pincer.Core.Session.Server do
     {progress_notifications, progress_tracker, needs_review?} =
       SubAgentProgress.notifications(messages, state.subagent_progress_tracker)
 
-    # Notifica o usuário sobre o progresso dos operários (apenas se broadcast for true)
+    # Notify the user about sub-agent progress (only when broadcasting is enabled)
     if broadcast? do
       Enum.each(progress_notifications, fn message ->
         publish(state.session_id, {:agent_status, message})
@@ -306,12 +306,12 @@ defmodule Pincer.Core.Session.Server do
           String.contains?(msg.content, "PLAN_GENERATED:") ->
             plan = String.replace(msg.content, "PLAN_GENERATED:\n", "")
 
-            "📋 **Plano de Projeto Sugerido (#{msg.project_id})**:\n#{plan}\n\nPara prosseguir, use:\n`/project approve #{msg.project_id}`\nOu modifique com:\n`/project modify #{msg.project_id} <novas tarefas>`"
+            "📋 **Suggested Project Plan (#{msg.project_id})**:\n#{plan}\n\nTo proceed, use:\n`/project approve #{msg.project_id}`\nOr modify with:\n`/project modify #{msg.project_id} <new tasks>`"
 
           String.contains?(msg.content, "ERROR_DIAGNOSTIC:") ->
             reason = String.replace(msg.content, "ERROR_DIAGNOSTIC: ", "")
 
-            "❌ **FALHA CRÍTICA NO PROJETO (#{msg.project_id})**\nO agente esgotou as tentativas de execução.\n\n**Motivo Detectado:**\n`#{reason}`\n\nVocê pode:\n1. `/project resume #{msg.project_id}` (Tentar novamente)\n2. `/project modify #{msg.project_id} <plano>` (Corrigir a rota)\n3. `/project stop #{msg.project_id}`"
+            "❌ **CRITICAL PROJECT FAILURE (#{msg.project_id})**\nThe agent exhausted all execution attempts.\n\n**Detected Reason:**\n`#{reason}`\n\nYou can:\n1. `/project resume #{msg.project_id}` (Retry)\n2. `/project modify #{msg.project_id} <plan>` (Change course)\n3. `/project stop #{msg.project_id}`"
 
           true ->
             "[#{msg.project_id || "GLOBAL"}]: #{msg.content}"
@@ -326,8 +326,8 @@ defmodule Pincer.Core.Session.Server do
 
     new_history = state.history ++ [system_msg]
 
-    # Se estiver ocioso e algo importante aconteceu, o Maestro avalia se deve falar algo
-    # Apenas se broadcast for true (evita que o bot comece a falar sozinho durante o boot)
+    # If idle and something important happened, the Maestro evaluates whether to speak up
+    # Only when broadcasting (prevents the bot from talking unprompted during boot)
     if broadcast? and state.status == :idle and needs_review? do
       Task.start(fn ->
         evaluate_blackboard_update(self(), state.session_id, new_history, state.model_override)
@@ -354,13 +354,13 @@ defmodule Pincer.Core.Session.Server do
   def handle_call(:reset, _from, state) do
     Logger.info("[SESSION] #{state.session_id} resetting history...")
 
-    # 1. Limpa SQLite
+    # 1. Clear SQLite
     Pincer.Ports.Storage.delete_messages(state.session_id)
 
-    # 2. Reseta RAM (mantém apenas o system prompt inicial)
+    # 2. Reset RAM (keep only the initial system prompt)
     new_history = [%{"role" => "system", "content" => get_system_prompt(state)}]
 
-    # 3. Dispara Bootstrap novamente somente se a identidade ainda nao existe
+    # 3. Re-trigger Bootstrap only if identity files do not exist yet
     if bootstrap_active?(state.workspace_path) do
       send(self(), :trigger_bootstrap)
     end
@@ -491,7 +491,7 @@ defmodule Pincer.Core.Session.Server do
     PubSub.broadcast("session:#{session_id}", event)
   end
 
-  # (Restante das funções auxiliares mantidas para compatibilidade...)
+  # (Remaining helper functions kept for compatibility...)
   # get_system_prompt, content_to_text, is_just_chat?, quick_assistant_reply, evaluate_blackboard_update, etc.
 
   defp get_system_prompt(state) do
@@ -561,7 +561,7 @@ defmodule Pincer.Core.Session.Server do
   defp is_just_chat?(input) do
     normalized = String.downcase(String.trim(input))
 
-    # Verbos de ação ou comandos técnicos não devem ser "just chat"
+    # Action verbs or technical commands should not be treated as "just chat"
     technical_intent? =
       String.match?(
         normalized,
@@ -571,7 +571,7 @@ defmodule Pincer.Core.Session.Server do
     cond do
       technical_intent? -> false
       String.length(input) < 8 -> true
-      normalized in ["oi", "ola", "ping", "hello", "hi", "hey", "bão?", "bão?"] -> true
+      normalized in ["oi", "ola", "ping", "hello", "hi", "hey"] -> true
       true -> false
     end
   end
@@ -588,7 +588,7 @@ defmodule Pincer.Core.Session.Server do
   end
 
   defp evaluate_blackboard_update(pid, sid, hist, mo) do
-    # Simula avaliação se o usuário deve ser interrompido
+    # Evaluate whether the user should be interrupted with new information
     case LLM.chat_completion(hist, if(mo, do: [provider: mo.provider, model: mo.model], else: [])) do
       {:ok, %{"content" => resp}, usage} ->
         if String.upcase(resp) != "IGNORE" do

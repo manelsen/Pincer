@@ -1229,10 +1229,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
     case Pincer.Core.Session.Server.reset(session_id) do
       :ok ->
-        Pincer.Channels.Telegram.send_message(chat_id, "🔄 Sessão reiniciada.")
+        Pincer.Channels.Telegram.send_message(chat_id, "🔄 Session reset.")
 
       _ ->
-        Pincer.Channels.Telegram.send_message(chat_id, "❌ Não foi possível reiniciar a sessão.")
+        Pincer.Channels.Telegram.send_message(chat_id, "❌ Could not reset the session.")
     end
   end
 
@@ -1287,7 +1287,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     case String.trim(text) |> String.downcase() do
       "on" ->
         Pincer.Core.Session.Server.set_reasoning_visible(session_id, true)
-        Pincer.Channels.Telegram.send_message(chat_id, "👁 Reasoning: visível")
+        Pincer.Channels.Telegram.send_message(chat_id, "👁 Reasoning: visible")
 
       "off" ->
         Pincer.Core.Session.Server.set_reasoning_visible(session_id, false)
@@ -1366,7 +1366,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
           edit_callback_message(
             chat_id,
             message_id,
-            "🤖 <b>Modelos de #{provider_id} (página #{page}):</b>",
+            "🤖 <b>Models from #{provider_id} (page #{page}):</b>",
             reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: buttons},
             parse_mode: "HTML"
           )
