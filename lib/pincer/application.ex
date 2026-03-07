@@ -129,8 +129,7 @@ defmodule Pincer.Application do
       Pincer.Channels.Supervisor,
       Pincer.Channels.Telegram.SessionSupervisor,
       Pincer.Channels.Discord.SessionSupervisor,
-      Pincer.Channels.WhatsApp.SessionSupervisor,
-      Pincer.Core.Reloader
+      Pincer.Channels.WhatsApp.SessionSupervisor
     ]
 
     children =
@@ -143,6 +142,14 @@ defmodule Pincer.Application do
     children =
       if Application.get_env(:pincer, :enable_heartbeat_watchers, true) do
         children ++ [Pincer.Core.Heartbeat.GitHubWatcher]
+      else
+        children
+      end
+
+    # Only start Code Reloader in dev env
+    children =
+      if Mix.env() == :dev do
+        children ++ [Pincer.Core.Reloader]
       else
         children
       end

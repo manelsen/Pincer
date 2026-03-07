@@ -34,10 +34,20 @@ defmodule Pincer.Core.OnboardTest do
       assert {:ok, plan} = Onboard.plan(Onboard.defaults(), capabilities: ["workspace_dirs"])
 
       assert {:mkdir_p, "db"} in plan
+      assert {:mkdir_p, "workspaces"} in plan
       assert {:mkdir_p, "sessions"} in plan
       assert {:mkdir_p, "memory"} in plan
-      refute Enum.any?(plan, &match?({:write_if_missing, "MEMORY.md", _}, &1))
-      refute Enum.any?(plan, &match?({:write_if_missing, "HISTORY.md", _}, &1))
+
+      refute Enum.any?(
+               plan,
+               &match?({:write_if_missing, "workspaces/.template/.pincer/MEMORY.md", _}, &1)
+             )
+
+      refute Enum.any?(
+               plan,
+               &match?({:write_if_missing, "workspaces/.template/.pincer/HISTORY.md", _}, &1)
+             )
+
       refute Enum.any?(plan, &match?({:write_config_yaml, "config.yaml", _}, &1))
     end
 
@@ -62,11 +72,13 @@ defmodule Pincer.Core.OnboardTest do
       assert is_map(report)
 
       assert File.dir?(Path.join(tmp, "db"))
+      assert File.dir?(Path.join(tmp, "workspaces"))
       assert File.dir?(Path.join(tmp, "sessions"))
       assert File.dir?(Path.join(tmp, "memory"))
       assert File.exists?(Path.join(tmp, "config.yaml"))
-      assert File.exists?(Path.join(tmp, "MEMORY.md"))
-      assert File.exists?(Path.join(tmp, "HISTORY.md"))
+      assert File.exists?(Path.join(tmp, "workspaces/.template/.pincer/BOOTSTRAP.md"))
+      assert File.exists?(Path.join(tmp, "workspaces/.template/.pincer/MEMORY.md"))
+      assert File.exists?(Path.join(tmp, "workspaces/.template/.pincer/HISTORY.md"))
 
       {:ok, config} = YamlElixir.read_from_file(Path.join(tmp, "config.yaml"))
       assert config["database"]["database"] == "db/pincer_mvp.db"
