@@ -18,11 +18,11 @@ defmodule Pincer.Core.UX do
     %{name: "kanban", description: "Show project kanban board"},
     %{name: "project", description: "Open project manager wizard"},
     %{name: "ping", description: "Health check"},
-    %{name: "new", description: "Reinicia a sessão atual"},
-    %{name: "reset", description: "Alias para /new"},
-    %{name: "model", description: "Troca o modelo: /model <provider/modelo>"},
-    %{name: "think", description: "Nível de thinking: /think off|low|medium|high"},
-    %{name: "reasoning", description: "Exibir reasoning: /reasoning on|off"}
+    %{name: "new", description: "Reset the current session"},
+    %{name: "reset", description: "Alias for /new"},
+    %{name: "model", description: "Switch model: /model <provider/model>"},
+    %{name: "think", description: "Thinking level: /think off|low|medium|high"},
+    %{name: "reasoning", description: "Show reasoning: /reasoning on|off"}
   ]
 
   @shortcut_routes %{
@@ -56,9 +56,11 @@ defmodule Pincer.Core.UX do
     "/reasoning" => "/reasoning"
   }
 
+  @doc "Returns the list of available commands with descriptions."
   @spec commands() :: [command()]
   def commands, do: @commands
 
+  @doc "Returns the formatted help text for a given channel."
   @spec help_text(atom()) :: String.t()
   def help_text(_channel \\ :generic) do
     """
@@ -69,7 +71,7 @@ defmodule Pincer.Core.UX do
     /kanban - Show session kanban board
     /project - Start/resume project manager wizard
     /ping   - Check if the bot is alive
-    /new    - Reinicia a sessão
+    /new    - Reset the session
 
     Accessibility note:
     - Use short, explicit commands.
@@ -79,6 +81,11 @@ defmodule Pincer.Core.UX do
     |> String.trim()
   end
 
+  @doc """
+  Resolves a user's text input to a known shortcut command.
+
+  Returns `{:ok, command}` if recognized, `:error` otherwise.
+  """
   @spec resolve_shortcut(String.t()) :: shortcut_result()
   def resolve_shortcut(input) when is_binary(input) do
     normalized =
@@ -103,16 +110,19 @@ defmodule Pincer.Core.UX do
 
   def resolve_shortcut(_), do: :error
 
+  @doc "Returns a hint message for unrecognized slash commands."
   @spec unknown_command_hint() :: String.t()
   def unknown_command_hint do
     "Use /menu, /status, /models, /kanban, /project or /ping."
   end
 
+  @doc "Returns a hint message for unknown or expired menu interactions."
   @spec unknown_interaction_hint() :: String.t()
   def unknown_interaction_hint do
     "Unknown or expired menu action. Use /menu."
   end
 
+  @doc "Returns the label used for the persistent menu button in channel adapters."
   @spec menu_button_label() :: String.t()
   def menu_button_label, do: "Menu"
 end

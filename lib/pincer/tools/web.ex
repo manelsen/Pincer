@@ -57,7 +57,7 @@ defmodule Pincer.Adapters.Tools.Web do
   def spec do
     %{
       name: "web",
-      description: "Ferramentas web para busca e extração de conteúdo.",
+      description: "Web tools for search and content extraction.",
       parameters: %{
         type: "object",
         properties: %{

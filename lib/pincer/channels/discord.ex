@@ -203,7 +203,7 @@ defmodule Pincer.Channels.Discord do
           file = %{name: filename, body: code}
 
           remaining_text =
-            String.replace(text, full_block, "\n📎 *[Conteúdo enviado no anexo: #{filename}]*")
+            String.replace(text, full_block, "\n📎 *[Content sent in attachment: #{filename}]*")
 
           auto_attach_files(remaining_text, existing_files ++ [file])
 
@@ -569,12 +569,12 @@ defmodule Pincer.Channels.Discord do
 
       case Pincer.Core.Session.Server.reset(session_id) do
         :ok ->
-          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔄 Sessão reiniciada.")
+          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔄 Session reset.")
 
         _ ->
           Pincer.Channels.Discord.send_message(
             "#{msg.channel_id}",
-            "❌ Não foi possível reiniciar a sessão."
+            "❌ Could not reset the session."
           )
       end
     end
@@ -644,7 +644,7 @@ defmodule Pincer.Channels.Discord do
       case String.trim(text) |> String.downcase() do
         "on" ->
           Pincer.Core.Session.Server.set_reasoning_visible(session_id, true)
-          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "👁 Reasoning: visível")
+          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "👁 Reasoning: visible")
 
         "off" ->
           Pincer.Core.Session.Server.set_reasoning_visible(session_id, false)
@@ -1144,7 +1144,7 @@ defmodule Pincer.Channels.Discord do
             {texts, refs ++ [ref]}
 
           true ->
-            {texts <> "\n\n" <> meta <> " (formato não suportado)", refs}
+            {texts <> "\n\n" <> meta <> " (unsupported format)", refs}
         end
       end)
     end

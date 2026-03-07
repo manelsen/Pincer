@@ -1,5 +1,5 @@
 defmodule Pincer.Core.UX.ModelKeyboard do
-  @moduledoc "Módulo de paginação de botões de modelo"
+  @moduledoc "Model button pagination module for channel keyboards."
 
   alias Pincer.Core.ChannelInteractionPolicy
 
@@ -73,8 +73,8 @@ defmodule Pincer.Core.UX.ModelKeyboard do
     back_row = case ChannelInteractionPolicy.back_to_providers_id(channel) do
       {:ok, cb} -> 
         case channel do
-          :telegram -> [[%{text: "⬅️ Voltar", callback_data: cb}]]
-          :discord -> [[%{type: 2, style: 2, label: "⬅️ Voltar", custom_id: cb}]]
+          :telegram -> [[%{text: "⬅️ Back", callback_data: cb}]]
+          :discord -> [[%{type: 2, style: 2, label: "⬅️ Back", custom_id: cb}]]
         end
       _ -> []
     end
