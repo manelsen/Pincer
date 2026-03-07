@@ -90,10 +90,9 @@ defmodule Pincer.Core.Orchestration.Archivist do
 
   use GenServer
   require Logger
+  alias Pincer.Core.AgentPaths
   alias Pincer.Core.Memory
   alias Pincer.Ports.LLM
-
-  @memory_file "MEMORY.md"
 
   @type option :: any()
   @type state :: keyword()
@@ -151,10 +150,10 @@ defmodule Pincer.Core.Orchestration.Archivist do
   - Knowledge snippets are stored in LanceDB
   - Bug fix relationships are stored in Graph DB
   """
-  @spec start_consolidation(String.t(), list()) :: {:ok, pid()}
-  def start_consolidation(session_id, history) do
+  @spec start_consolidation(String.t(), list(), keyword()) :: {:ok, pid()}
+  def start_consolidation(session_id, history, opts \\ []) do
     Task.start(fn ->
-      consolidate(session_id, history)
+      consolidate(session_id, history, opts)
     end)
   end
 
@@ -185,21 +184,28 @@ defmodule Pincer.Core.Orchestration.Archivist do
 
     * `:ok` - Consolidation completed (or skipped if file not found)
   """
-  @spec consolidate(String.t(), list()) :: :ok
-  def consolidate(session_id, _history) do
+  @spec consolidate(String.t(), list(), keyword()) :: :ok
+  def consolidate(session_id, _history, opts \\ []) do
     Logger.info("[ARCHIVIST] 📚 Starting consolidation for Session #{session_id}")
 
-    filename = "sessions/session_#{session_id}.md"
+    workspace_path = Keyword.get(opts, :workspace_path, AgentPaths.workspace_root(session_id))
+    filename = AgentPaths.session_log_path(workspace_path, session_id)
+    memory_path = AgentPaths.memory_path(workspace_path)
+    history_path = AgentPaths.history_path(workspace_path)
 
     if File.exists?(filename) do
       content = File.read!(filename)
 
       current_memory =
-        if File.exists?(@memory_file), do: File.read!(@memory_file), else: "(Empty)"
+        if File.exists?(memory_path), do: File.read!(memory_path), else: "(Empty)"
 
-      update_narrative_memory(content, current_memory)
+      update_narrative_memory(content, current_memory, memory_path)
 
-      case Memory.record_session(content, session_id: session_id) do
+      case Memory.record_session(content,
+             session_id: session_id,
+             history_path: history_path,
+             memory_path: memory_path
+           ) do
         {:ok, _report} ->
           :ok
 
@@ -214,7 +220,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
     end
   end
 
-  defp update_narrative_memory(content, current_memory) do
+  defp update_narrative_memory(content, current_memory, memory_path) do
     archive_instruction = """
     You are the ARCHIVIST. Read the session and update MEMORY.md with new facts.
     IGNORE trivial conversations. Keep it concise.
@@ -231,7 +237,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
     case LLM.chat_completion([%{"role" => "system", "content" => archive_instruction}]) do
       {:ok, %{"content" => new_memory}, _usage} ->
         clean_memory = sanitize_markdown(new_memory)
-        File.write(@memory_file, clean_memory)
+        File.write(memory_path, clean_memory)
         Logger.info("[ARCHIVIST] ✅ MEMORY.md updated!")
 
       _ ->
