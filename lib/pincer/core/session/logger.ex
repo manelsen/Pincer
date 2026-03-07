@@ -67,6 +67,8 @@ defmodule Pincer.Core.Session.Logger do
   """
   require Logger
 
+  alias Pincer.Core.AgentPaths
+
   @sessions_dir "sessions"
 
   @type session_id :: String.t()
@@ -107,12 +109,14 @@ defmodule Pincer.Core.Session.Logger do
     * Creates `sessions/` directory if it doesn't exist
     * Creates or appends to `sessions/session_{sanitized_id}.md`
   """
-  @spec log(session_id(), role(), content()) :: :ok | {:error, term()}
-  def log(session_id, role, content) do
-    ensure_dir_exists()
+  @spec log(session_id(), role(), content(), keyword()) :: :ok | {:error, term()}
+  def log(session_id, role, content, opts \\ []) do
+    workspace_path = Keyword.get(opts, :workspace_path)
+
+    ensure_dir_exists(workspace_path)
 
     timestamp = DateTime.utc_now() |> DateTime.to_string()
-    filename = get_filename(session_id)
+    filename = get_filename(session_id, workspace_path)
 
     entry = """
 
@@ -127,15 +131,23 @@ defmodule Pincer.Core.Session.Logger do
   end
 
   @doc false
-  @spec ensure_dir_exists() :: :ok
-  defp ensure_dir_exists do
+  @spec ensure_dir_exists(String.t() | nil) :: :ok
+  defp ensure_dir_exists(nil) do
     File.mkdir_p!(@sessions_dir)
   end
 
+  defp ensure_dir_exists(workspace_path) do
+    File.mkdir_p!(AgentPaths.sessions_dir(workspace_path))
+  end
+
   @doc false
-  @spec get_filename(session_id()) :: String.t()
-  defp get_filename(session_id) do
+  @spec get_filename(session_id(), String.t() | nil) :: String.t()
+  defp get_filename(session_id, nil) do
     safe_id = String.replace(session_id, ~r/[^a-zA-Z0-9_-]/, "_")
     Path.join(@sessions_dir, "session_#{safe_id}.md")
+  end
+
+  defp get_filename(session_id, workspace_path) do
+    AgentPaths.session_log_path(workspace_path, session_id)
   end
 end
