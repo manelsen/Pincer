@@ -38,6 +38,14 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
     def get_messages(_id), do: []
     def save_message(_id, _role, _content), do: {:ok, %{}}
     def search_similar_messages(_q, _l), do: []
+    def delete_messages(_id), do: :ok
+    def ingest_bug_fix(_b, _f, _fi), do: :ok
+    def query_history, do: []
+    def save_learning(_c, _s), do: {:ok, :ok}
+    def save_tool_error(_t, _a, _e), do: {:ok, :ok}
+    def list_recent_learnings(_l), do: []
+    def index_document(_p, _c, _v), do: :ok
+    def search_similar(_t, _v, _l), do: {:ok, []}
   end
 
   setup do
