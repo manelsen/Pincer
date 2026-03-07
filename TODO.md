@@ -95,3 +95,60 @@ Ordem de execução por risco (produção + segurança + quebra de contrato):
 10. [x] **P3 Performance/Manutenção**: reduzir `acc ++ ...` em `Enum.reduce`.
 
 Status atual: suíte completa verde (`515 testes + 2 doctests`, `0` falhas).
+
+---
+
+## 🚧 Isolamento de Agentes por Usuário no Mesmo Bot
+
+Objetivo: permitir que usuários diferentes conversem com o mesmo bot do Telegram, mas sejam roteados para agentes raiz distintos, com bootstrap, identidade, memória, logs e coordenação interna sem bleed entre agentes.
+
+- [x] Especificar em `SPECS.md` o contrato de roteamento `telegram user/chat id -> root agent id`, incluindo fallback quando não houver mapeamento.
+- [x] Especificar em `SPECS.md` a garantia de isolamento esperada para identidade, bootstrap, memória, logs, sub-agentes e Blackboard.
+- [x] Definir o shape de configuração em `config.yaml` para mapeamento estável de usuário do Telegram para agente raiz.
+- [x] Implementar parser/normalizador da configuração de mapeamento de agentes no canal Telegram.
+- [x] Implementar resolvedor de `agent_id` raiz para eventos privados do Telegram com fallback compatível ao comportamento atual.
+- [x] Fazer o canal Telegram iniciar a sessão com `session_id` de conversa, mas carregar workspace/blackboard pelo `root_agent_id` resolvido.
+- [x] Garantir que o workspace canônico do agente mapeado seja `workspaces/<agent_id>/.pincer/`.
+- [x] Remover seed de persona a partir de arquivos legados compartilhados da raiz para agentes raiz provisionados por mapeamento explícito.
+- [x] Garantir que um agente novo mapeado comece apenas com scaffold/template controlado e bootstrap local.
+- [x] Particionar o Blackboard por agente raiz ou namespace de sessão para impedir que updates globais de um agente entrem no prompt de outro.
+- [x] Particionar o journal do Blackboard de forma compatível com a nova chave de isolamento.
+- [x] Propagar o namespace de isolamento do agente raiz para sub-agentes, projetos e recovery.
+- [x] Garantir que consolidação do Archivist leia e escreva apenas dentro do workspace do agente raiz correto.
+- [x] Adicionar teste de roteamento Telegram provando `123 -> annie` e `456 -> lucie`.
+- [ ] Adicionar teste de bootstrap provando que Annie e Lucie podem nascer com personas distintas no mesmo bot.
+- [x] Adicionar teste de não-vazamento provando que `IDENTITY/SOUL/USER` de um agente não aparecem no prompt do outro.
+- [x] Adicionar teste de não-vazamento provando que mensagens do Blackboard de um agente não entram no histórico do outro.
+- [x] Adicionar teste de compatibilidade garantindo fallback para `telegram_<chat_id>` quando não houver `agent_map`.
+- [x] Documentar a configuração com exemplo real de casal/usuários distintos no `README.md`.
+- [x] Documentar a estratégia de migração para sessões existentes baseadas em `telegram_<chat_id>`.
+
+## ✅ CLI de Agente Raiz Explícito
+
+- [x] Especificar `mix pincer.agent new <agent_id>` em `SPECS.md`.
+- [x] Implementar task para criar `workspaces/<agent_id>/.pincer/` com scaffold idempotente.
+- [x] Garantir que a criação explícita não copie persona legada da raiz do repositório.
+- [x] Documentar o novo task no `README.md`.
+
+## ✅ Pairing Direcionado por Agente
+
+- [x] Especificar em `SPECS.md` o contrato de `mix pincer.agent pair [agent_id]`.
+- [x] Estender `Pincer.Core.Pairing` para emitir códigos out-of-band genéricos e direcionados.
+- [x] Persistir `sender -> agent_id` no store de pairing.
+- [x] Fazer o `/pair` do Telegram aceitar invites direcionados e genéricos.
+- [x] Fazer DMs pareadas genericamente criarem um novo `agent_id` opaco e vincularem o `principal_ref` ao agente.
+- [x] Fazer o roteamento de sessão do Telegram consultar binding dinâmico após `agent_map`.
+- [x] Garantir que sessões iniciadas por binding dinâmico não copiem persona legada da raiz.
+- [x] Expor `mix pincer.agent pair [agent_id]` no CLI.
+- [x] Cobrir o fluxo com testes de core, task e roteamento.
+- [x] Documentar o fluxo no `README.md`.
+
+## ✅ Identidade Hexagonal de Agente
+
+- [x] Separar `agent_id`, `principal_ref`, `conversation_ref` e `session_id` no core.
+- [x] Introduzir `AgentRegistry`, `Bindings`, `Session.Context` e `SessionResolver`.
+- [x] Fazer `SessionScopePolicy` resolver apenas o `session_id` operacional da conversa.
+- [x] Fazer `Session.Server` carregar persona/workspace/blackboard por `root_agent_id`.
+- [x] Fazer Telegram, Discord e WhatsApp iniciarem sessões com contexto completo.
+- [x] Fazer `mix pincer.agent new` sem argumentos gerar `agent_id` hexadecimal opaco.
+- [x] Fazer pairing genérico criar agentes opacos em vez de `telegram_<chat_id>`.
