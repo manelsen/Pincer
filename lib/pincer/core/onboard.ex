@@ -342,28 +342,21 @@ defmodule Pincer.Core.Onboard do
   end
 
   defp default_memory_md do
-    """
-    # Long-term Memory
-
-    This file stores curated long-term memory for Pincer.
-    """
-    |> String.trim()
-    |> Kernel.<>("\n")
+    Pincer.Core.AgentPaths.default_memory()
   end
 
   defp default_history_md do
-    """
-    # Session History
+    Pincer.Core.AgentPaths.default_history()
+  end
 
-    This file stores structured recent session snapshots before consolidation.
-    """
-    |> String.trim()
-    |> Kernel.<>("\n")
+  defp default_bootstrap_md do
+    Pincer.Core.AgentPaths.default_bootstrap()
   end
 
   defp capability_operations("workspace_dirs", _config) do
     [
       {:mkdir_p, "db"},
+      {:mkdir_p, "workspaces"},
       {:mkdir_p, "sessions"},
       {:mkdir_p, "memory"}
     ]
@@ -371,8 +364,10 @@ defmodule Pincer.Core.Onboard do
 
   defp capability_operations("memory_file", _config) do
     [
-      {:write_if_missing, "MEMORY.md", default_memory_md()},
-      {:write_if_missing, "HISTORY.md", default_history_md()}
+      {:mkdir_p, "workspaces/.template/.pincer"},
+      {:write_if_missing, "workspaces/.template/.pincer/BOOTSTRAP.md", default_bootstrap_md()},
+      {:write_if_missing, "workspaces/.template/.pincer/MEMORY.md", default_memory_md()},
+      {:write_if_missing, "workspaces/.template/.pincer/HISTORY.md", default_history_md()}
     ]
   end
 
