@@ -125,10 +125,11 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   - In production, consider using DynamicSupervisor for better fault tolerance
   """
   @spec execute(%{String.t() => String.t()}) :: execute_result()
-  def execute(%{"goal" => goal}) do
+  def execute(%{"goal" => goal} = args) do
+    parent_session_id = Map.get(args, "session_id")
     id = "agent_" <> (:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower))
 
-    case GenServer.start(SubAgent, goal: goal, id: id) do
+    case GenServer.start(SubAgent, goal: goal, id: id, parent_session_id: parent_session_id) do
       {:ok, _pid} ->
         {:ok, "Sub-Agent detached successfully. ID: #{id}. Monitor the Blackboard for updates."}
 

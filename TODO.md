@@ -65,7 +65,7 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
 
 ### [ ] Segurança & Proatividade
 - [x] `restrict_to_workspace`: Sandbox para comandos shell e leitura de arquivos. Implementado via `WorkspaceGuard`.
-- [ ] **Heartbeat Avançado**: Agentes que monitoram o GitHub em busca de mudanças e tomam a iniciativa.
+- [x] **Heartbeat Avançado**: Agentes que monitoram o GitHub em busca de mudanças e tomam a iniciativa. Implementado via `GitHubWatcher`.
 
 ---
 
