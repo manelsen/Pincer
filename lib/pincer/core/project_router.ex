@@ -15,6 +15,9 @@ defmodule Pincer.Core.ProjectRouter do
       ["/new" | rest] ->
         {:ok, :reset, Enum.join(rest, " ")}
 
+      ["/learn" | rest] ->
+        {:ok, :learn, Enum.join(rest, " ")}
+
       ["/reset" | rest] ->
         {:ok, :reset, Enum.join(rest, " ")}
 
@@ -53,6 +56,9 @@ defmodule Pincer.Core.ProjectRouter do
 
       :reset ->
         handle_reset(session_id, args)
+
+      :learn ->
+        handle_learn(session_id, args)
 
       :start ->
         ProjectOrchestrator.start(session_id, args)
@@ -162,6 +168,17 @@ defmodule Pincer.Core.ProjectRouter do
 
       _ ->
         {:error, "Não foi possível obter o status da sessão."}
+    end
+  end
+
+  defp handle_learn(_session_id, summary) do
+    if String.trim(summary) == "" do
+      {:handled, "Uso: /learn <lição ou regra que o agente deve memorizar>"}
+    else
+      case Pincer.Ports.Storage.save_learning("correction", summary) do
+        {:ok, _} -> {:handled, "✅ Lição memorizada com sucesso no Grafo de Conhecimento."}
+        {:error, e} -> {:handled, "❌ Falha ao memorizar lição: #{inspect(e)}"}
+      end
     end
   end
 end

@@ -156,16 +156,23 @@ defmodule Pincer.Core.Executor do
     long_term_memory = Process.get(:long_term_memory, "")
     current_time = DateTime.utc_now() |> DateTime.to_string()
 
-    # 1. Prune history to stay within context/payload limits
-    {pruned_history, pruned?} = prune_history(history)
-    if pruned?, do: send(session_pid, {:sme_status, :executor, "⚠️ **Context Pruned**: History exceeded 40 messages and was truncated to stay within API limits."})
+    # Determine Sweet Spot token limit based on active provider's context window.
+    # Consensus for complex reasoning ("Lost in the Middle"): cap at ~25% of absolute max.
+    active_provider = get_active_provider(model_override)
+    sweet_spot_limit = 
+      case Pincer.Ports.LLM.provider_config(active_provider) do
+        %{context_window: cw} when is_integer(cw) -> max(1000, trunc(cw * 0.25))
+        _ -> 8_000 # Default safe reasoning fallback
+      end
+
+    # 1. Prune history using the episodic Sweet Spot architecture
+    pruned_history = prune_history(history, sweet_spot_limit)
 
     augmented_history = augment_history(pruned_history, long_term_memory, current_time)
 
     # Resolve lazy attachment_ref parts based on what the active provider supports.
     # We resolve a fresh copy here (not modifying the history kept in state) so that
     # base64-encoded file data never gets persisted back to the session history.
-    active_provider = get_active_provider(model_override)
     ready_history = resolve_lazy_attachments(augmented_history, active_provider)
 
     tools_spec = deps.tool_registry.list_tools()
@@ -224,11 +231,13 @@ defmodule Pincer.Core.Executor do
   defp augment_history(history, memory, time) do
     case history do
       [%{"role" => "system", "content" => content} = sys | rest] ->
+        learnings = fetch_active_learnings()
+
         new_content =
           if memory != "" do
-            "#{content}\n\n### TEMPORAL CONTEXT\nCURRENT TIME: #{time}\n\n### NARRATIVE MEMORY\n#{memory}"
+            "#{content}\n\n### TEMPORAL CONTEXT\nCURRENT TIME: #{time}\n\n### NARRATIVE MEMORY\n#{memory}#{learnings}"
           else
-            "#{content}\n\n### TEMPORAL CONTEXT\nCURRENT TIME: #{time}"
+            "#{content}\n\n### TEMPORAL CONTEXT\nCURRENT TIME: #{time}#{learnings}"
           end
 
         [%{sys | "content" => new_content} | rest]
@@ -238,14 +247,85 @@ defmodule Pincer.Core.Executor do
     end
   end
 
-  @max_history_window 40
+  defp fetch_active_learnings do
+    case Pincer.Ports.Storage.list_recent_learnings(3) do
+      [] ->
+        ""
 
-  defp prune_history(history) when length(history) <= @max_history_window, do: {history, false}
+      learnings ->
+        formatted =
+          Enum.map_join(learnings, "\n", fn l ->
+            case l.type do
+              :error -> "- [AVOID ERROR] Tool `#{l.tool}` failed recently: #{l.error}"
+              :learning -> "- [LESSON] #{l.summary}"
+            end
+          end)
 
-  defp prune_history([system_msg | rest]) do
-    # Keep the system prompt at the beginning, but only take the latest N messages from the rest
-    pruned_rest = Enum.take(rest, -(@max_history_window - 1))
-    {[system_msg | pruned_rest], true}
+        "\n\n### RECENT LEARNINGS & ERRORS (Self-Improvement)\nAvoid repeating these recent mistakes:\n#{formatted}"
+    end
+  end
+
+  # The "Sweet Spot" architecture for complex reasoning:
+  # We preserve the Fixed Injection (System Prompt) and a strict window of recent turns.
+  # "Lost in the Middle" context is dropped. The agent must use GraphMemory to recall old facts.
+  @max_recent_messages 15
+
+  defp prune_history([], _safe_limit), do: []
+
+  defp prune_history([%{"role" => "system"} = system_msg | rest], safe_limit) do
+    # 1. Enforce strict episodic window (drop the "Lost in the Middle")
+    recent_messages =
+      if length(rest) > @max_recent_messages do
+        Enum.drop(rest, length(rest) - @max_recent_messages)
+      else
+        rest
+      end
+
+    # 2. Reverse to process newest messages first for the token cap
+    reversed_recent = Enum.reverse(recent_messages)
+
+    # 3. Accumulate tokens backwards
+    {kept_messages, _tokens} = 
+      Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
+        msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
+        new_total = acc_tokens + msg_tokens
+
+        # We always keep at least one message (the newest one), even if it's huge
+        if new_total <= safe_limit or acc_msgs == [] do
+          {:cont, {[msg | acc_msgs], new_total}}
+        else
+          {:halt, {acc_msgs, acc_tokens}}
+        end
+      end)
+
+    # 4. Reconstruct chronologically (system prompt + kept episodic memory)
+    [system_msg | kept_messages]
+  end
+
+  defp prune_history(history, safe_limit) do
+    # Fallback for histories without a system prompt at the head (usually testing only)
+    recent_messages =
+      if length(history) > @max_recent_messages do
+        Enum.drop(history, length(history) - @max_recent_messages)
+      else
+        history
+      end
+
+    reversed_recent = Enum.reverse(recent_messages)
+
+    {kept_messages, _tokens} = 
+      Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
+        msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
+        new_total = acc_tokens + msg_tokens
+
+        if new_total <= safe_limit or acc_msgs == [] do
+          {:cont, {[msg | acc_msgs], new_total}}
+        else
+          {:halt, {acc_msgs, acc_tokens}}
+        end
+      end)
+
+    kept_messages
   end
 
   defp handle_stream(stream, history, session_id, session_pid, depth, model_override, deps) do
@@ -462,12 +542,23 @@ defmodule Pincer.Core.Executor do
     result =
       case registry.execute_tool(name, args, context) do
         {:ok, c} ->
+          Process.put(:consecutive_errors, 0)
           c
 
         {:error, {:approval_required, cmd}} ->
+          Process.put(:consecutive_errors, 0)
           handle_approval(call_id, cmd, session_pid, session_id, registry)
 
         {:error, r} ->
+          errors = Process.get(:consecutive_errors, 0) + 1
+          Process.put(:consecutive_errors, errors)
+
+          # Auto-capture error if it repeats
+          if errors >= 3 do
+            Logger.warning("[SELF-IMPROVEMENT] Consecutive tool error detected. Capturing to Graph.")
+            Pincer.Ports.Storage.save_tool_error(name, args, inspect(r))
+          end
+
           "Error: #{inspect(r)}"
       end
 
