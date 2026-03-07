@@ -31,17 +31,17 @@ defmodule Pincer.Core.AgentRegistryTest do
 
     assert agent_id =~ ~r/^[0-9a-f]{6}$/
     assert workspace_path == AgentPaths.workspace_root(agent_id)
-    assert File.read!(AgentPaths.bootstrap_path(workspace_path)) == "# Template Bootstrap\n"
-    refute File.exists?(AgentPaths.identity_path(workspace_path))
-    refute File.exists?(AgentPaths.soul_path(workspace_path))
+    assert File.read!(AgentPaths.bootstrap_path(workspace_path)) =~ "BOOTSTRAP"
+    assert File.read!(AgentPaths.identity_path(workspace_path)) =~ "Pincer"
+    assert File.read!(AgentPaths.soul_path(workspace_path)) =~ "Core Truths"
   end
 
-  test "create_root_agent!/1 accepts explicit ids and does not copy legacy persona" do
+  test "create_root_agent!/1 accepts explicit ids" do
     %{agent_id: "annie", workspace_path: workspace_path} =
       AgentRegistry.create_root_agent!(agent_id: "annie")
 
     assert workspace_path == AgentPaths.workspace_root("annie")
-    refute File.exists?(AgentPaths.identity_path(workspace_path))
-    refute File.exists?(AgentPaths.soul_path(workspace_path))
+    assert File.read!(AgentPaths.identity_path(workspace_path)) =~ "Pincer"
+    assert File.read!(AgentPaths.soul_path(workspace_path)) =~ "Core Truths"
   end
 end

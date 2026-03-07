@@ -105,7 +105,7 @@ defmodule Pincer.Channels.WhatsAppTest do
       FakeBridge.emit(bridge_pid, incoming_message(chat_id, "kanban"))
 
       assert_receive {:bridge_send, ^chat_id, response}, 500
-      assert response =~ "Kanban indisponivel para esta sessao"
+      assert response =~ "Kanban unavailable for this session"
       assert response =~ "/project"
     end
   end

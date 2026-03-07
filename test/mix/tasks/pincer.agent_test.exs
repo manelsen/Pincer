@@ -43,7 +43,7 @@ defmodule Mix.Tasks.Pincer.AgentTest do
     :ok
   end
 
-  test "new creates isolated workspace scaffold without copying legacy persona" do
+  test "new creates isolated workspace scaffold" do
     output =
       capture_io(fn ->
         Mix.Task.run(@task, ["new", "annie"])
@@ -51,14 +51,14 @@ defmodule Mix.Tasks.Pincer.AgentTest do
 
     workspace = AgentPaths.workspace_root("annie")
 
-    assert File.read!(AgentPaths.bootstrap_path(workspace)) == "# Template Bootstrap\n"
-    assert File.read!(AgentPaths.memory_path(workspace)) == "# Template Memory\n"
-    assert File.read!(AgentPaths.history_path(workspace)) == "# Template History\n"
+    assert File.read!(AgentPaths.bootstrap_path(workspace)) =~ "BOOTSTRAP"
+    assert File.read!(AgentPaths.memory_path(workspace)) =~ "Long-term Memory"
+    assert File.read!(AgentPaths.history_path(workspace)) =~ "Session History"
     assert File.dir?(AgentPaths.sessions_dir(workspace))
 
-    refute File.exists?(AgentPaths.identity_path(workspace))
-    refute File.exists?(AgentPaths.soul_path(workspace))
-    refute File.exists?(AgentPaths.user_path(workspace))
+    assert File.read!(AgentPaths.identity_path(workspace)) =~ "Pincer"
+    assert File.read!(AgentPaths.soul_path(workspace)) =~ "Core Truths"
+    assert File.read!(AgentPaths.user_path(workspace)) =~ "Context"
 
     assert output =~ "workspaces/annie/.pincer"
   end
