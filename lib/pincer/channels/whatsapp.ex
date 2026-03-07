@@ -12,7 +12,7 @@ defmodule Pincer.Channels.WhatsApp do
   alias Pincer.Core.AccessPolicy
   alias Pincer.Core.Pairing
   alias Pincer.Core.ProjectRouter
-  alias Pincer.Core.SessionScopePolicy
+  alias Pincer.Core.SessionResolver
   alias Pincer.Core.UX
   alias Pincer.Core.Session.Server
 
@@ -49,7 +49,7 @@ defmodule Pincer.Channels.WhatsApp do
            bridge_module: bridge_module,
            bridge_pid: bridge_pid,
            ensure_session_started_fn:
-             read_fun(config, "ensure_session_started_fn", &default_ensure_session_started/1),
+             read_fun(config, "ensure_session_started_fn", &default_ensure_session_started/2),
            ensure_channel_session_fn:
              read_fun(config, "ensure_channel_session_fn", &default_ensure_channel_session/2),
            process_input_fn: read_fun(config, "process_input_fn", &default_process_input/2),
@@ -162,36 +162,38 @@ defmodule Pincer.Channels.WhatsApp do
 
   defp process_incoming(chat_id, sender_id, text, is_group, state) do
     trimmed = String.trim(text)
-    session_id = resolve_session_id(chat_id, is_group, state.config)
+    session_context = resolve_session_context(chat_id, sender_id, is_group, state.config)
+    session_id = session_context.session_id
 
     cond do
       String.starts_with?(trimmed, "/") ->
-        handle_command(chat_id, sender_id, session_id, trimmed, is_group, state)
+        handle_command(chat_id, sender_id, session_context, trimmed, is_group, state)
 
       true ->
         case UX.resolve_shortcut(trimmed) do
           {:ok, command} ->
-            handle_command(chat_id, sender_id, session_id, command, is_group, state)
+            handle_command(chat_id, sender_id, session_context, command, is_group, state)
 
           :error ->
             case ProjectRouter.continue_if_collecting(session_id, trimmed, has_attachments: false) do
               {:handled, response} ->
                 deliver_message(state, chat_id, response)
-                maybe_start_project_execution(chat_id, session_id, state)
+                maybe_start_project_execution(chat_id, session_context, state)
 
               :not_handled ->
-                route_to_session(chat_id, sender_id, session_id, text, is_group, state)
+                route_to_session(chat_id, sender_id, session_context, text, is_group, state)
             end
         end
     end
   end
 
-  defp route_to_session(chat_id, sender_id, session_id, text, is_group, state) do
+  defp route_to_session(chat_id, sender_id, session_context, text, is_group, state) do
     case authorize_dm(sender_id, chat_id, is_group, state.config) do
       :allow ->
-        with :ok <- safe_apply(state.ensure_session_started_fn, [session_id]),
-             :ok <- safe_apply(state.ensure_channel_session_fn, [chat_id, session_id]) do
-          case safe_apply(state.process_input_fn, [session_id, text]) do
+        with :ok <- ensure_session_started(state, session_context),
+             :ok <-
+               safe_apply(state.ensure_channel_session_fn, [chat_id, session_context.session_id]) do
+          case safe_apply(state.process_input_fn, [session_context.session_id, text]) do
             {:ok, :started} ->
               :ok
 
@@ -223,14 +225,15 @@ defmodule Pincer.Channels.WhatsApp do
     end
   end
 
-  defp maybe_start_project_execution(chat_id, session_id, state) do
-    case ProjectRouter.kickoff(session_id) do
+  defp maybe_start_project_execution(chat_id, session_context, state) do
+    case ProjectRouter.kickoff(session_context.session_id) do
       {:ok, kickoff} ->
-        with :ok <- safe_apply(state.ensure_session_started_fn, [session_id]),
-             :ok <- safe_apply(state.ensure_channel_session_fn, [chat_id, session_id]) do
+        with :ok <- ensure_session_started(state, session_context),
+             :ok <-
+               safe_apply(state.ensure_channel_session_fn, [chat_id, session_context.session_id]) do
           deliver_message(state, chat_id, "Project Runner: #{kickoff.status_message}")
 
-          case safe_apply(state.process_input_fn, [session_id, kickoff.prompt]) do
+          case safe_apply(state.process_input_fn, [session_context.session_id, kickoff.prompt]) do
             {:ok, _status} ->
               :ok
 
@@ -256,7 +259,8 @@ defmodule Pincer.Channels.WhatsApp do
     end
   end
 
-  defp handle_command(chat_id, sender_id, session_id, command_text, is_group, state) do
+  defp handle_command(chat_id, sender_id, session_context, command_text, is_group, state) do
+    session_id = session_context.session_id
     {command, args} = split_command(command_text)
 
     case command do
@@ -281,13 +285,13 @@ defmodule Pincer.Channels.WhatsApp do
       "/project" ->
         seed = if args == "", do: nil, else: args
         deliver_message(state, chat_id, ProjectRouter.project(session_id, seed))
-        maybe_start_project_execution(chat_id, session_id, state)
+        maybe_start_project_execution(chat_id, session_context, state)
 
       "/models" ->
         if args == "" do
           deliver_message(state, chat_id, model_help(state))
         else
-          handle_model_selection(chat_id, session_id, args, state)
+          handle_model_selection(chat_id, session_context, args, state)
         end
 
       "/pair" ->
@@ -302,10 +306,12 @@ defmodule Pincer.Channels.WhatsApp do
     end
   end
 
-  defp handle_model_selection(chat_id, session_id, args, state) do
+  defp handle_model_selection(chat_id, session_context, args, state) do
+    session_id = session_context.session_id
+
     case String.split(args, ~r/\s+/, parts: 2) do
       [provider_id, model] when provider_id != "" and model != "" ->
-        with :ok <- safe_apply(state.ensure_session_started_fn, [session_id]),
+        with :ok <- ensure_session_started(state, session_context),
              :ok <- safe_apply(state.set_model_fn, [session_id, provider_id, model]) do
           deliver_message(
             state,
@@ -488,11 +494,12 @@ defmodule Pincer.Channels.WhatsApp do
     end
   end
 
-  defp resolve_session_id(chat_id, is_group, config) do
-    SessionScopePolicy.resolve(
+  defp resolve_session_context(chat_id, sender_id, is_group, config) do
+    SessionResolver.resolve(
       :whatsapp,
       %{
         chat_id: chat_id,
+        sender_id: sender_id,
         is_group: is_group
       },
       config
@@ -637,7 +644,29 @@ defmodule Pincer.Channels.WhatsApp do
     end
   end
 
-  defp default_ensure_session_started(session_id) do
+  defp default_ensure_session_started(
+         session_id,
+         %Pincer.Core.Session.Context{} = session_context
+       ) do
+    start_opts =
+      session_context
+      |> Pincer.Core.Session.Context.to_start_opts()
+      |> Keyword.delete(:session_id)
+
+    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
+      [] ->
+        case Pincer.Core.Session.Supervisor.start_session(session_id, start_opts) do
+          {:ok, _pid} -> :ok
+          {:error, {:already_started, _pid}} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+
+      [_] ->
+        :ok
+    end
+  end
+
+  defp default_ensure_session_started(session_id, _session_context) do
     case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
       [] ->
         case Pincer.Core.Session.Supervisor.start_session(session_id) do
@@ -662,25 +691,41 @@ defmodule Pincer.Channels.WhatsApp do
   alias Pincer.Core.Structs.IncomingMessage
 
   defp default_process_input(session_id, input) do
-    incoming = case input do
-      text when is_binary(text) -> IncomingMessage.new(session_id, text)
-      %IncomingMessage{} = msg -> msg
-      parts when is_list(parts) ->
-        # Split text from attachments
-        {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
-        text = Enum.map_join(text_parts, "\n", & &1["text"])
-        atts = Enum.map(att_parts, & &1["attachment"])
-        
-        IncomingMessage.new(session_id, text: text, attachments: atts)
-    end
+    incoming =
+      case input do
+        text when is_binary(text) ->
+          IncomingMessage.new(session_id, text)
+
+        %IncomingMessage{} = msg ->
+          msg
+
+        parts when is_list(parts) ->
+          # Split text from attachments
+          {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
+          text = Enum.map_join(text_parts, "\n", & &1["text"])
+          atts = Enum.map(att_parts, & &1["attachment"])
+
+          IncomingMessage.new(session_id, text: text, attachments: atts)
+      end
 
     Server.process_input(session_id, incoming)
   end
+
   defp default_status(session_id), do: Pincer.Core.Session.Server.get_status(session_id)
 
   defp default_set_model(session_id, provider, model) do
     Server.set_model(session_id, provider, model)
     :ok
+  end
+
+  defp ensure_session_started(state, session_context) do
+    case function_arity(state.ensure_session_started_fn) do
+      2 ->
+        safe_apply(state.ensure_session_started_fn, [session_context.session_id, session_context])
+
+      _ ->
+        safe_apply(state.ensure_session_started_fn, [session_context.session_id])
+    end
   end
 
   defp read_fun(config, key, default) do
@@ -692,6 +737,11 @@ defmodule Pincer.Channels.WhatsApp do
 
   defp normalize_map(map) when is_map(map), do: map
   defp normalize_map(_), do: %{}
+
+  defp function_arity(fun) when is_function(fun) do
+    {:arity, arity} = :erlang.fun_info(fun, :arity)
+    arity
+  end
 
   defp normalize_text(value) when is_binary(value) do
     case String.trim(value) do
