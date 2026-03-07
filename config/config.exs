@@ -7,7 +7,7 @@ config :telegex,
   token: System.get_env("TELEGRAM_BOT_TOKEN"),
   caller_adapter: {Finch, [name: Pincer.Finch]}
 
-config :pincer, :storage_adapter, Pincer.Storage
+config :pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite
 
 config :pincer, :llm_providers, %{
   "google" => %{

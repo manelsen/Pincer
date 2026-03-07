@@ -1,6 +1,5 @@
 defmodule Pincer.Channels.TelegramTest do
   use ExUnit.Case, async: true
-  alias Pincer.Channels.Telegram
 
   describe "send_message/3" do
     test "removes <thinking> without skip_reasoning_strip" do

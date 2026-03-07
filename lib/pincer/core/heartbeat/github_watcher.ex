@@ -48,12 +48,12 @@ defmodule Pincer.Core.Heartbeat.GitHubWatcher do
     token = System.get_env("GITHUB_PERSONAL_ACCESS_TOKEN")
     url = "https://api.github.com/repos/#{repo}/commits/master" # Or main
     
-    case Req.get(url, auth: {:bearer, token}) do
+    case Req.get(url, auth: {:bearer, token}, receive_timeout: 15_000) do
       {:ok, %{status: 200, body: %{"sha" => hash}}} -> {:ok, hash}
       _ ->
         # Try main branch
         url_main = "https://api.github.com/repos/#{repo}/commits/main"
-        case Req.get(url_main, auth: {:bearer, token}) do
+        case Req.get(url_main, auth: {:bearer, token}, receive_timeout: 15_000) do
           {:ok, %{status: 200, body: %{"sha" => hash}}} -> {:ok, hash}
           _ -> {:error, :failed}
         end
