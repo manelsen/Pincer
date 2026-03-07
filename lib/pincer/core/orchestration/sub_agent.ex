@@ -75,12 +75,26 @@ defmodule Pincer.Core.Orchestration.SubAgent do
 
   use GenServer
   require Logger
+  alias Pincer.Core.AgentPaths
   alias Pincer.Core.LLM.RuntimeStatus
   alias Pincer.Core.Executor
   alias Pincer.Core.Orchestration.Blackboard
 
-  @type option :: {:goal, String.t()} | {:id, String.t()} | {:parent_session_id, String.t()}
-  @type state :: %{id: String.t(), goal: String.t(), parent_session_id: String.t() | nil}
+  @type option ::
+          {:goal, String.t()}
+          | {:id, String.t()}
+          | {:parent_session_id, String.t()}
+          | {:parent_workspace_path, String.t()}
+          | {:scope, String.t()}
+          | {:workspace_path, String.t()}
+
+  @type state :: %{
+          id: String.t(),
+          goal: String.t(),
+          parent_session_id: String.t() | nil,
+          scope: String.t(),
+          workspace_path: String.t()
+        }
 
   @doc """
   Starts a new SubAgent with the given options.
@@ -117,13 +131,21 @@ defmodule Pincer.Core.Orchestration.SubAgent do
     goal = Keyword.fetch!(opts, :goal)
     parent_session_id = Keyword.get(opts, :parent_session_id)
     id = Keyword.get(opts, :id, "sub_agent_" <> (:crypto.strong_rand_bytes(8) |> Base.encode16()))
+    parent_workspace_path = Keyword.get(opts, :parent_workspace_path)
+    scope = Keyword.get(opts, :scope, parent_session_id || id)
+    workspace_path = Keyword.get(opts, :workspace_path, AgentPaths.workspace_root(id))
+
+    AgentPaths.ensure_workspace!(
+      workspace_path,
+      bootstrap?: false,
+      inherit_from: parent_workspace_path
+    )
 
     Logger.info("[SubAgent #{id}] Starting with goal: #{goal}")
 
     # Post initial status
-    Blackboard.post(id, "Started with goal: #{goal}")
+    Blackboard.post(id, "Started with goal: #{goal}", nil, scope: scope)
     notify_parent(parent_session_id, "🤖 Sub-Agent [#{id}] started working on: #{goal}")
-
 
     # Start the Executor, passing *self()* as the session_pid
     # The Executor will send {:executor_finished, ...} to us.
@@ -137,9 +159,16 @@ defmodule Pincer.Core.Orchestration.SubAgent do
       %{"role" => "user", "content" => goal}
     ]
 
-    Executor.start(self(), id, history)
+    Executor.start(self(), id, history, workspace_path: workspace_path)
 
-    {:ok, %{id: id, goal: goal, parent_session_id: parent_session_id}}
+    {:ok,
+     %{
+       id: id,
+       goal: goal,
+       parent_session_id: parent_session_id,
+       scope: scope,
+       workspace_path: workspace_path
+     }}
   end
 
   # --- Handling Executor Messages ---
@@ -148,7 +177,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   @impl GenServer
   def handle_info({:executor_finished, _history, response, _usage}, state) do
     Logger.info("[SubAgent #{state.id}] Finished. Posting result.")
-    Blackboard.post(state.id, "FINISHED: #{response}")
+    Blackboard.post(state.id, "FINISHED: #{response}", nil, scope: state.scope)
     notify_parent(state.parent_session_id, "✅ Sub-Agent [#{state.id}] finished: #{response}")
     {:stop, :normal, state}
   end
@@ -157,7 +186,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   @impl GenServer
   def handle_info({:executor_failed, reason}, state) do
     Logger.error("[SubAgent #{state.id}] Failed: #{inspect(reason)}")
-    Blackboard.post(state.id, "FAILED: #{inspect(reason)}")
+    Blackboard.post(state.id, "FAILED: #{inspect(reason)}", nil, scope: state.scope)
     notify_parent(state.parent_session_id, "❌ Sub-Agent [#{state.id}] failed: #{inspect(reason)}")
     {:stop, :normal, state}
   end
@@ -165,7 +194,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   @doc false
   @impl GenServer
   def handle_info({:sme_tool_use, tools}, state) do
-    Blackboard.post(state.id, "Using tool: #{tools}")
+    Blackboard.post(state.id, "Using tool: #{tools}", nil, scope: state.scope)
     notify_parent(state.parent_session_id, "⚙️ Sub-Agent [#{state.id}] using: #{tools}")
     {:noreply, state}
   end
@@ -174,7 +203,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   @impl GenServer
   def handle_info({:llm_runtime_status, payload}, state) when is_map(payload) do
     status = RuntimeStatus.format(payload)
-    Blackboard.post(state.id, "LLM_STATUS: " <> status)
+    Blackboard.post(state.id, "LLM_STATUS: " <> status, nil, scope: state.scope)
     notify_parent(state.parent_session_id, "📐 Sub-Agent [#{state.id}] status: #{status}")
     {:noreply, state}
   end
@@ -186,6 +215,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   end
 
   defp notify_parent(nil, _msg), do: :ok
+
   defp notify_parent(session_id, msg) do
     Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:agent_status, msg})
   end

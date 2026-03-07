@@ -127,9 +127,15 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   @spec execute(%{String.t() => String.t()}) :: execute_result()
   def execute(%{"goal" => goal} = args) do
     parent_session_id = Map.get(args, "session_id")
+    parent_workspace_path = Map.get(args, "workspace_path")
     id = "agent_" <> (:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower))
 
-    case GenServer.start(SubAgent, goal: goal, id: id, parent_session_id: parent_session_id) do
+    case GenServer.start(SubAgent,
+           goal: goal,
+           id: id,
+           parent_session_id: parent_session_id,
+           parent_workspace_path: parent_workspace_path
+         ) do
       {:ok, _pid} ->
         {:ok, "Sub-Agent detached successfully. ID: #{id}. Monitor the Blackboard for updates."}
 
