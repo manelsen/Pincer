@@ -6,7 +6,7 @@ defmodule Pincer.DX.MacrosTest do
     Application.put_env(:pincer, :dx_test_key, :old_value)
 
     result =
-      Pincer.DX.Macros.with_app_env(:pincer, :dx_test_key, :new_value) do
+      Pincer.DX.Macros.with_app_env :pincer, :dx_test_key, :new_value do
         Application.get_env(:pincer, :dx_test_key)
       end
 
@@ -17,7 +17,7 @@ defmodule Pincer.DX.MacrosTest do
   test "with_app_env/4 restores missing key to missing state" do
     Application.delete_env(:pincer, :dx_missing_key)
 
-    Pincer.DX.Macros.with_app_env(:pincer, :dx_missing_key, :temp) do
+    Pincer.DX.Macros.with_app_env :pincer, :dx_missing_key, :temp do
       assert Application.get_env(:pincer, :dx_missing_key) == :temp
     end
 
@@ -30,7 +30,11 @@ defmodule Pincer.DX.MacrosTest do
 
   test "assert_ok/1 raises on non-ok tuple" do
     assert_raise ExUnit.AssertionError, fn ->
-      Pincer.DX.Macros.assert_ok({:error, :nope})
+      Pincer.DX.Macros.assert_ok(runtime_error_tuple())
     end
+  end
+
+  defp runtime_error_tuple do
+    Enum.fetch!([{:error, :nope}], 0)
   end
 end

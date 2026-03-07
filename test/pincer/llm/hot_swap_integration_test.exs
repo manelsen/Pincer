@@ -1,11 +1,12 @@
 defmodule Pincer.LLM.HotSwapIntegrationTest do
   use ExUnit.Case, async: false
 
+  alias Pincer.Core.AgentPaths
   alias Pincer.Core.Session.Server
   alias Pincer.Infra.PubSub
 
   defmodule IntegrationMockAdapter do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(_messages, _model, config, _tools) do
@@ -16,6 +17,7 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
           # Simulate slow failure
           Process.sleep(100)
           {:error, {:http_error, 429, "Rate limited"}}
+
         "Success" ->
           {:ok, %{"role" => "assistant", "content" => "Swapped Successfully!"}}
       end
@@ -28,8 +30,9 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
           if pid = config[:test_pid], do: send(pid, :entered_backoff)
           Process.sleep(100)
           {:error, {:http_error, 429, "Rate limited"}}
+
         "Success" ->
-           {:ok, [%{"choices" => [%{"delta" => %{"content" => "Swapped Successfully!"}}]}]}
+          {:ok, [%{"choices" => [%{"delta" => %{"content" => "Swapped Successfully!"}}]}]}
       end
     end
   end
@@ -51,37 +54,28 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
   setup do
     # Ensure dependencies are running
     Application.ensure_all_started(:pincer)
-    
+
     orig_providers = Application.get_env(:pincer, :llm_providers)
     orig_storage = Application.get_env(:pincer, :storage_adapter)
-    
-    # SAFEGUARD: If SOUL.md exists, back it up instead of overwriting
-    soul_exists = File.exists?("SOUL.md")
-    if soul_exists do
-      File.rename!("SOUL.md", "SOUL.md.testbackup")
-    end
-
-    # Create dummy soul for session to start in normal mode
-    File.write!("SOUL.md", "Integration Test Soul")
 
     Application.put_env(:pincer, :storage_adapter, MockStorage)
+
     Application.put_env(:pincer, :llm_providers, %{
-      "fail" => %{adapter: IntegrationMockAdapter, name: "Failing", env_key: "KF", test_pid: self()},
+      "fail" => %{
+        adapter: IntegrationMockAdapter,
+        name: "Failing",
+        env_key: "KF",
+        test_pid: self()
+      },
       "pass" => %{adapter: IntegrationMockAdapter, name: "Success", env_key: "KP"}
     })
-    
+
     System.put_env("KF", "vf")
     System.put_env("KP", "vp")
 
     on_exit(fn ->
       Application.put_env(:pincer, :llm_providers, orig_providers)
       Application.put_env(:pincer, :storage_adapter, orig_storage)
-      
-      # CLEANUP: Remove test file and restore backup if it existed
-      File.rm("SOUL.md")
-      if soul_exists do
-        File.rename!("SOUL.md.testbackup", "SOUL.md")
-      end
     end)
 
     :ok
@@ -89,7 +83,12 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
 
   test "session hot-swaps model during active executor backoff" do
     session_id = "test_swap_#{:rand.uniform(1000)}"
+    workspace = AgentPaths.workspace_root(session_id)
     PubSub.subscribe("session:#{session_id}")
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
+    File.write!(AgentPaths.identity_path(workspace), "Integration Test Identity")
+    File.write!(AgentPaths.soul_path(workspace), "Integration Test Soul")
 
     # 1. Start session with failing model
     {:ok, _pid} = Server.start_link(session_id: session_id)
@@ -97,11 +96,14 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
 
     # 2. Trigger execution
     assert {:ok, :buffered} =
-             Server.process_input(session_id, "Do something complex that is definitely long enough")
+             Server.process_input(
+               session_id,
+               "Do something complex that is definitely long enough"
+             )
 
     # 3. Wait for the signal from adapter that it failed and is about to retry (waiting)
     assert_receive :entered_backoff, 5000
-    
+
     # Give it a tiny bit more time to actually enter the receive/after block in Client
     Process.sleep(200)
 

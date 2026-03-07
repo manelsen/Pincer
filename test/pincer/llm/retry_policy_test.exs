@@ -4,7 +4,7 @@ defmodule Pincer.LLM.RetryPolicyTest do
   alias Pincer.LLM.Client
 
   defmodule RetryAdapter do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(_messages, _model, config, _tools) do
@@ -43,19 +43,20 @@ defmodule Pincer.LLM.RetryPolicyTest do
           {:ok, %{"role" => "assistant", "content" => "ok"}, nil}
       end
     end
-@impl true
-def stream_completion(messages, model, config, tools) do
-  case chat_completion(messages, model, config, tools) do
-    {:ok, _, _} -> {:ok, [%{"choices" => [%{"delta" => %{"content" => "stream-ok"}}]}]}
-    error -> error
-  end
-end
 
-@impl true
-def list_models(_config), do: {:ok, []}
+    @impl true
+    def stream_completion(messages, model, config, tools) do
+      case chat_completion(messages, model, config, tools) do
+        {:ok, _, _} -> {:ok, [%{"choices" => [%{"delta" => %{"content" => "stream-ok"}}]}]}
+        error -> error
+      end
+    end
 
-@impl true
-def transcribe_audio(_path, _model, _config), do: {:ok, "mock transcript"}
+    @impl true
+    def list_models(_config), do: {:ok, []}
+
+    @impl true
+    def transcribe_audio(_path, _model, _config), do: {:ok, "mock transcript"}
   end
 
   setup do
