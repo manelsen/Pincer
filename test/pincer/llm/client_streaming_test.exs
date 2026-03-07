@@ -4,7 +4,7 @@ defmodule Pincer.LLM.ClientStreamingTest do
   alias Pincer.LLM.Client
 
   defmodule MockStreamingAdapter do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(_messages, _model, _config, _tools) do
@@ -14,9 +14,11 @@ defmodule Pincer.LLM.ClientStreamingTest do
     @impl true
     def stream_completion(_messages, _model, _config, _tools) do
       # Simulate a stream of tokens
-      stream = Stream.map(["Hello", " world", "!"], fn token ->
-        %{"choices" => [%{"delta" => %{"content" => token}}]}
-      end)
+      stream =
+        Stream.map(["Hello", " world", "!"], fn token ->
+          %{"choices" => [%{"delta" => %{"content" => token}}]}
+        end)
+
       {:ok, stream}
     end
   end
@@ -29,7 +31,7 @@ defmodule Pincer.LLM.ClientStreamingTest do
         default_model: "stream-model"
       }
     })
-    
+
     Application.put_env(:pincer, :default_llm_provider, "stream_provider")
     System.put_env("STREAM_API_KEY", "stream_key_123")
 
@@ -44,12 +46,14 @@ defmodule Pincer.LLM.ClientStreamingTest do
   describe "stream_completion/2" do
     test "returns an enumerable stream of chunks" do
       messages = [%{"role" => "user", "content" => "Hi"}]
-      
+
       assert {:ok, stream} = Client.stream_completion(messages)
-      
+
       chunks = Enum.to_list(stream)
       assert length(chunks) == 3
-      assert List.first(chunks)["choices"] |> List.first() |> get_in(["delta", "content"]) == "Hello"
+
+      assert List.first(chunks)["choices"] |> List.first() |> get_in(["delta", "content"]) ==
+               "Hello"
     end
   end
 end

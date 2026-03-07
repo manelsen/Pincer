@@ -4,7 +4,7 @@ defmodule Pincer.LLM.ClientTelemetryTest do
   alias Pincer.LLM.Client
 
   defmodule TelemetryAdapter do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(_messages, _model, config, _tools) do

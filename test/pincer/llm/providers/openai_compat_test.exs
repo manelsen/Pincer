@@ -47,7 +47,7 @@ defmodule Pincer.LLM.Providers.OpenAICompatTest do
   end
 
   describe "message_to_stream_chunks/1" do
-    test "converts full assistant message into one stream delta chunk" do
+    test "omits synthetic content when tool calls are present" do
       chunks =
         OpenAICompat.message_to_stream_chunks(%{
           "role" => "assistant",
@@ -61,7 +61,7 @@ defmodule Pincer.LLM.Providers.OpenAICompatTest do
         })
 
       assert is_list(chunks)
-      assert get_in(chunks, [Access.at(0), "choices", Access.at(0), "delta", "content"]) == "ok"
+      assert get_in(chunks, [Access.at(0), "choices", Access.at(0), "delta", "content"]) == nil
 
       assert get_in(chunks, [
                Access.at(0),
@@ -73,6 +73,16 @@ defmodule Pincer.LLM.Providers.OpenAICompatTest do
                "function",
                "name"
              ]) == "tool_a"
+    end
+
+    test "keeps content when no tool calls are present" do
+      chunks =
+        OpenAICompat.message_to_stream_chunks(%{
+          "role" => "assistant",
+          "content" => "ok"
+        })
+
+      assert get_in(chunks, [Access.at(0), "choices", Access.at(0), "delta", "content"]) == "ok"
     end
   end
 end
