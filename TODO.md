@@ -21,8 +21,9 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
   - Módulo que reduz tokens em ~98% ao extirpar a implementação/blocos `{}` e comentários, preservando apenas assinaturas (`def`, `import`, `class`).
   - Fornece o "Mapa do Território" ultra-barato para o LLM rotear sua busca profunda.
 - [ ] **Sincronização Híbrida de Conhecimento (GraphRAG Sync)**
-  - [ ] Sincronização Local (Git/Watcher): Hooks automáticos para re-indexar vetores do LanceDB após edições feitas pelo Pincer (`write_file`/`replace`) ou via commits (`git diff`).
+  - [x] **Sincronização Local (Git/Watcher):** Hooks automáticos para re-indexar vetores após edições feitas pelo Pincer ou via commits (`git diff`). Implementado via SQLite Vector Stopgap.
   - [ ] **RAG Dinâmico Externo via MCP (APIs e Linguagens):** 
+
     - Como lidar com tecnologias fast-moving (Gleam, Go 1.26, Odin)?
     - Ao detectar erro de compilação ou conhecimento obsoleto, o agente invoca o **MCP do GitHub** para extrair as *Release Notes* ou docs do repositório oficial (`github_search_code`).
     - Esse "texto limpo" é vetorizado na hora via API (ex: `openrouter/baai/bge-m3` por ~$0.01/1M tokens) e ingerido na coleção `external_docs` do LanceDB.

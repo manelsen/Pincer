@@ -22,7 +22,8 @@ defmodule Pincer.Adapters.NativeToolRegistry do
     Pincer.Adapters.Tools.Web,
     Pincer.Adapters.Tools.GraphMemory,
     Pincer.Adapters.Tools.CodeSkeleton,
-    Pincer.Adapters.Tools.Learning
+    Pincer.Adapters.Tools.Learning,
+    Pincer.Adapters.Tools.ExternalKnowledge
   ]
 
   @impl true
