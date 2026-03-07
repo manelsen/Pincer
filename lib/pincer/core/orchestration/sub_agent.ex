@@ -79,8 +79,8 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   alias Pincer.Core.Executor
   alias Pincer.Core.Orchestration.Blackboard
 
-  @type option :: {:goal, String.t()} | {:id, String.t()}
-  @type state :: %{id: String.t(), goal: String.t()}
+  @type option :: {:goal, String.t()} | {:id, String.t()} | {:parent_session_id, String.t()}
+  @type state :: %{id: String.t(), goal: String.t(), parent_session_id: String.t() | nil}
 
   @doc """
   Starts a new SubAgent with the given options.
@@ -112,15 +112,18 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   end
 
   @doc false
-  @impl GenServer
+  @impl true
   def init(opts) do
     goal = Keyword.fetch!(opts, :goal)
+    parent_session_id = Keyword.get(opts, :parent_session_id)
     id = Keyword.get(opts, :id, "sub_agent_" <> (:crypto.strong_rand_bytes(8) |> Base.encode16()))
 
     Logger.info("[SubAgent #{id}] Starting with goal: #{goal}")
 
     # Post initial status
     Blackboard.post(id, "Started with goal: #{goal}")
+    notify_parent(parent_session_id, "🤖 Sub-Agent [#{id}] started working on: #{goal}")
+
 
     # Start the Executor, passing *self()* as the session_pid
     # The Executor will send {:executor_finished, ...} to us.
@@ -136,7 +139,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
 
     Executor.start(self(), id, history)
 
-    {:ok, %{id: id, goal: goal}}
+    {:ok, %{id: id, goal: goal, parent_session_id: parent_session_id}}
   end
 
   # --- Handling Executor Messages ---
@@ -146,6 +149,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   def handle_info({:executor_finished, _history, response, _usage}, state) do
     Logger.info("[SubAgent #{state.id}] Finished. Posting result.")
     Blackboard.post(state.id, "FINISHED: #{response}")
+    notify_parent(state.parent_session_id, "✅ Sub-Agent [#{state.id}] finished: #{response}")
     {:stop, :normal, state}
   end
 
@@ -154,6 +158,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   def handle_info({:executor_failed, reason}, state) do
     Logger.error("[SubAgent #{state.id}] Failed: #{inspect(reason)}")
     Blackboard.post(state.id, "FAILED: #{inspect(reason)}")
+    notify_parent(state.parent_session_id, "❌ Sub-Agent [#{state.id}] failed: #{inspect(reason)}")
     {:stop, :normal, state}
   end
 
@@ -161,13 +166,16 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   @impl GenServer
   def handle_info({:sme_tool_use, tools}, state) do
     Blackboard.post(state.id, "Using tool: #{tools}")
+    notify_parent(state.parent_session_id, "⚙️ Sub-Agent [#{state.id}] using: #{tools}")
     {:noreply, state}
   end
 
   @doc false
   @impl GenServer
   def handle_info({:llm_runtime_status, payload}, state) when is_map(payload) do
-    Blackboard.post(state.id, "LLM_STATUS: " <> RuntimeStatus.format(payload))
+    status = RuntimeStatus.format(payload)
+    Blackboard.post(state.id, "LLM_STATUS: " <> status)
+    notify_parent(state.parent_session_id, "📐 Sub-Agent [#{state.id}] status: #{status}")
     {:noreply, state}
   end
 
@@ -175,5 +183,10 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   @impl GenServer
   def handle_info(_msg, state) do
     {:noreply, state}
+  end
+
+  defp notify_parent(nil, _msg), do: :ok
+  defp notify_parent(session_id, msg) do
+    Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:agent_status, msg})
   end
 end
