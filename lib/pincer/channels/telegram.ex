@@ -151,6 +151,7 @@ defmodule Pincer.Channels.Telegram do
       else
         text |> strip_reasoning() |> markdown_to_html()
       end
+
     do_send_message(chat_id, html_text, Keyword.put(opts, :parse_mode, "HTML"))
   end
 
@@ -248,10 +249,19 @@ defmodule Pincer.Channels.Telegram do
   # Wraps reasoning blocks in a stylized blockquote for clear visualization
   defp format_reasoning(text) when is_binary(text) do
     text
-    |> String.replace(~r/<thought>(.*?)<\/thought>/is, "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>")
-    |> String.replace(~r/<thinking>(.*?)<\/thinking>/is, "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>")
+    |> String.replace(
+      ~r/<thought>(.*?)<\/thought>/is,
+      "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>"
+    )
+    |> String.replace(
+      ~r/<thinking>(.*?)<\/thinking>/is,
+      "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>"
+    )
     # Handle cases where LLM doesn't close the tag or starts with it
-    |> String.replace(~r/^.*?think>\s*(.*?)$/is, "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>")
+    |> String.replace(
+      ~r/^.*?think>\s*(.*?)$/is,
+      "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>"
+    )
   end
 
   defp format_reasoning(other), do: other
@@ -467,13 +477,13 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   alias Pincer.Core.ProjectOrchestrator
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.RetryPolicy
-  alias Pincer.Core.SessionScopePolicy
   alias Pincer.Core.Telemetry, as: CoreTelemetry
   alias Pincer.Core.UX
   alias Pincer.Core.Session.Server
 
   @base_poll_interval 1000
   @max_poll_interval 30_000
+  @default_offset_path Path.join("sessions", "telegram_update_offset.txt")
   @max_attachment_bytes 104_857_600
   @groq_max_audio_bytes 25_165_824
   @multimodal_extension_mime %{
@@ -488,8 +498,45 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   }
 
   @doc false
-  def start_link(_) do
-    GenServer.start_link(__MODULE__, %{offset: 0, failures: 0}, name: __MODULE__)
+  def start_link(opts) do
+    opts = if is_list(opts), do: opts, else: []
+
+    offset_path =
+      Keyword.get(
+        opts,
+        :offset_path,
+        Application.get_env(:pincer, :telegram_update_offset_path, @default_offset_path)
+      )
+
+    GenServer.start_link(
+      __MODULE__,
+      %{offset: load_offset(offset_path), failures: 0, offset_path: offset_path},
+      name: __MODULE__
+    )
+  end
+
+  @doc false
+  def load_offset(path) when is_binary(path) do
+    case File.read(path) do
+      {:ok, raw} ->
+        case Integer.parse(String.trim(raw)) do
+          {offset, _rest} when offset >= 0 -> offset
+          _ -> 0
+        end
+
+      {:error, _reason} ->
+        0
+    end
+  end
+
+  @doc false
+  def persist_offset(path, offset) when is_binary(path) and is_integer(offset) and offset >= 0 do
+    path
+    |> Path.dirname()
+    |> File.mkdir_p!()
+
+    File.write!(path, "#{offset}\n")
+    :ok
   end
 
   @impl GenServer
@@ -534,7 +581,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   @impl GenServer
   def handle_info(:poll, state) do
-    {new_offset, failures} = fetch_updates(state.offset, state.failures)
+    {new_offset, failures} = fetch_updates(state.offset, state.failures, state.offset_path)
     schedule_poll(next_poll_interval(failures))
     {:noreply, %{state | offset: new_offset, failures: failures}}
   end
@@ -555,7 +602,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     Process.send_after(self(), :poll, interval_ms)
   end
 
-  defp fetch_updates(offset, failures) do
+  defp fetch_updates(offset, failures, offset_path) do
     case Pincer.Channels.Telegram.api_client().get_updates(offset: offset, timeout: 5) do
       {:ok, updates} ->
         Enum.each(updates, &safe_process_update/1)
@@ -566,6 +613,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
           else
             List.last(updates).update_id + 1
           end
+
+        if new_offset != offset do
+          persist_offset(offset_path, new_offset)
+        end
 
         {new_offset, 0}
 
@@ -606,11 +657,12 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     message = map_value(callback_query, :message)
 
     # Robust extraction of chat and message IDs
-    {chat_id, chat_type, message_id} = 
+    {chat_id, chat_type, message_id} =
       case message do
         msg when is_map(msg) ->
           chat = map_value(msg, :chat)
           {map_value(chat, :id), map_value(chat, :type), map_value(msg, :message_id)}
+
         _ ->
           {nil, nil, nil}
       end
@@ -618,7 +670,9 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     if is_binary(data) and not is_nil(chat_id) and not is_nil(message_id) do
       handle_callback(chat_id, chat_type, data, message_id)
     else
-      Logger.warning("[TELEGRAM] Ignoring malformed callback query: data=#{inspect(data)}, chat_id=#{inspect(chat_id)}, mid=#{inspect(message_id)}")
+      Logger.warning(
+        "[TELEGRAM] Ignoring malformed callback query: data=#{inspect(data)}, chat_id=#{inspect(chat_id)}, mid=#{inspect(message_id)}"
+      )
     end
   end
 
@@ -644,12 +698,13 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
             handle_command(chat_id, command, "", chat_type)
 
           :error ->
-            session_id = session_id_for_chat(chat_id, chat_type)
+            context = session_context_for_chat(chat_id, chat_type)
+            session_id = context.session_id
 
             case ProjectRouter.continue_if_collecting(session_id, text, has_attachments: false) do
               {:handled, response} ->
                 send_project_message(chat_id, session_id, response)
-                maybe_start_project_execution(chat_id, chat_type, session_id)
+                maybe_start_project_execution(chat_id, context)
 
               :not_handled ->
                 do_process_message(chat_id, text, chat_type)
@@ -679,27 +734,29 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp do_process_message(chat_id, input_content, chat_type) do
     case authorize_private_dm(chat_id, chat_type) do
       :allow ->
-        session_id = session_id_for_chat(chat_id, chat_type)
+        context = session_context_for_chat(chat_id, chat_type)
+        session_id = context.session_id
         Logger.info("[TELEGRAM] Message received from #{chat_id}")
 
-        ensure_session_started(session_id)
+        ensure_session_started(context)
         Pincer.Channels.Telegram.Session.ensure_started(chat_id, session_id)
 
         Logger.info("[TELEGRAM] Routing message to Session ID: #{session_id}")
 
         # Create agnostic IncomingMessage
-        incoming = case input_content do
-          text when is_binary(text) -> 
-            IncomingMessage.new(session_id, text)
-          
-          parts when is_list(parts) ->
-            # Split text from attachments
-            {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
-            text = Enum.map_join(text_parts, "\n", & &1["text"])
-            atts = Enum.map(att_parts, & &1["attachment"])
-            
-            IncomingMessage.new(session_id, text: text, attachments: atts)
-        end
+        incoming =
+          case input_content do
+            text when is_binary(text) ->
+              IncomingMessage.new(session_id, text)
+
+            parts when is_list(parts) ->
+              # Split text from attachments
+              {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
+              text = Enum.map_join(text_parts, "\n", & &1["text"])
+              atts = Enum.map(att_parts, & &1["attachment"])
+
+              IncomingMessage.new(session_id, text: text, attachments: atts)
+          end
 
         case Server.process_input(session_id, incoming) do
           {:ok, :started} ->
@@ -719,7 +776,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
             Pincer.Channels.Telegram.send_message(chat_id, response)
 
           {:ok, other} ->
-            Logger.debug("[TELEGRAM] Ignoring process_input success with payload: #{inspect(other)}")
+            Logger.debug(
+              "[TELEGRAM] Ignoring process_input success with payload: #{inspect(other)}"
+            )
+
             :ok
 
           _ ->
@@ -783,10 +843,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp has_audio?(message) do
-    is_map(map_value(message, :voice)) or 
-    is_map(map_value(message, :audio)) or 
-    is_map(map_value(message, :video)) or 
-    is_map(map_value(message, :video_note))
+    is_map(map_value(message, :voice)) or
+      is_map(map_value(message, :audio)) or
+      is_map(map_value(message, :video)) or
+      is_map(map_value(message, :video_note))
   end
 
   defp extract_attachment_parts(message, api_client) do
@@ -800,29 +860,37 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp maybe_collect_audio({text_acc, refs_acc}, message, api_client) do
-    audio_obj = 
-      map_value(message, :voice) || 
-      map_value(message, :audio) || 
-      map_value(message, :video) || 
-      map_value(message, :video_note)
+    audio_obj =
+      map_value(message, :voice) ||
+        map_value(message, :audio) ||
+        map_value(message, :video) ||
+        map_value(message, :video_note)
 
     case audio_obj do
       obj when is_map(obj) ->
         file_id = map_value(obj, :file_id)
         # Check for video types to set proper extension
-        ext = if map_value(message, :video) || map_value(message, :video_note), do: ".mp4", else: ".mp3"
-        
+        ext =
+          if map_value(message, :video) || map_value(message, :video_note),
+            do: ".mp4",
+            else: ".mp3"
+
         # For audio/voice/video, we try to transcribe it immediately if a whisper provider is available
         case handle_audio_transcription(file_id, ext, api_client) do
           {:ok, transcribed_text} ->
             # Send feedback message so the user can see what was understood
             chat_id = map_value(map_value(message, :chat), :id)
-            if chat_id, do: Pincer.Channels.Telegram.send_message(chat_id, "🎤 <i>\"#{transcribed_text}\"</i>")
+
+            if chat_id,
+              do:
+                Pincer.Channels.Telegram.send_message(chat_id, "🎤 <i>\"#{transcribed_text}\"</i>")
 
             {text_acc <> "\n" <> transcribed_text, refs_acc}
+
           _ ->
             {text_acc <> "\n[Media content - transcription failed]", refs_acc}
         end
+
       _ ->
         {text_acc, refs_acc}
     end
@@ -833,7 +901,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
          token <- Application.get_env(:telegex, :token),
          url <- "https://api.telegram.org/file/bot#{token}/#{file_path}",
          {:ok, response} <- Req.get(url, receive_timeout: 300_000) do
-      
       case response do
         %{status: 200, body: body} when is_binary(body) ->
           # Save temp file with correct extension
@@ -841,19 +908,24 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
           File.write!(temp_file, body)
           file_size = byte_size(body)
 
-          result = if file_size > @groq_max_audio_bytes do
-            Logger.info("[TELEGRAM] Media file too large for Groq (#{file_size} bytes). Splitting...")
-            process_large_audio(temp_file, file_id)
-          else
-            # Call LLM Port for transcription
-            Pincer.Ports.LLM.transcribe_audio(temp_file, provider: "groq_whisper")
-          end
-          
+          result =
+            if file_size > @groq_max_audio_bytes do
+              Logger.info(
+                "[TELEGRAM] Media file too large for Groq (#{file_size} bytes). Splitting..."
+              )
+
+              process_large_audio(temp_file, file_id)
+            else
+              # Call LLM Port for transcription
+              Pincer.Ports.LLM.transcribe_audio(temp_file, provider: "groq_whisper")
+            end
+
           # Clean up
           File.rm(temp_file)
           result
 
-        _ -> {:error, :download_failed}
+        _ ->
+          {:error, :download_failed}
       end
     else
       _ -> {:error, :transcription_failed}
@@ -863,22 +935,34 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp process_large_audio(input_file, file_id) do
     # Create a temporary directory for chunks
     chunk_prefix = "/tmp/pincer_chunk_#{file_id}"
-    
+
     # Split audio into 10 minute segments (-f segment -segment_time 600)
     # Using mp3 as target format for safety
-    case System.cmd("ffmpeg", ["-i", input_file, "-f", "segment", "-segment_time", "600", "-c", "copy", "#{chunk_prefix}_%03d.mp3"]) do
+    case System.cmd("ffmpeg", [
+           "-i",
+           input_file,
+           "-f",
+           "segment",
+           "-segment_time",
+           "600",
+           "-c",
+           "copy",
+           "#{chunk_prefix}_%03d.mp3"
+         ]) do
       {_, 0} ->
         # List chunks
         chunks = Path.wildcard("#{chunk_prefix}_*.mp3") |> Enum.sort()
-        
+
         Logger.info("[TELEGRAM] Audio split into #{length(chunks)} chunks.")
 
-        texts = chunks |> Enum.map(fn chunk ->
-          case Pincer.Ports.LLM.transcribe_audio(chunk, provider: "groq_whisper") do
-            {:ok, text} -> text
-            _ -> "[Transcription of chunk failed]"
-          end
-        end)
+        texts =
+          chunks
+          |> Enum.map(fn chunk ->
+            case Pincer.Ports.LLM.transcribe_audio(chunk, provider: "groq_whisper") do
+              {:ok, text} -> text
+              _ -> "[Transcription of chunk failed]"
+            end
+          end)
 
         # Cleanup chunks
         Enum.each(chunks, &File.rm/1)
@@ -1093,6 +1177,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp handle_command(chat_id, "/models", _text, _chat_type) do
     providers = Pincer.Ports.LLM.list_providers()
     buttons = build_provider_buttons(providers)
+
     if buttons == [] do
       interaction_unavailable(chat_id)
     else
@@ -1103,15 +1188,16 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp handle_command(chat_id, "/kanban", _text, chat_type) do
-    session_id = session_id_for_chat(chat_id, chat_type)
+    session_id = session_context_for_chat(chat_id, chat_type).session_id
     Pincer.Channels.Telegram.send_message(chat_id, ProjectRouter.kanban(session_id))
   end
 
   defp handle_command(chat_id, "/project", text, chat_type) do
-    session_id = session_id_for_chat(chat_id, chat_type)
+    context = session_context_for_chat(chat_id, chat_type)
+    session_id = context.session_id
     response = ProjectRouter.project(session_id, text)
     send_project_message(chat_id, session_id, response)
-    maybe_start_project_execution(chat_id, chat_type, session_id)
+    maybe_start_project_execution(chat_id, context)
   end
 
   defp handle_command(chat_id, "/pair", text, chat_type) do
@@ -1126,8 +1212,9 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp handle_command(chat_id, "/status", _text, chat_type) do
-    session_id = session_id_for_chat(chat_id, chat_type)
-    ensure_session_started(session_id)
+    context = session_context_for_chat(chat_id, chat_type)
+    session_id = context.session_id
+    ensure_session_started(context)
 
     case Pincer.Core.ProjectRouter.handle_command(:status, nil, session_id) do
       {:ok, msg} -> Pincer.Channels.Telegram.send_message(chat_id, msg)
@@ -1136,81 +1223,107 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp handle_command(chat_id, "/new", _text, chat_type) do
-    session_id = session_id_for_chat(chat_id, chat_type)
-    ensure_session_started(session_id)
+    context = session_context_for_chat(chat_id, chat_type)
+    session_id = context.session_id
+    ensure_session_started(context)
+
     case Pincer.Core.Session.Server.reset(session_id) do
       :ok ->
         Pincer.Channels.Telegram.send_message(chat_id, "🔄 Sessão reiniciada.")
+
       _ ->
         Pincer.Channels.Telegram.send_message(chat_id, "❌ Não foi possível reiniciar a sessão.")
     end
   end
 
-  defp handle_command(chat_id, "/reset", text, chat_type), do: handle_command(chat_id, "/new", text, chat_type)
+  defp handle_command(chat_id, "/reset", text, chat_type),
+    do: handle_command(chat_id, "/new", text, chat_type)
 
   defp handle_command(chat_id, "/model", text, chat_type) do
-    session_id = session_id_for_chat(chat_id, chat_type)
-    ensure_session_started(session_id)
+    context = session_context_for_chat(chat_id, chat_type)
+    session_id = context.session_id
+    ensure_session_started(context)
+
     case String.split(String.trim(text), "/", parts: 2) do
       [provider, model] when provider != "" and model != "" ->
         Pincer.Core.Session.Server.set_model(session_id, provider, model)
+
         Pincer.Channels.Telegram.send_message(
-          chat_id, "✅ Modelo: <code>#{provider}/#{model}</code>")
+          chat_id,
+          "✅ Modelo: <code>#{provider}/#{model}</code>"
+        )
+
       _ ->
         Pincer.Channels.Telegram.send_message(
-          chat_id, "Uso: /model <provider/modelo>\nEx: /model openrouter/mistral-7b")
+          chat_id,
+          "Uso: /model <provider/modelo>\nEx: /model openrouter/mistral-7b"
+        )
     end
   end
 
   defp handle_command(chat_id, "/think", text, chat_type) do
-    session_id = session_id_for_chat(chat_id, chat_type)
-    ensure_session_started(session_id)
+    context = session_context_for_chat(chat_id, chat_type)
+    session_id = context.session_id
+    ensure_session_started(context)
     level = text |> String.trim() |> String.downcase()
     valid = ["off", "low", "medium", "high"]
+
     if level in valid do
       Pincer.Core.Session.Server.set_thinking(session_id, level)
       Pincer.Channels.Telegram.send_message(chat_id, "🧠 Thinking: <code>#{level}</code>")
     else
       Pincer.Channels.Telegram.send_message(
-        chat_id, "Uso: /think off|low|medium|high")
+        chat_id,
+        "Uso: /think off|low|medium|high"
+      )
     end
   end
 
   defp handle_command(chat_id, "/reasoning", text, chat_type) do
-    session_id = session_id_for_chat(chat_id, chat_type)
-    ensure_session_started(session_id)
+    context = session_context_for_chat(chat_id, chat_type)
+    session_id = context.session_id
+    ensure_session_started(context)
+
     case String.trim(text) |> String.downcase() do
       "on" ->
         Pincer.Core.Session.Server.set_reasoning_visible(session_id, true)
         Pincer.Channels.Telegram.send_message(chat_id, "👁 Reasoning: visível")
+
       "off" ->
         Pincer.Core.Session.Server.set_reasoning_visible(session_id, false)
         Pincer.Channels.Telegram.send_message(chat_id, "🙈 Reasoning: oculto (strip ativado)")
+
       _ ->
         Pincer.Channels.Telegram.send_message(chat_id, "Uso: /reasoning on|off")
     end
   end
 
   defp handle_command(chat_id, "/verbose", text, chat_type) do
-    session_id = session_id_for_chat(chat_id, chat_type)
-    ensure_session_started(session_id)
+    context = session_context_for_chat(chat_id, chat_type)
+    session_id = context.session_id
+    ensure_session_started(context)
+
     case String.trim(text) |> String.downcase() do
       "on" ->
         Pincer.Core.Session.Server.set_verbose(session_id, true)
         Pincer.Channels.Telegram.send_message(chat_id, "🔊 Verbose: on")
+
       "off" ->
         Pincer.Core.Session.Server.set_verbose(session_id, false)
         Pincer.Channels.Telegram.send_message(chat_id, "🔇 Verbose: off")
+
       _ ->
         Pincer.Channels.Telegram.send_message(chat_id, "Uso: /verbose on|off")
     end
   end
 
   defp handle_command(chat_id, "/usage", text, chat_type) do
-    session_id = session_id_for_chat(chat_id, chat_type)
-    ensure_session_started(session_id)
+    context = session_context_for_chat(chat_id, chat_type)
+    session_id = context.session_id
+    ensure_session_started(context)
     display = text |> String.trim() |> String.downcase()
     valid = ["off", "tokens", "full"]
+
     if display in valid do
       Pincer.Core.Session.Server.set_usage(session_id, display)
       Pincer.Channels.Telegram.send_message(chat_id, "📊 Usage display: <code>#{display}</code>")
@@ -1229,19 +1342,30 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   @doc false
   defp handle_callback(chat_id, chat_type, payload, message_id) do
-    session_id = session_id_for_chat(chat_id, chat_type)
-    ensure_session_started(session_id)
+    context = session_context_for_chat(chat_id, chat_type)
+    session_id = context.session_id
+    ensure_session_started(context)
 
     case ChannelInteractionPolicy.parse(:telegram, payload) do
       {:ok, {:page, provider_id, page}} ->
         models = Pincer.Ports.LLM.list_models(provider_id)
         current_model = current_model_for_session(session_id)
-        buttons = Pincer.Core.UX.ModelKeyboard.build_keyboard(:telegram, provider_id, models, page, current_model)
+
+        buttons =
+          Pincer.Core.UX.ModelKeyboard.build_keyboard(
+            :telegram,
+            provider_id,
+            models,
+            page,
+            current_model
+          )
+
         if buttons == [] do
           interaction_unavailable(chat_id)
         else
           edit_callback_message(
-            chat_id, message_id,
+            chat_id,
+            message_id,
             "🤖 <b>Modelos de #{provider_id} (página #{page}):</b>",
             reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: buttons},
             parse_mode: "HTML"
@@ -1251,12 +1375,22 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       {:ok, {:select_provider, provider_id}} ->
         models = Pincer.Ports.LLM.list_models(provider_id)
         current_model = current_model_for_session(session_id)
-        buttons = Pincer.Core.UX.ModelKeyboard.build_keyboard(:telegram, provider_id, models, 1, current_model)
+
+        buttons =
+          Pincer.Core.UX.ModelKeyboard.build_keyboard(
+            :telegram,
+            provider_id,
+            models,
+            1,
+            current_model
+          )
+
         if buttons == [] do
           interaction_unavailable(chat_id)
         else
           edit_callback_message(
-            chat_id, message_id,
+            chat_id,
+            message_id,
             "🤖 <b>Selecione o Modelo para #{provider_id}:</b>",
             reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: buttons},
             parse_mode: "HTML"
@@ -1264,7 +1398,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         end
 
       {:ok, {:select_model, provider_id, model}} ->
-        ensure_session_started(session_id)
+        ensure_session_started(context)
 
         Server.set_model(session_id, provider_id, model)
 
@@ -1345,10 +1479,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       code ->
         case Pairing.approve_code(:telegram, chat_id, code) do
           :ok ->
-            Pincer.Channels.Telegram.send_message(
-              chat_id,
-              "Pairing concluido com sucesso. Agora sua DM esta autorizada."
-            )
+            Pincer.Channels.Telegram.send_message(chat_id, pairing_success_message(chat_id))
 
           {:error, :not_pending} ->
             Pincer.Channels.Telegram.send_message(
@@ -1399,39 +1530,59 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp normalize_chat_type(chat_type),
     do: chat_type |> to_string() |> String.trim() |> String.downcase()
 
-  defp session_id_for_chat(chat_id, chat_type) do
+  defp session_context_for_chat(chat_id, chat_type) do
     channel_config = Application.get_env(:pincer, :telegram_channel_config, %{})
 
-    SessionScopePolicy.resolve(
+    Pincer.Core.SessionResolver.resolve(
       :telegram,
       %{chat_id: chat_id, chat_type: chat_type},
       channel_config
     )
   end
 
-  defp ensure_session_started(session_id) do
-    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
+  defp ensure_session_started(%Pincer.Core.Session.Context{} = context) do
+    start_opts =
+      context
+      |> Pincer.Core.Session.Context.to_start_opts()
+      |> Keyword.delete(:session_id)
+
+    case Registry.lookup(Pincer.Core.Session.Registry, context.session_id) do
       [] ->
-        Logger.info("[TELEGRAM] Creating new session: #{session_id}")
-        Pincer.Core.Session.Supervisor.start_session(session_id)
+        Logger.info(
+          "[TELEGRAM] Creating new session: #{context.session_id} (root_agent=#{context.root_agent_id})"
+        )
+
+        Pincer.Core.Session.Supervisor.start_session(context.session_id, start_opts)
 
       [_] ->
         :ok
     end
   end
 
-  defp maybe_start_project_execution(chat_id, _chat_type, session_id) do
-    case ProjectRouter.kickoff(session_id) do
+  defp pairing_success_message(chat_id) do
+    bound_agent_id = Pairing.bound_agent_id(:telegram, chat_id)
+
+    cond do
+      is_nil(bound_agent_id) ->
+        "Pairing concluido com sucesso. Agora sua DM esta autorizada."
+
+      true ->
+        "Pairing concluido com sucesso. Esta DM agora aponta para o agente <code>#{bound_agent_id}</code>."
+    end
+  end
+
+  defp maybe_start_project_execution(chat_id, %Pincer.Core.Session.Context{} = context) do
+    case ProjectRouter.kickoff(context.session_id) do
       {:ok, kickoff} ->
-        ensure_session_started(session_id)
-        Pincer.Channels.Telegram.Session.ensure_started(chat_id, session_id)
+        ensure_session_started(context)
+        Pincer.Channels.Telegram.Session.ensure_started(chat_id, context.session_id)
 
         Pincer.Channels.Telegram.send_message(
           chat_id,
           "Project Runner: #{kickoff.status_message}"
         )
 
-        dispatch_project_task(session_id, kickoff.prompt)
+        dispatch_project_task(context.session_id, kickoff.prompt)
 
       :not_ready ->
         :ok
