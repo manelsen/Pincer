@@ -16,7 +16,6 @@ defmodule Pincer.Core.AgentRegistry do
           {:agent_id, String.t()}
           | {:bootstrap?, boolean()}
           | {:template_root, String.t()}
-          | {:legacy_root, String.t() | false | nil}
 
   @type create_result :: %{agent_id: String.t(), workspace_path: String.t()}
 
@@ -32,8 +31,7 @@ defmodule Pincer.Core.AgentRegistry do
 
     AgentPaths.ensure_workspace!(workspace_path,
       bootstrap?: Keyword.get(opts, :bootstrap?, true),
-      template_root: Keyword.get(opts, :template_root, File.cwd!()),
-      legacy_root: Keyword.get(opts, :legacy_root, false)
+      template_root: Keyword.get(opts, :template_root)
     )
 
     %{agent_id: agent_id, workspace_path: workspace_path}

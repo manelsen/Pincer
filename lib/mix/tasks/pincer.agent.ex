@@ -25,7 +25,7 @@ defmodule Mix.Tasks.Pincer.Agent do
   @impl Mix.Task
   def run(["new"]) do
     %{agent_id: agent_id, workspace_path: workspace} =
-      AgentRegistry.create_root_agent!(template_root: File.cwd!(), legacy_root: false)
+      AgentRegistry.create_root_agent!()
 
     Mix.shell().info("Agent ID: #{agent_id}")
     Mix.shell().info("Agent workspace created: #{AgentPaths.pincer_dir(workspace)}")
@@ -69,9 +69,7 @@ defmodule Mix.Tasks.Pincer.Agent do
     normalized_agent_id = normalize_agent_id!(agent_id)
 
     AgentRegistry.create_root_agent!(
-      agent_id: normalized_agent_id,
-      template_root: File.cwd!(),
-      legacy_root: false
+      agent_id: normalized_agent_id
     )
   rescue
     error in ArgumentError -> Mix.raise(Exception.message(error))

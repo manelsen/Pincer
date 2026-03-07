@@ -776,7 +776,7 @@ defmodule Pincer.Core.Pairing do
   defp invoke_agent_factory(_invalid_factory), do: nil
 
   defp default_agent_factory do
-    AgentRegistry.create_root_agent!(template_root: File.cwd!(), legacy_root: false)
+    AgentRegistry.create_root_agent!()
   end
 
   defp maybe_put_agent_id(pair_data, nil), do: pair_data
