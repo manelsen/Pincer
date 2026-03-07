@@ -12,11 +12,12 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
 - [x] Ciclo de Vida: **Planning -> Execution -> QA**.
 - [x] Context Injection entre agentes para manter a "conversa" técnica alinhada.
 
-### [x] Memória Vetorial & GraphRAG (Alta Performance)
-- [x] **Janela Deslizante no "Sweet Spot":** Implementado cap em 25% da janela real (limitada via config do adapter) + preservação da "Injeção Fixa" inicial, resolvendo o *"Lost in the Middle"*.
-- [x] Geração de Embeddings Local (Nx/Bumblebee).
-- [x] Persistência em SQLite (Stopgap) e Relacionamentos via Grafo (`Pincer.Storage.Graph`).
-- [x] **Migração para LanceDB** (Integração via Rustler/NIF) para busca vetorial escalável.
+- [x] **Memória Vetorial & GraphRAG (Alta Performance)**
+  - [x] **Janela Deslizante no "Sweet Spot":** Implementado cap em 25% da janela real (limitada via config do adapter) + preservação da "Injeção Fixa" inicial, resolvendo o *"Lost in the Middle"*.
+  - [x] Geração de Embeddings Local (Nx/Bumblebee).
+  - [x] Persistência em SQLite (Stopgap) e Relacionamentos via Grafo (`Pincer.Storage.Graph`).
+  - [x] **Busca Vetorial Híbrida (SQLite Stopgap):** Implementado motor de busca vetorial nativo em Elixir (Similaridade de Cosseno) sobre SQLite, servindo como alternativa resiliente ao LanceDB em ambientes sem Rust/Cargo.
+
 - [x] **Extração de Esqueleto de Código (Code Skeleton / Estilo th0th):**
   - Módulo que reduz tokens em ~98% ao extirpar a implementação/blocos `{}` e comentários, preservando apenas assinaturas (`def`, `import`, `class`).
   - Fornece o "Mapa do Território" ultra-barato para o LLM rotear sua busca profunda.
