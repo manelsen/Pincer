@@ -15,5 +15,7 @@ config :pincer,
 
 config :pincer, storage_adapter: Pincer.Storage.Adapters.SQLite
 
+config :pincer, workspaces_dir: "tmp/test_workspaces"
+
 config :pincer, enable_graph_watcher: false
 config :pincer, enable_heartbeat_watchers: false

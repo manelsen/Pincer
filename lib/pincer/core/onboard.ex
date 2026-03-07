@@ -354,20 +354,24 @@ defmodule Pincer.Core.Onboard do
   end
 
   defp capability_operations("workspace_dirs", _config) do
+    base = Pincer.Core.AgentPaths.base_dir()
+
     [
       {:mkdir_p, "db"},
-      {:mkdir_p, "workspaces"},
+      {:mkdir_p, base},
       {:mkdir_p, "sessions"},
       {:mkdir_p, "memory"}
     ]
   end
 
   defp capability_operations("memory_file", _config) do
+    tpl = Pincer.Core.AgentPaths.template_workspace()
+
     [
-      {:mkdir_p, "workspaces/.template/.pincer"},
-      {:write_if_missing, "workspaces/.template/.pincer/BOOTSTRAP.md", default_bootstrap_md()},
-      {:write_if_missing, "workspaces/.template/.pincer/MEMORY.md", default_memory_md()},
-      {:write_if_missing, "workspaces/.template/.pincer/HISTORY.md", default_history_md()}
+      {:mkdir_p, Path.join(tpl, ".pincer")},
+      {:write_if_missing, Path.join([tpl, ".pincer", "BOOTSTRAP.md"]), default_bootstrap_md()},
+      {:write_if_missing, Path.join([tpl, ".pincer", "MEMORY.md"]), default_memory_md()},
+      {:write_if_missing, Path.join([tpl, ".pincer", "HISTORY.md"]), default_history_md()}
     ]
   end
 

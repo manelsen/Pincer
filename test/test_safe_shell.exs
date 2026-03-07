@@ -40,7 +40,7 @@ Server.process_input(session_id, "Execute: rm tmp_test_file")
 receive do
   {:approval_requested, call_id, command} ->
     IO.puts("[RECEIVED] Approval Requested for id: #{call_id}, cmd: #{command}")
-    
+
     # Simulate User Approval
     IO.puts("Simulating 'GRANTED'...")
     Server.approve_tool(session_id, call_id)
@@ -56,10 +56,11 @@ end
 receive do
   {:agent_response, _res, _usage} ->
     IO.puts("[SUCCESS] Command executed after approval.")
+
     if not File.exists?("tmp_test_file") do
-        IO.puts("[SUCCESS] File 'tmp_test_file' was actually deleted.")
+      IO.puts("[SUCCESS] File 'tmp_test_file' was actually deleted.")
     else
-        IO.puts("[FAIL] File still exists.")
+      IO.puts("[FAIL] File still exists.")
     end
 after
   10_000 ->

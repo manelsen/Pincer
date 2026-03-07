@@ -8,10 +8,10 @@ defmodule Pincer.Core.Project.HardeningTest do
   # Usamos stub global para que os processos asíncronos (handle_continue)
   # consigam chamar o mock sem erro de ownership.
   setup :set_mox_from_context
-  
+
   setup do
     Pincer.LLM.ClientMock
-    |> stub(:chat_completion, fn _msgs, _model, _config, _tools -> 
+    |> stub(:chat_completion, fn _msgs, _model, _config, _tools ->
       {:ok, %{"content" => "Architect: Spec\nTester: RED\nCoder: GREEN"}}
     end)
 
@@ -19,6 +19,7 @@ defmodule Pincer.Core.Project.HardeningTest do
       nil -> Blackboard.start_link([])
       _ -> :ok
     end
+
     :ok
   end
 
@@ -26,10 +27,10 @@ defmodule Pincer.Core.Project.HardeningTest do
   test "stop/1 terminates the worker process immediately" do
     id = "p-zombie-test"
     {:ok, pid} = Server.start_link(id: id, session_id: "s1", objective: "Heavy Task")
-    
+
     wait_for_status(id, :awaiting_approval)
     Server.approve(id)
-    
+
     # Busy wait pelo worker subir
     worker_pid = wait_for_worker(id)
     assert Process.alive?(worker_pid)
@@ -47,13 +48,13 @@ defmodule Pincer.Core.Project.HardeningTest do
   test "execution logic is ignored if status is not :running" do
     id = "p-bypass-test"
     {:ok, pid} = Server.start_link(id: id, session_id: "s1", objective: "Forbidden task")
-    
+
     wait_for_status(id, :awaiting_approval)
-    
+
     # Tentamos forçar o handle_info de execução enviando mensagem direta ao processo
     send(pid, :execute_next)
     Process.sleep(100)
-    
+
     {:ok, state} = Server.get_status(id)
     assert state.status == :awaiting_approval
     assert state.worker_pid == nil
@@ -63,8 +64,9 @@ defmodule Pincer.Core.Project.HardeningTest do
   test "project enters :error state after max_retries" do
     id = "p-retry-test"
     # max_retries: 1 para o teste ser rápido
-    {:ok, _pid} = Server.start_link(id: id, session_id: "s1", objective: "Fail task", max_retries: 1)
-    
+    {:ok, _pid} =
+      Server.start_link(id: id, session_id: "s1", objective: "Fail task", max_retries: 1)
+
     wait_for_status(id, :awaiting_approval)
     Server.approve(id)
 
@@ -85,8 +87,10 @@ defmodule Pincer.Core.Project.HardeningTest do
       flunk("Timeout waiting for status #{target_status}")
     else
       case Server.get_status(id) do
-        {:ok, %{status: ^target_status}} -> :ok
-        _ -> 
+        {:ok, %{status: ^target_status}} ->
+          :ok
+
+        _ ->
           Process.sleep(50)
           wait_for_status(id, target_status, attempts - 1)
       end
@@ -98,8 +102,10 @@ defmodule Pincer.Core.Project.HardeningTest do
       flunk("Timeout waiting for worker process")
     else
       case Server.get_status(id) do
-        {:ok, %{worker_pid: pid}} when is_pid(pid) -> pid
-        _ -> 
+        {:ok, %{worker_pid: pid}} when is_pid(pid) ->
+          pid
+
+        _ ->
           Process.sleep(50)
           wait_for_worker(id, attempts - 1)
       end

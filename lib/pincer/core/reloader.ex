@@ -14,7 +14,7 @@ defmodule Pincer.Core.Reloader do
     # Ensure the file-system monitoring application is started
     Application.ensure_all_started(:file_system)
     fs_module = Module.concat([FileSystem])
-    
+
     Logger.info("[RELOADER] Initializing Code Watcher...")
 
     if Code.ensure_loaded?(fs_module) do
@@ -89,7 +89,7 @@ defmodule Pincer.Core.Reloader do
 
         :error ->
           Logger.error("[RELOADER] Compilation failed! Check your syntax errors.")
-          
+
         :noop ->
           :ok
       end
@@ -103,7 +103,10 @@ defmodule Pincer.Core.Reloader do
 
   @impl true
   def handle_info({:EXIT, pid, reason}, %{watcher_pid: pid} = state) do
-    Logger.warning("[RELOADER] Watcher process #{inspect(pid)} exited: #{inspect(reason)}. Restarting in 1s...")
+    Logger.warning(
+      "[RELOADER] Watcher process #{inspect(pid)} exited: #{inspect(reason)}. Restarting in 1s..."
+    )
+
     Process.send_after(self(), :init_watcher, 1000)
     {:noreply, %{state | watcher_pid: nil}}
   end
@@ -130,10 +133,10 @@ defmodule Pincer.Core.Reloader do
   defp get_changed_modules(_diagnostics) do
     # When Mix compiles, it returns diagnostics or paths. We can also cross-reference `code:modified_modules/0` 
     # but a simpler way is to just find modules that are loaded in memory but have a newer .beam file.
-    loaded_modules = 
-      :code.all_loaded() 
+    loaded_modules =
+      :code.all_loaded()
       |> Enum.map(&elem(&1, 0))
-      |> Enum.filter(&(String.starts_with?(to_string(&1), "Elixir.Pincer")))
+      |> Enum.filter(&String.starts_with?(to_string(&1), "Elixir.Pincer"))
 
     Enum.filter(loaded_modules, fn mod ->
       case :code.is_loaded(mod) do
@@ -141,6 +144,7 @@ defmodule Pincer.Core.Reloader do
           # If the file path is an absolute path to a beam file, check its modification time
           path_str = List.to_string(path)
           String.ends_with?(path_str, ".beam") and module_changed?(mod, path_str)
+
         _ ->
           false
       end
@@ -154,6 +158,7 @@ defmodule Pincer.Core.Reloader do
         # But a safer bet is: if the source file is newer than the loaded module's load time, or if we just Mix.compiled, 
         # we can just blindly attempt to reload any module belonging to "pincer" that might have changed.
         true
+
       _ ->
         false
     end
@@ -164,10 +169,10 @@ defmodule Pincer.Core.Reloader do
   # that were freshly touched by the compiler.
   defp reload_modules(_changed) do
     # 1. Fetch all currently loaded Pincer modules
-    pincer_modules = 
+    pincer_modules =
       :code.all_loaded()
       |> Enum.map(&elem(&1, 0))
-      |> Enum.filter(&(String.starts_with?(to_string(&1), "Elixir.Pincer")))
+      |> Enum.filter(&String.starts_with?(to_string(&1), "Elixir.Pincer"))
 
     # 2. For each module, purge the old version and load the new one from disk
     # We skip the Reloader itself to avoid killing the current process mid-reload.
@@ -177,11 +182,12 @@ defmodule Pincer.Core.Reloader do
     |> Enum.each(fn mod ->
       :code.purge(mod)
       :code.delete(mod)
-      
+
       # Attempt to reload if it still exists (might have been deleted)
       case :code.load_file(mod) do
         {:module, ^mod} -> :ok
-        {:error, _} -> :ok # Module might have been removed or renamed
+        # Module might have been removed or renamed
+        {:error, _} -> :ok
       end
     end)
   end

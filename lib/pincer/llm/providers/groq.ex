@@ -32,8 +32,11 @@ defmodule Pincer.LLM.Providers.Groq do
           |> Enum.map(fn m ->
             # Groq doesn't always tag free models in the ID, but often includes 
             # them in a specific tier or name. We check for 'free' or small models often used as free.
-            is_free = String.contains?(String.downcase(m), "free") or 
-                      String.contains?(String.downcase(m), "versa") # 'versatile' is often the free tier
+            # 'versatile' is often the free tier
+            is_free =
+              String.contains?(String.downcase(m), "free") or
+                String.contains?(String.downcase(m), "versa")
+
             {m, is_free}
           end)
           |> Enum.sort_by(fn {_, free} -> not free end)

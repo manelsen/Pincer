@@ -17,11 +17,12 @@ defmodule Pincer.Core.Graph.Sync do
       {output, 0} ->
         files = output |> String.split("\n", trim: true) |> Enum.filter(&supported_file?/1)
         Logger.info("[GRAPH-SYNC] Git detected #{length(files)} changed files. Syncing...")
-        
+
         Enum.each(files, &index_file/1)
         {:ok, files}
 
-      _ -> {:error, :git_failed}
+      _ ->
+        {:error, :git_failed}
     end
   end
 
@@ -34,7 +35,7 @@ defmodule Pincer.Core.Graph.Sync do
         content = File.read!(path)
         ext = Path.extname(path)
         skeleton = CodeSkeleton.extract(content, ext)
-        
+
         # We index the skeleton because it provides the best architecture mapping
         # using the least amount of space/tokens.
         case LLM.generate_embedding(skeleton, provider: "openrouter") do
@@ -43,7 +44,9 @@ defmodule Pincer.Core.Graph.Sync do
             Logger.debug("[GRAPH-SYNC] Indexed skeleton: #{path}")
 
           error ->
-            Logger.error("[GRAPH-SYNC] Failed to generate embedding for #{path}: #{inspect(error)}")
+            Logger.error(
+              "[GRAPH-SYNC] Failed to generate embedding for #{path}: #{inspect(error)}"
+            )
         end
       rescue
         e -> Logger.error("[GRAPH-SYNC] Failed to index #{path}: #{inspect(e)}")
@@ -53,7 +56,21 @@ defmodule Pincer.Core.Graph.Sync do
 
   defp supported_file?(path) do
     ext = Path.extname(path) |> String.downcase()
-    ext in [".ex", ".exs", ".ts", ".js", ".py", ".md", ".txt", ".go", ".rs", ".java", ".c", ".cpp"] and 
+
+    ext in [
+      ".ex",
+      ".exs",
+      ".ts",
+      ".js",
+      ".py",
+      ".md",
+      ".txt",
+      ".go",
+      ".rs",
+      ".java",
+      ".c",
+      ".cpp"
+    ] and
       not String.contains?(path, "/deps/") and
       not String.contains?(path, "/_build/") and
       not String.contains?(path, "/.git/")

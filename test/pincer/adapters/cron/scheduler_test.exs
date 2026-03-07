@@ -11,24 +11,30 @@ defmodule Pincer.Adapters.Cron.SchedulerTest do
     end
 
     parent = self()
+
     first_log =
       capture_log(fn ->
-        {:ok, pid} = start_supervised(
-          {Scheduler,
-           [
-             name: nil,
-             tick_interval: :timer.hours(1),
-             due_jobs_fetcher: missing_table_fetcher,
-             next_run_updater: fn _job -> :ok end,
-             job_dispatcher: fn _job -> :ok end
-           ]}
-        )
+        {:ok, pid} =
+          start_supervised(
+            {Scheduler,
+             [
+               name: nil,
+               tick_interval: :timer.hours(1),
+               due_jobs_fetcher: missing_table_fetcher,
+               next_run_updater: fn _job -> :ok end,
+               job_dispatcher: fn _job -> :ok end
+             ]}
+          )
+
         send(parent, {:started, pid})
         # Wait a bit for the async tick to log
         Process.sleep(50)
       end)
 
-    pid = receive do {:started, p} -> p end
+    pid =
+      receive do
+        {:started, p} -> p
+      end
 
     assert Process.alive?(pid)
     assert first_log =~ "cron_jobs table missing"

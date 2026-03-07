@@ -64,7 +64,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   def execute(args, context \\ %{}) do
     action = Map.get(args, "action")
     raw_path = Map.get(args, "path", ".")
-    
+
     workspace_root = Map.get(context, "workspace_path") || get_workspace_root()
 
     with {:ok, safe_path} <- validate_path(raw_path, workspace_root) do

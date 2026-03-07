@@ -3,9 +3,15 @@ defmodule Pincer.Channels.Discord.API do
   Behavior for Discord API interactions.
   """
   @callback bulk_overwrite_global_commands(commands :: [map()]) :: {:ok, any()} | {:error, any()}
-  @callback create_interaction_response(interaction_id :: integer(), token :: String.t(), response :: map()) :: :ok | {:error, any()}
-  @callback create_message(channel_id :: integer(), content :: String.t(), opts :: keyword()) :: {:ok, any()} | {:error, any()}
-  @callback edit_message(channel_id :: integer(), message_id :: integer(), opts :: keyword()) :: {:ok, any()} | {:error, any()}
+  @callback create_interaction_response(
+              interaction_id :: integer(),
+              token :: String.t(),
+              response :: map()
+            ) :: :ok | {:error, any()}
+  @callback create_message(channel_id :: integer(), content :: String.t(), opts :: keyword()) ::
+              {:ok, any()} | {:error, any()}
+  @callback edit_message(channel_id :: integer(), message_id :: integer(), opts :: keyword()) ::
+              {:ok, any()} | {:error, any()}
 end
 
 defmodule Pincer.Channels.Discord.API.Adapter do
@@ -27,11 +33,12 @@ defmodule Pincer.Channels.Discord.API.Adapter do
   @impl true
   def create_message(channel_id, content, opts) do
     # Ensure channel_id is an integer (Discord Snowflake)
-    id = case channel_id do
-      i when is_integer(i) -> i
-      s when is_binary(s) -> String.to_integer(s)
-      _ -> channel_id
-    end
+    id =
+      case channel_id do
+        i when is_integer(i) -> i
+        s when is_binary(s) -> String.to_integer(s)
+        _ -> channel_id
+      end
 
     # Nostrum 0.10+: try map-based options first as it's the modern way
     # If opts is empty, we can just send content.
@@ -48,7 +55,12 @@ defmodule Pincer.Channels.Discord.API.Adapter do
     nostrum_api(:message).edit(channel_id, message_id, opts)
   end
 
-  defp nostrum_api(:message), do: Application.get_env(:pincer, :nostrum_message_api, Nostrum.Api.Message)
-  defp nostrum_api(:interaction), do: Application.get_env(:pincer, :nostrum_interaction_api, Nostrum.Api.Interaction)
-  defp nostrum_api(:application_command), do: Application.get_env(:pincer, :nostrum_app_command_api, Nostrum.Api.ApplicationCommand)
+  defp nostrum_api(:message),
+    do: Application.get_env(:pincer, :nostrum_message_api, Nostrum.Api.Message)
+
+  defp nostrum_api(:interaction),
+    do: Application.get_env(:pincer, :nostrum_interaction_api, Nostrum.Api.Interaction)
+
+  defp nostrum_api(:application_command),
+    do: Application.get_env(:pincer, :nostrum_app_command_api, Nostrum.Api.ApplicationCommand)
 end

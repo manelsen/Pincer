@@ -25,6 +25,7 @@ defmodule Pincer.Core.Cron do
   """
   def schedule(session_id, message, seconds_from_now) do
     run_at = DateTime.add(DateTime.utc_now(), seconds_from_now, :second)
+
     add(%{
       name: "one_shot_#{System.unique_integer([:positive])}",
       cron_expression: nil,

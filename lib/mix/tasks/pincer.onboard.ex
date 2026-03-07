@@ -77,11 +77,14 @@ defmodule Mix.Tasks.Pincer.Onboard do
     cond do
       opts[:accept_risk] ->
         :ok
+
       opts[:non_interactive] ->
         Mix.shell().info(@security_warning)
         :ok
+
       true ->
         Mix.shell().info(@security_warning)
+
         answer =
           Mix.shell()
           |> then(& &1.prompt("Understood? [y/N]: "))
@@ -92,6 +95,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
         if answer not in ["y", "yes"] do
           Mix.raise("Onboarding aborted by user.")
         end
+
         :ok
     end
   end
@@ -131,18 +135,20 @@ defmodule Mix.Tasks.Pincer.Onboard do
     provider_default = opts[:provider] || get_in(config, ["llm", "provider"])
 
     db_path = prompt_with_default("Database path", db_default)
-    
-    provider = if opts[:provider] do
-      opts[:provider]
-    else
-      prompt_provider_choice(provider_default)
-    end
-    
-    model = if opts[:model] do
-      opts[:model]
-    else
-      prompt_model_for_provider(provider)
-    end
+
+    provider =
+      if opts[:provider] do
+        opts[:provider]
+      else
+        prompt_provider_choice(provider_default)
+      end
+
+    model =
+      if opts[:model] do
+        opts[:model]
+      else
+        prompt_model_for_provider(provider)
+      end
 
     apply_overrides(config, db_path: db_path, provider: provider, model: model)
   end
@@ -157,9 +163,9 @@ defmodule Mix.Tasks.Pincer.Onboard do
     Mix.shell().info("  6) anthropic       (Claude)")
     Mix.shell().info("  7) groq            (Groq — Ultra fast inference)")
     Mix.shell().info("  8) Other (type ID)")
-    
+
     answer = Mix.shell().prompt("Choose [1-8]: ") |> to_string() |> String.trim()
-    
+
     case answer do
       "1" -> "openrouter"
       "2" -> "z_ai"
@@ -180,12 +186,14 @@ defmodule Mix.Tasks.Pincer.Onboard do
         Mix.shell().info("  1) openrouter/free (default)")
         Mix.shell().info("  2) openrouter/mistral-7b")
         Mix.shell().info("  3) Other (type ID)")
+
         case Mix.shell().prompt("Choose [1-3]: ") |> to_string() |> String.trim() do
           "1" -> "openrouter/free"
           "2" -> "openrouter/mistral-7b"
           "3" -> prompt_with_default("Enter model_id", "openrouter/free")
           _ -> "openrouter/free"
         end
+
       _ ->
         prompt_with_default("Default model for #{provider}", "default")
     end

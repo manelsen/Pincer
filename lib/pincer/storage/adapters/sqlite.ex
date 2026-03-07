@@ -151,7 +151,11 @@ defmodule Pincer.Storage.Adapters.SQLite do
     |> Enum.sort_by(& &1.score, :desc)
     |> Enum.take(limit)
     |> then(fn results ->
-      {:ok, Enum.map(results, &%{role: &1.node.type, content: &1.node.data["content"] || &1.node.data["path"]})}
+      {:ok,
+       Enum.map(
+         results,
+         &%{role: &1.node.type, content: &1.node.data["content"] || &1.node.data["path"]}
+       )}
     end)
   end
 

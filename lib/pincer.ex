@@ -10,6 +10,8 @@ defmodule Pincer do
 end
 
 defmodule Pincer.Mix do
-  @moduledoc false
+  @moduledoc """
+  Top-level boundary scope for Mix tasks and compilation checks.
+  """
   use Boundary, top_level?: true, check: [in: false, out: false]
 end

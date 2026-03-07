@@ -456,7 +456,7 @@ defmodule Pincer.Core.Executor do
   end
 
   defp finalize_assistant_message(
-         assistant_msg,
+         raw_assistant_msg,
          history,
          session_id,
          session_pid,
@@ -465,6 +465,8 @@ defmodule Pincer.Core.Executor do
          deps,
          usage
        ) do
+    assistant_msg = Pincer.LLM.ToolParser.parse(raw_assistant_msg)
+
     case assistant_msg do
       %{"tool_calls" => tool_calls} when is_list(tool_calls) and tool_calls != [] ->
         normalized_tool_calls = Enum.map(tool_calls, &ensure_tool_call_type/1)

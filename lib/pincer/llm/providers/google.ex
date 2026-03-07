@@ -24,7 +24,9 @@ defmodule Pincer.LLM.Providers.Google do
 
     if is_nil(api_key) or api_key == "" do
       Logger.warning("Incomplete provider configuration for Google. Using MOCK mode.")
-      {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your Google API Key."}, nil}
+
+      {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your Google API Key."},
+       nil}
     else
       {system_msgs, chat_msgs} = Enum.split_with(messages, fn m -> m["role"] == "system" end)
 
@@ -146,7 +148,9 @@ defmodule Pincer.LLM.Providers.Google do
           # Clean prefix 'models/' and filter for those supporting generateContent
           list =
             models
-            |> Enum.filter(fn m -> "generateContent" in (m["supportedGenerationMethods"] || []) end)
+            |> Enum.filter(fn m ->
+              "generateContent" in (m["supportedGenerationMethods"] || [])
+            end)
             |> Enum.map(fn m -> String.replace(m["name"] || "", "models/", "") end)
             |> Enum.reject(&(&1 == ""))
             |> Enum.sort()

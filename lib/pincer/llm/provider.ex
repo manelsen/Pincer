@@ -58,7 +58,7 @@ defmodule Pincer.LLM.Provider do
   @doc """
   Transcribes an audio file into text.
   """
-  @callback transcribe_audio(file_path :: String.t(), model :: String.t(), config :: map()) :: 
+  @callback transcribe_audio(file_path :: String.t(), model :: String.t(), config :: map()) ::
               {:ok, String.t()} | {:error, any()}
 
   @doc """

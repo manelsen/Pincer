@@ -40,7 +40,7 @@ defmodule Pincer.Core.Graph.Watcher do
       # We debounce re-indexing a bit to avoid CPU spikes during large saves
       # Use a 3-second window to let the file "settle"
       new_timer = Process.send_after(self(), {:debounce_index, rel_path}, 3000)
-      
+
       {:noreply, %{state | pending_timers: Map.put(state.pending_timers, rel_path, new_timer)}}
     else
       {:noreply, state}
@@ -51,7 +51,7 @@ defmodule Pincer.Core.Graph.Watcher do
   def handle_info({:debounce_index, path}, state) do
     # Perform the actual indexing
     Sync.index_file(path)
-    
+
     # Remove from pending list
     {:noreply, %{state | pending_timers: Map.delete(state.pending_timers, path)}}
   end

@@ -23,7 +23,8 @@ defmodule Pincer.Core.UX.MenuPolicyTest do
                "model",
                "think",
                "reasoning"
-             ]    end
+             ]
+    end
 
     test "applies validation and dedupe for Telegram" do
       result =

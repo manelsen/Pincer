@@ -95,7 +95,9 @@ defmodule Pincer.Core.ChannelInteractionPolicy do
           {page, ""} when page >= 1 -> {:ok, {:page, provider_id, page}}
           _ -> {:error, :invalid_payload}
         end
-      _ -> {:error, :invalid_payload}
+
+      _ ->
+        {:error, :invalid_payload}
     end
   end
 

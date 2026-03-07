@@ -39,18 +39,20 @@ defmodule Pincer.LLM.Providers.Anthropic do
         messages: chat_messages
       }
 
-      budget = case config[:thinking_level] do
-        "low"    -> 4_000
-        "medium" -> 10_000
-        "high"   -> 20_000
-        _        -> nil
-      end
+      budget =
+        case config[:thinking_level] do
+          "low" -> 4_000
+          "medium" -> 10_000
+          "high" -> 20_000
+          _ -> nil
+        end
 
-      body = if budget do
-        Map.put(body, :thinking, %{type: "enabled", budget_tokens: budget})
-      else
-        body
-      end
+      body =
+        if budget do
+          Map.put(body, :thinking, %{type: "enabled", budget_tokens: budget})
+        else
+          body
+        end
 
       max_tokens = max(config[:max_tokens] || 4096, (budget || 0) + 1)
       body = Map.put(body, :max_tokens, max_tokens)
@@ -120,13 +122,14 @@ defmodule Pincer.LLM.Providers.Anthropic do
 
   @impl true
   def list_models(_config) do
-    {:ok, [
-      "claude-3-5-sonnet-latest",
-      "claude-3-5-haiku-latest",
-      "claude-3-opus-latest",
-      "claude-3-sonnet-20240229",
-      "claude-3-haiku-20240307"
-    ]}
+    {:ok,
+     [
+       "claude-3-5-sonnet-latest",
+       "claude-3-5-haiku-latest",
+       "claude-3-opus-latest",
+       "claude-3-sonnet-20240229",
+       "claude-3-haiku-20240307"
+     ]}
   end
 
   @impl true
