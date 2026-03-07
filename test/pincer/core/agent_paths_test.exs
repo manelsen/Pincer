@@ -7,18 +7,19 @@ defmodule Pincer.Core.AgentPathsTest do
     tmp = tempdir("agent_paths_root")
     workspace = Path.join(tmp, "workspaces/root_agent")
 
-    File.write!(Path.join(tmp, "IDENTITY.md"), "# Root Identity\n")
-    File.write!(Path.join(tmp, "SOUL.md"), "# Root Soul\n")
-    File.write!(Path.join(tmp, "USER.md"), "# Root User\n")
-    File.write!(Path.join(tmp, "BOOTSTRAP.md"), "# Root Bootstrap\n")
+    File.mkdir_p!(Path.join(tmp, ".pincer"))
+    File.write!(Path.join(tmp, ".pincer/IDENTITY.md"), "# Root Identity\n")
+    File.write!(Path.join(tmp, ".pincer/SOUL.md"), "# Root Soul\n")
+    File.write!(Path.join(tmp, ".pincer/USER.md"), "# Root User\n")
+    File.write!(Path.join(tmp, ".pincer/BOOTSTRAP.md"), "# Root Bootstrap\n")
 
     assert workspace ==
-             AgentPaths.ensure_workspace!(workspace, bootstrap?: true, legacy_root: tmp)
+             AgentPaths.ensure_workspace!(workspace, bootstrap?: true, template_root: tmp)
 
-    assert File.read!(AgentPaths.identity_path(workspace)) == "# Root Identity\n"
-    assert File.read!(AgentPaths.soul_path(workspace)) == "# Root Soul\n"
-    assert File.read!(AgentPaths.user_path(workspace)) == "# Root User\n"
-    assert File.read!(AgentPaths.bootstrap_path(workspace)) == "# Root Bootstrap\n"
+    assert File.read!(AgentPaths.identity_path(workspace)) =~ "Pincer"
+    assert File.read!(AgentPaths.soul_path(workspace)) =~ "Core Truths"
+    assert File.read!(AgentPaths.user_path(workspace)) =~ "Context"
+    assert File.read!(AgentPaths.bootstrap_path(workspace)) =~ "BOOTSTRAP"
     assert File.exists?(AgentPaths.memory_path(workspace))
     assert File.exists?(AgentPaths.history_path(workspace))
     assert File.dir?(AgentPaths.sessions_dir(workspace))
@@ -51,25 +52,6 @@ defmodule Pincer.Core.AgentPathsTest do
     assert File.exists?(AgentPaths.history_path(subagent_workspace))
   end
 
-  test "ensure_workspace!/2 can disable legacy root persona seeding for mapped agents" do
-    tmp = tempdir("agent_paths_mapped")
-    workspace = Path.join(tmp, "workspaces/annie")
-
-    File.write!(Path.join(tmp, "IDENTITY.md"), "# Legacy Identity\n")
-    File.write!(Path.join(tmp, "SOUL.md"), "# Legacy Soul\n")
-    File.write!(Path.join(tmp, "USER.md"), "# Legacy User\n")
-    File.write!(Path.join(tmp, "BOOTSTRAP.md"), "# Legacy Bootstrap\n")
-
-    assert workspace ==
-             AgentPaths.ensure_workspace!(workspace, bootstrap?: true, legacy_root: false)
-
-    refute File.exists?(AgentPaths.identity_path(workspace))
-    refute File.exists?(AgentPaths.soul_path(workspace))
-    refute File.exists?(AgentPaths.user_path(workspace))
-    assert File.exists?(AgentPaths.bootstrap_path(workspace))
-    assert File.exists?(AgentPaths.memory_path(workspace))
-    assert File.exists?(AgentPaths.history_path(workspace))
-  end
 
   defp tempdir(prefix) do
     path = Path.join(System.tmp_dir!(), "#{prefix}_#{System.unique_integer([:positive])}")

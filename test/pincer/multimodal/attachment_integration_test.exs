@@ -137,7 +137,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
           Enum.find(
             user_content,
             &(&1["type"] == "text" and
-                String.contains?(&1["text"] || "", "não suporta"))
+                String.contains?(&1["text"] || "", "does not support"))
           )
 
         assert text_part != nil
@@ -231,7 +231,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
           Enum.find(
             user_content,
             &(&1["type"] == "text" and
-                String.contains?(&1["text"] || "", "maior que o limite"))
+                String.contains?(&1["text"] || "", "exceeds inline limit"))
           )
 
         assert text_part != nil
@@ -274,7 +274,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
           Enum.find(
             user_content,
             &(&1["type"] == "text" and
-                String.contains?(&1["text"] || "", "Falha ao baixar"))
+                String.contains?(&1["text"] || "", "Failed to download"))
           )
 
         assert text_part != nil
