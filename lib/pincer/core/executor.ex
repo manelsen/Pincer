@@ -147,11 +147,12 @@ defmodule Pincer.Core.Executor do
         do: [provider: model_override.provider, model: model_override.model],
         else: []
 
-    client_opts = if thinking = Map.get(model_override || %{}, :thinking_level) do
-      Keyword.put(client_opts, :thinking_level, thinking)
-    else
-      client_opts
-    end
+    client_opts =
+      if thinking = Map.get(model_override || %{}, :thinking_level) do
+        Keyword.put(client_opts, :thinking_level, thinking)
+      else
+        client_opts
+      end
 
     long_term_memory = Process.get(:long_term_memory, "")
     current_time = DateTime.utc_now() |> DateTime.to_string()
@@ -159,10 +160,12 @@ defmodule Pincer.Core.Executor do
     # Determine Sweet Spot token limit based on active provider's context window.
     # Consensus for complex reasoning ("Lost in the Middle"): cap at ~25% of absolute max.
     active_provider = get_active_provider(model_override)
-    sweet_spot_limit = 
+
+    sweet_spot_limit =
       case Pincer.Ports.LLM.provider_config(active_provider) do
         %{context_window: cw} when is_integer(cw) -> max(1000, trunc(cw * 0.25))
-        _ -> 8_000 # Default safe reasoning fallback
+        # Default safe reasoning fallback
+        _ -> 8_000
       end
 
     # 1. Prune history using the episodic Sweet Spot architecture
@@ -184,7 +187,15 @@ defmodule Pincer.Core.Executor do
     case deps.llm_client.stream_completion(ready_history, [tools: tools_spec] ++ client_opts) do
       {:ok, stream} ->
         try do
-          handle_stream(stream, pruned_history, session_id, session_pid, depth, model_override, deps)
+          handle_stream(
+            stream,
+            pruned_history,
+            session_id,
+            session_pid,
+            depth,
+            model_override,
+            deps
+          )
         rescue
           error in Protocol.UndefinedError ->
             Logger.warning(
@@ -206,7 +217,9 @@ defmodule Pincer.Core.Executor do
         end
 
       {:error, {:missing_credentials, env_key}} ->
-        msg = "❌ **Credentials Missing**: The environment variable `#{env_key}` is not set or is empty. Please configure it in your `.env` file and restart the server."
+        msg =
+          "❌ **Credentials Missing**: The environment variable `#{env_key}` is not set or is empty. Please configure it in your `.env` file and restart the server."
+
         Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:agent_response, msg})
         {:error, :missing_credentials}
 
@@ -285,7 +298,7 @@ defmodule Pincer.Core.Executor do
     reversed_recent = Enum.reverse(recent_messages)
 
     # 3. Accumulate tokens backwards
-    {kept_messages, _tokens} = 
+    {kept_messages, _tokens} =
       Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
         msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
         new_total = acc_tokens + msg_tokens
@@ -313,7 +326,7 @@ defmodule Pincer.Core.Executor do
 
     reversed_recent = Enum.reverse(recent_messages)
 
-    {kept_messages, _tokens} = 
+    {kept_messages, _tokens} =
       Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
         msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
         new_total = acc_tokens + msg_tokens
@@ -357,16 +370,20 @@ defmodule Pincer.Core.Executor do
   defp process_chunk(chunk, acc_text, acc_tools, session_pid) do
     case chunk do
       %{"choices" => [%{"delta" => delta}]} ->
+        tool_deltas = delta["tool_calls"]
+
         new_text =
-          if token = delta["content"] do
-            send(session_pid, {:agent_stream_token, token})
-            acc_text <> token
-          else
-            acc_text
+          case {tool_deltas, delta["content"]} do
+            {nil, token} when is_binary(token) and token != "" ->
+              send(session_pid, {:agent_stream_token, token})
+              acc_text <> token
+
+            _ ->
+              acc_text
           end
 
         new_tools =
-          if tool_deltas = delta["tool_calls"] do
+          if tool_deltas do
             merge_tool_deltas(acc_tools, tool_deltas)
           else
             acc_tools
@@ -427,7 +444,9 @@ defmodule Pincer.Core.Executor do
         {:error, {:invalid_chat_response, other}}
 
       {:error, {:missing_credentials, env_key}} ->
-        msg = "❌ **Credentials Missing**: The environment variable `#{env_key}` is not set or is empty."
+        msg =
+          "❌ **Credentials Missing**: The environment variable `#{env_key}` is not set or is empty."
+
         Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:agent_response, msg})
         {:error, :missing_credentials}
 
@@ -555,7 +574,10 @@ defmodule Pincer.Core.Executor do
 
           # Auto-capture error if it repeats
           if errors >= 3 do
-            Logger.warning("[SELF-IMPROVEMENT] Consecutive tool error detected. Capturing to Graph.")
+            Logger.warning(
+              "[SELF-IMPROVEMENT] Consecutive tool error detected. Capturing to Graph."
+            )
+
             Pincer.Ports.Storage.save_tool_error(name, args, inspect(r))
           end
 
@@ -590,7 +612,10 @@ defmodule Pincer.Core.Executor do
       {:agent_thinking, "Waiting for confirmation for: `#{command}`..."}
     )
 
-    Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:approval_requested, call_id, command})
+    Pincer.Infra.PubSub.broadcast(
+      "session:#{session_id}",
+      {:approval_requested, call_id, command}
+    )
 
     receive do
       {:tool_approval, ^call_id, :granted} ->

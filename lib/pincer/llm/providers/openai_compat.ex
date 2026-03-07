@@ -51,6 +51,7 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     # in production (SSE framing and Req collectable mismatch). For stability,
     # fallback to single-shot completion and convert it into one synthetic stream chunk.
     clean_messages = Enum.map(messages, &clean_message/1)
+
     case chat_completion(clean_messages, model, config, tools) do
       {:ok, message, _usage} ->
         {:ok, message_to_stream_chunks(message)}
@@ -76,13 +77,19 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     tool_calls = message["tool_calls"] || []
 
     delta = %{}
-    delta = if content == "", do: delta, else: Map.put(delta, "content", content)
 
     delta =
       if is_list(tool_calls) and tool_calls != [] do
         Map.put(delta, "tool_calls", tool_calls_to_deltas(tool_calls))
       else
         delta
+      end
+
+    delta =
+      if content == "" or Map.has_key?(delta, "tool_calls") do
+        delta
+      else
+        Map.put(delta, "content", content)
       end
 
     [%{"choices" => [%{"delta" => delta}]}]
@@ -184,17 +191,18 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     case body do
       %{"choices" => [%{"message" => message} | _]} ->
         usage = body["usage"]
-        
+
         # OpenRouter and some providers send reasoning in separate fields
         reasoning = message["reasoning"] || message["thought"]
-        
-        message = if is_binary(reasoning) and reasoning != "" do
-          content = message["content"] || ""
-          # Prepend reasoning wrapped in tags so Pincer's UI can handle it
-          Map.put(message, "content", "<thinking>\n#{reasoning}\n</thinking>\n\n#{content}")
-        else
-          message
-        end
+
+        message =
+          if is_binary(reasoning) and reasoning != "" do
+            content = message["content"] || ""
+            # Prepend reasoning wrapped in tags so Pincer's UI can handle it
+            Map.put(message, "content", "<thinking>\n#{reasoning}\n</thinking>\n\n#{content}")
+          else
+            message
+          end
 
         {:ok, message, usage}
 
@@ -254,7 +262,10 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
           {:ok, models}
 
         {:ok, response} ->
-          Logger.warning("[LLM] Unexpected response listing models from #{models_url}: #{response.status}")
+          Logger.warning(
+            "[LLM] Unexpected response listing models from #{models_url}: #{response.status}"
+          )
+
           {:error, :unexpected_response}
 
         {:error, reason} ->
@@ -314,7 +325,11 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
 
       true ->
         # Fallback assumption
-        chat_url |> String.split("/") |> Enum.slice(0..-2//-1) |> Enum.join("/") |> Kernel.<>("/models")
+        chat_url
+        |> String.split("/")
+        |> Enum.slice(0..-2//-1)
+        |> Enum.join("/")
+        |> Kernel.<>("/models")
     end
   end
 
