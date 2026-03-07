@@ -118,7 +118,6 @@ defmodule Pincer.Application do
       {Finch, name: Pincer.Finch},
       {Pincer.Infra.Repo, repo_config},
       Pincer.Core.Heartbeat,
-      Pincer.Core.Heartbeat.GitHubWatcher,
       {Registry, keys: :duplicate, name: Pincer.Dispatcher.Registry},
       {DynamicSupervisor, strategy: :one_for_one, name: Pincer.MCP.Supervisor},
       Pincer.Adapters.Connectors.MCP.Manager,
@@ -131,9 +130,22 @@ defmodule Pincer.Application do
       Pincer.Channels.Telegram.SessionSupervisor,
       Pincer.Channels.Discord.SessionSupervisor,
       Pincer.Channels.WhatsApp.SessionSupervisor,
-      Pincer.Core.Graph.Watcher,
       Pincer.Core.Reloader
     ]
+
+    children =
+      if Application.get_env(:pincer, :enable_graph_watcher, true) do
+        children ++ [Pincer.Core.Graph.Watcher]
+      else
+        children
+      end
+
+    children =
+      if Application.get_env(:pincer, :enable_heartbeat_watchers, true) do
+        children ++ [Pincer.Core.Heartbeat.GitHubWatcher]
+      else
+        children
+      end
 
     opts = [strategy: :one_for_one, name: Pincer.Supervisor]
     Supervisor.start_link(children, opts)
