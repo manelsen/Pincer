@@ -18,6 +18,7 @@ defmodule Pincer.MixProject do
         ],
         ignore_unknown: true
       ],
+      elixirc_options: [warnings_as_errors: true],
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
       aliases: aliases(),
@@ -46,9 +47,17 @@ defmodule Pincer.MixProject do
 
   defp aliases do
     [
-      qa: ["format --check-formatted", "test.quick"],
-      "test.quick": ["test --stale --max-failures 1"],
-      "sprint.check": ["format --check-formatted", "test"]
+      qa: [
+        "format --check-formatted",
+        "compile --warnings-as-errors",
+        "test --warnings-as-errors --max-failures 1"
+      ],
+      "test.quick": ["test --warnings-as-errors --stale --max-failures 1"],
+      "sprint.check": [
+        "format --check-formatted",
+        "compile --warnings-as-errors",
+        "test --warnings-as-errors"
+      ]
     ]
   end
 
