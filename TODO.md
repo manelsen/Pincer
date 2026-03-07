@@ -22,14 +22,13 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
   - Fornece o "Mapa do Território" ultra-barato para o LLM rotear sua busca profunda.
 - [ ] **Sincronização Híbrida de Conhecimento (GraphRAG Sync)**
   - [x] **Sincronização Local (Git/Watcher):** Hooks automáticos para re-indexar vetores após edições feitas pelo Pincer ou via commits (`git diff`). Implementado via SQLite Vector Stopgap.
-  - [ ] **RAG Dinâmico Externo via MCP (APIs e Linguagens):** 
-
+  - [x] **RAG Dinâmico Externo via MCP (APIs e Linguagens):** 
     - Como lidar com tecnologias fast-moving (Gleam, Go 1.26, Odin)?
     - Ao detectar erro de compilação ou conhecimento obsoleto, o agente invoca o **MCP do GitHub** para extrair as *Release Notes* ou docs do repositório oficial (`github_search_code`).
-    - Esse "texto limpo" é vetorizado na hora via API (ex: `openrouter/baai/bge-m3` por ~$0.01/1M tokens) e ingerido na coleção `external_docs` do LanceDB.
-  - [ ] **Retroalimentação em Grafo (Experiência Dedutiva):**
+    - Esse "texto limpo" é vetorizado na hora via API (ex: `openrouter/baai/bge-m3` por ~$0.01/1M tokens) e ingerido na coleção `external_docs` do LanceDB. Implementado via `ExternalKnowledge` tool.
+  - [x] **Retroalimentação em Grafo (Experiência Dedutiva):**
     - Após o RAG resolver o problema, o agente consolida o aprendizado na **Memória em Grafos**: `[Bug] --(resolvido_em)--> [Módulo/Versão]`.
-    - No próximo encontro com o mesmo erro (mesmo em outros projetos), o agente consulta o Grafo primeiro (fatos causais) antes de recorrer à busca vetorial cega ou ao GitHub, garantindo "memória de sênior".
+    - No próximo encontro com o mesmo erro (mesmo em outros projetos), o agente consulta o Grafo primeiro (fatos causais) antes de recorrer à busca vetorial cega ou ao GitHub, garantindo "memória de sênior". Implementado via `capture_tool_error_to_graph` e `Learning` tool.
 
 ### [x] Motor de Auto-Melhoria Contínua (Self-Improving Agent)
 - [x] **Captura de Erros Autônoma (Error Nodes):** Interceptar falhas consecutivas de ferramentas (ex: `shell_server`, erros de sintaxe ou "tool_execution_failed") no `Pincer.Core.Executor` e salvar automaticamente como "Nós de Erro" estruturados (Metadata, Causa, Fix) na Memória de Grafos, sem depender da vontade do LLM.
@@ -47,13 +46,13 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
 
 ## ✨ CANAIS & INTERFACE (GATEWAYS)
 
-### [ ] Abstração Multi-canal
+### [x] Abstração Multi-canal
 - [x] Telegram (Telegex).
-- [ ] **CLI Interativo** (`mix pincer.chat` com histórico persistente).
-- [ ] Webhook Universal para integração com outras ferramentas.
+- [x] **CLI Interativo** (`mix pincer.chat` com histórico persistente).
+- [x] Webhook Universal para integração com outras ferramentas.
 
-### [ ] UX & Streaming
-- [ ] **Progress Streaming**: Enviar partes da resposta conforme o LLM gera (via Telegex edit_message).
+### [x] UX & Streaming
+- [x] **Progress Streaming**: Enviar partes da resposta conforme o LLM gera (via Telegex edit_message). Implementado em Telegram e Discord.
 - [ ] Notificações inteligentes de progresso do Sub-agente.
 
 ---
@@ -65,7 +64,7 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
 - [x] Processamento de imagens/logs enviados como arquivos (Inlining + Previews para logs grandes)
 
 ### [ ] Segurança & Proatividade
-- [ ] `restrict_to_workspace`: Sandbox para comandos shell e leitura de arquivos.
+- [x] `restrict_to_workspace`: Sandbox para comandos shell e leitura de arquivos. Implementado via `WorkspaceGuard`.
 - [ ] **Heartbeat Avançado**: Agentes que monitoram o GitHub em busca de mudanças e tomam a iniciativa.
 
 ---
