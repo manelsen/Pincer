@@ -39,4 +39,15 @@ defmodule Pincer.Storage do
       []
     end
   end
+
+  @impl true
+  def save_learning(cat, sum), do: graph_adapter().save_learning(cat, sum)
+
+  @impl true
+  def save_tool_error(tool, args, err), do: graph_adapter().save_tool_error(tool, args, err)
+
+  @impl true
+  def list_recent_learnings(limit), do: graph_adapter().list_recent_learnings(limit)
+
+  defp graph_adapter, do: Pincer.Storage.Adapters.Graph
 end
