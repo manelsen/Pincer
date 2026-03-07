@@ -49,5 +49,11 @@ defmodule Pincer.Storage do
   @impl true
   def list_recent_learnings(limit), do: graph_adapter().list_recent_learnings(limit)
 
+  @impl true
+  def index_document(path, content, vector), do: graph_adapter().index_document(path, content, vector)
+
+  @impl true
+  def search_similar(type, vector, limit), do: graph_adapter().search_similar(type, vector, limit)
+
   defp graph_adapter, do: Pincer.Storage.Adapters.Graph
 end

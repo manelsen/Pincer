@@ -9,6 +9,7 @@ defmodule Pincer.Core do
       Project.Supervisor,
       ProjectRouter,
       ProjectOrchestrator,
+      Structs.IncomingMessage,
       Executor,
       UX,
       UX.MenuPolicy,
@@ -31,6 +32,11 @@ defmodule Pincer.Core do
       WorkspaceGuard,
       Orchestration.Blackboard,
       Orchestration.SubAgent,
-      Orchestration.Scheduler
+      Orchestration.Scheduler,
+      Graph.State,
+      Graph.Nodes,
+      Graph.Runner,
+      Graph.Sync,
+      Graph.Watcher
     ]
 end

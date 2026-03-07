@@ -50,4 +50,6 @@ defmodule Pincer.LLM.Providers.Groq do
 
   @impl true
   def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
+  @impl true
+  def generate_embedding(_text, _model, _config), do: {:error, :not_implemented}
 end

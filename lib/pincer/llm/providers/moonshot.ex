@@ -29,6 +29,8 @@ defmodule Pincer.LLM.Providers.Moonshot do
 
   @impl true
   def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
+  @impl true
+  def generate_embedding(_text, _model, _config), do: {:error, :not_implemented}
 
   defp normalize_config(config) do
     config = Map.put_new(config, :base_url, "https://api.moonshot.ai/v1/chat/completions")

@@ -110,7 +110,7 @@ defmodule Pincer.Channels.SmokeTest do
     assert Process.alive?(pid)
 
     # Trigger process
-    assert {:ok, :started} = Pincer.Core.Session.Server.process_input(session_id, "Please analyze this text")
+    assert {:ok, :buffered} = Pincer.Core.Session.Server.process_input(session_id, "Please analyze this text")
 
     # Assertions
     assert_receive {:agent_partial, "Hello"}, 5000
@@ -142,7 +142,7 @@ defmodule Pincer.Channels.SmokeTest do
     assert {:ok, pid} = Pincer.Core.Session.Supervisor.start_session(session_id)
     assert Process.alive?(pid)
 
-    assert {:ok, :started} = Pincer.Core.Session.Server.process_input(session_id, "Please analyze this text")
+    assert {:ok, :buffered} = Pincer.Core.Session.Server.process_input(session_id, "Please analyze this text")
 
     assert_receive {:agent_partial, "Hello"}, 5000
     assert_receive {:agent_response, "Hello world!", _usage}, 5000

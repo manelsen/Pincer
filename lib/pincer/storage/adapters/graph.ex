@@ -276,4 +276,56 @@ defmodule Pincer.Storage.Adapters.Graph do
       end
     end)
   end
+
+  @doc """
+  Indexes a document or chunk with its vector embedding in SQLite.
+  """
+  def index_document(path, content, vector) do
+    # Convert float list to binary for BLOB storage
+    embedding_bin = :erlang.term_to_binary(vector)
+
+    case create_node("document", %{"path" => path, "content" => content}) do
+      {:ok, node} ->
+        node
+        |> Node.changeset(%{embedding: embedding_bin})
+        |> Repo.update()
+
+        :ok
+
+      error ->
+        error
+    end
+  end
+
+  @doc """
+  Performs a brute-force cosine similarity search in SQLite.
+  Suitable for "Stopgap" mode with small-to-medium datasets.
+  """
+  def search_similar(type, query_vector, limit \\ 5) do
+    query = from(n in Node, where: n.type == ^type and not is_nil(n.embedding))
+
+    Repo.all(query)
+    |> Enum.map(fn node ->
+      vector = :erlang.binary_to_term(node.embedding)
+      score = cosine_similarity(query_vector, vector)
+      %{node: node, score: score}
+    end)
+    |> Enum.sort_by(& &1.score, :desc)
+    |> Enum.take(limit)
+    |> then(fn results ->
+      {:ok, Enum.map(results, &%{role: &1.node.type, content: &1.node.data["content"] || &1.node.data["path"]})}
+    end)
+  end
+
+  defp cosine_similarity(v1, v2) do
+    dot_product = Enum.zip(v1, v2) |> Enum.map(fn {a, b} -> a * b end) |> Enum.sum()
+    mag1 = :math.sqrt(Enum.map(v1, fn x -> x * x end) |> Enum.sum())
+    mag2 = :math.sqrt(Enum.map(v2, fn x -> x * x end) |> Enum.sum())
+
+    if mag1 > 0 and mag2 > 0 do
+      dot_product / (mag1 * mag2)
+    else
+      0.0
+    end
+  end
 end

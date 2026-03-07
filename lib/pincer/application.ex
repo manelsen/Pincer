@@ -130,6 +130,7 @@ defmodule Pincer.Application do
       Pincer.Channels.Telegram.SessionSupervisor,
       Pincer.Channels.Discord.SessionSupervisor,
       Pincer.Channels.WhatsApp.SessionSupervisor,
+      Pincer.Core.Graph.Watcher,
       Pincer.Core.Reloader
     ]
 
