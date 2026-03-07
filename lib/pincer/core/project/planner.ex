@@ -40,12 +40,21 @@ defmodule Pincer.Core.Project.Planner do
 
     case LLM.chat_completion(messages) do
       {:ok, %{"content" => content}, _usage} ->
-        tasks = 
+        tasks =
           content
           |> String.split("\n")
           |> Enum.map(&String.trim/1)
           |> Enum.reject(&(&1 == ""))
-        
+
+        {:ok, tasks}
+
+      {:ok, %{"content" => content}} ->
+        tasks =
+          content
+          |> String.split("\n")
+          |> Enum.map(&String.trim/1)
+          |> Enum.reject(&(&1 == ""))
+
         {:ok, tasks}
 
       {:error, reason} ->

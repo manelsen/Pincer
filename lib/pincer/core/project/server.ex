@@ -68,7 +68,11 @@ defmodule Pincer.Core.Project.Server do
   @impl true
   def handle_call(:approve, _from, state) do
     Logger.info("[PROJECT] #{state.id} Approved. Starting execution.")
-    Blackboard.post("system", "Project approved. Starting execution.", state.id)
+
+    Blackboard.post("system", "Project approved. Starting execution.", state.id,
+      scope: state.session_id
+    )
+
     send(self(), :execute_next)
     {:reply, :ok, %{state | status: :running}}
   end
@@ -82,7 +86,7 @@ defmodule Pincer.Core.Project.Server do
   @impl true
   def handle_call(:resume, _from, state) do
     Logger.info("[PROJECT] #{state.id} Resuming execution.")
-    Blackboard.post("system", "Project resumed.", state.id)
+    Blackboard.post("system", "Project resumed.", state.id, scope: state.session_id)
     send(self(), :execute_next)
     {:reply, :ok, %{state | status: :running, retry_count: 0}}
   end
@@ -97,7 +101,10 @@ defmodule Pincer.Core.Project.Server do
   def handle_info(:plan_project, state) do
     case Planner.build_plan(state.objective) do
       {:ok, tasks} ->
-        Blackboard.post("Architect", "PLAN_GENERATED:\n" <> Enum.join(tasks, "\n"), state.id)
+        Blackboard.post("Architect", "PLAN_GENERATED:\n" <> Enum.join(tasks, "\n"), state.id,
+          scope: state.session_id
+        )
+
         {:noreply, %{state | items: tasks, status: :awaiting_approval}}
 
       {:error, reason} ->
@@ -112,7 +119,10 @@ defmodule Pincer.Core.Project.Server do
 
   def handle_info(:execute_next, %{active_task_index: idx, items: items} = state)
       when idx >= length(items) do
-    Blackboard.post("system", "Project completed successfully!", state.id)
+    Blackboard.post("system", "Project completed successfully!", state.id,
+      scope: state.session_id
+    )
+
     {:noreply, %{state | status: :completed}}
   end
 
@@ -128,7 +138,11 @@ defmodule Pincer.Core.Project.Server do
       end)
 
     ref = Process.monitor(pid)
-    Blackboard.post("system", "Starting task (#{role}): #{task}", state.id)
+
+    Blackboard.post("system", "Starting task (#{role}): #{task}", state.id,
+      scope: state.session_id
+    )
+
     {:noreply, %{state | status: :running, worker_pid: pid, monitor_ref: ref}}
   end
 
@@ -138,7 +152,8 @@ defmodule Pincer.Core.Project.Server do
     Blackboard.post(
       "system",
       "Completed: #{Enum.at(state.items, state.active_task_index)}",
-      state.id
+      state.id,
+      scope: state.session_id
     )
 
     send(self(), :execute_next)
@@ -164,7 +179,8 @@ defmodule Pincer.Core.Project.Server do
       Blackboard.post(
         "system",
         "Task failed, retrying... (Attempt #{next_retry_count})",
-        state.id
+        state.id,
+        scope: state.session_id
       )
 
       send(self(), :execute_next)
@@ -173,7 +189,7 @@ defmodule Pincer.Core.Project.Server do
       diagnostic =
         "ERROR_DIAGNOSTIC: Task failed after #{state.max_retries} attempts. Last Reason: #{inspect(reason)}"
 
-      Blackboard.post("Reviewer", diagnostic, state.id)
+      Blackboard.post("Reviewer", diagnostic, state.id, scope: state.session_id)
 
       Logger.error("Project #{state.id} halted. Awaiting user intervention.")
 
