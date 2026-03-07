@@ -229,4 +229,51 @@ defmodule Pincer.Storage.Adapters.Graph do
 
     Repo.one(query)
   end
+
+  @doc """
+  Saves a new learning or user correction to the knowledge graph.
+  """
+  def save_learning(category, summary) do
+    data = %{
+      "category" => category,
+      "summary" => summary,
+      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
+    create_node("learning", data)
+  end
+
+  @doc """
+  Saves a recurring tool error to the knowledge graph.
+  """
+  def save_tool_error(tool, args, error) do
+    data = %{
+      "tool" => tool,
+      "args" => args,
+      "error" => error,
+      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
+    }
+
+    create_node("tool_error", data)
+  end
+
+  @doc """
+  Lists the most recent learnings and tool errors.
+  """
+  def list_recent_learnings(limit \\ 3) do
+    query =
+      from(n in Node,
+        where: n.type in ["tool_error", "learning"],
+        order_by: [desc: n.inserted_at],
+        limit: ^limit
+      )
+
+    Repo.all(query)
+    |> Enum.map(fn n ->
+      case n.type do
+        "tool_error" -> %{type: :error, tool: n.data["tool"], error: n.data["error"]}
+        "learning" -> %{type: :learning, category: n.data["category"], summary: n.data["summary"]}
+      end
+    end)
+  end
 end

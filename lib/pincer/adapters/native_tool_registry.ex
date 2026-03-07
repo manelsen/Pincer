@@ -21,7 +21,8 @@ defmodule Pincer.Adapters.NativeToolRegistry do
     Pincer.Adapters.Tools.SafeShell,
     Pincer.Adapters.Tools.Web,
     Pincer.Adapters.Tools.GraphMemory,
-    Pincer.Adapters.Tools.CodeSkeleton
+    Pincer.Adapters.Tools.CodeSkeleton,
+    Pincer.Adapters.Tools.Learning
   ]
 
   @impl true
