@@ -9,14 +9,16 @@ defmodule Pincer.Channels.SmokeTest do
 
   # Simple Mock Provider for Streaming
   defmodule MockStreamProvider do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
     def chat_completion(_, _, _, _), do: {:ok, %{"content" => "Mock response"}}
+
     def stream_completion(_msgs, _model, _config, _tools) do
-      stream = 
+      stream =
         ["Hello", " world", "!"]
-        |> Stream.map(fn text -> 
+        |> Stream.map(fn text ->
           %{"choices" => [%{"delta" => %{"content" => text}}]}
         end)
+
       {:ok, stream}
     end
   end
@@ -30,18 +32,18 @@ defmodule Pincer.Channels.SmokeTest do
   setup do
     # Ensure Pincer is running (restart to ensure clean state)
     Application.stop(:pincer)
-    
+
     # Use Mock Registry to avoid MCP timeouts
-    Application.put_env(:pincer, :core, 
+    Application.put_env(:pincer, :core,
       tool_registry: MockRegistry,
       llm_client: Pincer.LLM.Client
     )
-    
+
     # Pre-stub Telegram methods that might be called during app startup
     # (The Application start might trigger Telegram Poller init)
     Mox.stub(TelegramAPIMock, :delete_webhook, fn -> {:ok, true} end)
     Mox.stub(TelegramAPIMock, :get_updates, fn _opts -> {:ok, []} end)
-    
+
     Application.ensure_all_started(:pincer)
 
     # Ensure DB is ready
@@ -50,9 +52,11 @@ defmodule Pincer.Channels.SmokeTest do
 
     # Setup Mock LLM
     original_llm = Application.get_env(:pincer, :llm_providers)
+
     Application.put_env(:pincer, :llm_providers, %{
       "test_provider" => %{adapter: MockStreamProvider, default_model: "test"}
     })
+
     Application.put_env(:pincer, :default_llm_provider, "test_provider")
 
     # Setup Channel Mocks
@@ -64,21 +68,22 @@ defmodule Pincer.Channels.SmokeTest do
     end)
 
     verify_on_exit!()
-    
+
     # Allow UpdatesProvider to use the mock
     if pid = Process.whereis(Pincer.Channels.Telegram.UpdatesProvider) do
       Mox.allow(TelegramAPIMock, self(), pid)
     end
-    
+
     :ok
   end
 
   defp ensure_started_and_allow(module, id, mock) do
-    {:ok, pid} = 
+    {:ok, pid} =
       case module.ensure_started(id) do
         {:ok, pid} -> {:ok, pid}
         {:error, {:already_started, pid}} -> {:ok, pid}
       end
+
     Mox.allow(mock, self(), pid)
     {:ok, pid}
   end
@@ -92,25 +97,26 @@ defmodule Pincer.Channels.SmokeTest do
     # 1. First token creates the message
     TelegramAPIMock
     |> expect(:send_message, fn ^chat_id, "Hello ▌", _opts ->
-         {:ok, %{message_id: mid}}
-       end)
+      {:ok, %{message_id: mid}}
+    end)
     # 2. Subsequent tokens might be debounced or final
     |> stub(:edit_message_text, fn ^chat_id, ^mid, _text, _opts ->
-         {:ok, %{}}
-       end)
+      {:ok, %{}}
+    end)
 
     # Subscribe to see what's happening
     Pincer.Infra.PubSub.subscribe("session:#{session_id}")
 
     # Start the session workers
     ensure_started_and_allow(Telegram.Session, chat_id, TelegramAPIMock)
-    
+
     # Assert session start
     assert {:ok, pid} = Pincer.Core.Session.Supervisor.start_session(session_id)
     assert Process.alive?(pid)
 
     # Trigger process
-    assert {:ok, :buffered} = Pincer.Core.Session.Server.process_input(session_id, "Please analyze this text")
+    assert {:ok, :buffered} =
+             Pincer.Core.Session.Server.process_input(session_id, "Please analyze this text")
 
     # Assertions
     assert_receive {:agent_partial, "Hello"}, 5000
@@ -130,19 +136,20 @@ defmodule Pincer.Channels.SmokeTest do
     # Intercept API calls
     DiscordAPIMock
     |> expect(:create_message, fn ^channel_id, "Hello ▌", _opts ->
-         {:ok, %{id: mid}}
-       end)
+      {:ok, %{id: mid}}
+    end)
     |> stub(:edit_message, fn ^channel_id, ^mid, _opts ->
-         {:ok, %{}}
-       end)
+      {:ok, %{}}
+    end)
 
     Pincer.Infra.PubSub.subscribe("session:#{session_id}")
     ensure_started_and_allow(Discord.Session, channel_id, DiscordAPIMock)
-    
+
     assert {:ok, pid} = Pincer.Core.Session.Supervisor.start_session(session_id)
     assert Process.alive?(pid)
 
-    assert {:ok, :buffered} = Pincer.Core.Session.Server.process_input(session_id, "Please analyze this text")
+    assert {:ok, :buffered} =
+             Pincer.Core.Session.Server.process_input(session_id, "Please analyze this text")
 
     assert_receive {:agent_partial, "Hello"}, 5000
     assert_receive {:agent_response, "Hello world!", _usage}, 5000

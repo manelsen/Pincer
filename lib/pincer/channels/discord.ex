@@ -242,7 +242,7 @@ defmodule Pincer.Channels.Discord do
     alias Pincer.Core.ChannelInteractionPolicy
     alias Pincer.Core.Pairing
     alias Pincer.Core.ProjectRouter
-    alias Pincer.Core.SessionScopePolicy
+    alias Pincer.Core.SessionResolver
     alias Pincer.Core.UX
     alias Pincer.Core.Session.Server
 
@@ -266,14 +266,15 @@ defmodule Pincer.Channels.Discord do
                     handle_command(msg, command)
 
                   :error ->
-                    session_id = resolve_session_id(msg)
+                    session_context = resolve_session_context(msg)
+                    session_id = session_context.session_id
 
                     case ProjectRouter.continue_if_collecting(session_id, trimmed,
                            has_attachments: not Enum.empty?(msg.attachments)
                          ) do
                       {:handled, response} ->
                         Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
-                        maybe_start_project_execution(msg.channel_id, session_id)
+                        maybe_start_project_execution(msg.channel_id, session_context)
 
                       :not_handled ->
                         Logger.info(
@@ -305,7 +306,7 @@ defmodule Pincer.Channels.Discord do
                           end
 
                         if has_content do
-                          ensure_brain_session_started(session_id)
+                          ensure_brain_session_started(session_context)
 
                           Pincer.Channels.Discord.Session.ensure_started(
                             msg.channel_id,
@@ -313,18 +314,21 @@ defmodule Pincer.Channels.Discord do
                           )
 
                           # Create agnostic IncomingMessage
-                          incoming = case full_content do
-                            text when is_binary(text) -> 
-                              IncomingMessage.new(session_id, text)
-                            
-                            parts when is_list(parts) ->
-                              # Split text from attachments
-                              {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
-                              text = Enum.map_join(text_parts, "\n", & &1["text"])
-                              atts = Enum.map(att_parts, & &1["attachment"])
-                              
-                              IncomingMessage.new(session_id, text: text, attachments: atts)
-                          end
+                          incoming =
+                            case full_content do
+                              text when is_binary(text) ->
+                                IncomingMessage.new(session_id, text)
+
+                              parts when is_list(parts) ->
+                                # Split text from attachments
+                                {text_parts, att_parts} =
+                                  Enum.split_with(parts, fn p -> p["type"] == "text" end)
+
+                                text = Enum.map_join(text_parts, "\n", & &1["text"])
+                                atts = Enum.map(att_parts, & &1["attachment"])
+
+                                IncomingMessage.new(session_id, text: text, attachments: atts)
+                            end
 
                           Server.process_input(session_id, incoming)
                         else
@@ -385,18 +389,32 @@ defmodule Pincer.Channels.Discord do
 
     defp read_sender_id(_), do: "unknown"
 
-    defp resolve_session_id(context) do
+    defp resolve_session_context(context) do
       policy_config = Application.get_env(:pincer, :discord_channel_config, %{})
+      sender_id = resolve_sender_id(context)
 
-      SessionScopePolicy.resolve(
+      SessionResolver.resolve(
         :discord,
         %{
           channel_id: read_field(context, :channel_id),
-          guild_id: read_field(context, :guild_id)
+          guild_id: read_field(context, :guild_id),
+          sender_id: sender_id
         },
         policy_config
       )
     end
+
+    defp resolve_session_id(context), do: resolve_session_context(context).session_id
+
+    defp resolve_sender_id(context) do
+      read_optional_sender_id(read_field(context, :author)) ||
+        read_field(read_field(context, :user), :id) ||
+        read_field(read_field(read_field(context, :member), :user), :id) ||
+        "unknown"
+    end
+
+    defp read_optional_sender_id(nil), do: nil
+    defp read_optional_sender_id(author), do: read_sender_id(author)
 
     defp read_field(map, key) when is_map(map) and is_atom(key) do
       Map.get(map, key) || Map.get(map, Atom.to_string(key))
@@ -458,11 +476,15 @@ defmodule Pincer.Channels.Discord do
     defp handle_command(msg, "/models") do
       providers = Pincer.Ports.LLM.list_providers()
       buttons = build_provider_buttons(providers)
-      
-      buttons = case ChannelInteractionPolicy.menu_id(:discord) do
-        {:ok, id} -> buttons ++ [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
-        _ -> buttons
-      end
+
+      buttons =
+        case ChannelInteractionPolicy.menu_id(:discord) do
+          {:ok, id} ->
+            buttons ++ [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
+
+          _ ->
+            buttons
+        end
 
       components = chunk_buttons(buttons)
 
@@ -481,17 +503,19 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_command(msg, "/project") do
-      session_id = resolve_session_id(msg)
+      session_context = resolve_session_context(msg)
+      session_id = session_context.session_id
       response = ProjectRouter.project(session_id)
       Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
-      maybe_start_project_execution(msg.channel_id, session_id)
+      maybe_start_project_execution(msg.channel_id, session_context)
     end
 
     defp handle_command(msg, "/project " <> details) do
-      session_id = resolve_session_id(msg)
+      session_context = resolve_session_context(msg)
+      session_id = session_context.session_id
       response = ProjectRouter.project(session_id, details)
       Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
-      maybe_start_project_execution(msg.channel_id, session_id)
+      maybe_start_project_execution(msg.channel_id, session_context)
     end
 
     defp handle_command(msg, "/pair") do
@@ -539,33 +563,50 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_command(msg, "/new") do
-      session_id = resolve_session_id(msg)
-      ensure_brain_session_started(session_id)
+      session_context = resolve_session_context(msg)
+      session_id = session_context.session_id
+      ensure_brain_session_started(session_context)
+
       case Pincer.Core.Session.Server.reset(session_id) do
         :ok ->
           Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔄 Sessão reiniciada.")
+
         _ ->
-          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "❌ Não foi possível reiniciar a sessão.")
+          Pincer.Channels.Discord.send_message(
+            "#{msg.channel_id}",
+            "❌ Não foi possível reiniciar a sessão."
+          )
       end
     end
 
     defp handle_command(msg, "/reset"), do: handle_command(msg, "/new")
 
     defp handle_command(msg, "/model") do
-      Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /model <provider/modelo>\nEx: /model openrouter/mistral-7b")
+      Pincer.Channels.Discord.send_message(
+        "#{msg.channel_id}",
+        "Uso: /model <provider/modelo>\nEx: /model openrouter/mistral-7b"
+      )
     end
 
     defp handle_command(msg, "/model " <> text) do
-      session_id = resolve_session_id(msg)
-      ensure_brain_session_started(session_id)
+      session_context = resolve_session_context(msg)
+      session_id = session_context.session_id
+      ensure_brain_session_started(session_context)
+
       case String.split(String.trim(text), "/", parts: 2) do
         [provider, model] when provider != "" and model != "" ->
           Pincer.Core.Session.Server.set_model(session_id, provider, model)
+
           Pincer.Channels.Discord.send_message(
-            "#{msg.channel_id}", "✅ Modelo: `#{provider}/#{model}`")
+            "#{msg.channel_id}",
+            "✅ Modelo: `#{provider}/#{model}`"
+          )
+
         _ ->
           Pincer.Channels.Discord.send_message(
-            "#{msg.channel_id}", "Uso: /model <provider/modelo>\nEx: /model openrouter/mistral-7b")
+            "#{msg.channel_id}",
+            "Uso: /model <provider/modelo>\nEx: /model openrouter/mistral-7b"
+          )
       end
     end
 
@@ -574,15 +615,20 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_command(msg, "/think " <> text) do
-      session_id = resolve_session_id(msg)
-      ensure_brain_session_started(session_id)
+      session_context = resolve_session_context(msg)
+      session_id = session_context.session_id
+      ensure_brain_session_started(session_context)
       level = text |> String.trim() |> String.downcase()
       valid = ["off", "low", "medium", "high"]
+
       if level in valid do
         Pincer.Core.Session.Server.set_thinking(session_id, level)
         Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🧠 Thinking: `#{level}`")
       else
-        Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /think off|low|medium|high")
+        Pincer.Channels.Discord.send_message(
+          "#{msg.channel_id}",
+          "Uso: /think off|low|medium|high"
+        )
       end
     end
 
@@ -591,15 +637,23 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_command(msg, "/reasoning " <> text) do
-      session_id = resolve_session_id(msg)
-      ensure_brain_session_started(session_id)
+      session_context = resolve_session_context(msg)
+      session_id = session_context.session_id
+      ensure_brain_session_started(session_context)
+
       case String.trim(text) |> String.downcase() do
         "on" ->
           Pincer.Core.Session.Server.set_reasoning_visible(session_id, true)
           Pincer.Channels.Discord.send_message("#{msg.channel_id}", "👁 Reasoning: visível")
+
         "off" ->
           Pincer.Core.Session.Server.set_reasoning_visible(session_id, false)
-          Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🙈 Reasoning: oculto (strip ativado)")
+
+          Pincer.Channels.Discord.send_message(
+            "#{msg.channel_id}",
+            "🙈 Reasoning: oculto (strip ativado)"
+          )
+
         _ ->
           Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /reasoning on|off")
       end
@@ -610,15 +664,19 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_command(msg, "/verbose " <> text) do
-      session_id = resolve_session_id(msg)
-      ensure_brain_session_started(session_id)
+      session_context = resolve_session_context(msg)
+      session_id = session_context.session_id
+      ensure_brain_session_started(session_context)
+
       case String.trim(text) |> String.downcase() do
         "on" ->
           Pincer.Core.Session.Server.set_verbose(session_id, true)
           Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔊 Verbose: on")
+
         "off" ->
           Pincer.Core.Session.Server.set_verbose(session_id, false)
           Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔇 Verbose: off")
+
         _ ->
           Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /verbose on|off")
       end
@@ -629,10 +687,12 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_command(msg, "/usage " <> text) do
-      session_id = resolve_session_id(msg)
-      ensure_brain_session_started(session_id)
+      session_context = resolve_session_context(msg)
+      session_id = session_context.session_id
+      ensure_brain_session_started(session_context)
       display = text |> String.trim() |> String.downcase()
       valid = ["off", "tokens", "full"]
+
       if display in valid do
         Pincer.Core.Session.Server.set_usage(session_id, display)
         Pincer.Channels.Discord.send_message("#{msg.channel_id}", "📊 Usage display: `#{display}`")
@@ -673,10 +733,14 @@ defmodule Pincer.Channels.Discord do
       providers = Pincer.Ports.LLM.list_providers()
       buttons = build_provider_buttons(providers)
 
-      buttons = case ChannelInteractionPolicy.menu_id(:discord) do
-        {:ok, id} -> buttons ++ [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
-        _ -> buttons
-      end
+      buttons =
+        case ChannelInteractionPolicy.menu_id(:discord) do
+          {:ok, id} ->
+            buttons ++ [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
+
+          _ ->
+            buttons
+        end
 
       components = chunk_buttons(buttons)
 
@@ -703,7 +767,8 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_project_command(interaction) do
-      session_id = resolve_session_id(interaction)
+      session_context = resolve_session_context(interaction)
+      session_id = session_context.session_id
 
       response = %{
         type: 4,
@@ -711,7 +776,7 @@ defmodule Pincer.Channels.Discord do
       }
 
       send_interaction_response(interaction, response)
-      maybe_start_project_execution(read_field(interaction, :channel_id), session_id)
+      maybe_start_project_execution(read_field(interaction, :channel_id), session_context)
     end
 
     defp build_status_content(session_id) do
@@ -774,12 +839,19 @@ defmodule Pincer.Channels.Discord do
           models = Pincer.Ports.LLM.list_models(provider_id)
           session_id = resolve_session_id(interaction)
           current_model = current_model_for_session(session_id)
-          
+
           # build_keyboard returns list of lines [[btn]], we need a flat list for chunk_buttons
           # or just pass it as is if it's already structured for Discord ActionRows.
           # Actually, Discord needs ActionRows. build_keyboard returns [[btn]], which is perfect.
-          rows = Pincer.Core.UX.ModelKeyboard.build_keyboard(:discord, provider_id, models, page, current_model)
-          
+          rows =
+            Pincer.Core.UX.ModelKeyboard.build_keyboard(
+              :discord,
+              provider_id,
+              models,
+              page,
+              current_model
+            )
+
           # rows is [[map]], chunk_buttons expects [map]. We flatten it.
           buttons = List.flatten(rows)
           components = chunk_buttons(buttons)
@@ -799,7 +871,15 @@ defmodule Pincer.Channels.Discord do
           session_id = resolve_session_id(interaction)
           current_model = current_model_for_session(session_id)
 
-          rows = Pincer.Core.UX.ModelKeyboard.build_keyboard(:discord, provider_id, models, 1, current_model)
+          rows =
+            Pincer.Core.UX.ModelKeyboard.build_keyboard(
+              :discord,
+              provider_id,
+              models,
+              1,
+              current_model
+            )
+
           buttons = List.flatten(rows)
           components = chunk_buttons(buttons)
 
@@ -815,9 +895,10 @@ defmodule Pincer.Channels.Discord do
           send_interaction_response(interaction, response)
 
         {:ok, {:select_model, provider_id, model}} ->
-          session_id = resolve_session_id(interaction)
+          session_context = resolve_session_context(interaction)
+          session_id = session_context.session_id
 
-          ensure_brain_session_started(session_id)
+          ensure_brain_session_started(session_context)
           Server.set_model(session_id, provider_id, model)
 
           response = %{
@@ -836,10 +917,14 @@ defmodule Pincer.Channels.Discord do
           providers = Pincer.Ports.LLM.list_providers()
           buttons = build_provider_buttons(providers)
 
-          buttons = case ChannelInteractionPolicy.menu_id(:discord) do
-            {:ok, id} -> buttons ++ [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
-            _ -> buttons
-          end
+          buttons =
+            case ChannelInteractionPolicy.menu_id(:discord) do
+              {:ok, id} ->
+                buttons ++ [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
+
+              _ ->
+                buttons
+            end
 
           components = chunk_buttons(buttons)
 
@@ -879,10 +964,11 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp unknown_interaction_response do
-      menu_btn = case ChannelInteractionPolicy.menu_id(:discord) do
-        {:ok, id} -> [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
-        _ -> []
-      end
+      menu_btn =
+        case ChannelInteractionPolicy.menu_id(:discord) do
+          {:ok, id} -> [%{type: 2, style: 2, label: UX.menu_button_label(), custom_id: id}]
+          _ -> []
+        end
 
       %{
         type: 7,
@@ -893,19 +979,19 @@ defmodule Pincer.Channels.Discord do
       }
     end
 
-    defp maybe_start_project_execution(channel_id, session_id)
-         when not is_nil(channel_id) and is_binary(session_id) do
-      case ProjectRouter.kickoff(session_id) do
+    defp maybe_start_project_execution(channel_id, %Pincer.Core.Session.Context{} = context)
+         when not is_nil(channel_id) do
+      case ProjectRouter.kickoff(context.session_id) do
         {:ok, kickoff} ->
-          ensure_brain_session_started(session_id)
-          Pincer.Channels.Discord.Session.ensure_started(channel_id, session_id)
+          ensure_brain_session_started(context)
+          Pincer.Channels.Discord.Session.ensure_started(channel_id, context.session_id)
 
           Pincer.Channels.Discord.send_message(
             "#{channel_id}",
             "Project Runner: #{kickoff.status_message}"
           )
 
-          _ = Server.process_input(session_id, kickoff.prompt)
+          _ = Server.process_input(context.session_id, kickoff.prompt)
           :ok
 
         :not_ready ->
@@ -919,7 +1005,26 @@ defmodule Pincer.Channels.Discord do
       end
     end
 
-    defp maybe_start_project_execution(_channel_id, _session_id), do: :ok
+    defp maybe_start_project_execution(_channel_id, _session_context), do: :ok
+
+    defp ensure_brain_session_started(%Pincer.Core.Session.Context{} = context) do
+      start_opts =
+        context
+        |> Pincer.Core.Session.Context.to_start_opts()
+        |> Keyword.delete(:session_id)
+
+      case Registry.lookup(Pincer.Core.Session.Registry, context.session_id) do
+        [] ->
+          Logger.info(
+            "[DISCORD] Creating new brain session: #{context.session_id} (root_agent=#{context.root_agent_id})"
+          )
+
+          Pincer.Core.Session.Supervisor.start_session(context.session_id, start_opts)
+
+        [_] ->
+          :ok
+      end
+    end
 
     defp ensure_brain_session_started(session_id) do
       case Registry.lookup(Pincer.Core.Session.Registry, session_id) do

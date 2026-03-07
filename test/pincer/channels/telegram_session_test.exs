@@ -53,6 +53,45 @@ defmodule Pincer.Channels.Telegram.SessionTest do
     Process.sleep(80)
   end
 
+  test "large single-token partial waits for final and avoids preview duplication" do
+    chat_id = 47
+    test_pid = self()
+    large_body = String.duplicate("a", 4201)
+    payload = "<thinking>internal</thinking>\n\n" <> large_body
+
+    APIMock
+    |> expect(:send_message, fn ^chat_id, text, opts ->
+      assert text == large_body
+      assert opts[:parse_mode] == "HTML"
+      {:error, %Telegex.Error{error_code: 400, description: "Bad Request: message is too long"}}
+    end)
+    |> expect(:send_message, fn ^chat_id, text, opts ->
+      assert text == String.duplicate("a", 4000)
+      assert opts[:parse_mode] == "HTML"
+      send(test_pid, {:telegram_chunk, 1, text})
+      {:ok, %{message_id: 1001}}
+    end)
+    |> expect(:send_message, fn ^chat_id, text, opts ->
+      assert text == String.duplicate("a", 201)
+      assert opts[:parse_mode] == "HTML"
+      send(test_pid, {:telegram_chunk, 2, text})
+      {:ok, %{message_id: 1002}}
+    end)
+
+    {:ok, pid} = Session.start_link(chat_id)
+    allow(APIMock, self(), pid)
+
+    send(pid, {:agent_partial, payload})
+    Process.sleep(80)
+    refute_receive {:telegram_chunk, _, _}, 50
+
+    send(pid, {:agent_response, payload, nil})
+
+    assert_receive {:telegram_chunk, 1, _}, 500
+    assert_receive {:telegram_chunk, 2, _}, 500
+    refute_receive {:telegram_chunk, _, _}, 100
+  end
+
   test "worker rebinds to session scope topic and delivers response from new topic" do
     chat_id = 44
 
@@ -69,7 +108,11 @@ defmodule Pincer.Channels.Telegram.SessionTest do
 
     Process.sleep(50)
 
-    Pincer.Infra.PubSub.broadcast("session:telegram_main", {:agent_response, "Main scope reply", nil})
+    Pincer.Infra.PubSub.broadcast(
+      "session:telegram_main",
+      {:agent_response, "Main scope reply", nil}
+    )
+
     Process.sleep(80)
   end
 
