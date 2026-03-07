@@ -17,8 +17,12 @@ defmodule Pincer.Core.Orchestration.Blackboard do
   # --- API ---
 
   @doc "Compatibility API for posting messages."
-  def post(agent_id, content, project_id \\ nil) do
-    GenServer.call(__MODULE__, {:post, agent_id, content, project_id})
+  def post(agent_id, content), do: post(agent_id, content, nil, [])
+
+  def post(agent_id, content, project_id), do: post(agent_id, content, project_id, [])
+
+  def post(agent_id, content, project_id, opts) when is_list(opts) do
+    GenServer.call(__MODULE__, {:post, agent_id, content, project_id, opts})
   end
 
   @doc "Wait for the journaler to process all pending messages (for tests)."
@@ -42,11 +46,12 @@ defmodule Pincer.Core.Orchestration.Blackboard do
   end
 
   @doc "Direct write to ETS. This is what allows 10M+ ops."
-  def post_direct(id, agent_id, content, project_id) do
+  def post_direct(id, agent_id, content, project_id, opts \\ []) do
     msg = %{
       id: id,
       agent_id: agent_id,
       project_id: project_id,
+      scope: Keyword.get(opts, :scope),
       content: content,
       timestamp: DateTime.utc_now()
     }
@@ -59,29 +64,40 @@ defmodule Pincer.Core.Orchestration.Blackboard do
   @doc """
   Fetches new messages. If not in RAM, automatically falls back to Disk Journal.
   """
-  def fetch_new(since_id, limit \\ :all) do
+  def fetch_new(since_id, limit_or_opts \\ :all)
+
+  def fetch_new(since_id, opts) when is_list(opts) do
+    limit = Keyword.get(opts, :limit, :all)
+    scope = Keyword.get(opts, :scope)
+    do_fetch_new(since_id, limit, scope)
+  end
+
+  def fetch_new(since_id, limit) do
+    do_fetch_new(since_id, limit, nil)
+  end
+
+  defp do_fetch_new(since_id, limit, scope) do
     first_key = :ets.first(@table)
 
     cond do
       # 1. Caso base: Cache vazio ou since_id muito antigo -> Busca no Disco
       first_key == :"$end_of_table" or since_id < first_key ->
         # Busca no disco primeiro
-        disk_messages = read_from_journal(since_id, limit)
+        {disk_messages, disk_last_id} = read_from_journal(since_id, limit, scope)
 
         # Se o disco preencheu o limite, retorna.
         # Caso contrário, tenta complementar com o que tem na RAM.
         if reached_limit?(disk_messages, limit) do
-          {disk_messages, last_seen_id(disk_messages, since_id)}
+          {disk_messages, disk_last_id}
         else
           ram_limit = remaining_limit(limit, length(disk_messages))
-          ram_since = last_seen_id(disk_messages, since_id)
-          {ram_messages, last_id} = fetch_from_ram(ram_since, ram_limit)
+          {ram_messages, last_id} = fetch_from_ram(disk_last_id, ram_limit, scope)
           {disk_messages ++ ram_messages, last_id}
         end
 
       # 2. Caso padrão: Tudo está na RAM
       true ->
-        fetch_from_ram(since_id, limit)
+        fetch_from_ram(since_id, limit, scope)
     end
   end
 
@@ -92,7 +108,12 @@ defmodule Pincer.Core.Orchestration.Blackboard do
   defp remaining_limit(limit, count) when is_integer(limit), do: max(limit - count, 0)
 
   defp last_seen_id([], since_id), do: since_id
-  defp last_seen_id(messages, _since_id), do: List.last(messages).id
+
+  defp last_seen_id(messages, since_id) do
+    Enum.reduce(messages, since_id, fn msg, current ->
+      max(current, message_id(msg))
+    end)
+  end
 
   # --- Callbacks ---
 
@@ -115,9 +136,9 @@ defmodule Pincer.Core.Orchestration.Blackboard do
   end
 
   @impl true
-  def handle_call({:post, agent_id, content, project_id}, _from, state) do
+  def handle_call({:post, agent_id, content, project_id, opts}, _from, state) do
     id = state.next_id
-    post_direct(id, agent_id, content, project_id)
+    post_direct(id, agent_id, content, project_id, opts)
     {:reply, id, %{state | next_id: id + 1}}
   end
 
@@ -178,6 +199,7 @@ defmodule Pincer.Core.Orchestration.Blackboard do
 
   defp fallback_usage do
     memsup = String.to_atom("memsup")
+
     if Process.whereis(memsup) do
       try do
         {total, allocated, _} = apply(memsup, :get_memory_data, [])
@@ -192,86 +214,86 @@ defmodule Pincer.Core.Orchestration.Blackboard do
 
   # --- Internal Logic: RAM Fetch ---
 
-  defp fetch_from_ram(since_id, :all) do
+  defp fetch_from_ram(since_id, :all, scope) do
     spec = [{{:"$1", :"$2"}, [{:>, :"$1", since_id}], [:"$2"]}]
     messages = :ets.select(@table, spec)
-    {messages, last_seen_id(messages, since_id)}
+    {filter_scope(messages, scope), last_seen_id(messages, since_id)}
   end
 
-  defp fetch_from_ram(since_id, limit) when is_integer(limit) do
+  defp fetch_from_ram(since_id, limit, scope) when is_integer(limit) do
     if limit <= 0 do
       {[], since_id}
     else
       spec = [{{:"$1", :"$2"}, [{:>, :"$1", since_id}], [:"$2"]}]
 
-      case :ets.select(@table, spec, limit) do
-        {messages, _continuation} ->
-          {messages, last_seen_id(messages, since_id)}
-
-        :"$end_of_table" ->
-          {[], since_id}
-
-        msgs when is_list(msgs) ->
-          {msgs, last_seen_id(msgs, since_id)}
-      end
+      messages = :ets.select(@table, spec)
+      scoped_messages = messages |> filter_scope(scope) |> Enum.take(limit)
+      {scoped_messages, last_seen_id(messages, since_id)}
     end
   end
 
-  defp fetch_from_ram(since_id, _limit) do
+  defp fetch_from_ram(since_id, _limit, _scope) do
     {[], since_id}
   end
 
   # --- Internal Logic: Disk Recovery ---
 
-  defp read_from_journal(since_id, limit) do
+  defp read_from_journal(since_id, limit, scope) do
     if File.exists?(@journal_file) do
       case :file.open(@journal_file, [:read, :binary, :raw]) do
         {:ok, file} ->
           try do
-            iterate_journal(file, since_id, limit, [])
+            {messages, last_id} = iterate_journal(file, since_id, [], since_id)
+            {messages |> filter_scope(scope) |> Enum.take(normalize_limit(limit)), last_id}
           after
             :file.close(file)
           end
 
         _ ->
-          []
+          {[], since_id}
       end
     else
-      []
+      {[], since_id}
     end
   end
 
-  defp iterate_journal(file, since_id, limit, acc) do
-    if limit_reached?(acc, limit) do
-      Enum.reverse(acc)
-    else
-      case :file.read(file, 4) do
-        {:ok, <<size::32>>} ->
-          case :file.read(file, size) do
-            {:ok, binary} ->
-              msg = :erlang.binary_to_term(binary)
+  defp iterate_journal(file, since_id, acc, last_id) do
+    case :file.read(file, 4) do
+      {:ok, <<size::32>>} ->
+        case :file.read(file, size) do
+          {:ok, binary} ->
+            msg = :erlang.binary_to_term(binary)
 
-              if msg.id > since_id do
-                iterate_journal(file, since_id, limit, [msg | acc])
-              else
-                iterate_journal(file, since_id, limit, acc)
-              end
+            if message_id(msg) > since_id do
+              iterate_journal(file, since_id, [msg | acc], max(last_id, message_id(msg)))
+            else
+              iterate_journal(file, since_id, acc, last_id)
+            end
 
-            _ ->
-              Enum.reverse(acc)
-          end
+          _ ->
+            {Enum.reverse(acc), last_id}
+        end
 
-        :eof ->
-          Enum.reverse(acc)
+      :eof ->
+        {Enum.reverse(acc), last_id}
 
-        _ ->
-          Enum.reverse(acc)
-      end
+      _ ->
+        {Enum.reverse(acc), last_id}
     end
   end
 
-  defp limit_reached?(_acc, :all), do: false
-  defp limit_reached?(acc, limit) when is_integer(limit), do: length(acc) >= limit
+  defp normalize_limit(:all), do: 1_000_000_000
+  defp normalize_limit(limit) when is_integer(limit) and limit >= 0, do: limit
+  defp normalize_limit(_), do: 0
+
+  defp filter_scope(messages, nil), do: messages
+
+  defp filter_scope(messages, scope) do
+    Enum.filter(messages, fn msg -> Map.get(msg, :scope) == scope end)
+  end
+
+  defp message_id(%{id: id}) when is_integer(id), do: id
+  defp message_id(_), do: 0
 
   # --- Internal Logic: Journaler & Pruning ---
 
