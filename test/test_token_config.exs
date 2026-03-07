@@ -17,6 +17,7 @@ end
 
 # Check System env as well (since Config.load puts it there)
 sys_token = System.get_env("GITHUB_PERSONAL_ACCESS_TOKEN")
+
 if sys_token do
   IO.puts("[OK] GitHub Token found in System env.")
 else

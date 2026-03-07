@@ -37,7 +37,8 @@ defmodule Pincer.LLM.Providers.OpenRouter do
             is_free = pricing["prompt"] == "0" and pricing["completion"] == "0"
             {id, is_free}
           end)
-          |> Enum.sort_by(fn {_, free} -> not free end) # Free first
+          # Free first
+          |> Enum.sort_by(fn {_, free} -> not free end)
           |> Enum.map(fn {id, free} ->
             if free, do: "#{id} (FREE)", else: id
           end)

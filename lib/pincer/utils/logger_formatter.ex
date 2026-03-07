@@ -8,11 +8,11 @@ defmodule Pincer.Utils.LoggerFormatter do
     time = format_timestamp(timestamp)
     level_tag = format_level(level)
     meta = format_metadata(metadata)
-    
+
     # ANSI Colors
     reset = "\e[0m"
     gray = "\e[90m"
-    
+
     # Example Output: 22:15:01 [INFO] [session:123] Hello world
     "#{gray}#{time}#{reset} #{level_tag} #{meta}#{message}\n"
   end
@@ -30,7 +30,7 @@ defmodule Pincer.Utils.LoggerFormatter do
   defp format_metadata(metadata) do
     session = Keyword.get(metadata, :session_id)
     project = Keyword.get(metadata, :project_id)
-    
+
     yellow = "\e[33m"
     reset = "\e[0m"
 

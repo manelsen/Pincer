@@ -47,21 +47,21 @@ defmodule Pincer.Core.Graph.Runner do
 
   defp execute_llm_edge(state, deps) do
     tools_spec = deps.tool_registry.list_tools()
-    
+
     # In a full implementation, this would use stream_completion and handle tokens
     # For the graph abstraction, we treat the network call as a discrete edge.
-    case deps.llm_client.chat_completion(state.history, [tools: tools_spec]) do
+    case deps.llm_client.chat_completion(state.history, tools: tools_spec) do
       {:ok, response} ->
         # Parse response into standard message and tool calls
         message = response["choices"] |> hd() |> Map.get("message")
         tool_calls = Map.get(message, "tool_calls", [])
-        
+
         # We must save the assistant's message to history before executing tools
         new_messages = [message]
-        
+
         # 3. Feed the result back to the pure Node to get the next state
         next_state = Nodes.on_llm_response(state, new_messages, tool_calls)
-        
+
         # Continue the loop
         loop(next_state, deps)
 
@@ -74,36 +74,43 @@ defmodule Pincer.Core.Graph.Runner do
 
   defp execute_tools_edge(state, tool_calls, deps) do
     # 1. Execute tools imperatively
-    results = Enum.map(tool_calls, fn call ->
-      function_name = get_in(call, ["function", "name"])
-      arguments = get_in(call, ["function", "arguments"])
-      call_id = Map.get(call, "id")
+    results =
+      Enum.map(tool_calls, fn call ->
+        function_name = get_in(call, ["function", "name"])
+        arguments = get_in(call, ["function", "arguments"])
+        call_id = Map.get(call, "id")
 
-      # Try to parse args if it's a JSON string
-      args_map = case arguments do
-        s when is_binary(s) -> 
-          case Jason.decode(s) do
-            {:ok, m} -> m
-            _ -> %{}
+        # Try to parse args if it's a JSON string
+        args_map =
+          case arguments do
+            s when is_binary(s) ->
+              case Jason.decode(s) do
+                {:ok, m} -> m
+                _ -> %{}
+              end
+
+            m when is_map(m) ->
+              m
+
+            _ ->
+              %{}
           end
-        m when is_map(m) -> m
-        _ -> %{}
-      end
 
-      # Execute via registry
-      result_text = case deps.tool_registry.execute(function_name, args_map) do
-        {:ok, res} -> res
-        {:error, err} -> "Error: #{err}"
-      end
+        # Execute via registry
+        result_text =
+          case deps.tool_registry.execute(function_name, args_map) do
+            {:ok, res} -> res
+            {:error, err} -> "Error: #{err}"
+          end
 
-      # Format to LLM standard tool message
-      %{
-        "role" => "tool",
-        "name" => function_name,
-        "tool_call_id" => call_id,
-        "content" => to_string(result_text)
-      }
-    end)
+        # Format to LLM standard tool message
+        %{
+          "role" => "tool",
+          "name" => function_name,
+          "tool_call_id" => call_id,
+          "content" => to_string(result_text)
+        }
+      end)
 
     # 2. Feed results back to pure Node to transition state
     next_state = Nodes.on_tool_results(state, results)

@@ -46,8 +46,11 @@ defmodule Mix.Tasks.Pincer.Server do
     case Application.ensure_all_started(:pincer) do
       {:ok, _} ->
         IO.puts(IO.ANSI.cyan() <> ">>> Pincer Application STARTED <<<" <> IO.ANSI.reset())
+
       {:error, reason} ->
-        IO.puts(IO.ANSI.red() <> "!!! FAILED TO START PINCER: #{inspect(reason)}" <> IO.ANSI.reset())
+        IO.puts(
+          IO.ANSI.red() <> "!!! FAILED TO START PINCER: #{inspect(reason)}" <> IO.ANSI.reset()
+        )
     end
 
     # Keep the process alive

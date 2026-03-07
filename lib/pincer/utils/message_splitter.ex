@@ -4,11 +4,12 @@ defmodule Pincer.Utils.MessageSplitter do
   Prioritizes preserving formatting (paragraphs, words) over exact length.
   """
 
-  @default_limit 4000 # Telegram limit is 4096, keeping safety margin for HTML tags
+  # Telegram limit is 4096, keeping safety margin for HTML tags
+  @default_limit 4000
 
   @doc """
   Splits text into chunks of at most `limit` characters.
-  
+
   Strategy:
   1. Split by newlines first (paragraphs/lines).
   2. Accumulate lines until limit is reached.
@@ -18,7 +19,7 @@ defmodule Pincer.Utils.MessageSplitter do
   def split(text, limit \\ @default_limit) do
     # First pass: preserve paragraphs/lines
     lines = String.split(text, ~r/(?:\r\n|\n)/)
-    
+
     Enum.reduce(lines, [], fn line, acc ->
       process_line(line, acc, limit)
     end)
@@ -29,7 +30,8 @@ defmodule Pincer.Utils.MessageSplitter do
     # First line matches logic of "add to empty chunk"
     # But wait, line might be huge.
     if String.length(line) > limit do
-      split_huge_line(line, limit) |> Enum.reverse() # Reverse because accumulator expects reversed list
+      # Reverse because accumulator expects reversed list
+      split_huge_line(line, limit) |> Enum.reverse()
     else
       [line]
     end
@@ -65,7 +67,7 @@ defmodule Pincer.Utils.MessageSplitter do
   defp split_huge_line(text, limit) do
     # Try splitting by spaces first to preserve words
     words = String.split(text, " ")
-    
+
     # If it was just one massive word (no spaces), fall back to hard chunking
     if length(words) == 1 do
       text

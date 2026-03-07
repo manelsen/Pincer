@@ -58,7 +58,7 @@ defmodule Pincer.Channels.WhatsApp.Session do
   @impl true
   def init(chat_id) do
     session_id = default_session_id(chat_id)
-    
+
     # 1. Macro init handles system:delivery
     super(chat_id)
 
@@ -142,7 +142,9 @@ defmodule Pincer.Channels.WhatsApp.Session do
   defp normalize_session_id(chat_id, _), do: default_session_id(chat_id)
 
   defp subscribe_session(session_id), do: Pincer.Infra.PubSub.subscribe("session:#{session_id}")
-  defp unsubscribe_session(session_id), do: Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
+
+  defp unsubscribe_session(session_id),
+    do: Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
 
   defp maybe_advance_project_flow(state) do
     case ProjectRouter.on_agent_response(state.session_id) do

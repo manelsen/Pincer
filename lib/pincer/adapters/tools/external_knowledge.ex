@@ -14,13 +14,15 @@ defmodule Pincer.Adapters.Tools.ExternalKnowledge do
         "type" => "function",
         "function" => %{
           "name" => "ingest_external_knowledge",
-          "description" => "Ingests a piece of external knowledge (like documentation, release notes, or code examples) into the long-term vector memory. Use this after researching new technologies (like Gleam or Go 1.26) via GitHub or Web.",
+          "description" =>
+            "Ingests a piece of external knowledge (like documentation, release notes, or code examples) into the long-term vector memory. Use this after researching new technologies (like Gleam or Go 1.26) via GitHub or Web.",
           "parameters" => %{
             "type" => "object",
             "properties" => %{
               "source" => %{
                 "type" => "string",
-                "description" => "The source of the information (e.g., 'GitHub: odin-lang/Odin', 'Gleam Docs')."
+                "description" =>
+                  "The source of the information (e.g., 'GitHub: odin-lang/Odin', 'Gleam Docs')."
               },
               "content" => %{
                 "type" => "string",
@@ -35,7 +37,8 @@ defmodule Pincer.Adapters.Tools.ExternalKnowledge do
         "type" => "function",
         "function" => %{
           "name" => "search_external_knowledge",
-          "description" => "Searches the external knowledge base for information about APIs, languages, or documentation previously ingested.",
+          "description" =>
+            "Searches the external knowledge base for information about APIs, languages, or documentation previously ingested.",
           "parameters" => %{
             "type" => "object",
             "properties" => %{
@@ -56,7 +59,11 @@ defmodule Pincer.Adapters.Tools.ExternalKnowledge do
   end
 
   @impl true
-  def execute(%{"tool_name" => "ingest_external_knowledge", "source" => source, "content" => content}) do
+  def execute(%{
+        "tool_name" => "ingest_external_knowledge",
+        "source" => source,
+        "content" => content
+      }) do
     case LLM.generate_embedding(content, provider: "openrouter") do
       {:ok, vector} ->
         case Storage.index_document(source, content, vector) do

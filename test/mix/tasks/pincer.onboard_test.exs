@@ -29,12 +29,12 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
 
     assert File.exists?("config.yaml")
     assert File.dir?("db")
-    assert File.dir?("workspaces")
+    assert File.dir?(Pincer.Core.AgentPaths.base_dir())
     assert File.dir?("sessions")
     assert File.dir?("memory")
-    assert File.exists?("workspaces/.template/.pincer/BOOTSTRAP.md")
-    assert File.exists?("workspaces/.template/.pincer/MEMORY.md")
-    assert File.exists?("workspaces/.template/.pincer/HISTORY.md")
+    assert File.exists?("#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/BOOTSTRAP.md")
+    assert File.exists?("#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/MEMORY.md")
+    assert File.exists?("#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/HISTORY.md")
 
     {:ok, config} = YamlElixir.read_from_file("config.yaml")
     assert config["database"]["database"] == "db/pincer_mvp.db"
@@ -62,12 +62,12 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     end)
 
     assert File.dir?("db")
-    assert File.dir?("workspaces")
+    assert File.dir?(Pincer.Core.AgentPaths.base_dir())
     assert File.dir?("sessions")
     assert File.dir?("memory")
     assert File.exists?("config.yaml")
-    refute File.exists?("workspaces/.template/.pincer/MEMORY.md")
-    refute File.exists?("workspaces/.template/.pincer/HISTORY.md")
+    refute File.exists?("#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/MEMORY.md")
+    refute File.exists?("#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/HISTORY.md")
   end
 
   test "invalid capabilities raise explicit error" do
@@ -182,7 +182,7 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     assert output =~ "ssh deploy@vps.example.com"
     assert output =~ "mix pincer.onboard --non-interactive --yes"
     refute File.exists?("config.yaml")
-    refute File.exists?("workspaces/.template/.pincer/MEMORY.md")
-    refute File.exists?("workspaces/.template/.pincer/HISTORY.md")
+    refute File.exists?("#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/MEMORY.md")
+    refute File.exists?("#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/HISTORY.md")
   end
 end

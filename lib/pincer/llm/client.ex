@@ -160,16 +160,17 @@ defmodule Pincer.LLM.Client do
   Returns available models for a specific provider from the model-selection
 
   registry (config.yaml `llm` with fallback to `:llm_providers`).
-  
+
   Attempts dynamic discovery from provider API with 1-hour cache.
   """
   @spec list_models(String.t()) :: [String.t()]
   def list_models(provider_id) do
     cache_key = {:models, provider_id}
-    
+
     case get_cached_models(cache_key) do
-      {:ok, models} -> 
+      {:ok, models} ->
         models
+
       :miss ->
         models = fetch_models_from_provider(provider_id)
         put_cached_models(cache_key, models)
@@ -185,18 +186,21 @@ defmodule Pincer.LLM.Client do
       ModelRegistry.list_models(provider_id, model_selection_registry())
     else
       adapter = config[:adapter]
-      requested_profile = nil # Default profile for listing
+      # Default profile for listing
+      requested_profile = nil
 
       case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
         {:ok, auth_selection} ->
           config_with_auth = auth_selection.config
-          
+
           case apply(adapter, :list_models, [config_with_auth]) do
-            {:ok, models} when is_list(models) and models != [] -> 
+            {:ok, models} when is_list(models) and models != [] ->
               models
-            _ -> 
+
+            _ ->
               ModelRegistry.list_models(provider_id, model_selection_registry())
           end
+
         _ ->
           ModelRegistry.list_models(provider_id, model_selection_registry())
       end
@@ -209,6 +213,7 @@ defmodule Pincer.LLM.Client do
 
   defp get_cached_models(key) do
     ensure_cache_table()
+
     case :ets.lookup(@cache_table, key) do
       [{^key, models, expiry}] ->
         if System.system_time(:second) < expiry do
@@ -217,7 +222,9 @@ defmodule Pincer.LLM.Client do
           :ets.delete(@cache_table, key)
           :miss
         end
-      [] -> :miss
+
+      [] ->
+        :miss
     end
   end
 
@@ -355,10 +362,10 @@ defmodule Pincer.LLM.Client do
 
       case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
         {:ok, auth_selection} ->
-          model = 
-            Keyword.get(opts, :model) || 
-            config[:embedding_model] || 
-            (if provider_id == "openrouter", do: "baai/bge-m3", else: config[:default_model])
+          model =
+            Keyword.get(opts, :model) ||
+              config[:embedding_model] ||
+              if provider_id == "openrouter", do: "baai/bge-m3", else: config[:default_model]
 
           config_with_auth = auth_selection.config
           apply(adapter, :generate_embedding, [text, model, config_with_auth])
@@ -979,7 +986,8 @@ defmodule Pincer.LLM.Client do
   defp chat_message_to_stream_chunks(_), do: [%{"choices" => [%{"delta" => %{"content" => ""}}]}]
 
   defp simulate_response(_messages) do
-    {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your LLM providers."}, nil}
+    {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your LLM providers."},
+     nil}
   end
 
   defp drain_model_changed(provider, model) do

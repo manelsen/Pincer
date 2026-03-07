@@ -81,7 +81,7 @@ defmodule Pincer.Channels.CLI do
     Logger.info("CLI Channel Enabled.")
     # We still need session-specific subscription for direct agent events (thinking, etc)
     Pincer.Infra.PubSub.subscribe("session:cli_user")
-    
+
     # Macro init handles "system:delivery"
     super(state)
   end

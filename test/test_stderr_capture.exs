@@ -12,6 +12,7 @@ echo "ERROR: This is a stderr log" >&2
 echo "Another error line" >&2
 sleep 1
 """)
+
 File.chmod!("mock_stderr.sh", 0o755)
 
 alias Pincer.Adapters.Connectors.MCP.Transports.Stdio
@@ -28,12 +29,12 @@ receive do
   {_port, {:data, data}} ->
     IO.puts("\nReceived data chunk:")
     IO.inspect(data)
-    
+
     # Process it with handle_data
     {msgs, buffer} = Stdio.handle_data("", data)
     IO.puts("\nParsed Messages: #{length(msgs)}")
     IO.inspect(msgs)
-    
+
     IO.puts("\nRemaining Buffer: #{inspect(buffer)}")
 after
   2000 -> IO.puts("No data received!")

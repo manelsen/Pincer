@@ -23,8 +23,24 @@ defmodule Pincer.Core.AgentPaths do
   @bootstrap_file "BOOTSTRAP.md"
   @memory_file "MEMORY.md"
   @history_file "HISTORY.md"
-  @template_workspace Path.join(["workspaces", ".template"])
   @templates_dir "pincer/templates"
+
+  @doc """
+  The base directory for all workspaces. Configurable via `:pincer, :workspaces_dir`.
+  """
+  @spec base_dir() :: String.t()
+  def base_dir do
+    Application.get_env(:pincer, :workspaces_dir, "workspaces")
+  end
+
+  @doc """
+  The path to the special `.template` workspace.
+  """
+  @spec template_workspace() :: String.t()
+  def template_workspace do
+    Path.join(base_dir(), ".template")
+  end
+
   @default_memory_md """
   # Long-term Memory
 
@@ -45,7 +61,7 @@ defmodule Pincer.Core.AgentPaths do
   Returns the workspace root for a given agent or session id.
   """
   @spec workspace_root(String.t() | atom()) :: String.t()
-  def workspace_root(agent_id), do: Path.join("workspaces", to_string(agent_id))
+  def workspace_root(agent_id), do: Path.join(base_dir(), to_string(agent_id))
 
   @doc """
   Returns the `.pincer/` directory inside a workspace.
@@ -248,7 +264,7 @@ defmodule Pincer.Core.AgentPaths do
   end
 
   defp template_file(root, filename) when is_binary(root) do
-    Path.join([root, @template_workspace, @pincer_dir, filename])
+    Path.join([root, ".template", @pincer_dir, filename])
   end
 
   defp template_file(_root, _filename), do: nil

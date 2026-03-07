@@ -12,10 +12,18 @@ defmodule Pincer.Utils.CodeSkeleton do
     lines = String.split(source_code, ~r/\r?\n/)
 
     case String.downcase(extension) do
-      ext when ext in [".ex", ".exs", ".gleam"] -> extract_elixir_like(lines)
-      ext when ext in [".ts", ".js", ".java", ".c", ".cpp", ".cs", ".go", ".rs", ".zig"] -> extract_brace_based(lines)
-      ext when ext in [".py"] -> extract_python(lines)
-      _ -> source_code # Fallback to raw if unsupported
+      ext when ext in [".ex", ".exs", ".gleam"] ->
+        extract_elixir_like(lines)
+
+      ext when ext in [".ts", ".js", ".java", ".c", ".cpp", ".cs", ".go", ".rs", ".zig"] ->
+        extract_brace_based(lines)
+
+      ext when ext in [".py"] ->
+        extract_python(lines)
+
+      # Fallback to raw if unsupported
+      _ ->
+        source_code
     end
   end
 
@@ -50,7 +58,7 @@ defmodule Pincer.Utils.CodeSkeleton do
     |> Enum.map(fn line ->
       # Remove one-line 'do:' implementation
       line = Regex.replace(~r/,\s*do:\s*.*$/, line, "")
-      
+
       # Remove trailing 'do'
       if String.contains?(line, "def") and String.ends_with?(String.trim(line), "do") do
         line |> String.trim_trailing() |> String.replace_suffix(" do", "")
@@ -65,34 +73,34 @@ defmodule Pincer.Utils.CodeSkeleton do
     lines
     |> Enum.reduce({[], 0}, fn line, {acc, brace_depth} ->
       trimmed = String.trim(line)
-      
+
       # Track braces
       open_braces = length(Regex.scan(~r/\{/, line))
       close_braces = length(Regex.scan(~r/\}/, line))
-      
-      is_declaration? = 
+
+      is_declaration? =
         String.starts_with?(trimmed, "import ") or
-        String.starts_with?(trimmed, "export ") or
-        String.starts_with?(trimmed, "class ") or
-        String.starts_with?(trimmed, "interface ") or
-        String.starts_with?(trimmed, "type ") or
-        String.starts_with?(trimmed, "func ") or
-        String.starts_with?(trimmed, "struct ") or
-        String.starts_with?(trimmed, "impl ") or
-        String.starts_with?(trimmed, "pub ") or
-        String.starts_with?(trimmed, "fn ") or
-        String.starts_with?(trimmed, "constructor") or
-        Regex.match?(~r/^(public|private|protected|async|static)?\s*\w+\s*\(/, trimmed)
+          String.starts_with?(trimmed, "export ") or
+          String.starts_with?(trimmed, "class ") or
+          String.starts_with?(trimmed, "interface ") or
+          String.starts_with?(trimmed, "type ") or
+          String.starts_with?(trimmed, "func ") or
+          String.starts_with?(trimmed, "struct ") or
+          String.starts_with?(trimmed, "impl ") or
+          String.starts_with?(trimmed, "pub ") or
+          String.starts_with?(trimmed, "fn ") or
+          String.starts_with?(trimmed, "constructor") or
+          Regex.match?(~r/^(public|private|protected|async|static)?\s*\w+\s*\(/, trimmed)
 
       # We keep declarations that are at depth 0 (or 1 for class methods)
-      acc = 
+      acc =
         if is_declaration? and brace_depth <= 1 do
           # Keep the line but strip implementation if it starts here
           if !String.starts_with?(trimmed, "import") and String.contains?(line, "{") do
-             clean_line = line |> String.split("{") |> List.first() |> String.trim_trailing()
-             [clean_line | acc]
+            clean_line = line |> String.split("{") |> List.first() |> String.trim_trailing()
+            [clean_line | acc]
           else
-             [line | acc]
+            [line | acc]
           end
         else
           acc
@@ -109,6 +117,7 @@ defmodule Pincer.Utils.CodeSkeleton do
     lines
     |> Enum.filter(fn line ->
       trimmed = String.trim(line)
+
       String.starts_with?(trimmed, "import ") or
         String.starts_with?(trimmed, "from ") or
         String.starts_with?(trimmed, "class ") or

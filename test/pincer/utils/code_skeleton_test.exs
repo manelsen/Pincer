@@ -18,15 +18,15 @@ defmodule Pincer.Utils.CodeSkeletonTest do
         defp private_func(arg), do: arg + 1
       end
       """
-      
+
       skeleton = CodeSkeleton.extract(code, ".ex")
-      
+
       assert skeleton =~ "defmodule MyApp.Module"
       assert skeleton =~ "alias Other.Module"
       assert skeleton =~ "@spec run(integer()) :: :ok"
       assert skeleton =~ "def run(id)"
       assert skeleton =~ "defp private_func(arg)"
-      
+
       # Should NOT contain implementation details
       refute skeleton =~ "IO.puts"
       refute skeleton =~ "arg + 1"
@@ -35,7 +35,7 @@ defmodule Pincer.Utils.CodeSkeletonTest do
     test "extracts TypeScript signatures including class methods" do
       code = """
       import { x } from 'y';
-      
+
       interface User { id: number; }
 
       export class Service {
@@ -47,15 +47,15 @@ defmodule Pincer.Utils.CodeSkeletonTest do
         }
       }
       """
-      
+
       skeleton = CodeSkeleton.extract(code, ".ts")
-      
+
       assert skeleton =~ "import { x } from 'y'"
       assert skeleton =~ "interface User"
       assert skeleton =~ "export class Service"
       assert skeleton =~ "constructor()"
       assert skeleton =~ "async fetchData(id: string): Promise<User>"
-      
+
       # Should NOT contain implementation
       refute skeleton =~ "const res ="
       refute skeleton =~ "return res.json()"
@@ -75,16 +75,16 @@ defmodule Pincer.Utils.CodeSkeletonTest do
               # heavy logic here
               return prompt.upper()
       """
-      
+
       skeleton = CodeSkeleton.extract(code, ".py")
-      
+
       assert skeleton =~ "import os"
       assert skeleton =~ "from path import Path"
       assert skeleton =~ "class AI"
       assert skeleton =~ "@property"
       assert skeleton =~ "def name(self)"
       assert skeleton =~ "def think(self, prompt: str) -> str"
-      
+
       # Should NOT contain implementation
       refute skeleton =~ "return \"Pincer\""
       refute skeleton =~ "prompt.upper()"

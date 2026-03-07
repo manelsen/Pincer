@@ -1,6 +1,6 @@
 defmodule Pincer.Ports.Cron do
   @moduledoc "Port for cron scheduling operations."
-  
+
   @callback list_jobs() :: [map()]
   @callback create_job(map()) :: {:ok, map()} | {:error, term()}
   @callback delete_job(String.t()) :: {:ok, map()} | {:error, term()}

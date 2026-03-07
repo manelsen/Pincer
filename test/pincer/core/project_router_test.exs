@@ -16,7 +16,8 @@ defmodule Pincer.Core.ProjectRouterTest do
     end
 
     test "correctly parses /project modify" do
-      assert {:ok, :modify, {"p-123", "Task 1\nTask 2"}} = ProjectRouter.parse("/project modify p-123 Task 1\nTask 2")
+      assert {:ok, :modify, {"p-123", "Task 1\nTask 2"}} =
+               ProjectRouter.parse("/project modify p-123 Task 1\nTask 2")
     end
 
     test "returns error for unknown command" do

@@ -117,11 +117,12 @@ defmodule Pincer.Channels.Telegram.Renderer do
   defp render_list(items, type) do
     items
     |> Enum.with_index(1)
-    |> Enum.map(fn 
+    |> Enum.map(fn
       {{"li", _attrs, children, _m_inner}, index} ->
         prefix = if type == :ordered, do: "#{index}. ", else: "• "
         prefix <> String.trim(render(children)) <> "\n"
-      {other, _} -> 
+
+      {other, _} ->
         render([other])
     end)
     |> Enum.join("")

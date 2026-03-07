@@ -1,7 +1,7 @@
 defmodule Pincer.Ports.Messaging do
   @moduledoc "Port for outbound messaging."
   alias Pincer.Infra.PubSub
-  
+
   @callback deliver(String.t(), String.t()) :: :ok | {:error, term()}
 
   @doc "Dispatches a message to the appropriate adapter via PubSub."

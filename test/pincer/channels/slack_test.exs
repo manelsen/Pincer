@@ -7,9 +7,11 @@ defmodule Pincer.Channels.SlackTest do
 
   setup do
     Application.put_env(:pincer, :slack_api, Pincer.Channels.Slack.APIMock)
-    on_exit(fn -> 
+
+    on_exit(fn ->
       Application.put_env(:pincer, :slack_api, Pincer.Channels.TestAdapter)
     end)
+
     verify_on_exit!()
     :ok
   end
@@ -21,7 +23,8 @@ defmodule Pincer.Channels.SlackTest do
     end
 
     test "converte links para formato Slack" do
-      assert Slack.markdown_to_mrkdwn("[Pincer](https://pincer.ai)") == "<https://pincer.ai|Pincer>"
+      assert Slack.markdown_to_mrkdwn("[Pincer](https://pincer.ai)") ==
+               "<https://pincer.ai|Pincer>"
     end
   end
 
@@ -35,10 +38,10 @@ defmodule Pincer.Channels.SlackTest do
 
       APIMock
       |> expect(:post, fn "chat.postMessage", ^token, payload ->
-           assert payload.channel == channel_id
-           assert payload.text == "*olá slack*"
-           {:ok, %{ts: "1234567890.123456"}}
-         end)
+        assert payload.channel == channel_id
+        assert payload.text == "*olá slack*"
+        {:ok, %{ts: "1234567890.123456"}}
+      end)
 
       assert Slack.send_message(channel_id, text) == {:ok, "1234567890.123456"}
     end
@@ -55,11 +58,11 @@ defmodule Pincer.Channels.SlackTest do
 
       APIMock
       |> expect(:post, fn "chat.update", ^token, payload ->
-           assert payload.channel == channel_id
-           assert payload.ts == mid
-           assert payload.text == text
-           {:ok, %{}}
-         end)
+        assert payload.channel == channel_id
+        assert payload.ts == mid
+        assert payload.text == text
+        {:ok, %{}}
+      end)
 
       assert Slack.update_message(channel_id, mid, text) == :ok
     end

@@ -2,7 +2,8 @@ defmodule Pincer.Channels.Slack.API do
   @moduledoc """
   Behavior for Slack API interactions.
   """
-  @callback post(method :: String.t(), token :: String.t(), payload :: map()) :: {:ok, any()} | {:error, any()}
+  @callback post(method :: String.t(), token :: String.t(), payload :: map()) ::
+              {:ok, any()} | {:error, any()}
 end
 
 defmodule Pincer.Channels.Slack.API.Adapter do

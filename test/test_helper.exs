@@ -14,3 +14,6 @@ Application.put_env(:pincer, :llm_providers, %{
 })
 
 Application.put_env(:pincer, :default_llm_provider, "test")
+
+# Clean up any leftover workspaces from previous test runs
+File.rm_rf!("tmp/test_workspaces")

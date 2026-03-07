@@ -18,14 +18,15 @@ if length(fs_tools) > 0 do
 
   # Try to read a file
   IO.puts("\nTesting 'read_file' on 'mix.exs'...")
+
   case Manager.execute_tool("read_file", %{"path" => "mix.exs"}) do
-    {:ok, content} -> 
+    {:ok, content} ->
       IO.puts("[SUCCESS] Read 'mix.exs' content snippet:")
       IO.puts(String.slice(content, 0, 100) <> "...")
+
     error ->
       IO.puts("[FAIL] Failed to read file: #{inspect(error)}")
   end
-
 else
   IO.puts("\n[FAIL] No Filesystem tools found.")
 end

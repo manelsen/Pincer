@@ -14,11 +14,13 @@ Process.sleep(5000)
 tools = Manager.get_all_tools()
 
 IO.puts("\n=== Discovered MCP Tools ===")
+
 Enum.each(tools, fn tool ->
   IO.puts("- #{tool["name"]}: #{tool["description"]}")
 end)
 
 IO.puts("\n=== Testing calculate_profits ===")
+
 case Manager.execute_tool("calculate_profits", %{"filename" => "dados_cliente.csv"}) do
   {:ok, result} ->
     IO.puts("✅ Success!")
