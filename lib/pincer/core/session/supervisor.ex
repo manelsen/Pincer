@@ -109,8 +109,11 @@ defmodule Pincer.Core.Session.Supervisor do
     * `{:error, reason}` - Failed to start session
   """
   @spec start_session(session_id()) :: {:ok, pid()} | {:error, term()}
-  def start_session(session_id) do
-    child_spec = {Pincer.Core.Session.Server, [session_id: session_id]}
+  def start_session(session_id), do: start_session(session_id, [])
+
+  @spec start_session(session_id(), keyword()) :: {:ok, pid()} | {:error, term()}
+  def start_session(session_id, opts) when is_binary(session_id) and is_list(opts) do
+    child_spec = {Pincer.Core.Session.Server, Keyword.put(opts, :session_id, session_id)}
     DynamicSupervisor.start_child(__MODULE__, child_spec)
   end
 

@@ -11,22 +11,30 @@ defmodule Pincer.Core.Session.Server do
 
   alias Pincer.Ports.LLM
   alias Pincer.Ports.Storage
+  alias Pincer.Core.AgentPaths
   alias Pincer.Core.Executor
   alias Pincer.Core.SubAgentProgress
   alias Pincer.Infra.PubSub
   alias Pincer.Core.Orchestration.Blackboard
 
-  @identity_file "IDENTITY.md"
-  @soul_file "SOUL.md"
-  @user_file "USER.md"
-  @bootstrap_file "BOOTSTRAP.md"
-
   @impl true
   def init(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
+    root_agent_id = Keyword.get(opts, :root_agent_id, session_id)
     Logger.metadata(session_id: session_id)
-    workspace_path = "workspaces/#{session_id}"
-    File.mkdir_p!(workspace_path)
+    workspace_path = Keyword.get(opts, :workspace_path, AgentPaths.workspace_root(root_agent_id))
+    bootstrap? = Keyword.get(opts, :bootstrap?, true)
+    allow_legacy_root_seed? = Keyword.get(opts, :allow_legacy_root_seed?, true)
+    principal_ref = Keyword.get(opts, :principal_ref)
+    conversation_ref = Keyword.get(opts, :conversation_ref)
+    blackboard_scope = Keyword.get(opts, :blackboard_scope, root_agent_id)
+
+    ensure_opts = [
+      bootstrap?: bootstrap?,
+      legacy_root: if(allow_legacy_root_seed?, do: File.cwd!(), else: false)
+    ]
+
+    AgentPaths.ensure_workspace!(workspace_path, ensure_opts)
 
     # 1. Recupera mensagens persistidas
     persisted = Storage.get_messages(session_id)
@@ -39,7 +47,11 @@ defmodule Pincer.Core.Session.Server do
     state = %{
       mode: :normal,
       session_id: session_id,
+      root_agent_id: root_agent_id,
+      principal_ref: principal_ref,
+      conversation_ref: conversation_ref,
       workspace_path: workspace_path,
+      blackboard_scope: blackboard_scope,
       history: [],
       status: :idle,
       worker_pid: nil,
@@ -67,7 +79,7 @@ defmodule Pincer.Core.Session.Server do
     send(self(), :recovery_catch_up)
 
     # 6. Bootstrap Handshake (se for a primeira vez ou BOOTSTRAP.md existir)
-    if Enum.empty?(persisted) and File.exists?(@bootstrap_file) do
+    if Enum.empty?(persisted) and bootstrap_active?(workspace_path) do
       send(self(), :trigger_bootstrap)
     end
 
@@ -84,7 +96,7 @@ defmodule Pincer.Core.Session.Server do
     Logger.info("[SESSION] #{state.session_id} Maestro performing recovery catch-up...")
 
     # Lê tudo do Blackboard que aconteceu desde a última vez que este agente esteve vivo
-    case Blackboard.fetch_new(state.last_blackboard_id) do
+    case Blackboard.fetch_new(state.last_blackboard_id, scope: state.blackboard_scope) do
       {[], _} ->
         {:noreply, state}
 
@@ -120,7 +132,7 @@ defmodule Pincer.Core.Session.Server do
   def handle_info(:heartbeat, state) do
     Process.send_after(self(), :heartbeat, 10000)
 
-    case Blackboard.fetch_new(state.last_blackboard_id) do
+    case Blackboard.fetch_new(state.last_blackboard_id, scope: state.blackboard_scope) do
       {[], _} ->
         {:noreply, state}
 
@@ -131,6 +143,7 @@ defmodule Pincer.Core.Session.Server do
 
   @impl true
   def handle_info({:assistant_reply_finished, response}, state) do
+    persist_assistant_response(state.session_id, response)
     new_history = state.history ++ [%{"role" => "assistant", "content" => response}]
     {:noreply, %{state | history: new_history}}
   end
@@ -138,7 +151,8 @@ defmodule Pincer.Core.Session.Server do
   @impl true
   def handle_info({:executor_finished, final_history, response, usage}, state) do
     usage = usage || %{}
-    
+    persist_assistant_response(state.session_id, response)
+
     # Normaliza chaves do usage (podem vir como strings ou átomos dependendo do provedor/mock)
     prompt_tokens = usage["prompt_tokens"] || usage[:prompt_tokens] || 0
     completion_tokens = usage["completion_tokens"] || usage[:completion_tokens] || 0
@@ -149,7 +163,15 @@ defmodule Pincer.Core.Session.Server do
     }
 
     publish(state.session_id, {:agent_response, response, usage})
-    {:noreply, %{state | history: final_history, status: :idle, worker_pid: nil, token_usage_total: new_totals}}
+
+    {:noreply,
+     %{
+       state
+       | history: final_history,
+         status: :idle,
+         worker_pid: nil,
+         token_usage_total: new_totals
+     }}
   end
 
   @impl true
@@ -172,7 +194,7 @@ defmodule Pincer.Core.Session.Server do
 
   @impl true
   def handle_info(:flush_input, state) do
-    combined_input = 
+    combined_input =
       state.input_buffer
       |> Enum.map(&content_to_text/1)
       |> Enum.join("\n")
@@ -212,13 +234,15 @@ defmodule Pincer.Core.Session.Server do
   @impl true
   def handle_info({:system_update_prompt}, state) do
     Logger.info("[SESSION] #{state.session_id} hot-swapping system prompt...")
-    
-    new_history = case state.history do
-      [%{"role" => "system"} | rest] ->
-        [%{"role" => "system", "content" => get_system_prompt(state)} | rest]
-      other ->
-        other
-    end
+
+    new_history =
+      case state.history do
+        [%{"role" => "system"} | rest] ->
+          [%{"role" => "system", "content" => get_system_prompt(state)} | rest]
+
+        other ->
+          other
+      end
 
     {:noreply, %{state | history: new_history}}
   end
@@ -229,6 +253,7 @@ defmodule Pincer.Core.Session.Server do
       msg = "🔄 **Failover**: Swapping to `#{meta.provider}/#{meta.model}` due to `#{meta.reason}`"
       publish(state.session_id, {:agent_response, msg})
     end
+
     {:noreply, state}
   end
 
@@ -240,11 +265,12 @@ defmodule Pincer.Core.Session.Server do
   @impl true
   def handle_info({:executor_failed, reason}, state) do
     Logger.error("[SESSION] #{state.session_id} Executor failed: #{inspect(reason)}")
-    
-    error_msg = case reason do
-      {:http_error, code, body} -> "❌ **LLM Error (#{code})**: #{extract_error_message(body)}"
-      other -> "❌ **Executor Error**: #{inspect(other)}"
-    end
+
+    error_msg =
+      case reason do
+        {:http_error, code, body} -> "❌ **LLM Error (#{code})**: #{extract_error_message(body)}"
+        other -> "❌ **Executor Error**: #{inspect(other)}"
+      end
 
     publish(state.session_id, {:agent_response, error_msg})
     {:noreply, %{state | status: :idle, worker_pid: nil}}
@@ -338,8 +364,10 @@ defmodule Pincer.Core.Session.Server do
     # 2. Reseta RAM (mantém apenas o system prompt inicial)
     new_history = [%{"role" => "system", "content" => get_system_prompt(state)}]
 
-    # 3. Dispara Bootstrap novamente
-    send(self(), :trigger_bootstrap)
+    # 3. Dispara Bootstrap novamente somente se a identidade ainda nao existe
+    if bootstrap_active?(state.workspace_path) do
+      send(self(), :trigger_bootstrap)
+    end
 
     {:reply, :ok, %{state | history: new_history, status: :idle, worker_pid: nil}}
   end
@@ -403,7 +431,13 @@ defmodule Pincer.Core.Session.Server do
     # input can be binary (from legacy) or IncomingMessage (from new flow)
     text_for_storage = content_to_text(input)
     Storage.save_message(state.session_id, "user", text_for_storage)
-    Pincer.Core.Session.Logger.log(state.session_id, "user", text_for_storage)
+
+    Pincer.Core.Session.Logger.log(
+      state.session_id,
+      "user",
+      text_for_storage,
+      workspace_path: state.workspace_path
+    )
 
     # Map to LLM history format
     user_msg = map_input_to_history(input)
@@ -411,7 +445,13 @@ defmodule Pincer.Core.Session.Server do
 
     if is_just_chat?(text_for_storage) do
       Task.start(fn ->
-        quick_assistant_reply(self(), state.session_id, new_history, text_for_storage, state.model_override)
+        quick_assistant_reply(
+          self(),
+          state.session_id,
+          new_history,
+          text_for_storage,
+          state.model_override
+        )
       end)
 
       {:reply, {:ok, :butler_notified}, %{state | history: new_history}}
@@ -420,6 +460,7 @@ defmodule Pincer.Core.Session.Server do
         model_override: state.model_override,
         workspace_path: state.workspace_path
       ]
+
       {:ok, pid} = Executor.start(self(), state.session_id, new_history, executor_opts)
 
       {:reply, {:ok, :started},
@@ -427,12 +468,19 @@ defmodule Pincer.Core.Session.Server do
     end
   end
 
-  defp map_input_to_history(%IncomingMessage{text: text, attachments: []}), do: %{"role" => "user", "content" => text}
+  defp map_input_to_history(%IncomingMessage{text: text, attachments: []}),
+    do: %{"role" => "user", "content" => text}
+
   defp map_input_to_history(%IncomingMessage{text: text, attachments: atts}) do
-    content = [%{"type" => "text", "text" => text}] ++ Enum.map(atts, fn a -> %{"type" => "attachment", "attachment" => a} end)
+    content =
+      [%{"type" => "text", "text" => text}] ++
+        Enum.map(atts, fn a -> %{"type" => "attachment", "attachment" => a} end)
+
     %{"role" => "user", "content" => content}
   end
-  defp map_input_to_history(input) when is_binary(input), do: %{"role" => "user", "content" => input}
+
+  defp map_input_to_history(input) when is_binary(input),
+    do: %{"role" => "user", "content" => input}
 
   defp extract_error_message(body) when is_binary(body) do
     case Jason.decode(body) do
@@ -452,12 +500,17 @@ defmodule Pincer.Core.Session.Server do
 
   defp get_system_prompt(state) do
     workspace = state.workspace_path
-    
-    # Check if local files exist in workspace, fallback to globals
-    identity = read_config_file(Path.join(workspace, @identity_file), @identity_file)
-    soul = read_config_file(Path.join(workspace, @soul_file), @soul_file)
-    user = read_config_file(Path.join(workspace, @user_file), @user_file)
-    bootstrap = if File.exists?(@bootstrap_file), do: File.read!(@bootstrap_file), else: ""
+
+    identity = AgentPaths.read_file(AgentPaths.identity_path(workspace))
+    soul = AgentPaths.read_file(AgentPaths.soul_path(workspace))
+    user = AgentPaths.read_file(AgentPaths.user_path(workspace))
+
+    bootstrap =
+      if bootstrap_active?(workspace) do
+        AgentPaths.read_file(AgentPaths.bootstrap_path(workspace))
+      else
+        ""
+      end
 
     prompt = """
     #{if bootstrap != "", do: "!!! BOOTSTRAP MODE ACTIVE !!!\n#{bootstrap}\n", else: ""}
@@ -480,12 +533,21 @@ defmodule Pincer.Core.Session.Server do
     String.trim(prompt)
   end
 
-  defp read_config_file(workspace_path, global_path) do
-    cond do
-      File.exists?(workspace_path) -> File.read!(workspace_path)
-      File.exists?(global_path) -> File.read!(global_path)
-      true -> ""
+  @doc false
+  def bootstrap_active?(workspace_path, opts \\ []) when is_binary(workspace_path) do
+    AgentPaths.bootstrap_active?(workspace_path, opts)
+  end
+
+  defp persist_assistant_response(_session_id, response) when not is_binary(response), do: :ok
+
+  defp persist_assistant_response(session_id, response) do
+    trimmed = String.trim(response)
+
+    if trimmed != "" do
+      Storage.save_message(session_id, "assistant", trimmed)
     end
+
+    :ok
   end
 
   defp content_to_text(%IncomingMessage{text: text}), do: text
@@ -502,10 +564,13 @@ defmodule Pincer.Core.Session.Server do
 
   defp is_just_chat?(input) do
     normalized = String.downcase(String.trim(input))
-    
+
     # Verbos de ação ou comandos técnicos não devem ser "just chat"
-    technical_intent? = 
-      String.match?(normalized, ~r/^(ls|cat|read|write|git|mix|python|node|npx|sh|bash|exec|run|make|grep|find|mkdir|rm|cp|mv|project|plan|create|edit|save)\b/)
+    technical_intent? =
+      String.match?(
+        normalized,
+        ~r/^(ls|cat|read|write|git|mix|python|node|npx|sh|bash|exec|run|make|grep|find|mkdir|rm|cp|mv|project|plan|create|edit|save)\b/
+      )
 
     cond do
       technical_intent? -> false
