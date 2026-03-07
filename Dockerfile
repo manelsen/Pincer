@@ -1,11 +1,19 @@
-FROM elixir:1.18 AS builder
+FROM golang:1.25 AS whatsapp-builder
+
+WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev build-essential && \
+    rm -rf /var/lib/apt/lists/*
+COPY infrastructure/whatsapp ./infrastructure/whatsapp
+RUN cd infrastructure/whatsapp && go build -o whatsapp_bridge main.go
+
+FROM elixir:1.18-slim AS builder
 
 ENV MIX_ENV=prod \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential git ca-certificates nodejs npm && \
+    apt-get install -y --no-install-recommends build-essential git ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -21,6 +29,7 @@ RUN mix deps.compile
 COPY lib ./lib
 COPY priv ./priv
 COPY infrastructure/whatsapp ./infrastructure/whatsapp
+COPY --from=whatsapp-builder /app/infrastructure/whatsapp/whatsapp_bridge ./infrastructure/whatsapp/whatsapp_bridge
 COPY config.yaml ./config.yaml
 COPY TODO.md ./TODO.md
 COPY README.md ./README.md
@@ -30,9 +39,8 @@ COPY SOUL.md ./SOUL.md
 COPY USER.md ./USER.md
 
 RUN mix compile
-RUN npm install --prefix /app/infrastructure/whatsapp --omit=dev
 
-FROM elixir:1.18 AS runtime
+FROM elixir:1.18-slim AS runtime
 
 ARG APP_UID=1000
 ARG APP_GID=1000
@@ -45,12 +53,17 @@ ENV MIX_ENV=prod \
     HEX_HOME=/app/.hex
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates nodejs npm && \
+    apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 inotify-tools nodejs npm python3 python3-venv python3-pip && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --gid "${APP_GID}" pincer && \
     useradd --uid "${APP_UID}" --gid pincer --home /app --shell /bin/sh --create-home pincer
 
 WORKDIR /app
+
+# Install Python dependencies directly in runtime to avoid relocation issues
+RUN mkdir -p /app/infrastructure/mcp && \
+    python3 -m venv /app/infrastructure/mcp/venv && \
+    /app/infrastructure/mcp/venv/bin/pip install --no-cache-dir "mcp[cli]" fastmcp
 
 COPY --from=builder /app/_build /app/_build
 COPY --from=builder /app/deps /app/deps
@@ -58,6 +71,7 @@ COPY --from=builder /app/lib /app/lib
 COPY --from=builder /app/priv /app/priv
 COPY --from=builder /app/config /app/config
 COPY --from=builder /app/infrastructure/whatsapp /app/infrastructure/whatsapp
+COPY infrastructure/mcp/shell_server.py /app/infrastructure/mcp/shell_server.py
 COPY --from=builder /app/mix.exs /app/mix.exs
 COPY --from=builder /app/mix.lock /app/mix.lock
 COPY --from=builder /app/config.yaml /app/config.yaml

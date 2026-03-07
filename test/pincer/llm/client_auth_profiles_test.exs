@@ -95,7 +95,7 @@ defmodule Pincer.LLM.ClientAuthProfilesTest do
     System.delete_env("TEST_AUTH_PRIMARY")
     System.delete_env("TEST_AUTH_BACKUP")
 
-    assert {:error, :missing_credentials} = Client.chat_completion([])
+    assert {:error, {:missing_credentials, _}} = Client.chat_completion([])
   end
 
   test "keeps backward compatibility when provider has no auth chain" do

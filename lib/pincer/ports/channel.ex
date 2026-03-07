@@ -135,7 +135,18 @@ defmodule Pincer.Ports.Channel do
   @callback update_message(recipient_id :: String.t(), message_id :: any(), content :: String.t()) ::
               :ok | {:error, any()}
 
-  @optional_callbacks send_message: 2, update_message: 3
+  @doc """
+  Checks if a given session ID belongs to this channel adapter.
+  Used for routing outbound messages.
+  """
+  @callback handles_session?(session_id :: String.t()) :: boolean()
+
+  @doc """
+  Resolves the external recipient identifier from a session ID.
+  """
+  @callback resolve_recipient(session_id :: String.t()) :: String.t()
+
+  @optional_callbacks send_message: 2, update_message: 3, handles_session?: 1, resolve_recipient: 1
 
   @doc false
   defmacro __using__(_opts) do
@@ -143,6 +154,7 @@ defmodule Pincer.Ports.Channel do
       @behaviour Pincer.Ports.Channel
       use GenServer
       require Logger
+      alias Pincer.Infra.PubSub
 
       @doc """
       Default implementation that starts the GenServer with the module name.
@@ -150,11 +162,54 @@ defmodule Pincer.Ports.Channel do
       def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
       @doc """
-      Default implementation that accepts initial state.
+      Default implementation that accepts initial state and subscribes to system:delivery.
       """
-      def init(state), do: {:ok, state}
+      def init(state) do
+        PubSub.subscribe("system:delivery")
+        {:ok, state}
+      end
 
-      defoverridable start_link: 1, init: 1
+      # Default handler for outbound messages via PubSub
+      @impl GenServer
+      def handle_info({:deliver_message, session_id, message}, state) do
+        # Check if this adapter handles this session_id.
+        # Most adapters use a prefix like "telegram_", "slack_", "cli_".
+        if handles_session?(session_id) do
+          # Resolve recipient from session_id if needed, or use session_id directly
+          recipient_id = resolve_recipient(session_id)
+          
+          # Optional callback: not all channels support outbound (e.g. some webhooks)
+          if function_exported?(__MODULE__, :send_message, 2) do
+            apply(__MODULE__, :send_message, [recipient_id, message])
+          end
+        end
+        {:noreply, state}
+      end
+
+      def handle_info(_other, state), do: {:noreply, state}
+
+      # Helper to check if session belongs to this adapter
+      def handles_session?(session_id) do
+        # Default behavior: try to find the adapter name in the session_id
+        # Example: Pincer.Channels.Telegram -> "telegram"
+        prefix = __MODULE__ 
+                 |> Module.split() 
+                 |> List.last() 
+                 |> String.downcase()
+        
+        String.starts_with?(session_id, prefix <> "_")
+      end
+
+      # Helper to extract recipient from session_id
+      def resolve_recipient(session_id) do
+        # Default: "telegram_123" -> "123"
+        case String.split(session_id, "_", parts: 2) do
+          [_prefix, recipient] -> recipient
+          _ -> session_id
+        end
+      end
+
+      defoverridable start_link: 1, init: 1, handle_info: 2, handles_session?: 1, resolve_recipient: 1
     end
   end
 end

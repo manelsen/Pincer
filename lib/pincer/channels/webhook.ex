@@ -346,7 +346,10 @@ defmodule Pincer.Channels.Webhook do
     end
   end
 
+  alias Pincer.Core.Structs.IncomingMessage
+
   defp default_process_input(session_id, text) do
-    Pincer.Core.Session.Server.process_input(session_id, text)
+    incoming = IncomingMessage.new(session_id, text)
+    Pincer.Core.Session.Server.process_input(session_id, incoming)
   end
 end

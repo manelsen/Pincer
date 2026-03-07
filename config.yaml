@@ -59,5 +59,8 @@ mcp:
     github:
       args: ["-y", "@modelcontextprotocol/server-github"]
       command: "npx"
+    shell:
+      command: "infrastructure/mcp/venv/bin/python3"
+      args: ["infrastructure/mcp/shell_server.py"]
 tools:
   restrict_to_workspace: true

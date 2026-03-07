@@ -66,6 +66,7 @@ defmodule Pincer.Storage.Graph.Node do
   schema "nodes" do
     field(:type, :string)
     field(:data, :map)
+    field(:embedding, :binary)
     timestamps()
   end
 
@@ -95,7 +96,7 @@ defmodule Pincer.Storage.Graph.Node do
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
   def changeset(node, attrs) do
     node
-    |> cast(attrs, [:type, :data])
+    |> cast(attrs, [:type, :data, :embedding])
     |> validate_required([:type, :data])
   end
 end

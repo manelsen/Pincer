@@ -674,6 +674,8 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     Logger.debug("Ignoring unsupported update or update without text: #{inspect(update)}")
   end
 
+  alias Pincer.Core.Structs.IncomingMessage
+
   defp do_process_message(chat_id, input_content, chat_type) do
     case authorize_private_dm(chat_id, chat_type) do
       :allow ->
@@ -685,7 +687,21 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
         Logger.info("[TELEGRAM] Routing message to Session ID: #{session_id}")
 
-        case Server.process_input(session_id, input_content) do
+        # Create agnostic IncomingMessage
+        incoming = case input_content do
+          text when is_binary(text) -> 
+            IncomingMessage.new(session_id, text)
+          
+          parts when is_list(parts) ->
+            # Split text from attachments
+            {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
+            text = Enum.map_join(text_parts, "\n", & &1["text"])
+            atts = Enum.map(att_parts, & &1["attachment"])
+            
+            IncomingMessage.new(session_id, text: text, attachments: atts)
+        end
+
+        case Server.process_input(session_id, incoming) do
           {:ok, :started} ->
             :ok
 
