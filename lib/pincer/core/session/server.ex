@@ -24,15 +24,11 @@ defmodule Pincer.Core.Session.Server do
     Logger.metadata(session_id: session_id)
     workspace_path = Keyword.get(opts, :workspace_path, AgentPaths.workspace_root(root_agent_id))
     bootstrap? = Keyword.get(opts, :bootstrap?, true)
-    allow_legacy_root_seed? = Keyword.get(opts, :allow_legacy_root_seed?, true)
     principal_ref = Keyword.get(opts, :principal_ref)
     conversation_ref = Keyword.get(opts, :conversation_ref)
     blackboard_scope = Keyword.get(opts, :blackboard_scope, root_agent_id)
 
-    ensure_opts = [
-      bootstrap?: bootstrap?,
-      legacy_root: if(allow_legacy_root_seed?, do: File.cwd!(), else: false)
-    ]
+    ensure_opts = [bootstrap?: bootstrap?]
 
     AgentPaths.ensure_workspace!(workspace_path, ensure_opts)
 

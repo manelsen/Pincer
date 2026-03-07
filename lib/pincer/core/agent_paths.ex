@@ -3,8 +3,16 @@ defmodule Pincer.Core.AgentPaths do
   Canonical path resolver for per-agent workspaces.
 
   Runtime cognitive state for Pincer lives under `workspaces/<agent_id>/.pincer/`.
-  Root agents may bootstrap from a template or legacy files. Sub-agents inherit
-  persona files from the parent workspace, but never bootstrap.
+  Root agents bootstrap from persona templates shipped in `priv/pincer/templates/`.
+  Sub-agents inherit persona files from the parent workspace, but never bootstrap.
+
+  ## Template Resolution Order
+
+  When seeding a new workspace, files are resolved in this order:
+
+  1. **Explicit template_root** — `workspaces/.template/.pincer/<file>` (operator override)
+  2. **priv/pincer/templates/<file>** — bundled defaults shipped with the release
+  3. **Inline fallback** — hardcoded defaults for MEMORY.md and HISTORY.md
   """
 
   @pincer_dir ".pincer"
@@ -16,6 +24,7 @@ defmodule Pincer.Core.AgentPaths do
   @memory_file "MEMORY.md"
   @history_file "HISTORY.md"
   @template_workspace Path.join(["workspaces", ".template"])
+  @templates_dir "pincer/templates"
   @default_memory_md """
   # Long-term Memory
 
@@ -30,7 +39,6 @@ defmodule Pincer.Core.AgentPaths do
   @type ensure_option ::
           {:bootstrap?, boolean()}
           | {:inherit_from, String.t()}
-          | {:legacy_root, String.t() | false | nil}
           | {:template_root, String.t() | false | nil}
 
   @doc """
@@ -118,11 +126,10 @@ defmodule Pincer.Core.AgentPaths do
   """
   @spec default_bootstrap() :: String.t()
   def default_bootstrap do
-    :pincer
-    |> :code.priv_dir()
-    |> to_string()
-    |> Path.join("pincer/bootstrap.md")
-    |> File.read!()
+    case priv_template(@bootstrap_file) do
+      {:ok, content} -> content
+      :error -> "# Bootstrap\n\nWelcome! Please introduce yourself.\n"
+    end
   end
 
   @doc """
@@ -138,18 +145,17 @@ defmodule Pincer.Core.AgentPaths do
   def default_history, do: String.trim(@default_history_md) <> "\n"
 
   defp seed_memory_files(workspace_path, opts) do
-    template_root = Keyword.get(opts, :template_root, File.cwd!())
-    legacy_root = Keyword.get(opts, :legacy_root, File.cwd!())
+    template_root = Keyword.get(opts, :template_root)
 
     seed_file_from_sources(
       memory_path(workspace_path),
-      [template_file(template_root, @memory_file), legacy_file(legacy_root, @memory_file)],
+      [template_file(template_root, @memory_file), priv_template_path(@memory_file)],
       default_memory()
     )
 
     seed_file_from_sources(
       history_path(workspace_path),
-      [template_file(template_root, @history_file), legacy_file(legacy_root, @history_file)],
+      [template_file(template_root, @history_file), priv_template_path(@history_file)],
       default_history()
     )
   end
@@ -163,30 +169,29 @@ defmodule Pincer.Core.AgentPaths do
   end
 
   defp seed_root_persona(workspace_path, opts) do
-    template_root = Keyword.get(opts, :template_root, File.cwd!())
-    legacy_root = Keyword.get(opts, :legacy_root, File.cwd!())
+    template_root = Keyword.get(opts, :template_root)
 
     seed_file_from_sources(
       identity_path(workspace_path),
-      [template_file(template_root, @identity_file), legacy_file(legacy_root, @identity_file)],
+      [template_file(template_root, @identity_file), priv_template_path(@identity_file)],
       nil
     )
 
     seed_file_from_sources(
       soul_path(workspace_path),
-      [template_file(template_root, @soul_file), legacy_file(legacy_root, @soul_file)],
+      [template_file(template_root, @soul_file), priv_template_path(@soul_file)],
       nil
     )
 
     seed_file_from_sources(
       user_path(workspace_path),
-      [template_file(template_root, @user_file), legacy_file(legacy_root, @user_file)],
+      [template_file(template_root, @user_file), priv_template_path(@user_file)],
       nil
     )
 
     seed_file_from_sources(
       bootstrap_path(workspace_path),
-      [template_file(template_root, @bootstrap_file), legacy_file(legacy_root, @bootstrap_file)],
+      [template_file(template_root, @bootstrap_file), priv_template_path(@bootstrap_file)],
       if(bootstrap_active?(workspace_path, bootstrap_path: bootstrap_path(workspace_path)),
         do: default_bootstrap(),
         else: nil
@@ -248,9 +253,19 @@ defmodule Pincer.Core.AgentPaths do
 
   defp template_file(_root, _filename), do: nil
 
-  defp legacy_file(root, filename) when is_binary(root) do
-    Path.join(root, filename)
+  @doc false
+  @spec priv_template_path(String.t()) :: String.t() | nil
+  def priv_template_path(filename) do
+    case :code.priv_dir(:pincer) do
+      {:error, _} -> nil
+      priv -> Path.join([to_string(priv), @templates_dir, filename])
+    end
   end
 
-  defp legacy_file(_root, _filename), do: nil
+  defp priv_template(filename) do
+    case priv_template_path(filename) do
+      nil -> :error
+      path -> if File.exists?(path), do: {:ok, File.read!(path)}, else: :error
+    end
+  end
 end

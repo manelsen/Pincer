@@ -45,8 +45,7 @@ defmodule Pincer.Core.Session.Context do
       principal_ref: context.principal_ref,
       conversation_ref: context.conversation_ref,
       workspace_path: context.workspace_path,
-      blackboard_scope: context.blackboard_scope,
-      allow_legacy_root_seed?: context.root_agent_source == :session_scope
+      blackboard_scope: context.blackboard_scope
     ] ++ opts
   end
 
