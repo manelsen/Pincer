@@ -1,4 +1,10 @@
 defmodule Pincer.Channels.Telegram.SessionSupervisor do
+  @moduledoc """
+  DynamicSupervisor managing per-chat Telegram session processes.
+
+  Each Telegram chat gets its own `Pincer.Channels.Telegram.Session` child,
+  started on demand via `start_session/2`.
+  """
   use DynamicSupervisor
 
   def start_link(_arg) do

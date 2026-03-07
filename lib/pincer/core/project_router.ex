@@ -7,6 +7,12 @@ defmodule Pincer.Core.ProjectRouter do
   alias Pincer.Core.Project.Server, as: ProjectServer
   alias Pincer.Core.ProjectOrchestrator
 
+  @doc """
+  Parses a textual command into a structured `{:ok, command, args}` tuple.
+
+  Supports `/status`, `/new`, `/reset`, `/learn`, and `/project` subcommands.
+  Returns `:error` for unrecognized input.
+  """
   def parse(text) when is_binary(text) do
     case String.split(text, " ", parts: 3) do
       ["/status"] ->
@@ -49,6 +55,14 @@ defmodule Pincer.Core.ProjectRouter do
 
   def parse(_), do: :error
 
+  @doc """
+  Dispatches a parsed command to the appropriate handler.
+
+  ## Parameters
+    - `cmd` — atom returned by `parse/1` (e.g. `:status`, `:reset`, `:start`)
+    - `args` — command arguments (string or tuple)
+    - `session_id` — the active session ID
+  """
   def handle_command(cmd, args, session_id) do
     case cmd do
       :status ->
@@ -83,16 +97,22 @@ defmodule Pincer.Core.ProjectRouter do
 
   # --- Legacy Compatibility & Real Logic ---
 
+  @doc """
+  Returns the project kanban board for a session, or a hint if unavailable.
+  """
   def kanban(session_id) do
     case ProjectOrchestrator.board(session_id) do
       {:ok, board} ->
         board
 
       :not_found ->
-        "Kanban indisponivel para esta sessao. Use /project para iniciar o wizard."
+        "Kanban unavailable for this session. Use /project to start the wizard."
     end
   end
 
+  @doc """
+  Starts or resumes the project orchestrator wizard.
+  """
   def project(session_id, seed \\ nil), do: ProjectOrchestrator.start(session_id, seed)
 
   @spec continue_if_collecting(String.t(), String.t(), keyword()) ::
@@ -131,17 +151,17 @@ defmodule Pincer.Core.ProjectRouter do
   end
 
   defp handle_reset(session_id, model_args) do
-    # 1. Se houver argumento, tenta trocar o modelo primeiro
+    # 1. If a model argument is present, attempt to switch model first
     if model_args != "" do
-      # Aqui assumimos formato "provider:model" ou apenas "model"
-      # Para simplificar agora, vamos apenas logar e resetar. 
-      # Futuramente podemos dar parse real no model_args.
+      # Assumes format "provider:model" or just "model".
+      # For now, just log and reset.
+      # Future: parse model_args into actual provider/model switch.
       Logger.info("[ROUTER] Resetting with model preference: #{model_args}")
     end
 
-    # 2. Reseta a sessão
+    # 2. Reset the session
     Pincer.Core.Session.Server.reset(session_id)
-    {:ok, "🧹 Sessão resetada. Carregando identidade..."}
+    {:ok, "🧹 Session reset. Loading identity..."}
   end
 
   defp format_status(session_id) do
@@ -159,25 +179,25 @@ defmodule Pincer.Core.ProjectRouter do
 
         {:ok,
          """
-         Sessão: #{session_id}
-         Modelo: #{provider}/#{model}
-         Tokens esta sessão: #{in_t} in · #{out_t} out
+         Session: #{session_id}
+         Model: #{provider}/#{model}
+         Tokens this session: #{in_t} in · #{out_t} out
          Thinking: #{thinking} | Reasoning: #{reasoning}
          Status: #{status}
          """}
 
       _ ->
-        {:error, "Não foi possível obter o status da sessão."}
+        {:error, "Could not retrieve session status."}
     end
   end
 
   defp handle_learn(_session_id, summary) do
     if String.trim(summary) == "" do
-      {:handled, "Uso: /learn <lição ou regra que o agente deve memorizar>"}
+      {:handled, "Usage: /learn <lesson or rule the agent should memorize>"}
     else
       case Pincer.Ports.Storage.save_learning("correction", summary) do
-        {:ok, _} -> {:handled, "✅ Lição memorizada com sucesso no Grafo de Conhecimento."}
-        {:error, e} -> {:handled, "❌ Falha ao memorizar lição: #{inspect(e)}"}
+        {:ok, _} -> {:handled, "✅ Lesson memorized successfully in the Knowledge Graph."}
+        {:error, e} -> {:handled, "❌ Failed to memorize lesson: #{inspect(e)}"}
       end
     end
   end

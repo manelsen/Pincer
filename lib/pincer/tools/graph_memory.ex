@@ -90,7 +90,7 @@ defmodule Pincer.Adapters.Tools.GraphMemory do
 
       %{
         name: "graph_history",
-        description: "Recupera o histórico de bugs e correções...",
+        description: "Retrieves the history of bugs and fixes...",
         parameters: %{
           type: "object",
           properties: %{
@@ -153,7 +153,7 @@ defmodule Pincer.Adapters.Tools.GraphMemory do
       {:ok, "[{\"bug\":\"NullReference in auth\",\"file\":\"lib/auth.ex\",...}]"}
 
       iex> Pincer.Adapters.Tools.GraphMemory.execute(%{})
-      {:ok, "Nenhum bug ou correção encontrado no grafo ainda."}
+      {:ok, "No bugs or fixes found in the graph yet."}
 
       iex> Pincer.Adapters.Tools.GraphMemory.execute(%{"filter" => "nonexistent"})
       {:ok, "Nenhum resultado para o filtro 'nonexistent'."}
@@ -166,7 +166,7 @@ defmodule Pincer.Adapters.Tools.GraphMemory do
     results = Storage.query_history()
 
     if Enum.empty?(results) do
-      {:ok, "Nenhum bug ou correção encontrado no grafo ainda."}
+      {:ok, "No bugs or fixes found in the graph yet."}
     else
       filter_and_respond(results, params["filter"])
     end

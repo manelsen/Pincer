@@ -28,7 +28,7 @@ defmodule Pincer.Core.Orchestration.Blackboard do
   @doc "Wait for the journaler to process all pending messages (for tests)."
   def wait_for_journal do
     if p = Process.whereis(:blackboard_journaler) do
-      # Envia uma mensagem e espera o retorno, garantindo que a fila anterior foi processada
+      # Send a message and wait for the response, ensuring the previous queue was processed
       ref = make_ref()
       send(p, {:ping, self(), ref})
 
@@ -80,13 +80,13 @@ defmodule Pincer.Core.Orchestration.Blackboard do
     first_key = :ets.first(@table)
 
     cond do
-      # 1. Caso base: Cache vazio ou since_id muito antigo -> Busca no Disco
+      # 1. Base case: Cache empty or since_id too old -> read from Disk
       first_key == :"$end_of_table" or since_id < first_key ->
-        # Busca no disco primeiro
+        # Read from disk first
         {disk_messages, disk_last_id} = read_from_journal(since_id, limit, scope)
 
-        # Se o disco preencheu o limite, retorna.
-        # Caso contrário, tenta complementar com o que tem na RAM.
+        # If disk filled the limit, return.
+        # Otherwise, try to complement with what's in RAM.
         if reached_limit?(disk_messages, limit) do
           {disk_messages, disk_last_id}
         else
@@ -95,7 +95,7 @@ defmodule Pincer.Core.Orchestration.Blackboard do
           {disk_messages ++ ram_messages, last_id}
         end
 
-      # 2. Caso padrão: Tudo está na RAM
+      # 2. Default case: Everything is in RAM
       true ->
         fetch_from_ram(since_id, limit, scope)
     end
@@ -315,7 +315,7 @@ defmodule Pincer.Core.Orchestration.Blackboard do
         receive_loop(file)
 
       {:ping, from, ref} ->
-        # Força o flush do arquivo para o disco antes de responder
+        # Flush the file to disk before responding
         :file.datasync(file)
         send(from, {:pong, ref})
         receive_loop(file)
