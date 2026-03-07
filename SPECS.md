@@ -92,6 +92,67 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 
 ---
 
+## Incremento 2026-03-07 (Telegram Replay + Bootstrap Recovery + Stream Hygiene)
+
+### Objetivo
+- Impedir respostas duplicadas no Telegram causadas por replay de updates apos restart.
+- Impedir reentrada indevida em bootstrap quando `IDENTITY.md` e `SOUL.md` ja existem.
+- Preservar respostas do assistente no storage para manter contexto apos reinicio de sessao.
+- Impedir que o stream sintetico OpenAI-compatible vaze texto de planejamento junto com `tool_calls`.
+
+### Interfaces/Public API
+- `Pincer.Channels.Telegram.UpdatesProvider.start_link/1`
+  - aceita opcionalmente `offset_path:` para carregar/persistir o ultimo `update_id + 1`.
+- `Pincer.Channels.Telegram.UpdatesProvider.load_offset/1`
+- `Pincer.Channels.Telegram.UpdatesProvider.persist_offset/2`
+- `Pincer.Core.Session.Server.bootstrap_active?/2`
+  - decide se `BOOTSTRAP.md` ainda deve influenciar o prompt/sessao.
+
+### Regras
+- O poller do Telegram deve iniciar a partir do offset persistido quando disponivel.
+- Apos polling bem-sucedido com updates, o novo offset deve ser persistido antes do proximo ciclo.
+- `BOOTSTRAP.md` so entra no prompt e so dispara `:trigger_bootstrap` quando a identidade ainda nao foi estabelecida.
+- Respostas finais do assistente devem ser persistidas com role `assistant`.
+- `OpenAICompat.message_to_stream_chunks/1` nao deve incluir `"content"` no mesmo delta sintetico que carrega `tool_calls`.
+
+### Criterios de aceite
+1. Teste prova que o `UpdatesProvider` relanca usando o offset persistido e atualiza esse valor apos sucesso.
+2. Teste prova que `bootstrap_active?/2` desativa bootstrap quando `IDENTITY.md` e `SOUL.md` existem.
+3. Teste prova que respostas do assistente sao persistidas no storage.
+4. Teste prova que `message_to_stream_chunks/1` nao vaza `content` quando `tool_calls` estao presentes.
+
+---
+
+## Incremento 2026-03-07 (Telegram streaming sem duplicacao nem vazamento bruto)
+
+### Objetivo
+- Impedir que respostas longas do Telegram aparecam duplicadas quando o fluxo usa preview (`agent_partial`) seguido de finalizacao (`agent_response`).
+- Impedir que o preview exponha reasoning bruto em cenarios de "stream" sintetico em que o backend entrega a resposta inteira em um unico token.
+
+### Escopo
+- `lib/pincer/channels/telegram.ex`
+- `lib/pincer/channels/telegram/session.ex`
+- `test/pincer/channels/telegram_session_test.exs`
+- `test/pincer/channels/telegram_test.exs`
+
+### Interface/Contrato
+- `Pincer.Channels.Telegram.send_message/3`
+- `Pincer.Channels.Telegram.update_message/4`
+- Fluxo de finalizacao em `Pincer.Channels.Telegram.Session`
+
+### Regras
+- Se existir preview ativo e a resposta final exceder o limite seguro do Telegram, o primeiro chunk deve reutilizar a mensagem ja existente; nao pode reenviar o texto inteiro do zero.
+- O preview de streaming deve ser suprimido quando o primeiro token ja representa uma resposta inteira/grande demais para streaming util.
+- Quando `reasoning_visible` estiver ativo, a formatacao de reasoning continua suportada no envio final, mas o preview nao deve despejar o bloco bruto completo de uma resposta sintetica.
+
+### Criterios de aceite
+1. Caminho `partial + final` curto continua finalizando in-place sem envio extra.
+2. Caminho `partial + final` longo resulta em uma unica resposta final visivel, sem duplicar o primeiro chunk.
+3. Teste de regressao cobre supressao de preview para token unico/grande.
+4. Testes Telegram relevantes passam.
+
+---
+
 ## 0. Incremento 2026-02-22 (Onboard + DB em `./db`)
 
 ### Objetivo
@@ -1128,7 +1189,56 @@ config = ~y"""
 - Critérios de aceite:
   1. regressão cobre bloqueio de symlink escape no `SafeShell`;
   2. regressão cobre bloqueio no executor de comando aprovado fora da política;
-  3. `SecurityAudit` reporta erro para `tools.restrict_to_workspace=false`;
+3. `SecurityAudit` reporta erro para `tools.restrict_to_workspace=false`;
+
+## Isolamento de Estado Cognitivo por Workspace (SPR-084)
+
+### Problema
+
+- `IDENTITY.md`, `SOUL.md`, `USER.md`, `BOOTSTRAP.md`, `MEMORY.md`, `HISTORY.md` e logs de sessão ainda vazam para a raiz do projeto;
+- `Session.Server`, `Session.Logger` e `Archivist` assumem paths globais;
+- sub-agentes hoje não recebem workspace próprio, então herdam cwd global e não ficam isolados.
+
+### Objetivo
+
+- mover o estado cognitivo do Pincer para `workspaces/<agent_id>/.pincer/`;
+- garantir que cada agente trabalhe dentro do seu próprio workspace;
+- permitir bootstrap apenas para agentes raiz;
+- impedir que sub-agentes entrem no rito de bootstrap.
+
+### Contrato
+
+- todo agente raiz usa `workspaces/<session_id>/.pincer/` como diretório canônico para:
+  - `BOOTSTRAP.md`
+  - `IDENTITY.md`
+  - `SOUL.md`
+  - `USER.md`
+  - `MEMORY.md`
+  - `HISTORY.md`
+  - `sessions/session_<id>.md`
+- sub-agentes usam `workspaces/<agent_id>/.pincer/`, mas:
+  - não recebem `BOOTSTRAP.md`;
+  - podem herdar `IDENTITY.md`, `SOUL.md` e `USER.md` do workspace pai como seed inicial;
+  - mantêm `MEMORY.md`, `HISTORY.md` e logs próprios.
+- `Session.Server` não deve mais ler persona/memória da raiz do repo para operação normal;
+- onboarding deve provisionar scaffold/template compatível com a nova convenção, sem recriar `MEMORY.md` ou `HISTORY.md` na raiz.
+
+### Implementação
+
+- introduzir um resolvedor central de paths do agente;
+- `Session.Server.init/1` garante o `.pincer/` do workspace antes de montar o system prompt;
+- `bootstrap_active?/2` passa a considerar apenas `workspaces/<id>/.pincer/BOOTSTRAP.md` e a ausência de `IDENTITY.md` + `SOUL.md` naquele mesmo workspace;
+- `Session.Logger` grava em `workspaces/<id>/.pincer/sessions/`;
+- `Archivist` consolida contra `workspaces/<id>/.pincer/MEMORY.md` e `workspaces/<id>/.pincer/HISTORY.md`;
+- `dispatch_agent` passa o `workspace_path` do pai ao sub-agente para que ele crie um workspace isolado e herde apenas persona, nunca bootstrap.
+
+### Critério de aceite
+
+1. sessão raiz monta prompt usando apenas arquivos de `workspaces/<session_id>/.pincer/`;
+2. logs de sessão passam a existir somente em `workspaces/<session_id>/.pincer/sessions/`;
+3. sub-agente recebe workspace isolado e não cria `BOOTSTRAP.md`;
+4. onboarding deixa de escrever `MEMORY.md` e `HISTORY.md` na raiz;
+5. testes de regressão cobrem seed de workspace raiz, seed de sub-agente e resolução do prompt local.
   4. suíte focada de segurança/executor permanece verde.
 
 ### Runtime de Skills Isolado (SPR-054 / Sidecar Hardened Baseline)
@@ -1846,3 +1956,216 @@ config = ~y"""
   2. falha de Git não derruba o fluxo (mensagem amigável e continuação do plano);
   3. Telegram e Discord chamam o roteador core para `/project` e `/kanban`;
   4. testes cobrem criação/falha de branch e roteamento core-first.
+
+### Higiene de Warnings no Ambiente de Teste (SPR-081)
+- Objetivo:
+  - remover warnings evitáveis que poluem `mix test` e mascaram regressões reais;
+  - manter `mix compile` e a compilação de testes sem redefinições artificiais nem violações triviais de behaviour.
+- Interfaces públicas afetadas:
+  - `test/test_helper.exs`
+  - `test/support/mocks.ex`
+  - adapters de teste que implementam `Pincer.LLM.Provider`
+- Regras v1:
+  - `test/support` deve ser carregado uma única vez no ambiente `:test`;
+  - adapters de teste que declaram `@behaviour Pincer.LLM.Provider` devem implementar todos os callbacks exigidos, ainda que via helper compartilhado;
+  - testes de macros não devem induzir warnings do compilador por padrões obviamente inalcançáveis quando isso não faz parte do objetivo do teste.
+- Critérios de aceite:
+  1. recompilação forçada em `MIX_ENV=test` não emite warnings de redefinição de mocks/stubs;
+  2. adapters de teste deixam de emitir warnings por callbacks obrigatórios ausentes;
+  3. o teste de `assert_ok/1` continua cobrindo o erro sem emitir warning de tipagem trivial.
+
+### Enforcement de `--warnings-as-errors` no DX (SPR-082)
+- Objetivo:
+  - transformar warnings de compilação em falha explícita por padrão no ciclo de desenvolvimento;
+  - impedir regressão silenciosa da política via configuração do projeto.
+- Interfaces públicas afetadas:
+  - `mix.exs`
+  - `test/mix/aliases_test.exs`
+  - `README.md`
+- Regras v1:
+  - `mix compile` deve tratar warnings como erro via configuração do projeto;
+  - aliases de DX (`qa`, `test.quick`, `sprint.check`) devem propagar `--warnings-as-errors` para testes;
+  - a documentação de teste deve refletir o fluxo estrito.
+- Critérios de aceite:
+  1. `Mix.Project.config/0` expõe `elixirc_options` com `warnings_as_errors: true`;
+  2. aliases de DX incluem `compile --warnings-as-errors` ou `test --warnings-as-errors` conforme aplicável;
+  3. README deixa explícito o comando de teste estrito.
+
+### Hygiene do Unit Systemd do Server (SPR-083)
+- Objetivo:
+  - evitar sinais duplicados de shutdown no restart do serviço;
+  - garantir que o flag global do Mix `--no-compile` seja interpretado pelo Mix, não pelo task `pincer.server`.
+- Interfaces públicas afetadas:
+  - `infrastructure/systemd/pincer.service`
+  - `test/mix/tasks/pincer_server_test.exs`
+- Regras v1:
+  - o unit template não deve declarar `ExecStop` explícito para reenviar `SIGTERM` ao `MAINPID`; o stop deve ficar a cargo do próprio systemd;
+  - `ExecStart` deve chamar diretamente `mix pincer.server telegram`, sem flags espúrios depois do nome do task que acabem sendo tratados como canal.
+- Critérios de aceite:
+  1. o template não contém `ExecStop=/bin/kill -TERM $MAINPID`;
+  2. o template contém `ExecStart=/usr/bin/env mix pincer.server telegram`;
+  3. o teste de regressão do template cobre ambos os pontos.
+
+### Roteamento de Agente Raiz por Usuário do Telegram + Blackboard Escopado (SPR-085)
+- Objetivo:
+  - permitir que múltiplos usuários conversem com o mesmo bot do Telegram, mas cada DM seja roteada para um agente raiz estável (`agent_id`) com bootstrap/persona/memória próprios;
+  - eliminar bleed de coordenação interna entre agentes raiz ao escopar Blackboard e recovery por sessão raiz.
+- Interfaces públicas afetadas:
+  - `config.yaml`
+  - `Pincer.Core.SessionScopePolicy`
+  - `Pincer.Core.Session.Supervisor`
+  - `Pincer.Core.Session.Server`
+  - `Pincer.Core.AgentPaths`
+  - `Pincer.Core.Orchestration.Blackboard`
+  - `Pincer.Core.Orchestration.SubAgent`
+  - `Pincer.Core.Project.Server`
+  - `Pincer.Channels.Telegram`
+- Regras v1:
+  - `channels.telegram.agent_map` pode mapear IDs de DM do Telegram para um `agent_id` estável:
+    - exemplo:
+      - `"123": "annie"`
+      - `"456": "lucie"`
+  - em chat privado do Telegram:
+    - se existir entrada em `agent_map`, `SessionScopePolicy.resolve/3` deve retornar esse `agent_id`;
+    - se não existir entrada, o fallback continua sendo o comportamento atual (`telegram_<chat_id>` ou `telegram_main` conforme `dm_session_scope`).
+  - em chats não privados, `agent_map` não altera o roteamento.
+  - `Pincer.Core.Session.Supervisor.start_session/2` deve aceitar opções de inicialização da sessão.
+  - sessões iniciadas a partir de `agent_map` devem usar scaffold/template local sem copiar persona legada da raiz do repo.
+  - `AgentPaths.ensure_workspace!/2` deve permitir desabilitar fallback legado de persona/bootstrap ao criar agentes raiz explicitamente mapeados.
+  - `Blackboard.post/4` e `Blackboard.fetch_new/2` devem aceitar um `scope` lógico:
+    - root session usa `scope = session_id`;
+    - sub-agentes e projetos publicam no mesmo `scope` da root session;
+    - `Session.Server` consome somente mensagens do seu próprio `scope`.
+  - mensagens antigas do journal sem `scope` não devem ser injetadas no histórico de sessões escopadas.
+- Critérios de aceite:
+  1. DM `123` pode ser roteada para `annie` e DM `456` para `lucie` usando o mesmo bot/token;
+  2. workspaces canônicos ficam em `workspaces/annie/.pincer/` e `workspaces/lucie/.pincer/`;
+  3. criação inicial de `annie`/`lucie` não copia `IDENTITY.md`, `SOUL.md`, `USER.md` ou `BOOTSTRAP.md` legados da raiz quando a sessão nasce via `agent_map`;
+  4. Blackboard/recovery de `annie` não aparece no histórico de `lucie`, e vice-versa;
+  5. fallback compatível permanece para DMs sem entrada em `agent_map`.
+
+### CLI para Criar Agente Raiz Explícito (SPR-086)
+- Objetivo:
+  - expor um comando de CLI explícito para criar um agente raiz com workspace próprio em `workspaces/<agent_id>/.pincer/`;
+  - tornar a criação do agente idempotente e segura, sem copiar persona legada compartilhada da raiz do repo.
+- Interface pública:
+  - `mix pincer.agent new <agent_id>`
+  - `Mix.Tasks.Pincer.Agent.run/1`
+- Regras v1:
+  - o único subcomando inicial é `new`;
+  - `agent_id` deve ser um identificador seguro para diretório (`[A-Za-z0-9_-]+`);
+  - o comando cria ou garante a existência de:
+    - `workspaces/<agent_id>/.pincer/BOOTSTRAP.md`
+    - `workspaces/<agent_id>/.pincer/MEMORY.md`
+    - `workspaces/<agent_id>/.pincer/HISTORY.md`
+    - `workspaces/<agent_id>/.pincer/sessions/`
+  - `IDENTITY.md`, `SOUL.md` e `USER.md` não devem ser copiados da raiz legada do repositório;
+  - se `workspaces/.template/.pincer/` existir, `BOOTSTRAP.md`, `MEMORY.md` e `HISTORY.md` devem ser semeados a partir desse template;
+  - reruns não podem sobrescrever arquivos já existentes no workspace do agente;
+  - uso inválido deve falhar com mensagem explícita de uso.
+
+### Pairing Direcionado para Agentes Explícitos (SPR-087)
+- Objetivo:
+  - permitir que o operador emita códigos de pairing genéricos ou direcionados a um `agent_id` explícito;
+  - fazer com que `/pair <codigo>` em DM do Telegram vincule o remetente ao agente correto sem depender de `agent_map` estático;
+  - preservar o fallback genérico criando um agente dedicado por DM quando o código não tiver alvo explícito.
+- Interfaces públicas afetadas:
+  - `mix pincer.agent pair [agent_id]`
+  - `Pincer.Core.Pairing.issue_invite/2`
+  - `Pincer.Core.Pairing.bound_agent_id/2`
+  - `Pincer.Core.Pairing.bound_agent_session?/2`
+  - `Pincer.Core.SessionScopePolicy.resolve/3`
+  - fluxo `/pair` em `Pincer.Channels.Telegram`
+- Regras v1:
+  - `mix pincer.agent pair annie` deve:
+    - validar `agent_id` com a mesma regra de `mix pincer.agent new`;
+    - falhar se `workspaces/annie/.pincer/` não existir;
+    - emitir um código out-of-band para o canal Telegram direcionado ao agente `annie`.
+  - `mix pincer.agent pair` sem `agent_id` deve emitir um código genérico para o canal Telegram.
+  - códigos emitidos por `issue_invite/2` não são pré-vinculados a `sender_id`; qualquer usuário que enviar `/pair <codigo>` em DM privada do Telegram pode consumi-los uma única vez.
+  - ao consumir um código direcionado:
+    - o `sender_id` fica marcado como `paired`;
+    - `bound_agent_id(:telegram, sender_id)` deve retornar o `agent_id` explícito.
+  - ao consumir um código genérico no Telegram:
+    - o `sender_id` fica marcado como `paired`;
+    - um novo `agent_id` hexadecimal opaco deve ser criado e vinculado ao remetente, independentemente de `dm_session_scope`.
+  - `SessionScopePolicy.resolve/3` para DMs do Telegram deve consultar `agent_map` primeiro, depois `bound_agent_id/2`, e só então cair no fallback legado.
+  - `approve_code/4` deve aceitar tanto códigos pendentes legados vinculados ao sender quanto invites out-of-band; um invite válido não pode ser rejeitado apenas porque existe pending legado para o mesmo sender.
+  - sessões iniciadas a partir de binding dinâmico de pairing devem usar scaffold/template local sem copiar persona legada da raiz.
+  - o binding `sender -> agent_id` deve persistir no store de pairing entre reinícios.
+- Critérios de aceite:
+  1. `mix pincer.agent pair annie` gera código para `annie` e falha com mensagem clara se `annie` não existir;
+  2. `/pair <codigo_direcionado>` em DM privada do Telegram vincula o remetente a `annie`;
+  3. `/pair <codigo_generico>` em DM privada do Telegram vincula o remetente a um novo agente raiz com `agent_id` hexadecimal opaco mesmo quando `dm_session_scope` está em `main`;
+  4. `SessionScopePolicy.resolve/3` respeita `agent_map` estático antes do binding dinâmico e mantém fallback compatível;
+  5. binding de pairing sobrevive à recriação das tabelas runtime.
+- Critérios de aceite:
+  1. `mix pincer.agent new annie` cria `workspaces/annie/.pincer/` com scaffold mínimo e sem persona herdada da raiz;
+  2. rerodar `mix pincer.agent new annie` preserva `BOOTSTRAP.md`, `IDENTITY.md`, `SOUL.md` e `USER.md` já personalizados;
+  3. `mix pincer.agent`, `mix pincer.agent new` e `mix pincer.agent new ../oops` falham com erro amigável;
+  4. o task é classificado em `Pincer.Mix` e aparece documentado no `README.md`.
+
+### Identidade Hexagonal de Agente e Binding Multi-Canal (SPR-088)
+- Objetivo:
+  - separar definitivamente identidade interna do agente, identidade externa do usuário e identidade da conversa;
+  - permitir que múltiplos bindings externos apontem para o mesmo agente raiz sem fundir históricos de conversa;
+  - parar de inferir workspace e blackboard a partir de `session_id`.
+- Conceitos canônicos:
+  - `agent_id`: identificador interno, opaco e imutável do agente raiz;
+  - `display_name`: opcional e definido no bootstrap/persona; não participa do roteamento;
+  - `principal_ref`: identidade externa normalizada, ex. `telegram:user:123`;
+  - `conversation_ref`: identidade da conversa concreta, ex. `telegram:dm:123`;
+  - `session_id`: identificador operacional da conversa no runtime e no storage de mensagens;
+  - `root_agent_id`: agente raiz responsável por persona, workspace e escopo de blackboard.
+- Interfaces públicas novas:
+  - `Pincer.Core.AgentRegistry`
+  - `Pincer.Core.Bindings`
+  - `Pincer.Core.Session.Context`
+  - `Pincer.Core.SessionResolver`
+- Interfaces públicas afetadas:
+  - `Pincer.Core.Session.Server`
+  - `Pincer.Core.Session.Supervisor`
+  - `Pincer.Core.Pairing`
+  - `Pincer.Core.SessionScopePolicy`
+  - canais Telegram, Discord e WhatsApp
+  - `mix pincer.agent new [agent_id]`
+- Regras v1:
+  - `AgentRegistry.create_root_agent!/1` deve gerar `agent_id` hexadecimal opaco com 6 dígitos quando nenhum `agent_id` explícito for informado;
+  - `mix pincer.agent new` sem argumentos deve criar um agente novo com esse `agent_id` opaco e imprimir o ID resultante;
+  - `mix pincer.agent new <agent_id>` continua permitido para criação explícita/manual;
+  - `Bindings.principal_ref/3` deve normalizar identidades externas no formato `<channel>:<kind>:<external_id>`;
+  - `Bindings.resolve/1` deve devolver o `agent_id` atualmente vinculado ao `principal_ref`, com fallback compatível para o store legado de pairing;
+  - `Bindings.bind/2` deve persistir o vínculo `principal_ref -> agent_id` usando o mecanismo de persistência do pairing;
+  - `SessionScopePolicy.resolve/3` passa a resolver apenas `session_id` operacional da conversa, sem retornar `agent_id` explícito;
+  - `SessionResolver.resolve/3` deve devolver um `%Pincer.Core.Session.Context{}` contendo ao menos:
+    - `session_id`
+    - `principal_ref`
+    - `conversation_ref`
+    - `root_agent_id`
+    - `root_agent_source`
+    - `workspace_path`
+    - `blackboard_scope`
+  - `root_agent_source` deve indicar pelo menos:
+    - `:session_scope` para fallbacks legados;
+    - `:static_mapping` para `agent_map`;
+    - `:binding` para vínculos dinâmicos;
+  - `Session.Server` deve:
+    - persistir mensagens e estado conversacional por `session_id`;
+    - carregar persona/bootstrap/workspace por `root_agent_id`;
+    - usar `blackboard_scope = root_agent_id`;
+    - manter logs de sessão em `.pincer/sessions/session_<session_id>.md` dentro do workspace do agente raiz;
+  - canais devem iniciar sessões passando `root_agent_id`, `principal_ref` e `conversation_ref` para o core;
+  - no Telegram/Discord/WhatsApp em DM:
+    - `session_id` continua obedecendo `dm_session_scope`;
+    - `root_agent_id` vem de `agent_map`, depois `Bindings`, depois fallback de `SessionScopePolicy`;
+  - códigos genéricos de pairing não devem mais vincular o usuário a `telegram_<chat_id>`:
+    - ao aprovar um código genérico, deve ser criado um novo agente raiz com `agent_id` hexadecimal opaco;
+    - esse `agent_id` deve ser persistido no pairing e visível por `Bindings.resolve/1`.
+- Critérios de aceite:
+  1. um mesmo usuário pode apontar `telegram:user:123` e `discord:user:456` para o mesmo `agent_id`;
+  2. as duas conversas mantêm `session_id` separados, mas compartilham persona/workspace/blackboard do mesmo agente raiz;
+  3. `SessionScopePolicy.resolve/3` não retorna mais `agent_id` explícito mapeado ou pareado;
+  4. `mix pincer.agent new` sem argumentos gera ID hexadecimal opaco com 6 dígitos;
+  5. `/pair <codigo_generico>` cria um agente novo com ID hexadecimal opaco e workspace próprio;
+  6. workspaces e bootstrap de agentes explícitos/dinâmicos não copiam persona legada da raiz;
+  7. suíte verde com `mix test --warnings-as-errors`.
