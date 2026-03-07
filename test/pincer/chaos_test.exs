@@ -4,8 +4,6 @@ defmodule Pincer.ChaosTest do
   require Logger
 
   alias Pincer.Core.Orchestration.Blackboard
-  alias Pincer.Core.Project.Server
-  alias Pincer.Core.Project.Supervisor, as: ProjectSupervisor
 
   setup :set_mox_from_context
 

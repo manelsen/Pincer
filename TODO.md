@@ -93,4 +93,4 @@ Ordem de execução por risco (produção + segurança + quebra de contrato):
 9. [x] **P3 Arquitetura**: revisar startup supervisionado do Discord Consumer.
 10. [x] **P3 Performance/Manutenção**: reduzir `acc ++ ...` em `Enum.reduce`.
 
-Status atual: suíte completa verde (`541 testes + 2 doctests`, `0` falhas).
+Status atual: suíte completa verde (`515 testes + 2 doctests`, `0` falhas).

@@ -23,25 +23,37 @@ defmodule Pincer.Core.Graph.Watcher do
     # We do a git sync on boot to catch up
     Sync.sync_git()
 
-    {:ok, %{watcher_pid: watcher_pid}}
+    {:ok, %{watcher_pid: watcher_pid, pending_timers: %{}}}
   end
 
   @impl true
   def handle_info({:file_event, _pid, {path, events}}, state) do
     # Filter for relevant events: modified, created, renamed
     if Enum.any?(events, &(&1 in [:modified, :created, :renamed])) do
-      # Relative path
       rel_path = Path.relative_to_cwd(path)
-      
+
+      # Cancel existing timer for this file if it hasn't fired yet
+      if timer = Map.get(state.pending_timers, rel_path) do
+        Process.cancel_timer(timer)
+      end
+
       # We debounce re-indexing a bit to avoid CPU spikes during large saves
-      Process.send_after(self(), {:debounce_index, rel_path}, 2000)
+      # Use a 3-second window to let the file "settle"
+      new_timer = Process.send_after(self(), {:debounce_index, rel_path}, 3000)
+      
+      {:noreply, %{state | pending_timers: Map.put(state.pending_timers, rel_path, new_timer)}}
+    else
+      {:noreply, state}
     end
-    {:noreply, state}
   end
 
+  @impl true
   def handle_info({:debounce_index, path}, state) do
+    # Perform the actual indexing
     Sync.index_file(path)
-    {:noreply, state}
+    
+    # Remove from pending list
+    {:noreply, %{state | pending_timers: Map.delete(state.pending_timers, path)}}
   end
 
   def handle_info(_other, state), do: {:noreply, state}
