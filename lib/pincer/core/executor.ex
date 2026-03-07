@@ -753,11 +753,29 @@ defmodule Pincer.Core.Executor do
     %{"filename" => filename, "size" => size, "url" => url} = ref
 
     if size > @max_inline_bytes do
-      %{
-        "type" => "text",
-        "text" =>
-          "[Arquivo texto '#{filename}' (#{size} bytes) maior que o limite de inlining (#{@max_inline_bytes} bytes).]"
-      }
+      case download_as_base64(url) do
+        {:ok, data} ->
+          case Base.decode64(data) do
+            {:ok, binary} ->
+              # Read a 10KB preview
+              preview = String.slice(binary_to_utf8(binary), 0, 10_000)
+
+              %{
+                "type" => "text",
+                "text" =>
+                  "--- Content of #{filename} (PREVIEW - #{size} bytes) ---\n#{preview}\n\n[... File too large for full inlining. Use 'read_file' or 'grep' to see specific parts if needed.]"
+              }
+
+            :error ->
+              %{
+                "type" => "text",
+                "text" => "[Falha ao decodificar arquivo texto '#{filename}' para UTF-8.]"
+              }
+          end
+
+        {:error, reason} ->
+          %{"type" => "text", "text" => "[Falha ao baixar '#{filename}': #{inspect(reason)}]"}
+      end
     else
       case download_as_base64(url) do
         {:ok, data} ->
