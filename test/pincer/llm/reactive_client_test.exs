@@ -4,7 +4,7 @@ defmodule Pincer.LLM.ReactiveClientTest do
   alias Pincer.LLM.Client
 
   defmodule ReactiveMockAdapter do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(_messages, _model, config, _tools) do

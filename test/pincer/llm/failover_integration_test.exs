@@ -1,10 +1,11 @@
 defmodule Pincer.LLM.FailoverIntegrationTest do
   use ExUnit.Case, async: false
 
+  alias Pincer.Core.LLM.CooldownStore
   alias Pincer.LLM.Client
 
   defmodule FailoverAdapter do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(_messages, model, config, _tools) do
@@ -42,7 +43,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
   end
 
   defmodule StreamParityAdapter do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(_messages, model, config, _tools) do
@@ -86,6 +87,9 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
     original_providers = Application.get_env(:pincer, :llm_providers)
     original_default = Application.get_env(:pincer, :default_llm_provider)
     original_retry = Application.get_env(:pincer, :llm_retry)
+    original_cooldown = Application.get_env(:pincer, :llm_cooldown)
+
+    CooldownStore.reset()
 
     Application.put_env(:pincer, :default_llm_provider, "p1")
 
@@ -115,6 +119,14 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
       else
         Application.delete_env(:pincer, :llm_retry)
       end
+
+      if original_cooldown do
+        Application.put_env(:pincer, :llm_cooldown, original_cooldown)
+      else
+        Application.delete_env(:pincer, :llm_cooldown)
+      end
+
+      CooldownStore.reset()
     end)
 
     :ok

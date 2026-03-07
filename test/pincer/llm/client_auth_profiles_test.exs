@@ -5,7 +5,7 @@ defmodule Pincer.LLM.ClientAuthProfilesTest do
   alias Pincer.LLM.Client
 
   defmodule AuthProfileAdapter do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(_messages, _model, config, _tools) do

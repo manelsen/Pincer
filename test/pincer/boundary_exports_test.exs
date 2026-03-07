@@ -31,6 +31,7 @@ defmodule Pincer.BoundaryExportsTest do
     assert mix_boundary_source =~ "check: [in: false, out: false]"
 
     task_files = [
+      "lib/mix/tasks/pincer.agent.ex",
       "lib/mix/tasks/pincer.chat.ex",
       "lib/mix/tasks/pincer.doctor.ex",
       "lib/mix/tasks/pincer.onboard.ex",

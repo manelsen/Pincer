@@ -4,7 +4,7 @@ defmodule Pincer.LLM.ClientTest do
   alias Pincer.LLM.Client
 
   defmodule MockAdapter do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(messages, model, config, tools) do
@@ -30,7 +30,7 @@ defmodule Pincer.LLM.ClientTest do
   end
 
   defmodule InvalidStreamAdapter do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(_messages, _model, _config, _tools) do
