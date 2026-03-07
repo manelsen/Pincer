@@ -266,6 +266,44 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
   @impl true
   def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
 
+  @impl true
+  def generate_embedding(text, model, config) do
+    url = infer_embeddings_url(config[:base_url])
+    api_key = config[:api_key]
+
+    body = %{
+      "model" => model,
+      "input" => text
+    }
+
+    case Req.post(url,
+           json: body,
+           auth: {:bearer, api_key},
+           receive_timeout: 60_000
+         ) do
+      {:ok, %{status: 200, body: %{"data" => [%{"embedding" => vector} | _]}}} ->
+        {:ok, vector}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, {:http_error, status, body}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp infer_embeddings_url(chat_url) when is_binary(chat_url) do
+    cond do
+      String.contains?(chat_url, "/chat/completions") ->
+        String.replace(chat_url, "/chat/completions", "/embeddings")
+
+      true ->
+        Path.join(chat_url, "embeddings")
+    end
+  end
+
+  defp infer_embeddings_url(_), do: "https://api.openai.com/v1/embeddings"
+
   defp infer_models_url(chat_url) when is_binary(chat_url) do
     cond do
       String.contains?(chat_url, "/chat/completions") ->

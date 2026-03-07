@@ -148,7 +148,17 @@ defmodule Pincer.LLM.Client do
   end
 
   @doc """
+  Returns the raw configuration map for a given provider.
+  """
+  @spec provider_config(String.t()) :: map() | nil
+  def provider_config(provider_id) do
+    registry = provider_registry()
+    registry[provider_id]
+  end
+
+  @doc """
   Returns available models for a specific provider from the model-selection
+
   registry (config.yaml `llm` with fallback to `:llm_providers`).
   
   Attempts dynamic discovery from provider API with 1-hour cache.
@@ -325,6 +335,29 @@ defmodule Pincer.LLM.Client do
           model = Keyword.get(opts, :model, config[:default_model])
           config_with_auth = auth_selection.config
           apply(adapter, :transcribe_audio, [file_path, model, config_with_auth])
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  def generate_embedding(text, opts \\ []) do
+    registry = provider_registry()
+    provider_id = Keyword.get(opts, :provider, "openrouter")
+    config = registry[provider_id]
+
+    if is_nil(config) do
+      {:error, :unknown_provider}
+    else
+      adapter = config[:adapter]
+      requested_profile = Keyword.get(opts, :auth_profile)
+
+      case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
+        {:ok, auth_selection} ->
+          model = Keyword.get(opts, :model, config[:default_model] || "baai/bge-m3")
+          config_with_auth = auth_selection.config
+          apply(adapter, :generate_embedding, [text, model, config_with_auth])
 
         {:error, reason} ->
           {:error, reason}

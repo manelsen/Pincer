@@ -2,9 +2,9 @@ defmodule Pincer.Channels.Slack.Session do
   @moduledoc """
   Manages outgoing responses for a specific Slack channel.
   """
-  use GenServer
-  require Logger
+  use Pincer.Ports.Channel
 
+  @impl Pincer.Ports.Channel
   def start_link(channel_id) do
     GenServer.start_link(__MODULE__, channel_id, name: via_tuple(channel_id))
   end
@@ -22,8 +22,30 @@ defmodule Pincer.Channels.Slack.Session do
   @impl true
   def init(channel_id) do
     session_id = "slack_#{channel_id}"
+    # 1. Macro init handles system:delivery
+    super(channel_id)
+
+    # 2. Session-specific subscription
     Pincer.Infra.PubSub.subscribe("session:#{session_id}")
     {:ok, %{channel_id: channel_id, session_id: session_id}}
+  end
+
+  # Hexagonal enforcement: override handles_session?
+  @impl true
+  def handles_session?(id), do: String.starts_with?(id, "slack_")
+
+  @impl true
+  def resolve_recipient(id) do
+    case String.split(id, "_", parts: 2) do
+      ["slack", channel_id] -> channel_id
+      _ -> id
+    end
+  end
+
+  # We need to implement send_message/2 because the macro calls it
+  @impl Pincer.Ports.Channel
+  def send_message(channel_id, text) do
+    Pincer.Channels.Slack.send_message(channel_id, text)
   end
 
   @impl true

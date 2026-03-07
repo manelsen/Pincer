@@ -40,4 +40,7 @@ defmodule Pincer.LLM.Providers.GroqWhisper do
   def stream_completion(_m, _mo, _c, _t), do: {:error, :not_implemented}
   @impl true
   def list_models(_config), do: {:ok, ["whisper-large-v3", "whisper-large-v3-turbo"]}
+
+  @impl true
+  def generate_embedding(_text, _model, _config), do: {:error, :not_implemented}
 end

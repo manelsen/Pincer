@@ -29,6 +29,8 @@ defmodule Pincer.LLM.Providers.Zhipu do
 
   @impl true
   def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
+  @impl true
+  def generate_embedding(_text, _model, _config), do: {:error, :not_implemented}
 
   # Zhipu GLM API uses the same schema, so we leverage the base compat adapter
   # and only inject provider-specific settings here.
