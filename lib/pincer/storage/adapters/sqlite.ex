@@ -42,7 +42,7 @@ defmodule Pincer.Storage.Adapters.SQLite do
 
   """
 
-  @behaviour Pincer.Storage.Port
+  @behaviour Pincer.Ports.Storage
 
   alias Pincer.Infra.Repo
   alias Pincer.Storage.Message

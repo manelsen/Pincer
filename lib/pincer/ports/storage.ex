@@ -15,7 +15,8 @@ defmodule Pincer.Ports.Storage do
   # --- Dispatcher ---
 
   defp adapter do
-    # Default to Pincer.Storage (the facade/adapter) if not configured
+    # Ensure we go through the Storage facade/dispatcher by default
+    # This allows multi-adapter routing (SQLite for messages, Graph for vectors)
     Application.get_env(:pincer, :storage_adapter, Pincer.Storage)
   end
 
