@@ -11,7 +11,6 @@ WorkingDirectory=/home/micelio/git/Pincer
 Environment=MIX_ENV=prod
 EnvironmentFile=-/etc/pincer/pincer.env
 ExecStart=/usr/bin/env mix pincer.server telegram
-ExecStop=/bin/kill -TERM $MAINPID
 Restart=always
 RestartSec=5
 TimeoutStartSec=120

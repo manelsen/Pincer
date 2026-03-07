@@ -34,9 +34,6 @@ COPY config.yaml ./config.yaml
 COPY TODO.md ./TODO.md
 COPY README.md ./README.md
 COPY LICENSE ./LICENSE
-COPY IDENTITY.md ./IDENTITY.md
-COPY SOUL.md ./SOUL.md
-COPY USER.md ./USER.md
 
 RUN mix compile
 
@@ -78,14 +75,11 @@ COPY --from=builder /app/config.yaml /app/config.yaml
 COPY --from=builder /app/TODO.md /app/TODO.md
 COPY --from=builder /app/README.md /app/README.md
 COPY --from=builder /app/LICENSE /app/LICENSE
-COPY --from=builder /app/IDENTITY.md /app/IDENTITY.md
-COPY --from=builder /app/SOUL.md /app/SOUL.md
-COPY --from=builder /app/USER.md /app/USER.md
 COPY --from=builder /root/.mix /app/.mix
 COPY --from=builder /root/.hex /app/.hex
 COPY infrastructure/docker/entrypoint.sh /app/infrastructure/docker/entrypoint.sh
 
-RUN mkdir -p /app/db /app/logs /app/sessions /app/memory && \
+RUN mkdir -p /app/db /app/logs /app/sessions /app/memory /app/workspaces && \
     chmod +x /app/infrastructure/docker/entrypoint.sh && \
     chown -R pincer:pincer /app
 
