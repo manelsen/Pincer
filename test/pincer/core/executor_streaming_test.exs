@@ -4,7 +4,7 @@ defmodule Pincer.Core.ExecutorStreamingTest do
   alias Pincer.Core.Executor
 
   defmodule MockStreamProvider do
-    @behaviour Pincer.LLM.Provider
+    use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(_messages, _model, _config, _tools) do
