@@ -355,7 +355,11 @@ defmodule Pincer.LLM.Client do
 
       case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
         {:ok, auth_selection} ->
-          model = Keyword.get(opts, :model, config[:default_model] || "baai/bge-m3")
+          model = 
+            Keyword.get(opts, :model) || 
+            config[:embedding_model] || 
+            (if provider_id == "openrouter", do: "baai/bge-m3", else: config[:default_model])
+
           config_with_auth = auth_selection.config
           apply(adapter, :generate_embedding, [text, model, config_with_auth])
 

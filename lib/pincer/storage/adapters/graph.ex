@@ -68,6 +68,7 @@ defmodule Pincer.Storage.Adapters.Graph do
 
   """
 
+  @behaviour Pincer.Ports.Storage
   import Ecto.Query
   alias Pincer.Infra.Repo
   alias Pincer.Storage.Graph.{Node, Edge}
