@@ -3,12 +3,12 @@ defmodule Pincer.Channels.Discord.Session do
   Driven Adapter for Discord.
   One process per active Discord channel that listens to PubSub and sends messages via Nostrum.
   """
-  use GenServer
-  require Logger
+  use Pincer.Ports.Channel
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.StreamingPolicy
   alias Pincer.Core.Session.Server
 
+  @impl Pincer.Ports.Channel
   def start_link(%{channel_id: channel_id} = args) do
     GenServer.start_link(__MODULE__, args, name: via_tuple(channel_id))
   end
@@ -46,8 +46,12 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   @impl true
-  def init(%{channel_id: channel_id, session_id: session_id})
+  def init(%{channel_id: channel_id, session_id: session_id} = args)
       when is_binary(session_id) and session_id != "" do
+    # 1. Macro init handles system:delivery
+    super(args)
+
+    # 2. Session-specific subscription
     subscribe_session(session_id)
     Logger.info("[DISCORD SESSION] Worker started for channel: #{channel_id}")
     {:ok, state(channel_id, session_id)}
@@ -56,9 +60,32 @@ defmodule Pincer.Channels.Discord.Session do
   @impl true
   def init(channel_id) do
     session_id = default_session_id(channel_id)
+    
+    # 1. Macro init handles system:delivery
+    super(channel_id)
+
+    # 2. Session-specific subscription
     subscribe_session(session_id)
     Logger.info("[DISCORD SESSION] Worker started for channel: #{channel_id}")
     {:ok, state(channel_id, session_id)}
+  end
+
+  # Hexagonal enforcement: override handles_session?
+  @impl true
+  def handles_session?(id), do: String.starts_with?(id, "discord_")
+
+  @impl true
+  def resolve_recipient(id) do
+    case String.split(id, "_", parts: 2) do
+      ["discord", channel_id] -> channel_id
+      _ -> id
+    end
+  end
+
+  # We need to implement send_message/2 because the macro calls it
+  @impl Pincer.Ports.Channel
+  def send_message(channel_id, text) do
+    Pincer.Channels.Discord.send_message(channel_id, text)
   end
 
   @impl true

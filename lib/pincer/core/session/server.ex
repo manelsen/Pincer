@@ -251,6 +251,12 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
+  def handle_info({:sme_status, _sme_name, msg}, state) do
+    publish(state.session_id, {:agent_status, msg})
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info(msg, state) do
     Logger.debug("[SESSION] #{state.session_id} received unexpected message: #{inspect(msg)}")
     {:noreply, state}
@@ -370,31 +376,42 @@ defmodule Pincer.Core.Session.Server do
     {:reply, :ok, %{state | usage_display: level}}
   end
 
+  alias Pincer.Core.Structs.IncomingMessage
+
   @impl true
-  def handle_call({:process_input, input}, _from, state) do
+  def handle_call({:process_input, %IncomingMessage{} = input}, _from, state) do
     # Cancel previous timer if exists
     if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
 
-    new_buffer = state.input_buffer ++ [input]
+    # For buffering, we collect the text from the incoming message
+    new_buffer = state.input_buffer ++ [input.text]
     # Wait 1200ms for more chunks before flushing (safer for high latency)
     new_timer = Process.send_after(self(), :flush_input, 1200)
 
     {:reply, {:ok, :buffered}, %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
   end
 
+  def handle_call({:process_input, input}, from, state) when is_binary(input) do
+    # Legacy support: convert string to IncomingMessage
+    msg = IncomingMessage.new(state.session_id, input)
+    handle_call({:process_input, msg}, from, state)
+  end
+
   # --- Boilerplate & Standard Flow ---
 
   defp process_standard_input(input, state) do
+    # input can be binary (from legacy) or IncomingMessage (from new flow)
     text_for_storage = content_to_text(input)
     Storage.save_message(state.session_id, "user", text_for_storage)
     Pincer.Core.Session.Logger.log(state.session_id, "user", text_for_storage)
 
-    user_msg = %{"role" => "user", "content" => input}
+    # Map to LLM history format
+    user_msg = map_input_to_history(input)
     new_history = state.history ++ [user_msg]
 
-    if is_just_chat?(input) do
+    if is_just_chat?(text_for_storage) do
       Task.start(fn ->
-        quick_assistant_reply(self(), state.session_id, new_history, input, state.model_override)
+        quick_assistant_reply(self(), state.session_id, new_history, text_for_storage, state.model_override)
       end)
 
       {:reply, {:ok, :butler_notified}, %{state | history: new_history}}
@@ -409,6 +426,13 @@ defmodule Pincer.Core.Session.Server do
        %{state | history: new_history, worker_pid: pid, status: :working}}
     end
   end
+
+  defp map_input_to_history(%IncomingMessage{text: text, attachments: []}), do: %{"role" => "user", "content" => text}
+  defp map_input_to_history(%IncomingMessage{text: text, attachments: atts}) do
+    content = [%{"type" => "text", "text" => text}] ++ Enum.map(atts, fn a -> %{"type" => "attachment", "attachment" => a} end)
+    %{"role" => "user", "content" => content}
+  end
+  defp map_input_to_history(input) when is_binary(input), do: %{"role" => "user", "content" => input}
 
   defp extract_error_message(body) when is_binary(body) do
     case Jason.decode(body) do
@@ -446,6 +470,11 @@ defmodule Pincer.Core.Session.Server do
 
     ## USER:
     #{user}
+
+    ## CAPABILITIES & TOOLS:
+    You are a technical agent with access to multiple tools through the Model Context Protocol (MCP) and native Elixir integrations. 
+    You can read and write files, execute shell commands, manage projects, and more. 
+    Never claim you don't have tools; if a task requires technical action, you must use the available tools to perform it.
     """
 
     String.trim(prompt)
@@ -459,6 +488,7 @@ defmodule Pincer.Core.Session.Server do
     end
   end
 
+  defp content_to_text(%IncomingMessage{text: text}), do: text
   defp content_to_text(c) when is_binary(c), do: c
 
   defp content_to_text(p) when is_list(p),
@@ -471,7 +501,18 @@ defmodule Pincer.Core.Session.Server do
   defp is_just_chat?(input) when is_list(input), do: false
 
   defp is_just_chat?(input) do
-    String.length(input) < 15 or String.downcase(input) in ["oi", "ola", "ping"]
+    normalized = String.downcase(String.trim(input))
+    
+    # Verbos de ação ou comandos técnicos não devem ser "just chat"
+    technical_intent? = 
+      String.match?(normalized, ~r/^(ls|cat|read|write|git|mix|python|node|npx|sh|bash|exec|run|make|grep|find|mkdir|rm|cp|mv|project|plan|create|edit|save)\b/)
+
+    cond do
+      technical_intent? -> false
+      String.length(input) < 8 -> true
+      normalized in ["oi", "ola", "ping", "hello", "hi", "hey", "bão?", "bão?"] -> true
+      true -> false
+    end
   end
 
   defp quick_assistant_reply(pid, sid, hist, _in, mo) do

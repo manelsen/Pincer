@@ -659,7 +659,23 @@ defmodule Pincer.Channels.WhatsApp do
     end
   end
 
-  defp default_process_input(session_id, text), do: Server.process_input(session_id, text)
+  alias Pincer.Core.Structs.IncomingMessage
+
+  defp default_process_input(session_id, input) do
+    incoming = case input do
+      text when is_binary(text) -> IncomingMessage.new(session_id, text)
+      %IncomingMessage{} = msg -> msg
+      parts when is_list(parts) ->
+        # Split text from attachments
+        {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
+        text = Enum.map_join(text_parts, "\n", & &1["text"])
+        atts = Enum.map(att_parts, & &1["attachment"])
+        
+        IncomingMessage.new(session_id, text: text, attachments: atts)
+    end
+
+    Server.process_input(session_id, incoming)
+  end
   defp default_status(session_id), do: Pincer.Core.Session.Server.get_status(session_id)
 
   defp default_set_model(session_id, provider, model) do

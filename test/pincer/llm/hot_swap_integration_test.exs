@@ -88,7 +88,8 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
     Server.set_model(session_id, "fail", "default")
 
     # 2. Trigger execution
-    assert {:ok, :started} = Server.process_input(session_id, "Do something complex that is definitely long enough")
+    assert {:ok, :buffered} =
+             Server.process_input(session_id, "Do something complex that is definitely long enough")
 
     # 3. Wait for the signal from adapter that it failed and is about to retry (waiting)
     assert_receive :entered_backoff, 5000

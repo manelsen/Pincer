@@ -16,6 +16,17 @@ defmodule Pincer.LLM.ClientTest do
     def stream_completion(_messages, _model, _config, _tools) do
       {:ok, [%{"choices" => [%{"delta" => %{"content" => "MockAdapter stream"}}]}]}
     end
+
+    @impl true
+    def list_models(config) do
+      case Map.get(config, :models) do
+        nil -> {:ok, []}
+        list -> {:ok, list}
+      end
+    end
+
+    @impl true
+    def transcribe_audio(_path, _model, _config), do: {:ok, "mock transcript"}
   end
 
   defmodule InvalidStreamAdapter do
@@ -30,6 +41,12 @@ defmodule Pincer.LLM.ClientTest do
     def stream_completion(_messages, _model, _config, _tools) do
       {:ok, %Req.Response{status: 400, headers: %{}, body: %{}, trailers: %{}, private: %{}}}
     end
+
+    @impl true
+    def list_models(_config), do: {:ok, []}
+
+    @impl true
+    def transcribe_audio(_path, _model, _config), do: {:ok, "mock transcript"}
   end
 
   setup do
@@ -119,7 +136,7 @@ defmodule Pincer.LLM.ClientTest do
 
       providers = Client.list_providers()
 
-      assert Enum.map(providers, & &1.id) == ["openrouter", "z_ai"]
+      assert Enum.map(providers, & &1.id) == ["moonshot", "openrouter", "z_ai"]
     end
 
     test "list_models/1 reads model list from config.yaml llm structure when present" do
@@ -172,7 +189,7 @@ defmodule Pincer.LLM.ClientTest do
         }
       })
 
-      assert Client.list_models("z_ai") == ["glm-4.7", "glm-4.5"]
+      assert Client.list_models("z_ai") == ["glm-4.5"]
     end
   end
 

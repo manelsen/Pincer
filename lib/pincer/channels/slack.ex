@@ -83,6 +83,7 @@ defmodule Pincer.Channels.Slack.Handler do
   use Slack.Bot
   require Logger
   alias Pincer.Core.Session.Server
+  alias Pincer.Core.Structs.IncomingMessage
 
   @impl true
   def handle_event("message", %{"text" => text, "user" => user_id, "channel" => channel_id} = _payload, _bot) do
@@ -93,7 +94,8 @@ defmodule Pincer.Channels.Slack.Handler do
     ensure_session_started(session_id)
     Pincer.Channels.Slack.Session.ensure_started(channel_id)
 
-    Server.process_input(session_id, text)
+    incoming = IncomingMessage.new(session_id, text)
+    Server.process_input(session_id, incoming)
     :ok
   end
 

@@ -311,7 +311,7 @@ defmodule Pincer.Channels.DiscordTest do
 
       APIMock
       |> expect(:create_interaction_response, fn 111, "token-1", response ->
-        assert response.type == 4
+        assert response.type == 7
         assert response.data.content =~ "Select AI Provider"
 
         custom_ids =
@@ -348,7 +348,7 @@ defmodule Pincer.Channels.DiscordTest do
 
       APIMock
       |> expect(:create_interaction_response, fn 119, "token-119", response ->
-        assert response.type == 4
+        assert response.type == 7
 
         custom_ids =
           response.data.components

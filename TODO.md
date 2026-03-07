@@ -12,10 +12,30 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
 - [x] Ciclo de Vida: **Planning -> Execution -> QA**.
 - [x] Context Injection entre agentes para manter a "conversa" técnica alinhada.
 
-### [x] Memória Vetorial de Alta Performance
+### [ ] Memória Vetorial & GraphRAG (Alta Performance)
+- [x] **Janela Deslizante no "Sweet Spot":** Implementado cap em 25% da janela real (limitada via config do adapter) + preservação da "Injeção Fixa" inicial, resolvendo o *"Lost in the Middle"*.
 - [x] Geração de Embeddings Local (Nx/Bumblebee).
-- [x] Persistência em SQLite (Stopgap).
+- [x] Persistência em SQLite (Stopgap) e Relacionamentos via Grafo (`Pincer.Storage.Graph`).
 - [x] **Migração para LanceDB** (Integração via Rustler/NIF) para busca vetorial escalável.
+- [x] **Extração de Esqueleto de Código (Code Skeleton / Estilo th0th):**
+  - Módulo que reduz tokens em ~98% ao extirpar a implementação/blocos `{}` e comentários, preservando apenas assinaturas (`def`, `import`, `class`).
+  - Fornece o "Mapa do Território" ultra-barato para o LLM rotear sua busca profunda.
+- [ ] **Sincronização Híbrida de Conhecimento (GraphRAG Sync)**
+  - [ ] Sincronização Local (Git/Watcher): Hooks automáticos para re-indexar vetores do LanceDB após edições feitas pelo Pincer (`write_file`/`replace`) ou via commits (`git diff`).
+  - [ ] **RAG Dinâmico Externo via MCP (APIs e Linguagens):** 
+    - Como lidar com tecnologias fast-moving (Gleam, Go 1.26, Odin)?
+    - Ao detectar erro de compilação ou conhecimento obsoleto, o agente invoca o **MCP do GitHub** para extrair as *Release Notes* ou docs do repositório oficial (`github_search_code`).
+    - Esse "texto limpo" é vetorizado na hora via API (ex: `openrouter/baai/bge-m3` por ~$0.01/1M tokens) e ingerido na coleção `external_docs` do LanceDB.
+  - [ ] **Retroalimentação em Grafo (Experiência Dedutiva):**
+    - Após o RAG resolver o problema, o agente consolida o aprendizado na **Memória em Grafos**: `[Bug] --(resolvido_em)--> [Módulo/Versão]`.
+    - No próximo encontro com o mesmo erro (mesmo em outros projetos), o agente consulta o Grafo primeiro (fatos causais) antes de recorrer à busca vetorial cega ou ao GitHub, garantindo "memória de sênior".
+
+### [x] Motor de Auto-Melhoria Contínua (Self-Improving Agent)
+- [x] **Captura de Erros Autônoma (Error Nodes):** Interceptar falhas consecutivas de ferramentas (ex: `shell_server`, erros de sintaxe ou "tool_execution_failed") no `Pincer.Core.Executor` e salvar automaticamente como "Nós de Erro" estruturados (Metadata, Causa, Fix) na Memória de Grafos, sem depender da vontade do LLM.
+- [x] **Promoção e Injeção Fixa (The Learning Loop):** 
+  - Ao iniciar uma sessão em um repositório, o Pincer consulta o Grafo pelas "Lições Aprendidas" ou erros frequentes associados aos arquivos do contexto atual.
+  - Injetar um sumário dessas lições diretamente no System Prompt (A "Injeção Fixa" do Sweet Spot).
+- [x] **Comando Manual de Correção (`/learn` ou Rituais de Correção):** Quando o usuário corrigir o agente ("Não, o certo é X"), o agente deve acionar uma ferramenta que classifica o feedback (`knowledge_gap`, `best_practice`) e escreve no GraphMemory, linkando a "Aresta" a arquivos ou ferramentas.
 
 ### [ ] MCP Host Universal (Nano-Inspirado)
 - [x] Suporte a MCP via STDIO (Handshake corrigido).
@@ -39,9 +59,9 @@ Um motor Elixir/OTP que combina a versatilidade do **NanoBot**, a orquestração
 
 ## 🛠️ FUNCIONALIDADES AVANÇADAS
 
-### [ ] Voz & Multimodal
-- [ ] Transcrição de voz automática no Telegram (Whisper via Bumblebee local).
-- [ ] Processamento de imagens/logs enviados como arquivos.
+### [x] Voz & Multimodal
+- [x] Transcrição de voz automática no Telegram (Whisper via Groq API)
+- [x] Processamento de imagens/logs enviados como arquivos (Inlining + Previews para logs grandes)
 
 ### [ ] Segurança & Proatividade
 - [ ] `restrict_to_workspace`: Sandbox para comandos shell e leitura de arquivos.

@@ -3,10 +3,11 @@ defmodule Pincer.Channels.WhatsApp.Session do
   WhatsApp session worker that forwards session PubSub events to a chat ID.
   """
 
-  use GenServer
+  use Pincer.Ports.Channel
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.Session.Server
 
+  @impl Pincer.Ports.Channel
   def start_link(%{chat_id: chat_id} = args) do
     GenServer.start_link(__MODULE__, args, name: via_tuple(chat_id))
   end
@@ -44,8 +45,12 @@ defmodule Pincer.Channels.WhatsApp.Session do
   end
 
   @impl true
-  def init(%{chat_id: chat_id, session_id: session_id})
+  def init(%{chat_id: chat_id, session_id: session_id} = args)
       when is_binary(session_id) and session_id != "" do
+    # 1. Macro init handles system:delivery
+    super(args)
+
+    # 2. Session-specific subscription
     subscribe_session(session_id)
     {:ok, %{chat_id: chat_id, session_id: session_id}}
   end
@@ -53,8 +58,31 @@ defmodule Pincer.Channels.WhatsApp.Session do
   @impl true
   def init(chat_id) do
     session_id = default_session_id(chat_id)
+    
+    # 1. Macro init handles system:delivery
+    super(chat_id)
+
+    # 2. Session-specific subscription
     subscribe_session(session_id)
     {:ok, %{chat_id: chat_id, session_id: session_id}}
+  end
+
+  # Hexagonal enforcement: override handles_session?
+  @impl true
+  def handles_session?(id), do: String.starts_with?(id, "whatsapp_")
+
+  @impl true
+  def resolve_recipient(id) do
+    case String.split(id, "_", parts: 2) do
+      ["whatsapp", chat_id] -> chat_id
+      _ -> id
+    end
+  end
+
+  # We need to implement send_message/2 because the macro calls it
+  @impl Pincer.Ports.Channel
+  def send_message(chat_id, text) do
+    Pincer.Channels.WhatsApp.send_message(chat_id, text)
   end
 
   @impl true

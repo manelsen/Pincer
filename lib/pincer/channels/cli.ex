@@ -69,67 +69,31 @@ defmodule Pincer.Channels.CLI do
       Pincer.Channels.CLI.send_message("cli_user", "Response text")
   """
 
-  use GenServer
-  @behaviour Pincer.Ports.Channel
-  require Logger
+  use Pincer.Ports.Channel
 
-  @doc """
-  Starts the CLI channel GenServer.
-
-  Initializes with an empty frontend PID, meaning messages will be logged
-  until a frontend attaches via `attach/0`.
-
-  ## Parameters
-
-    - `_config` - Configuration map (unused for CLI channel)
-
-  ## Returns
-
-    - `{:ok, pid}` - Channel started successfully
-
-  ## Examples
-
-      Pincer.Channels.CLI.start_link(%{})
-  """
-  @spec start_link(config :: map()) :: GenServer.on_start()
   @impl Pincer.Ports.Channel
   def start_link(_config) do
     GenServer.start_link(__MODULE__, %{frontend_pid: nil}, name: __MODULE__)
   end
 
-  @doc """
-  Attaches the calling process as the frontend for CLI output.
-
-  After attachment, all CLI output will be sent to the calling process
-  as `{:cli_output, text}` messages. Also ensures the `"cli_user"` session
-  exists.
-
-  ## Returns
-
-    - `:ok` - Attachment successful
-
-  ## Examples
-
-      # In a frontend process
-      Pincer.Channels.CLI.attach()
-
-      # Later, receive output
-      receive do
-        {:cli_output, text} -> IO.puts(text)
-      end
-  """
-  @spec attach() :: :ok
-  def attach do
-    GenServer.call(__MODULE__, :attach)
-  end
-
-  @impl GenServer
+  @impl true
   def init(state) do
     Logger.info("CLI Channel Enabled.")
+    # We still need session-specific subscription for direct agent events (thinking, etc)
     Pincer.Infra.PubSub.subscribe("session:cli_user")
-    Pincer.Infra.PubSub.subscribe("system:delivery")
-    {:ok, state}
+    
+    # Macro init handles "system:delivery"
+    super(state)
   end
+
+  # We override handles_session? because CLI uses a fixed "cli_user" ID
+  @impl true
+  def handles_session?("cli_user"), do: true
+  def handles_session?(_), do: false
+
+  @impl true
+  def resolve_recipient("cli_user"), do: "cli_user"
+  def resolve_recipient(id), do: id
 
   @impl GenServer
   def handle_call(:attach, {from_pid, _tag}, state) do
@@ -167,10 +131,13 @@ defmodule Pincer.Channels.CLI do
     :ok
   end
 
+  alias Pincer.Core.Structs.IncomingMessage
+
   @doc false
   @impl true
   def handle_cast({:user_input, text}, state) do
-    Pincer.Core.Session.Server.process_input("cli_user", text)
+    incoming = IncomingMessage.new("cli_user", text)
+    Pincer.Core.Session.Server.process_input("cli_user", incoming)
     {:noreply, state}
   end
 
@@ -179,13 +146,7 @@ defmodule Pincer.Channels.CLI do
     {:noreply, state}
   end
 
-  @impl GenServer
-  def handle_info({:deliver_message, session_id, message}, state) do
-    if session_id == "cli_user" do
-      send_message(session_id, message)
-    end
-    {:noreply, state}
-  end
+  # The macro now handles handle_info({:deliver_message, ...}) by calling send_message/2
 
   def handle_info({:agent_response, text, _usage}, state) do
     send_to_frontend(state, text)

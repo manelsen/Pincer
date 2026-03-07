@@ -10,6 +10,8 @@ defmodule Pincer.Channels.Discord do
   @behaviour Pincer.Ports.Channel
   use Supervisor
   require Logger
+  alias Pincer.Core.Structs.IncomingMessage
+  alias Pincer.Core.Session.Server
   alias Pincer.Core.UX
   alias Pincer.Core.UX.MenuPolicy
 
@@ -310,7 +312,21 @@ defmodule Pincer.Channels.Discord do
                             session_id
                           )
 
-                          Server.process_input(session_id, full_content)
+                          # Create agnostic IncomingMessage
+                          incoming = case full_content do
+                            text when is_binary(text) -> 
+                              IncomingMessage.new(session_id, text)
+                            
+                            parts when is_list(parts) ->
+                              # Split text from attachments
+                              {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
+                              text = Enum.map_join(text_parts, "\n", & &1["text"])
+                              atts = Enum.map(att_parts, & &1["attachment"])
+                              
+                              IncomingMessage.new(session_id, text: text, attachments: atts)
+                          end
+
+                          Server.process_input(session_id, incoming)
                         else
                           Logger.debug(
                             "[DISCORD] Ignoring empty message without supported attachments."

@@ -60,4 +60,10 @@ defmodule Pincer.LLM.Provider do
   """
   @callback transcribe_audio(file_path :: String.t(), model :: String.t(), config :: map()) :: 
               {:ok, String.t()} | {:error, any()}
+
+  @doc """
+  Generates a vector embedding for the given text.
+  """
+  @callback generate_embedding(text :: String.t(), model :: String.t(), config :: map()) ::
+              {:ok, [float()]} | {:error, any()}
 end

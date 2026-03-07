@@ -43,14 +43,19 @@ defmodule Pincer.LLM.RetryPolicyTest do
           {:ok, %{"role" => "assistant", "content" => "ok"}, nil}
       end
     end
+@impl true
+def stream_completion(messages, model, config, tools) do
+  case chat_completion(messages, model, config, tools) do
+    {:ok, _, _} -> {:ok, [%{"choices" => [%{"delta" => %{"content" => "stream-ok"}}]}]}
+    error -> error
+  end
+end
 
-    @impl true
-    def stream_completion(messages, model, config, tools) do
-      case chat_completion(messages, model, config, tools) do
-        {:ok, _, _} -> {:ok, [%{"choices" => [%{"delta" => %{"content" => "stream-ok"}}]}]}
-        {:error, reason} -> {:error, reason}
-      end
-    end
+@impl true
+def list_models(_config), do: {:ok, []}
+
+@impl true
+def transcribe_audio(_path, _model, _config), do: {:ok, "mock transcript"}
   end
 
   setup do
