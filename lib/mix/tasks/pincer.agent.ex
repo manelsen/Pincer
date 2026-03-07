@@ -68,9 +68,7 @@ defmodule Mix.Tasks.Pincer.Agent do
   defp create_named_agent!(agent_id) do
     normalized_agent_id = normalize_agent_id!(agent_id)
 
-    AgentRegistry.create_root_agent!(
-      agent_id: normalized_agent_id
-    )
+    AgentRegistry.create_root_agent!(agent_id: normalized_agent_id)
   rescue
     error in ArgumentError -> Mix.raise(Exception.message(error))
   end

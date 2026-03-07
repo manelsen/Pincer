@@ -35,6 +35,7 @@ IO.puts("Waiting for scheduled task trigger...")
 receive do
   {:agent_status, msg} ->
     IO.puts("\n[RECEIVED] Agent Status: #{msg}")
+
     if String.contains?(msg, "Scheduler Works") do
       IO.puts("[SUCCESS] Scheduled task triggered!")
     else
@@ -43,6 +44,7 @@ receive do
 
   {:agent_thinking, msg} ->
     IO.puts("\n[RECEIVED] Agent Thinking: #{msg}")
+
     if String.contains?(msg, "Sub-Agente") do
       IO.puts("[SUCCESS] Sub-Agent spawned!")
       # End test successfully

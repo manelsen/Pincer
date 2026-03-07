@@ -10,7 +10,8 @@ defmodule Pincer.Adapters.Tools.Learning do
       "type" => "function",
       "function" => %{
         "name" => "record_learning",
-        "description" => "Record a new learning, best practice, or user correction into the permanent Graph Knowledge Base. Use this whenever the user corrects you, or you discover a better way to do something.",
+        "description" =>
+          "Record a new learning, best practice, or user correction into the permanent Graph Knowledge Base. Use this whenever the user corrects you, or you discover a better way to do something.",
         "parameters" => %{
           "type" => "object",
           "properties" => %{
@@ -21,7 +22,8 @@ defmodule Pincer.Adapters.Tools.Learning do
             },
             "summary" => %{
               "type" => "string",
-              "description" => "A concise summary of what was learned or corrected. Start with an action verb."
+              "description" =>
+                "A concise summary of what was learned or corrected. Start with an action verb."
             }
           },
           "required" => ["category", "summary"]
@@ -33,8 +35,11 @@ defmodule Pincer.Adapters.Tools.Learning do
   @impl true
   def execute(%{"category" => cat, "summary" => sum}) do
     case Pincer.Ports.Storage.save_learning(cat, sum) do
-      {:ok, _} -> {:ok, "Learning successfully recorded and will be injected into future sessions."}
-      {:error, e} -> {:error, "Failed to record learning: #{inspect(e)}"}
+      {:ok, _} ->
+        {:ok, "Learning successfully recorded and will be injected into future sessions."}
+
+      {:error, e} ->
+        {:error, "Failed to record learning: #{inspect(e)}"}
     end
   end
 end

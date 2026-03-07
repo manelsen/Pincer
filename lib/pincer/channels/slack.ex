@@ -18,20 +18,24 @@ defmodule Pincer.Channels.Slack do
 
     if app_token && bot_token do
       Logger.info("Starting Slack Channel (Socket Mode)...")
-      
+
       children = [
         {Registry, [keys: :unique, name: Pincer.Channels.Slack.Registry]},
-        {Slack.Supervisor, [
-          app_token: app_token,
-          bot_token: bot_token,
-          bot: Pincer.Channels.Slack.Handler
-        ]},
+        {Slack.Supervisor,
+         [
+           app_token: app_token,
+           bot_token: bot_token,
+           bot: Pincer.Channels.Slack.Handler
+         ]},
         {Pincer.Channels.Slack.SessionSupervisor, []}
       ]
 
       Supervisor.init(children, strategy: :one_for_one)
     else
-      Logger.warning("Slack tokens missing (SLACK_APP_TOKEN or SLACK_BOT_TOKEN). Slack channel disabled.")
+      Logger.warning(
+        "Slack tokens missing (SLACK_APP_TOKEN or SLACK_BOT_TOKEN). Slack channel disabled."
+      )
+
       :ignore
     end
   end
@@ -39,10 +43,10 @@ defmodule Pincer.Channels.Slack do
   @impl true
   def send_message(channel_id, text, _opts \\ []) do
     token = System.get_env("SLACK_BOT_TOKEN")
-    
+
     # Slack uses mrkdwn format
     formatted_text = markdown_to_mrkdwn(text)
-    
+
     case api_client().post("chat.postMessage", token, %{channel: channel_id, text: formatted_text}) do
       {:ok, %{ts: mid}} -> {:ok, mid}
       {:ok, %{"ts" => mid}} -> {:ok, mid}
@@ -55,8 +59,12 @@ defmodule Pincer.Channels.Slack do
   def update_message(channel_id, message_id, text) do
     token = System.get_env("SLACK_BOT_TOKEN")
     formatted_text = markdown_to_mrkdwn(text)
-    
-    case api_client().post("chat.update", token, %{channel: channel_id, ts: message_id, text: formatted_text}) do
+
+    case api_client().post("chat.update", token, %{
+           channel: channel_id,
+           ts: message_id,
+           text: formatted_text
+         }) do
       {:ok, _} -> :ok
       {:error, reason} -> {:error, reason}
     end
@@ -69,8 +77,10 @@ defmodule Pincer.Channels.Slack do
   # Basic Markdown to Slack mrkdwn conversion
   def markdown_to_mrkdwn(text) do
     text
-    |> String.replace(~r/\*\*(.*?)\*\*/, "*\\1*") # Bold: **text** -> *text*
-    |> String.replace(~r/__(.*?)__/, "_\\1_")   # Underline/Italic: __text__ -> _text_
+    # Bold: **text** -> *text*
+    |> String.replace(~r/\*\*(.*?)\*\*/, "*\\1*")
+    # Underline/Italic: __text__ -> _text_
+    |> String.replace(~r/__(.*?)__/, "_\\1_")
     # Slack links: [label](url) -> <url|label>
     |> String.replace(~r/\[(.*?)\]\((.*?)\)/, "<\\2|\\1>")
   end
@@ -86,7 +96,11 @@ defmodule Pincer.Channels.Slack.Handler do
   alias Pincer.Core.Structs.IncomingMessage
 
   @impl true
-  def handle_event("message", %{"text" => text, "user" => user_id, "channel" => channel_id} = _payload, _bot) do
+  def handle_event(
+        "message",
+        %{"text" => text, "user" => user_id, "channel" => channel_id} = _payload,
+        _bot
+      ) do
     # Routing to Pincer session
     session_id = "slack_#{channel_id}"
     Logger.info("[SLACK] Message received from #{user_id} in #{channel_id}")
@@ -109,6 +123,7 @@ defmodule Pincer.Channels.Slack.Handler do
       [] ->
         Logger.info("[SLACK] Creating new session: #{session_id}")
         Pincer.Core.Session.Supervisor.start_session(session_id)
+
       [_] ->
         :ok
     end

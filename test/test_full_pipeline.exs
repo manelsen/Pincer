@@ -3,9 +3,10 @@
 # Start the application to ensure Embeddings model is loaded
 # This might take a moment to download/load the model if not cached
 IO.puts("Starting Pincer application...")
+
 case Application.ensure_all_started(:pincer) do
   {:ok, _} -> IO.puts("Pincer started successfully.")
-  {:error,reason} -> IO.puts("Pincer start warning/error: #{inspect(reason)}")
+  {:error, reason} -> IO.puts("Pincer start warning/error: #{inspect(reason)}")
 end
 
 # Alias modules
@@ -23,10 +24,10 @@ session_id = "session_test_123"
 IO.puts("\n2. Saving message (Generating Embedding + Indexing)...")
 # This calls Embeddings.generate internally
 case LanceDB.save_message(session_id, role, content) do
-  {:ok, %{id: id}} -> 
+  {:ok, %{id: id}} ->
     IO.puts("   [OK] Message saved with ID: #{id}")
-  
-  {:error, e} -> 
+
+  {:error, e} ->
     IO.puts("   [FAIL] Save error: #{inspect(e)}")
     System.halt(1)
 end
@@ -38,6 +39,7 @@ results = LanceDB.search_similar_messages(query, 2)
 
 if length(results) > 0 do
   IO.puts("   [OK] Found #{length(results)} results.")
+
   Enum.each(results, fn res ->
     IO.puts("     - Score: #{res.score} | Content: #{res.content}")
   end)

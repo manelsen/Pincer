@@ -106,11 +106,14 @@ defmodule Pincer.Application do
   def start(_type, _args) do
     File.mkdir_p!("logs")
     Pincer.Infra.Config.load()
-    
+
     repo_config = Pincer.Infra.Config.get(:repo)
 
     IO.puts("Starting Bot...")
-    IO.puts("Enabled channels whitelist: #{inspect(Application.get_env(:pincer, :enabled_channels))}")
+
+    IO.puts(
+      "Enabled channels whitelist: #{inspect(Application.get_env(:pincer, :enabled_channels))}"
+    )
 
     children = [
       Pincer.Infra.PubSub,

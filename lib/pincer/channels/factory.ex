@@ -102,26 +102,30 @@ defmodule Pincer.Channels.Factory do
   """
   @spec create_channel_specs(config :: map() | nil) :: [{module(), map()}]
   def create_channel_specs(config \\ nil) do
-    config = case config do
-      nil -> Pincer.Infra.Config.get(:channels, %{})
-      %{"channels" => c} -> c
-      c -> c
-    end
+    config =
+      case config do
+        nil -> Pincer.Infra.Config.get(:channels, %{})
+        %{"channels" => c} -> c
+        c -> c
+      end
 
     whitelist = Application.get_env(:pincer, :enabled_channels)
 
     config
     |> Enum.filter(fn {name, cfg} ->
       enabled_in_yaml = cfg["enabled"] == true
-      
-      result = if whitelist do
-        Enum.member?(whitelist, name)
-      else
-        enabled_in_yaml
-      end
+
+      result =
+        if whitelist do
+          Enum.member?(whitelist, name)
+        else
+          enabled_in_yaml
+        end
 
       unless result do
-        Logger.debug("Channel disabled or not in whitelist: #{name} (yaml_enabled=#{enabled_in_yaml})")
+        Logger.debug(
+          "Channel disabled or not in whitelist: #{name} (yaml_enabled=#{enabled_in_yaml})"
+        )
       end
 
       result

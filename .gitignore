@@ -17,7 +17,7 @@ pincer-*.tar
 .env.test
 .tool-versions
 
-# Local Agent Artifacts (NEW)
+# Local Agent Artifacts
 .local/
 
 # Databases
@@ -51,6 +51,7 @@ venv/
 mcp_sidecar/node_modules/
 analysis/
 docs/
+# workspaces/
 .elixir_ls/
 .vscode/
 .idea/

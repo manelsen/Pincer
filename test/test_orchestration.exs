@@ -25,12 +25,14 @@ IO.puts("Dispatch Result: #{result}")
 
 # 3. Monitor Blackboard
 IO.puts("Monitoring Blackboard (5s)...")
+
 Enum.each(1..5, fn i ->
   Process.sleep(1000)
   IO.puts("Tick #{i}...")
-  
+
   # Read Blackboard manually using the tool
   bb_content = BlackboardReader.execute(%{})
+
   if bb_content != "Blackboard is empty." do
     IO.puts("\n[BLACKBOARD UPDATE]:\n#{bb_content}\n")
   end

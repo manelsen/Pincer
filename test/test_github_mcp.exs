@@ -6,7 +6,8 @@ Application.ensure_all_started(:pincer)
 alias Pincer.Adapters.Connectors.MCP.Manager
 Logger.configure(level: :debug)
 # Force console backend to show debug logs
-:logger.set_handler_config(:default, :level, :debug) # For OTP 21+ logger default handler
+# For OTP 21+ logger default handler
+:logger.set_handler_config(:default, :level, :debug)
 # Or for Elixir Logger wrapper if using legacy console backend
 try do
   Logger.configure_backend(:console, level: :debug)

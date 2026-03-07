@@ -11,11 +11,16 @@ defmodule Pincer.Core.Graph.State do
     :model_override,
     :depth,
     :max_depth,
-    :status,         # :planning, :calling_llm, :executing_tools, :done, :error
-    :last_response,  # Stores the latest LLM response text or struct
-    :tool_calls,     # Pending tool calls to execute
-    :tool_results,   # Results from executed tools
-    :error_reason    # Stores error message if status == :error
+    # :planning, :calling_llm, :executing_tools, :done, :error
+    :status,
+    # Stores the latest LLM response text or struct
+    :last_response,
+    # Pending tool calls to execute
+    :tool_calls,
+    # Results from executed tools
+    :tool_results,
+    # Stores error message if status == :error
+    :error_reason
   ]
 
   @type status :: :planning | :calling_llm | :executing_tools | :done | :error

@@ -1,6 +1,6 @@
 defmodule Pincer.Infra do
   @moduledoc "Infrastructure layer."
-  use Boundary, 
+  use Boundary,
     exports: [
       PubSub,
       Config,

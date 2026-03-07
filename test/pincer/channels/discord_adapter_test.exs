@@ -13,19 +13,20 @@ defmodule Pincer.Channels.Discord.API.AdapterTest do
   setup do
     # Inject our mock into the Adapter
     Application.put_env(:pincer, :nostrum_message_api, NostrumMessageMock)
-    
+
     on_exit(fn ->
       Application.delete_env(:pincer, :nostrum_message_api)
     end)
+
     :ok
   end
 
   test "create_message handles integer channel_id and delegates to Nostrum" do
     channel_id = 12345
     content = "Hello"
-    
+
     assert {:ok, %{id: 999}} = Adapter.create_message(channel_id, content, [])
-    
+
     # Verify the mock received the correct arguments
     assert_receive {:nostrum_called, ^channel_id, ^content}
   end
@@ -34,9 +35,9 @@ defmodule Pincer.Channels.Discord.API.AdapterTest do
     channel_id_str = "67890"
     channel_id_int = 67890
     content = "Hello String"
-    
+
     assert {:ok, %{id: 999}} = Adapter.create_message(channel_id_str, content, [])
-    
+
     assert_receive {:nostrum_called, ^channel_id_int, ^content}
   end
 
@@ -44,9 +45,9 @@ defmodule Pincer.Channels.Discord.API.AdapterTest do
     channel_id = 111
     content = "Hello Opts"
     opts = [components: [%{type: 1}]]
-    
+
     assert {:ok, %{id: 999}} = Adapter.create_message(channel_id, content, opts)
-    
+
     # Verify we got a MAP with both content and components
     expected_params = %{content: content, components: [%{type: 1}]}
     assert_receive {:nostrum_called, ^channel_id, ^expected_params}

@@ -22,12 +22,16 @@ defmodule Pincer.Core.ProjectGitTest do
 
     File.cd!(root, fn ->
       # Ensure we are NOT in a repo
-      {_, code} = System.cmd("git", ["rev-parse", "--is-inside-work-tree"], stderr_to_stdout: true)
+      {_, code} =
+        System.cmd("git", ["rev-parse", "--is-inside-work-tree"], stderr_to_stdout: true)
+
       assert code != 0, "Test folder #{root} should not be a git repository"
 
       case ProjectGit.ensure_branch("project/research-language-policy") do
         {:ok, result} ->
-          assert result.status == :created, "Expected :created, got #{inspect(result.status)}. Repo path: #{result.repo_path}"
+          assert result.status == :created,
+                 "Expected :created, got #{inspect(result.status)}. Repo path: #{result.repo_path}"
+
           assert result.bootstrapped
           assert is_binary(result.repo_path)
           assert File.dir?(Path.join(result.repo_path, ".git"))

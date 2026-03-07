@@ -277,7 +277,9 @@ defmodule Pincer.Adapters.Connectors.MCP.Client do
       }
     }
 
-    if Application.get_env(:pincer, :log_mcp), do: Logger.debug("[MCP Client] Sending Handshake: #{inspect(payload)}")
+    if Application.get_env(:pincer, :log_mcp),
+      do: Logger.debug("[MCP Client] Sending Handshake: #{inspect(payload)}")
+
     send_payload(state, payload)
     {:noreply, %{state | requests: Map.put(state.requests, id, :init_handshake), next_id: id + 1}}
   end
@@ -286,7 +288,10 @@ defmodule Pincer.Adapters.Connectors.MCP.Client do
   def handle_call(:list_tools, from, state) do
     id = state.next_id
     payload = %{jsonrpc: "2.0", id: id, method: "tools/list", params: %{}}
-    if Application.get_env(:pincer, :log_mcp), do: Logger.debug("[MCP Client] Sending ListTools: #{inspect(payload)}")
+
+    if Application.get_env(:pincer, :log_mcp),
+      do: Logger.debug("[MCP Client] Sending ListTools: #{inspect(payload)}")
+
     send_payload(state, payload)
     {:noreply, %{state | requests: Map.put(state.requests, id, from), next_id: id + 1}}
   end
@@ -363,7 +368,8 @@ defmodule Pincer.Adapters.Connectors.MCP.Client do
 
   defp process_transport_messages(messages, state) do
     Enum.reduce(messages, state, fn msg, acc ->
-      if Application.get_env(:pincer, :log_mcp), do: Logger.debug("[MCP Client] Received message: #{inspect(msg)}")
+      if Application.get_env(:pincer, :log_mcp),
+        do: Logger.debug("[MCP Client] Received message: #{inspect(msg)}")
 
       case msg do
         %{"id" => id} = response -> handle_response(id, response, acc)

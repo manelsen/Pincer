@@ -1,6 +1,6 @@
 defmodule Pincer.Ports.ToolRegistry do
   @moduledoc "Port for discovering and executing tools."
-  
+
   @callback list_tools() :: [map()]
   @callback execute_tool(String.t(), map(), map()) :: {:ok, term()} | {:error, term()}
 
@@ -12,7 +12,7 @@ defmodule Pincer.Ports.ToolRegistry do
   end
 
   def list_tools do
-    Enum.flat_map(adapters(), fn adapter -> 
+    Enum.flat_map(adapters(), fn adapter ->
       if Code.ensure_loaded?(adapter), do: adapter.list_tools(), else: []
     end)
   end

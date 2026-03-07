@@ -47,17 +47,14 @@ defmodule Pincer.Core.Graph.Nodes do
     updated_history = state.history ++ new_messages
 
     if tool_calls == [] do
-      %{state | 
-        history: updated_history, 
-        status: :done, 
-        last_response: List.last(new_messages)["content"]
+      %{
+        state
+        | history: updated_history,
+          status: :done,
+          last_response: List.last(new_messages)["content"]
       }
     else
-      %{state | 
-        history: updated_history, 
-        status: :executing_tools, 
-        tool_calls: tool_calls
-      }
+      %{state | history: updated_history, status: :executing_tools, tool_calls: tool_calls}
     end
   end
 
@@ -68,12 +65,13 @@ defmodule Pincer.Core.Graph.Nodes do
   def on_tool_results(%State{} = state, tool_results_messages) do
     # Append the tool results to history and increment depth
     # This forms the CYCLE in the graph: back to planning.
-    %{state | 
-      history: state.history ++ tool_results_messages,
-      status: :planning,
-      depth: state.depth + 1,
-      tool_calls: [],
-      tool_results: []
+    %{
+      state
+      | history: state.history ++ tool_results_messages,
+        status: :planning,
+        depth: state.depth + 1,
+        tool_calls: [],
+        tool_results: []
     }
   end
 end

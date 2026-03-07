@@ -23,9 +23,11 @@ defmodule Pincer.Channels.Factory.Test do
     setup do
       old_whitelist = Application.get_env(:pincer, :enabled_channels)
       Application.delete_env(:pincer, :enabled_channels)
-      on_exit(fn -> 
+
+      on_exit(fn ->
         if old_whitelist, do: Application.put_env(:pincer, :enabled_channels, old_whitelist)
       end)
+
       :ok
     end
 

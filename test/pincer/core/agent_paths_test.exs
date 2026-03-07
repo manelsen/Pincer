@@ -52,7 +52,6 @@ defmodule Pincer.Core.AgentPathsTest do
     assert File.exists?(AgentPaths.history_path(subagent_workspace))
   end
 
-
   defp tempdir(prefix) do
     path = Path.join(System.tmp_dir!(), "#{prefix}_#{System.unique_integer([:positive])}")
     File.mkdir_p!(path)

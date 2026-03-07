@@ -20,27 +20,34 @@ IO.puts("Cada skill rodará em um container Docker efêmero e limpo.\n")
 Enum.each(skills, fn skill_name ->
   IO.puts("--------------------------------------------------")
   IO.puts("📦 Instalando e Inicializando: #{skill_name}")
-  
+
   # Como a chamada real do MCP exige persistir e mandar JSON por Stdio,
   # Aqui faremos um teste para varrer se o container Node.js consegue
   # usar o npx para baixar a skill e invocá-la (mesmo que com erro de config).
   # Passamos um timeout e um kill para garantir que ele não fique pendurado em prompt.
-  
+
   cmd = "docker"
+
   args = [
-    "run", "-i", "--rm", 
-    "--memory=1.5g",  # Memória estendida para suportar Puppeteer
-    "pincer-mcp-sidecar", 
-    "npx", "-y", skill_name
+    "run",
+    "-i",
+    "--rm",
+    # Memória estendida para suportar Puppeteer
+    "--memory=1.5g",
+    "pincer-mcp-sidecar",
+    "npx",
+    "-y",
+    skill_name
   ]
 
   # Inicia o processo Docker
-  port = Port.open({:spawn_executable, System.find_executable(cmd)}, [
-    :stream,
-    :binary,
-    :stderr_to_stdout,
-    args: args
-  ])
+  port =
+    Port.open({:spawn_executable, System.find_executable(cmd)}, [
+      :stream,
+      :binary,
+      :stderr_to_stdout,
+      args: args
+    ])
 
   # Aguarda até 5 segundos de output inicial
   receive do
@@ -48,11 +55,11 @@ Enum.each(skills, fn skill_name ->
       # Truncar saída para não poluir
       preview = String.slice(output, 0, 150)
       IO.puts("✅ Container Ativo! Resposta inicial interceptada:\n   #{preview}...")
-      
+
       # Força o encerramento seguro do container limpo
       Port.close(port)
-      
-    after 5000 ->
+  after
+    5000 ->
       IO.puts("⏳ Timeout inicial da skill (pode ser download grande do npx). Fechando porta.")
       Port.close(port)
   end

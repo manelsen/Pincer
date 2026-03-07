@@ -266,7 +266,8 @@ defmodule Pincer.Adapters.Connectors.MCP.Transports.Stdio do
               # We log it and move on to 'rest'.
               # If not JSON, assume it's a server log (captured stderr or dirty stdout)
               if String.trim(line) != "" do
-                if Application.get_env(:pincer, :log_mcp), do: Logger.debug("[MCP Server Log] #{String.trim(line)}")
+                if Application.get_env(:pincer, :log_mcp),
+                  do: Logger.debug("[MCP Server Log] #{String.trim(line)}")
               end
 
               extract_messages(rest, acc)
