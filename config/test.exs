@@ -13,7 +13,7 @@ config :pincer,
   telegram_api: Pincer.Channels.TestAdapter,
   slack_api: Pincer.Channels.TestAdapter
 
-config :pincer, storage_adapter: Pincer.Storage.Adapters.SQLite
+config :pincer, storage_adapter: Pincer.Storage
 
 config :pincer, enable_graph_watcher: false
 config :pincer, enable_heartbeat_watchers: false
