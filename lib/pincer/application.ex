@@ -118,6 +118,7 @@ defmodule Pincer.Application do
       {Finch, name: Pincer.Finch},
       {Pincer.Infra.Repo, repo_config},
       Pincer.Core.Heartbeat,
+      Pincer.Core.Heartbeat.GitHubWatcher,
       {Registry, keys: :duplicate, name: Pincer.Dispatcher.Registry},
       {DynamicSupervisor, strategy: :one_for_one, name: Pincer.MCP.Supervisor},
       Pincer.Adapters.Connectors.MCP.Manager,
