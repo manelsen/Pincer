@@ -20,7 +20,8 @@ defmodule Pincer.Adapters.NativeToolRegistry do
     Pincer.Adapters.Tools.BlackboardReader,
     Pincer.Adapters.Tools.SafeShell,
     Pincer.Adapters.Tools.Web,
-    Pincer.Adapters.Tools.GraphMemory
+    Pincer.Adapters.Tools.GraphMemory,
+    Pincer.Adapters.Tools.CodeSkeleton
   ]
 
   @impl true
