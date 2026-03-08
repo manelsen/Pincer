@@ -27,6 +27,23 @@ defmodule Pincer.Core.Graph.Sync do
   end
 
   @doc """
+  Performs a full sync of all supported files in the repository.
+  """
+  def sync_full do
+    case System.cmd("git", ["ls-files"]) do
+      {output, 0} ->
+        files = output |> String.split("\n", trim: true) |> Enum.filter(&supported_file?/1)
+        Logger.info("[GRAPH-SYNC] Full sync detected #{length(files)} files. Indexing...")
+
+        Enum.each(files, &index_file/1)
+        {:ok, files}
+
+      _ ->
+        {:error, :git_failed}
+    end
+  end
+
+  @doc """
   Indexes a single file into the knowledge graph with vector embeddings.
   """
   def index_file(path) do
@@ -71,6 +88,8 @@ defmodule Pincer.Core.Graph.Sync do
       ".c",
       ".cpp"
     ] and
+      not String.starts_with?(path, "tmp/") and
+      not String.starts_with?(path, "workspaces/") and
       not String.contains?(path, "/deps/") and
       not String.contains?(path, "/_build/") and
       not String.contains?(path, "/.git/")
