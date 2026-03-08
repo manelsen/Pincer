@@ -397,7 +397,7 @@ defmodule Pincer.LLM.Client do
       {:ok, message, usage} ->
         maybe_clear_provider_cooldown(failover_state)
         maybe_clear_auth_profile_cooldown(auth_context)
-        {:ok, message, usage}
+        {:ok, Pincer.LLM.ToolParser.parse(message), usage}
 
       {:ok, stream} ->
         maybe_clear_provider_cooldown(failover_state)
