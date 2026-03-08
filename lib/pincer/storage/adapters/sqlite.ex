@@ -125,8 +125,8 @@ defmodule Pincer.Storage.Adapters.SQLite do
   def index_document(path, content, vector) do
     embedding_bin = :erlang.term_to_binary(vector)
 
-    case create_node("document", %{"path" => path, "content" => content}) do
-      {:ok, node} ->
+    case ensure_node("document", %{"path" => path, "content" => content}) do
+      node when is_map(node) ->
         node
         |> Node.changeset(%{embedding: embedding_bin})
         |> Repo.update()
@@ -162,17 +162,17 @@ defmodule Pincer.Storage.Adapters.SQLite do
   # --- Private Helpers ---
 
   defp ensure_node(type, data) do
-    case Repo.one(
+    case Repo.all(
            from(n in Node,
              where:
                n.type == ^type and fragment("json_extract(data, '$.path') = ?", ^data["path"])
            )
          ) do
-      nil ->
+      [] ->
         {:ok, node} = create_node(type, data)
         node
 
-      node ->
+      [node | _] ->
         node
     end
   end
