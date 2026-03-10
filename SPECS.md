@@ -350,6 +350,42 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 2. Teste de unidade/integracao prova que `MemoryRecall.explain/2` mescla hit textual e hit semantico do mesmo documento em um unico resultado mais forte.
 3. Teste de regressao prova que o explain continua mostrando `messages/documents/semantic` por fonte, mas o bloco final usa a ordem reranqueada e deduplicada.
 4. Suite relevante de memoria continua verde.
+
+---
+
+## Incremento 2026-03-10 (Retrieval v2.1: recall relacional do grafo)
+
+### Objetivo
+- Fazer o grafo participar diretamente do recall, nao apenas como `boost` indireto.
+- Recuperar historico relacional de `bug/fix/file` para queries de incidente.
+- Injetar evidencias compactas de grafo no prompt com citacao clara, sem inundar o bloco final.
+
+### Interfaces/Public API
+- `Pincer.Ports.Storage.search_graph_history/2`
+- `Pincer.Core.MemoryRecall.explain/2`
+- `Pincer.Core.MemoryDiagnostics.explain/2`
+
+### Regras
+- `search_graph_history/2` deve retornar entradas estruturadas contendo:
+  - `bug`
+  - `fix`
+  - `file`
+  - `source`
+  - `citation`
+  - `score`
+- A busca do grafo deve priorizar matches em:
+  - descricao do bug
+  - resumo do fix
+  - caminho do arquivo
+- `MemoryRecall` deve consultar o grafo apenas para queries elegiveis e tipicamente incidentais.
+- Hits de grafo devem aparecer em `source_hits.graph` e `source_counts.graph`.
+- O bloco final deve poder incluir hits de grafo, mas com diversidade e sem duplicar excessivamente informacao ja coberta por documentos.
+- `MemoryDiagnostics.explain/2` deve expor `graph` na resposta.
+
+### Criterios de aceite
+1. Teste de integracao prova que `search_graph_history/2` retorna historico relevante para query de incidente.
+2. Teste de regressao prova que `MemoryRecall.explain/2` inclui hits de grafo e o prompt final menciona a citacao relacional.
+3. Teste de Mix task ou diagnostico prova que `pincer.memory.explain` mostra `graph=N` quando houver match.
 - Migrar o storage principal do Pincer de SQLite para PostgreSQL.
 - Substituir embeddings binarios por colunas vetoriais com `pgvector`.
 - Preservar a API publica do port `Pincer.Ports.Storage`.

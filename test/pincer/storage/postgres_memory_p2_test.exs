@@ -153,4 +153,22 @@ defmodule Pincer.Storage.PostgresMemoryP2Test do
     assert get_in(first, [:score_components, :graph]) > 0.0
     assert get_in(second, [:score_components, :graph]) == 0.0
   end
+
+  test "search_graph_history/2 returns structured relational matches for incident queries" do
+    assert {:ok, :ok} =
+             Postgres.ingest_bug_fix(
+               "Deploy timeout after webhook retries",
+               "Raised timeout to 60 seconds",
+               "lib/pincer/deploy.ex"
+             )
+
+    assert {:ok, [entry]} = Postgres.search_graph_history("deploy timeout webhook retries", 5)
+
+    assert entry.bug == "Deploy timeout after webhook retries"
+    assert entry.fix == "Raised timeout to 60 seconds"
+    assert entry.file == "lib/pincer/deploy.ex"
+    assert entry.source == "graph://lib/pincer/deploy.ex"
+    assert entry.citation == "graph lib/pincer/deploy.ex"
+    assert entry.score > 0.0
+  end
 end

@@ -135,6 +135,9 @@ defmodule Pincer.Core.ArchivistTest do
     def search_similar(_type, _vector, _limit), do: {:ok, []}
 
     @impl true
+    def search_graph_history(_query, _limit), do: {:ok, []}
+
+    @impl true
     def search_messages(_query, _limit), do: {:ok, []}
 
     @impl true

@@ -62,7 +62,7 @@ defmodule Mix.Tasks.Pincer.Memory.Explain do
     Mix.shell().info("Eligible: #{yes_no(explanation.eligible?)}")
 
     Mix.shell().info(
-      "Source hits: messages=#{length(explanation.messages)} documents=#{length(explanation.documents)} semantic=#{length(explanation.semantic)}"
+      "Source hits: messages=#{length(explanation.messages)} documents=#{length(explanation.documents)} semantic=#{length(explanation.semantic)} graph=#{length(explanation.graph)}"
     )
 
     Mix.shell().info("Prompt chars: #{String.length(explanation.prompt_block)}")

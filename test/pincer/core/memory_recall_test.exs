@@ -45,6 +45,20 @@ defmodule Pincer.Core.MemoryRecallTest do
          }
        ]}
     end
+
+    def search_graph_history(_query, _limit) do
+      {:ok,
+       [
+         %{
+           kind: :graph,
+           content:
+             "Bug: Deploy timeout after webhook retries. Fix: Raise timeout to 60 seconds. File: lib/pincer/deploy.ex",
+           source: "graph://lib/pincer/deploy.ex",
+           citation: "graph lib/pincer/deploy.ex",
+           score: 0.92
+         }
+       ]}
+    end
   end
 
   defmodule HybridStorageStub do
@@ -179,13 +193,14 @@ defmodule Pincer.Core.MemoryRecallTest do
 
     snapshot = MemoryObservability.snapshot()
 
-    assert snapshot.search.count == 3
+    assert snapshot.search.count == 4
     assert snapshot.search.by_source.messages.total_hits == 1
     assert snapshot.search.by_source.documents.total_hits == 1
     assert snapshot.search.by_source.semantic.total_hits == 1
+    assert snapshot.search.by_source.graph.total_hits == 1
     assert snapshot.recall.count == 1
     assert snapshot.recall.eligible_count == 1
-    assert snapshot.recall.total_hits == 3
+    assert snapshot.recall.total_hits == 4
     assert snapshot.recall.prompt_chars > 0
   end
 
@@ -202,10 +217,11 @@ defmodule Pincer.Core.MemoryRecallTest do
       )
 
     assert result.recall?
-    assert result.source_counts == %{messages: 1, documents: 1, semantic: 1}
+    assert result.source_counts == %{messages: 1, documents: 1, semantic: 1, graph: 1}
     assert length(result.source_hits.messages) == 1
     assert length(result.source_hits.documents) == 1
     assert length(result.source_hits.semantic) == 1
+    assert length(result.source_hits.graph) == 1
     assert result.user_memory =~ "Prefers short answers."
 
     snapshot = MemoryObservability.snapshot()
@@ -232,5 +248,20 @@ defmodule Pincer.Core.MemoryRecallTest do
     assert first.signals == [:semantic, :text]
     assert first.score > 0.80
     assert Enum.count(result.hits, &(&1.source == "session://s-1/snippet/1")) == 1
+  end
+
+  test "build/2 includes relational graph evidence for incident-style queries", %{
+    workspace: workspace
+  } do
+    result =
+      MemoryRecall.build(
+        [%{role: "user", content: "What happened in the deploy timeout incident?"}],
+        workspace_path: workspace,
+        storage: StorageStub,
+        embedding_fun: fn _query -> {:ok, [1.0, 0.0]} end
+      )
+
+    assert result.prompt_block =~ "graph lib/pincer/deploy.ex"
+    assert result.prompt_block =~ "Raise timeout to 60 seconds"
   end
 end

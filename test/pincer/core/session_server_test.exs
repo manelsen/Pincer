@@ -80,6 +80,9 @@ defmodule Pincer.Core.Session.ServerTest do
     @impl true
     def search_similar(_type, _vector, _limit), do: {:ok, []}
 
+    @impl true
+    def search_graph_history(_query, _limit), do: {:ok, []}
+
     defp agent do
       Application.fetch_env!(:pincer, :session_server_test_agent)
     end

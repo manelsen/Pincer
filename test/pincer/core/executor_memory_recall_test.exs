@@ -124,6 +124,9 @@ defmodule Pincer.Core.ExecutorMemoryRecallTest do
 
     @impl true
     def forget_memory(_source), do: :ok
+
+    @impl true
+    def search_graph_history(_query, _limit), do: {:ok, []}
   end
 
   setup do
