@@ -42,6 +42,21 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     assert output =~ "channels.whatsapp.enabled=true"
   end
 
+  test "if-missing skips when workspace is already onboarded" do
+    capture_io(fn ->
+      Mix.Task.run(@task, ["--non-interactive", "--yes"])
+    end)
+
+    Mix.Task.reenable(@task)
+
+    output =
+      capture_io(fn ->
+        Mix.Task.run(@task, ["--non-interactive", "--yes", "--if-missing"])
+      end)
+
+    assert output =~ "already onboarded"
+  end
+
   test "db-name flag overrides database output" do
     capture_io(fn ->
       Mix.Task.run(@task, ["--non-interactive", "--yes", "--db-name", "custom_db"])

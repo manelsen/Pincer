@@ -6,26 +6,16 @@ Pincer is a sophisticated AI agent framework built on Elixir/OTP, emphasizing fa
 
 ## 🚀 Quick Start
 
-1. **Install Dependencies**:
+1. **Start the stack**:
    ```bash
-   mix deps.get
+   docker compose up --build -d
    ```
 
-2. **Onboard**:
-   ```bash
-   mix pincer.onboard
-   ```
+   This bootstraps onboarding if needed, waits for PostgreSQL, creates the database, runs migrations, and starts the server.
 
-3. **Start PostgreSQL**:
+2. **Start chatting**:
    ```bash
-   docker compose up -d postgres
-   mix ecto.create
-   mix ecto.migrate
-   ```
-
-4. **Start Chatting**:
-   ```bash
-   mix pincer.chat
+   docker compose exec pincer-server mix pincer.chat
    ```
 
 ## 🗄️ Database

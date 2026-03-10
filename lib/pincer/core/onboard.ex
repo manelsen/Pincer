@@ -61,6 +61,18 @@ defmodule Pincer.Core.Onboard do
         }
 
   @doc """
+  Returns whether the workspace already contains the minimum onboarding scaffold.
+  """
+  @spec onboarded?(String.t()) :: boolean()
+  def onboarded?(root \\ File.cwd!()) when is_binary(root) do
+    Enum.all?(required_paths(), fn rel_path ->
+      root
+      |> Path.join(rel_path)
+      |> File.exists?()
+    end)
+  end
+
+  @doc """
   Returns onboarding defaults used for `config.yaml` generation.
   """
   @spec defaults() :: map()
@@ -132,6 +144,22 @@ defmodule Pincer.Core.Onboard do
         }
       }
     }
+  end
+
+  @doc """
+  Returns the minimum paths required for a workspace to be considered onboarded.
+  """
+  @spec required_paths() :: [String.t()]
+  def required_paths do
+    [
+      "config.yaml",
+      Pincer.Core.AgentPaths.base_dir(),
+      "sessions",
+      "memory",
+      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/BOOTSTRAP.md",
+      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/MEMORY.md",
+      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/HISTORY.md"
+    ]
   end
 
   @doc """

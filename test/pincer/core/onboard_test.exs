@@ -102,6 +102,42 @@ defmodule Pincer.Core.OnboardTest do
     end
   end
 
+  describe "onboarded?/1" do
+    test "returns false when required scaffold files are missing" do
+      tmp =
+        Path.join(System.tmp_dir!(), "pincer_onboard_state_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp)
+
+      on_exit(fn ->
+        File.rm_rf!(tmp)
+      end)
+
+      refute Onboard.onboarded?(tmp)
+    end
+
+    test "returns true after onboarding plan is fully applied" do
+      tmp =
+        Path.join(
+          System.tmp_dir!(),
+          "pincer_onboard_state_ready_#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(tmp)
+
+      on_exit(fn ->
+        File.rm_rf!(tmp)
+      end)
+
+      assert {:ok, _report} =
+               Onboard.defaults()
+               |> Onboard.plan()
+               |> Onboard.apply_plan(root: tmp)
+
+      assert Onboard.onboarded?(tmp)
+    end
+  end
+
   describe "preflight/1" do
     test "returns :ok for defaults" do
       assert :ok = Onboard.preflight(Onboard.defaults())
