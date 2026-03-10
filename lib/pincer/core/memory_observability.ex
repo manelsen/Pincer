@@ -125,6 +125,7 @@ defmodule Pincer.Core.MemoryObservability do
           state.recall
           |> increment(:count, Map.get(measurements, :count, 1))
           |> maybe_increment(:eligible_count, Map.get(metadata, :eligible, false))
+          |> maybe_increment(:empty_count, Map.get(measurements, :total_hits, 0) == 0)
           |> increment(:total_hits, Map.get(measurements, :total_hits, 0))
           |> increment(:prompt_chars, Map.get(measurements, :prompt_chars, 0))
           |> increment(:learnings_count, Map.get(measurements, :learnings_count, 0))
@@ -154,6 +155,7 @@ defmodule Pincer.Core.MemoryObservability do
       recall: %{
         count: state.recall.count,
         eligible_count: state.recall.eligible_count,
+        empty_count: state.recall.empty_count,
         total_hits: state.recall.total_hits,
         prompt_chars: state.recall.prompt_chars,
         learnings_count: state.recall.learnings_count,
@@ -175,6 +177,7 @@ defmodule Pincer.Core.MemoryObservability do
       recall: %{
         count: 0,
         eligible_count: 0,
+        empty_count: 0,
         total_hits: 0,
         prompt_chars: 0,
         learnings_count: 0,

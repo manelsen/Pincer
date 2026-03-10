@@ -129,6 +129,9 @@ defmodule Pincer.Core.ArchivistTest do
     end
 
     @impl true
+    def memory_report(_limit), do: {:ok, %{}}
+
+    @impl true
     def search_similar(_type, _vector, _limit), do: {:ok, []}
 
     @impl true

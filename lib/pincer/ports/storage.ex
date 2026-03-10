@@ -17,6 +17,7 @@ defmodule Pincer.Ports.Storage do
   @callback search_documents(String.t(), integer(), keyword()) ::
               {:ok, [map()]} | {:error, term()}
   @callback search_sessions(String.t(), integer()) :: {:ok, [map()]} | {:error, term()}
+  @callback memory_report(integer()) :: {:ok, map()} | {:error, term()}
   @callback forget_memory(String.t()) :: :ok | {:error, term()}
   @callback search_similar(String.t(), [float()], integer()) :: {:ok, [map()]} | {:error, term()}
 
@@ -46,6 +47,7 @@ defmodule Pincer.Ports.Storage do
   def search_documents(query, limit), do: adapter().search_documents(query, limit)
   def search_documents(query, limit, opts), do: adapter().search_documents(query, limit, opts)
   def search_sessions(query, limit), do: adapter().search_sessions(query, limit)
+  def memory_report(limit), do: adapter().memory_report(limit)
   def forget_memory(source), do: adapter().forget_memory(source)
   def search_similar(type, vector, limit), do: adapter().search_similar(type, vector, limit)
 end

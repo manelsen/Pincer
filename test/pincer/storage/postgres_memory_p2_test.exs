@@ -113,4 +113,44 @@ defmodule Pincer.Storage.PostgresMemoryP2Test do
                String.contains?(session.preview, "webhook retries")
            end)
   end
+
+  test "search_documents/3 boosts graph-backed file memories over equivalent unanchored docs" do
+    deploy_path = "lib/pincer/deploy.ex"
+    notes_path = "lib/pincer/notes.ex"
+    content = "Deploy timeout after webhook retries needs a 60 second timeout."
+
+    assert :ok =
+             Postgres.index_memory(
+               deploy_path,
+               content,
+               "technical_fact",
+               [1.0, 0.0],
+               importance: 5
+             )
+
+    assert :ok =
+             Postgres.index_memory(
+               notes_path,
+               content,
+               "technical_fact",
+               [1.0, 0.0],
+               importance: 5
+             )
+
+    assert {:ok, :ok} =
+             Postgres.ingest_bug_fix(
+               "Deploy timeout after webhook retries",
+               "Raised timeout to 60 seconds",
+               deploy_path
+             )
+
+    assert {:ok, [first, second | _]} =
+             Postgres.search_documents("deploy timeout webhook retries", 5)
+
+    assert first.source == deploy_path
+    assert second.source == notes_path
+    assert first.score > second.score
+    assert get_in(first, [:score_components, :graph]) > 0.0
+    assert get_in(second, [:score_components, :graph]) == 0.0
+  end
 end
