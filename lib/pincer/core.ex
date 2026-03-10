@@ -23,6 +23,7 @@ defmodule Pincer.Core do
       SessionResolver,
       Session.Context,
       MemoryTypes,
+      MemoryDiagnostics,
       MemoryObservability,
       ChannelInteractionPolicy,
       StreamingPolicy,

@@ -6,6 +6,8 @@ defmodule Pincer.Core.MemoryRecallTest do
   alias Pincer.Core.MemoryRecall
 
   defmodule StorageStub do
+    def memory_report(_limit), do: {:ok, %{}}
+
     def search_messages(_query, _limit) do
       {:ok,
        [
@@ -30,6 +32,8 @@ defmodule Pincer.Core.MemoryRecallTest do
        ]}
     end
 
+    def search_documents(query, limit, _opts), do: search_documents(query, limit)
+
     def search_similar(_type, _vector, _limit) do
       {:ok,
        [
@@ -38,6 +42,61 @@ defmodule Pincer.Core.MemoryRecallTest do
            content: "Deployment incidents usually happen after webhook retries.",
            source: "session://s-2/snippet/3",
            citation: "session://s-2/snippet/3"
+         }
+       ]}
+    end
+  end
+
+  defmodule HybridStorageStub do
+    def search_messages(_query, _limit), do: {:ok, []}
+    def memory_report(_limit), do: {:ok, %{}}
+
+    def search_documents(_query, _limit, _opts) do
+      {:ok,
+       [
+         %{
+           kind: :document,
+           content: "Deploy timeout runbook says to inspect webhook retries first.",
+           source: "session://s-1/snippet/1",
+           citation: "session://s-1/snippet/1",
+           score: 0.55,
+           signal: :text,
+           signal_score: 0.35,
+           score_components: %{text: 0.35, metadata_total: 0.20},
+           session_id: "s-1",
+           memory_type: "technical_fact"
+         },
+         %{
+           kind: :document,
+           content: "Another weaker text-only hit.",
+           source: "session://s-2/snippet/1",
+           citation: "session://s-2/snippet/1",
+           score: 0.50,
+           signal: :text,
+           signal_score: 0.30,
+           score_components: %{text: 0.30, metadata_total: 0.20},
+           session_id: "s-2",
+           memory_type: "technical_fact"
+         }
+       ]}
+    end
+
+    def search_documents(query, limit), do: search_documents(query, limit, [])
+
+    def search_similar(_type, _vector, _limit) do
+      {:ok,
+       [
+         %{
+           kind: :document,
+           content: "Deploy timeout runbook says to inspect webhook retries first.",
+           source: "session://s-1/snippet/1",
+           citation: "session://s-1/snippet/1",
+           score: 0.70,
+           signal: :semantic,
+           signal_score: 0.50,
+           score_components: %{semantic: 0.50, metadata_total: 0.20},
+           session_id: "s-1",
+           memory_type: "technical_fact"
          }
        ]}
     end
@@ -128,5 +187,50 @@ defmodule Pincer.Core.MemoryRecallTest do
     assert snapshot.recall.eligible_count == 1
     assert snapshot.recall.total_hits == 3
     assert snapshot.recall.prompt_chars > 0
+  end
+
+  test "explain/2 returns grouped source hits without emitting telemetry when disabled", %{
+    workspace: workspace
+  } do
+    result =
+      MemoryRecall.explain(
+        [%{role: "user", content: "What do we remember about deploy failures?"}],
+        workspace_path: workspace,
+        storage: StorageStub,
+        embedding_fun: fn _query -> {:ok, [1.0, 0.0]} end,
+        emit_telemetry?: false
+      )
+
+    assert result.recall?
+    assert result.source_counts == %{messages: 1, documents: 1, semantic: 1}
+    assert length(result.source_hits.messages) == 1
+    assert length(result.source_hits.documents) == 1
+    assert length(result.source_hits.semantic) == 1
+    assert result.user_memory =~ "Prefers short answers."
+
+    snapshot = MemoryObservability.snapshot()
+
+    assert snapshot.search.count == 0
+    assert snapshot.recall.count == 0
+  end
+
+  test "explain/2 merges textual and semantic hits from the same document", %{
+    workspace: workspace
+  } do
+    result =
+      MemoryRecall.explain(
+        [%{role: "user", content: "What do we remember about deploy failures?"}],
+        workspace_path: workspace,
+        storage: HybridStorageStub,
+        embedding_fun: fn _query -> {:ok, [1.0, 0.0]} end,
+        emit_telemetry?: false
+      )
+
+    [first | _] = result.hits
+
+    assert first.source == "session://s-1/snippet/1"
+    assert first.signals == [:semantic, :text]
+    assert first.score > 0.80
+    assert Enum.count(result.hits, &(&1.source == "session://s-1/snippet/1")) == 1
   end
 end

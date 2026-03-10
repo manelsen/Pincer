@@ -258,6 +258,98 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 ## Incremento 2026-03-10 (Migracao Direta para Postgres + pgvector)
 
 ### Objetivo
+...
+
+---
+
+## Incremento 2026-03-10 (P3B: relatorios e explain de memoria)
+
+### Objetivo
+- Transformar a telemetria de memoria em observabilidade operacional consumivel por humanos.
+- Expor um relatorio resumido de runtime + persistencia de memoria.
+- Expor um comando de explain que mostre, para uma query, o que o recall consideraria e por que.
+
+### Interfaces/Public API
+- `Pincer.Core.MemoryDiagnostics.report/1`
+- `Pincer.Core.MemoryDiagnostics.explain/2`
+- `Pincer.Core.MemoryRecall.explain/2`
+- `Pincer.Ports.Storage.memory_report/1`
+- `mix pincer.memory.report`
+- `mix pincer.memory.explain --query "..."`
+
+### Regras
+- `MemoryDiagnostics.report/1` deve combinar:
+  - snapshot atual de `Pincer.Core.MemoryObservability`
+  - resumo persistente vindo do adapter de storage
+- O resumo persistente deve incluir no minimo:
+  - total de documentos de memoria
+  - total de documentos esquecidos
+  - contagem por `memory_type`
+  - top memórias por acesso/importancia
+  - top sessoes por quantidade de memorias documentais
+- `MemoryRecall.explain/2` deve reutilizar a mesma logica de elegibilidade, sanitizacao e recuperacao usada por `build/2`, mas retornando detalhes por fonte (`messages`, `documents`, `semantic`) sem perder o bloco final de prompt.
+- `MemoryDiagnostics.explain/2` deve:
+  - aceitar query explicita
+  - retornar o explain detalhado do recall
+  - anexar sessoes relacionadas via `search_sessions/2`
+- `mix pincer.memory.report` deve imprimir um resumo legivel de:
+  - recall/search runtime
+  - distribuicao por fonte
+  - contagem persistente por tipo
+  - top memórias
+  - top sessoes
+- `mix pincer.memory.explain` deve:
+  - exigir `--query`
+  - aceitar `--workspace-path`, `--limit`, `--session-id`
+  - aceitar `--no-semantic` para evitar embeddings remotos
+  - imprimir elegibilidade, contagem por fonte, hits retornados e sessoes relacionadas
+- Comandos de diagnostico nao devem poluir a telemetria operacional do runtime por padrao.
+
+### Criterios de aceite
+1. Teste de unidade prova que `MemoryDiagnostics.report/1` e `MemoryDiagnostics.explain/2` agregam corretamente dependencias injetadas.
+2. Teste de regressao prova que `MemoryRecall.explain/2` retorna hits por fonte e preserva sanitizacao/compactacao do prompt.
+3. Teste de integracao prova que `mix pincer.memory.report` imprime resumo com runtime e persistencia.
+4. Teste de integracao prova que `mix pincer.memory.explain --no-semantic` explica uma query sem depender de rede.
+5. `mix format`, `mix compile` e os testes relevantes passam.
+
+---
+
+## Incremento 2026-03-10 (Retrieval v2: ranking hibrido, graph boost e diversidade)
+
+### Objetivo
+- Elevar o recall do Pincer do nivel `FTS + semantic stopgap` para um retrieval mais competitivo.
+- Combinar sinais textuais e semanticos de forma hibrida, sem dupla contagem ingênua.
+- Introduzir `graph boost` quando um documento indexado estiver ligado a historico de bug/fix no grafo.
+- Reduzir redundancia no bloco final de recall, privilegiando diversidade de sessao e tipo de memoria.
+
+### Interfaces/Public API
+- `Pincer.Core.MemoryRecall.explain/2`
+- `Pincer.Ports.Storage.search_documents/3`
+- `Pincer.Ports.Storage.search_similar/3`
+- `Pincer.Storage.Adapters.Postgres.memory_report/1`
+
+### Regras
+- Hits documentais retornados por `search_documents/3` e `search_similar/3` devem carregar metadados suficientes para merge hibrido:
+  - `memory_type`
+  - `session_id`
+  - `signal`
+  - `signal_score`
+  - `score_components`
+- O score final por sinal deve considerar:
+  - score bruto normalizado do sinal (`text` ou `semantic`)
+  - importancia
+  - acesso historico
+  - frescor com decay temporal
+  - `graph_boost` quando o `path` do documento coincidir com um `file` ligado a bugs/fixes relevantes
+- `MemoryRecall` deve mesclar hits textuais e semanticos do mesmo `source`, somando sinais distintos e contando boosts de metadata apenas uma vez.
+- O bloco final de recall deve aplicar uma selecao gulosa com penalidade leve para excesso de hits da mesma sessao/tipo de memoria.
+- `MemoryDiagnostics.explain/2` deve refletir os hits ja reranqueados pelo retrieval v2.
+
+### Criterios de aceite
+1. Teste de integracao prova que um documento com mesmo conteudo, mas ligado ao grafo de bug/fix correto, rankeia acima de equivalente sem ligacao.
+2. Teste de unidade/integracao prova que `MemoryRecall.explain/2` mescla hit textual e hit semantico do mesmo documento em um unico resultado mais forte.
+3. Teste de regressao prova que o explain continua mostrando `messages/documents/semantic` por fonte, mas o bloco final usa a ordem reranqueada e deduplicada.
+4. Suite relevante de memoria continua verde.
 - Migrar o storage principal do Pincer de SQLite para PostgreSQL.
 - Substituir embeddings binarios por colunas vetoriais com `pgvector`.
 - Preservar a API publica do port `Pincer.Ports.Storage`.
@@ -394,6 +486,65 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 2. Teste do mix task prova que `--if-missing` cria arquivos quando necessario e faz skip quando ja esta onboarded.
 3. README passa a documentar `docker compose up --build -d` como caminho principal.
 4. Suite relevante permanece verde.
+
+---
+
+## Incremento 2026-03-10 (Memoria P3B: relatorios e explain)
+
+### Objetivo
+- Transformar a observabilidade basica de memoria em ferramentas operacionais para humano.
+- Expor um relatorio de saude/inventario da memoria via Mix task.
+- Expor uma explicacao de recall por query via Mix task, usando as APIs de storage ja existentes.
+
+### Interfaces/Public API
+- `Pincer.Core.MemoryDiagnostics.report/1`
+- `Pincer.Core.MemoryDiagnostics.explain/2`
+- `mix pincer.memory.report`
+- `mix pincer.memory.explain --query "..."`
+
+### Regras
+- `Pincer.Core.MemoryDiagnostics.report/1` deve retornar um mapa deterministico contendo, no minimo:
+  - `snapshot` vindo de `Pincer.Core.MemoryObservability.snapshot/0`
+  - `health` com indicadores derivados, incluindo:
+    - `avg_hits_per_recall`
+    - `empty_recall_rate`
+    - `search_hit_rate`
+  - `inventory` com:
+    - `total_memories`
+    - `forgotten_memories`
+    - `by_type`
+    - `top_memories`
+  - `recent_learnings`
+  - `recent_history`
+- O inventario deve ser calculado a partir do banco atual (`nodes` do tipo `document`) sem criar nova dependencia.
+- `Pincer.Core.MemoryDiagnostics.explain/2` deve aceitar filtros por:
+  - `limit`
+  - `session_id`
+  - `memory_type`
+  - `include_forgotten`
+- `explain/2` deve retornar, no minimo:
+  - `eligible?` usando `Pincer.Core.MemoryRecall.eligible_query?/1`
+  - `documents` via `search_documents/3`
+  - `sessions` via `search_sessions/2`
+  - `semantic` via `search_similar/3` quando embeddings estiverem disponiveis
+  - `notes` quando alguma fonte for ignorada ou falhar
+- `mix pincer.memory.report` deve imprimir um relatorio legivel contendo:
+  - contadores principais
+  - saude do recall
+  - top memórias
+  - learnings/historico recentes
+- `mix pincer.memory.explain` deve:
+  - exigir `--query`
+  - imprimir filtros aplicados
+  - mostrar hits de documentos, sessoes e semanticos com score/citacao quando houver
+  - informar quando semantic search for pulada
+
+### Criterios de aceite
+1. Teste de unidade valida que `MemoryDiagnostics.report/1` combina snapshot e inventario persistido corretamente.
+2. Teste de unidade valida que `MemoryDiagnostics.explain/2` respeita filtros e anota fallback/skip semantico.
+3. Teste de Mix task prova que `mix pincer.memory.report` imprime um relatorio operacional com os principais contadores.
+4. Teste de Mix task prova que `mix pincer.memory.explain --query ...` imprime hits e falha sem `--query`.
+5. Suite relevante permanece verde.
 
 ---
 

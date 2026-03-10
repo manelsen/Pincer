@@ -75,6 +75,9 @@ defmodule Pincer.Core.ExecutorMemoryRecallTest do
     def index_memory(_path, _content, _memory_type, _vector, _opts), do: :ok
 
     @impl true
+    def memory_report(_limit), do: {:ok, %{}}
+
+    @impl true
     def search_similar(_type, _vector, _limit) do
       {:ok,
        [
