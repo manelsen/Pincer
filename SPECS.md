@@ -362,6 +362,41 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 
 ---
 
+## Incremento 2026-03-10 (Docker DX: auto-onboard idempotente)
+
+### Objetivo
+- Reduzir o setup local para um fluxo principal com `docker compose up --build -d`.
+- Fazer o container do app executar onboarding apenas quando o workspace ainda nao estiver preparado.
+- Persistir `workspaces/` no host para que scaffold e agentes sobrevivam a recreacoes do container.
+
+### Interfaces/Public API
+- `Pincer.Core.Onboard.onboarded?/1`
+- `mix pincer.onboard --if-missing`
+- `infrastructure/docker/entrypoint.sh`
+
+### Regras
+- `Onboard.onboarded?/1` deve retornar `true` apenas quando os artefatos minimos de onboarding existirem no root informado:
+  - `config.yaml`
+  - `workspaces/`
+  - `sessions/`
+  - `memory/`
+  - `workspaces/.template/.pincer/BOOTSTRAP.md`
+  - `workspaces/.template/.pincer/MEMORY.md`
+  - `workspaces/.template/.pincer/HISTORY.md`
+- `mix pincer.onboard --if-missing` deve:
+  - executar onboarding normal quando o workspace ainda nao estiver preparado;
+  - encerrar sem alterar arquivos quando o workspace ja estiver onboarded.
+- O entrypoint Docker deve rodar onboarding idempotente antes de `ecto.create/migrate`.
+- O `docker-compose.yml` deve persistir `workspaces/` no host e permitir escrita em `config.yaml`.
+
+### Criterios de aceite
+1. Teste de unidade prova `Onboard.onboarded?/1` para casos onboarded e incompleto.
+2. Teste do mix task prova que `--if-missing` cria arquivos quando necessario e faz skip quando ja esta onboarded.
+3. README passa a documentar `docker compose up --build -d` como caminho principal.
+4. Suite relevante permanece verde.
+
+---
+
 ## 0. Incremento 2026-02-22 (Onboard + DB em `./db`)
 
 ### Objetivo
