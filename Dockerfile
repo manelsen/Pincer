@@ -31,7 +31,6 @@ COPY priv ./priv
 COPY infrastructure/whatsapp ./infrastructure/whatsapp
 COPY --from=whatsapp-builder /app/infrastructure/whatsapp/whatsapp_bridge ./infrastructure/whatsapp/whatsapp_bridge
 COPY config.yaml ./config.yaml
-COPY TODO.md ./TODO.md
 COPY README.md ./README.md
 COPY LICENSE ./LICENSE
 
@@ -72,7 +71,6 @@ COPY infrastructure/mcp/shell_server.py /app/infrastructure/mcp/shell_server.py
 COPY --from=builder /app/mix.exs /app/mix.exs
 COPY --from=builder /app/mix.lock /app/mix.lock
 COPY --from=builder /app/config.yaml /app/config.yaml
-COPY --from=builder /app/TODO.md /app/TODO.md
 COPY --from=builder /app/README.md /app/README.md
 COPY --from=builder /app/LICENSE /app/LICENSE
 COPY --from=builder /root/.mix /app/.mix
