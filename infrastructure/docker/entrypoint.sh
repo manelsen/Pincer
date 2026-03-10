@@ -13,6 +13,8 @@ echo "---------------------"
 
 epmd -daemon
 
+mix pincer.onboard --non-interactive --accept-risk --yes --if-missing
+
 export PGHOST="${PINCER_DB_HOST:-postgres}"
 export PGPORT="${PINCER_DB_PORT:-5432}"
 export PGUSER="${PINCER_DB_USER:-postgres}"

@@ -33,6 +33,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
   @switches [
     non_interactive: :boolean,
     yes: :boolean,
+    if_missing: :boolean,
     accept_risk: :boolean,
     db_name: :string,
     provider: :string,
@@ -53,6 +54,15 @@ defmodule Mix.Tasks.Pincer.Onboard do
       Mix.raise("Invalid flags for pincer.onboard: #{invalid_flags}")
     end
 
+    if opts[:if_missing] && Onboard.onboarded?(File.cwd!()) do
+      Mix.shell().info("Workspace already onboarded. Skipping.")
+      :ok
+    else
+      do_run(opts)
+    end
+  end
+
+  defp do_run(opts) do
     require_risk_acknowledgement(opts)
 
     mode = parse_mode!(opts[:mode])
