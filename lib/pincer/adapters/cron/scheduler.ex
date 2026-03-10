@@ -124,7 +124,7 @@ defmodule Pincer.Adapters.Cron.Scheduler do
   defp load_due_jobs(state) do
     {state.due_jobs_fetcher.(), state}
   rescue
-    error in Exqlite.Error ->
+    error ->
       if missing_cron_jobs_table?(error) do
         state = maybe_warn_missing_table(state)
         {[], state}
@@ -133,11 +133,16 @@ defmodule Pincer.Adapters.Cron.Scheduler do
       end
   end
 
-  defp missing_cron_jobs_table?(%Exqlite.Error{message: msg}) when is_binary(msg) do
-    String.contains?(msg, "no such table") and String.contains?(msg, "cron_jobs")
-  end
+  defp missing_cron_jobs_table?(error) do
+    msg = Exception.message(error)
+    down = String.downcase(msg)
 
-  defp missing_cron_jobs_table?(_), do: false
+    (String.contains?(down, "no such table") or
+       String.contains?(down, "undefined table") or
+       String.contains?(down, "does not exist")) and String.contains?(down, "cron_jobs")
+  rescue
+    _ -> false
+  end
 
   defp maybe_warn_missing_table(%{missing_table_warned?: true} = state), do: state
 

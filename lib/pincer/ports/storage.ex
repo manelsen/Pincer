@@ -10,13 +10,20 @@ defmodule Pincer.Ports.Storage do
   @callback save_tool_error(String.t(), map(), String.t()) :: {:ok, term()} | {:error, term()}
   @callback list_recent_learnings(integer()) :: [map()]
   @callback index_document(String.t(), String.t(), [float()]) :: :ok | {:error, term()}
+  @callback index_memory(String.t(), String.t(), String.t(), [float()], keyword()) ::
+              :ok | {:error, term()}
+  @callback search_messages(String.t(), integer()) :: {:ok, [map()]} | {:error, term()}
+  @callback search_documents(String.t(), integer()) :: {:ok, [map()]} | {:error, term()}
+  @callback search_documents(String.t(), integer(), keyword()) ::
+              {:ok, [map()]} | {:error, term()}
+  @callback search_sessions(String.t(), integer()) :: {:ok, [map()]} | {:error, term()}
+  @callback forget_memory(String.t()) :: :ok | {:error, term()}
   @callback search_similar(String.t(), [float()], integer()) :: {:ok, [map()]} | {:error, term()}
 
   # --- Dispatcher ---
 
   defp adapter do
-    # Default to the unified SQLite adapter
-    Application.get_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
+    Application.get_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.Postgres)
   end
 
   def get_messages(session_id), do: adapter().get_messages(session_id)
@@ -31,5 +38,14 @@ defmodule Pincer.Ports.Storage do
   def save_tool_error(tool, args, err), do: adapter().save_tool_error(tool, args, err)
   def list_recent_learnings(limit), do: adapter().list_recent_learnings(limit)
   def index_document(path, content, vector), do: adapter().index_document(path, content, vector)
+
+  def index_memory(path, content, memory_type, vector, opts \\ []),
+    do: adapter().index_memory(path, content, memory_type, vector, opts)
+
+  def search_messages(query, limit), do: adapter().search_messages(query, limit)
+  def search_documents(query, limit), do: adapter().search_documents(query, limit)
+  def search_documents(query, limit, opts), do: adapter().search_documents(query, limit, opts)
+  def search_sessions(query, limit), do: adapter().search_sessions(query, limit)
+  def forget_memory(source), do: adapter().forget_memory(source)
   def search_similar(type, vector, limit), do: adapter().search_similar(type, vector, limit)
 end

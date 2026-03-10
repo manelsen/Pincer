@@ -43,8 +43,14 @@ defmodule Pincer.Core.ErrorClass do
   defp classify_normalized({:retry_timeout, _}), do: :retry_timeout
   defp classify_normalized(:tool_loop), do: :tool_loop
 
-  defp classify_normalized(%Exqlite.Error{message: msg}) when is_binary(msg) do
-    if String.contains?(msg, "no such table"), do: :db_schema, else: :db
+  defp classify_normalized(%Postgrex.Error{postgres: %{code: :undefined_table}}), do: :db_schema
+
+  defp classify_normalized(%Postgrex.Error{} = error) do
+    if db_schema_message?(Exception.message(error)), do: :db_schema, else: :db
+  end
+
+  defp classify_normalized(%RuntimeError{message: msg}) when is_binary(msg) do
+    if db_schema_message?(msg), do: :db_schema, else: :internal
   end
 
   defp classify_normalized(%Protocol.UndefinedError{protocol: protocol})
@@ -65,5 +71,14 @@ defmodule Pincer.Core.ErrorClass do
       String.contains?(down, "input tokens") or
       String.contains?(down, "max_tokens") or
       String.contains?(down, "max_completion_tokens")
+  end
+
+  defp db_schema_message?(msg) when is_binary(msg) do
+    down = String.downcase(msg)
+
+    (String.contains?(down, "no such table") or
+       String.contains?(down, "undefined table") or
+       String.contains?(down, "does not exist")) and
+      (String.contains?(down, "table") or String.contains?(down, "relation"))
   end
 end

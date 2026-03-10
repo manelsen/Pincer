@@ -6,7 +6,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
 
       mix pincer.onboard
       mix pincer.onboard --non-interactive --yes
-      mix pincer.onboard --non-interactive --db-path db/custom.db
+      mix pincer.onboard --non-interactive --db-name pincer_custom
       mix pincer.onboard --non-interactive --yes --capabilities workspace_dirs,config_yaml
   """
 
@@ -34,7 +34,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
     non_interactive: :boolean,
     yes: :boolean,
     accept_risk: :boolean,
-    db_path: :string,
+    db_name: :string,
     provider: :string,
     model: :string,
     capabilities: :string,
@@ -131,10 +131,10 @@ defmodule Mix.Tasks.Pincer.Onboard do
     Mix.shell().info("Pincer onboarding wizard")
     Mix.shell().info("Press ENTER to keep defaults.")
 
-    db_default = opts[:db_path] || get_in(config, ["database", "database"])
+    db_default = opts[:db_name] || get_in(config, ["database", "database"])
     provider_default = opts[:provider] || get_in(config, ["llm", "provider"])
 
-    db_path = prompt_with_default("Database path", db_default)
+    db_name = prompt_with_default("Database name", db_default)
 
     provider =
       if opts[:provider] do
@@ -150,7 +150,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
         prompt_model_for_provider(provider)
       end
 
-    apply_overrides(config, db_path: db_path, provider: provider, model: model)
+    apply_overrides(config, db_name: db_name, provider: provider, model: model)
   end
 
   defp prompt_provider_choice(_default) do
@@ -210,7 +210,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
   end
 
   defp apply_overrides(config, opts) do
-    db_path = opts[:db_path] || get_in(config, ["database", "database"])
+    db_name = opts[:db_name] || get_in(config, ["database", "database"])
     provider = opts[:provider] || get_in(config, ["llm", "provider"])
 
     model =
@@ -219,7 +219,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
         get_in(config, ["llm", get_in(config, ["llm", "provider"]), "default_model"])
 
     config
-    |> put_in(["database", "database"], db_path)
+    |> put_in(["database", "database"], db_name)
     |> put_in(["llm", "provider"], provider)
     |> ensure_provider_model(provider, model)
   end
@@ -307,7 +307,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
   defp validate_option_matrix!(opts, capabilities) do
     if is_list(capabilities) and "config_yaml" not in capabilities do
       invalid_flag =
-        [:db_path, :provider, :model]
+        [:db_name, :provider, :model]
         |> Enum.find(&present_option?(opts, &1))
 
       if invalid_flag do

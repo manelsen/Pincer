@@ -1,4 +1,22 @@
 services:
+  postgres:
+    container_name: pincer-postgres
+    image: pgvector/pgvector:0.8.2-pg18-trixie
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: pincer
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d pincer"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+    volumes:
+      - postgres18-data:/var/lib/postgresql
+
   pincer-server:
     container_name: pincer-server
     build:
@@ -11,11 +29,21 @@ services:
       - .env
     environment:
       MIX_ENV: prod
+      PINCER_DB_HOST: postgres
+      PINCER_DB_PORT: 5432
+      PINCER_DB_USER: postgres
+      PINCER_DB_PASSWORD: postgres
+      PINCER_DB_NAME: pincer
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     volumes:
       - ./config.yaml:/app/config.yaml:ro
       - ./.env:/app/.env:ro
-      - ./db:/app/db
       - ./logs:/app/logs
       - ./sessions:/app/sessions
       - ./memory:/app/memory
+
+volumes:
+  postgres18-data:

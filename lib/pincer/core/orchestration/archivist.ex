@@ -6,8 +6,8 @@ defmodule Pincer.Core.Orchestration.Archivist do
   logs through three distinct memory systems:
 
   1. **Narrative Memory** (`MEMORY.md`) - Human-readable summaries of interactions
-  2. **Semantic Memory** (LanceDB) - Vector embeddings for similarity-based retrieval
-  3. **Relational Memory** (Graph DB) - Structured relationships (bugs, fixes, files)
+  2. **Semantic Memory** (Postgres + pgvector) - Vector embeddings for similarity-based retrieval
+  3. **Relational Memory** (Postgres Graph Tables) - Structured relationships (bugs, fixes, files)
 
   ## Memory Architecture
 
@@ -30,7 +30,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
                │                    │                   │
                ▼                    ▼                   ▼
       ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-      │  MEMORY.md   │    │   LanceDB    │    │   Graph DB   │
+      │  MEMORY.md   │    │  pgvector    │    │ Postgres DB  │
       │  (Narrative) │    │  (Semantic)  │    │ (Relational) │
       └──────────────┘    └──────────────┘    └──────────────┘
 
@@ -84,15 +84,19 @@ defmodule Pincer.Core.Orchestration.Archivist do
 
   - `MEMORY.md` - Root of workspace, human-editable
   - `sessions/session_ID.md` - Individual session logs
-  - LanceDB - Vector embeddings for semantic search
-  - Graph DB - Structured relationships for queries
+  - Postgres + pgvector - Vector embeddings for semantic search
+  - Postgres graph tables - Structured relationships for queries
   """
 
   use GenServer
   require Logger
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.Memory
+  alias Pincer.Core.MemoryTypes
   alias Pincer.Ports.LLM
+  alias Pincer.Ports.Storage
+
+  @user_memory_header "## Learned User Memory"
 
   @type option :: any()
   @type state :: keyword()
@@ -147,8 +151,8 @@ defmodule Pincer.Core.Orchestration.Archivist do
   On successful consolidation:
 
   - `MEMORY.md` is updated with new narrative content
-  - Knowledge snippets are stored in LanceDB
-  - Bug fix relationships are stored in Graph DB
+  - Knowledge snippets are stored in Postgres + pgvector
+  - Bug fix relationships are stored in Postgres graph tables
   """
   @spec start_consolidation(String.t(), list(), keyword()) :: {:ok, pid()}
   def start_consolidation(session_id, history, opts \\ []) do
@@ -177,8 +181,8 @@ defmodule Pincer.Core.Orchestration.Archivist do
 
   1. Read `sessions/session_{session_id}.md`
   2. Update `MEMORY.md` with summarized narrative
-  3. Extract and store semantic snippets in LanceDB
-  4. Extract and store bug fix relationships in Graph DB
+  3. Extract and store semantic snippets in Postgres + pgvector
+  4. Extract and store bug fix relationships in Postgres graph tables
 
   ## Returns
 
@@ -192,6 +196,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
     filename = AgentPaths.session_log_path(workspace_path, session_id)
     memory_path = AgentPaths.memory_path(workspace_path)
     history_path = AgentPaths.history_path(workspace_path)
+    user_path = AgentPaths.user_path(workspace_path)
 
     if File.exists?(filename) do
       content = File.read!(filename)
@@ -199,7 +204,10 @@ defmodule Pincer.Core.Orchestration.Archivist do
       current_memory =
         if File.exists?(memory_path), do: File.read!(memory_path), else: "(Empty)"
 
+      current_user = if File.exists?(user_path), do: File.read!(user_path), else: ""
+
       update_narrative_memory(content, current_memory, memory_path)
+      update_user_memory(content, current_user, user_path)
 
       case Memory.record_session(content,
              session_id: session_id,
@@ -245,15 +253,16 @@ defmodule Pincer.Core.Orchestration.Archivist do
     end
   end
 
-  defp extract_semantic_snippets(_session_id, content) do
+  defp extract_semantic_snippets(session_id, content) do
     snippet_instruction = """
     You are a knowledge extraction specialist.
     Read the session below and extract "Knowledge Snippets" (technical facts, bug solutions, user preferences).
 
     RULES:
     1. Extract only what is USEFUL for future queries.
-    2. Format each snippet on a line starting with "SNIPPET:".
-    3. If there is nothing useful, respond "NONE".
+    2. Format each snippet as: "SNIPPET: [memory_type] | [importance 1-10] | [content]".
+    3. Allowed memory_type values: reference, technical_fact, bug_solution, user_preference, architecture_decision, session_summary.
+    4. If there is nothing useful, respond "NONE".
 
     ## SESSION TO PROCESS
     #{content}
@@ -266,17 +275,141 @@ defmodule Pincer.Core.Orchestration.Archivist do
           |> String.split("\n")
           |> Enum.filter(&String.starts_with?(&1, "SNIPPET:"))
           |> Enum.map(&(String.replace(&1, "SNIPPET:", "") |> String.trim()))
+          |> Enum.map(&parse_snippet/1)
 
-        Enum.each(snippets, fn s ->
-          Logger.debug("[ARCHIVIST] Semantic snippet extracted: #{s}")
-          # LanceDB.save_message(session_id, "archivist_snippet", s)
+        Enum.with_index(snippets, 1)
+        |> Enum.each(fn {snippet, index} ->
+          vector =
+            case LLM.generate_embedding(snippet.content, provider: "openrouter") do
+              {:ok, values} when is_list(values) -> values
+              _ -> []
+            end
+
+          path = "session://#{session_id}/snippet/#{index}"
+
+          Storage.index_memory(
+            path,
+            snippet.content,
+            snippet.memory_type,
+            vector,
+            importance: snippet.importance,
+            session_id: session_id
+          )
+
+          Logger.debug("[ARCHIVIST] Semantic snippet extracted: #{snippet.content}")
         end)
 
         if length(snippets) > 0,
-          do: Logger.info("[ARCHIVIST] 🧬 #{length(snippets)} snippets ingested into LanceDB.")
+          do:
+            Logger.info(
+              "[ARCHIVIST] 🧬 #{length(snippets)} snippets ingested into Postgres + pgvector."
+            )
 
       _ ->
         :ok
+    end
+  end
+
+  defp parse_snippet(raw_snippet) do
+    case String.split(raw_snippet, "|", parts: 3) |> Enum.map(&String.trim/1) do
+      [memory_type, importance, content] ->
+        %{
+          memory_type: MemoryTypes.normalize(memory_type),
+          importance: parse_importance(importance),
+          content: content
+        }
+
+      [content] ->
+        %{memory_type: "reference", importance: 5, content: content}
+
+      _ ->
+        %{memory_type: "reference", importance: 5, content: raw_snippet}
+    end
+  end
+
+  defp parse_importance(value) do
+    case Integer.parse(value) do
+      {importance, _} -> min(10, max(0, importance))
+      :error -> 5
+    end
+  end
+
+  defp update_user_memory(content, current_user, user_path) do
+    instruction = """
+    You extract durable user preferences and constraints.
+    Read the session below and extract durable user preferences.
+
+    RULES:
+    1. Return only bullet lines starting with "- ".
+    2. Include only stable preferences, habits, channels or constraints.
+    3. If there is nothing durable, return "NONE".
+
+    ## CURRENT USER FILE
+    #{current_user}
+
+    ## SESSION TO PROCESS
+    #{content}
+    """
+
+    case LLM.chat_completion([%{"role" => "system", "content" => instruction}]) do
+      {:ok, %{"content" => response}, _usage} ->
+        merged =
+          current_user
+          |> merge_user_memory(response)
+          |> String.trim()
+
+        if merged != "" do
+          File.write!(user_path, merged <> "\n")
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp merge_user_memory(existing_user, response) do
+    existing_user = String.trim(existing_user)
+
+    bullets =
+      response
+      |> String.split("\n")
+      |> Enum.map(&String.trim/1)
+      |> Enum.filter(&String.starts_with?(&1, "- "))
+      |> Enum.uniq()
+
+    cond do
+      String.trim(response) == "NONE" ->
+        existing_user
+
+      bullets == [] ->
+        existing_user
+
+      true ->
+        {base, existing_bullets} = split_user_memory(existing_user)
+
+        managed_section =
+          @user_memory_header <> "\n" <> Enum.join(Enum.uniq(existing_bullets ++ bullets), "\n")
+
+        cond do
+          base == "" -> managed_section
+          true -> base <> "\n\n" <> managed_section
+        end
+    end
+  end
+
+  defp split_user_memory(text) do
+    case String.split(text, @user_memory_header, parts: 2) do
+      [base, managed] ->
+        bullets =
+          managed
+          |> String.split("\n")
+          |> Enum.map(&String.trim/1)
+          |> Enum.filter(&String.starts_with?(&1, "- "))
+
+        {String.trim(base), bullets}
+
+      _ ->
+        {String.trim(text), []}
     end
   end
 
@@ -300,7 +433,10 @@ defmodule Pincer.Core.Orchestration.Archivist do
           [_, data] ->
             [bug, fix, file] = data |> String.split("|") |> Enum.map(&String.trim/1)
             Pincer.Ports.Storage.ingest_bug_fix(bug, fix, file)
-            Logger.info("[ARCHIVIST] 🕸️ Bug fix relationship ingested into SQLite Graph: #{file}")
+
+            Logger.info(
+              "[ARCHIVIST] 🕸️ Bug fix relationship ingested into Postgres graph: #{file}"
+            )
 
           _ ->
             :ok

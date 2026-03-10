@@ -75,7 +75,8 @@ defmodule Pincer.MixProject do
 
       # Database
       {:ecto_sql, "~> 3.11"},
-      {:ecto_sqlite3, "~> 0.15"},
+      {:postgrex, "~> 0.19"},
+      {:pgvector, "~> 0.3"},
 
       # Messaging
       {:telegex, "~> 1.8"},
@@ -186,7 +187,7 @@ defmodule Pincer.MixProject do
         Pincer.Storage,
         Pincer.Storage.Port,
         Pincer.Storage.Message,
-        Pincer.Storage.Adapters.SQLite,
+        Pincer.Storage.Adapters.Postgres,
         Pincer.Storage.Adapters.Graph,
         Pincer.Storage.Graph.Node,
         Pincer.Storage.Graph.Edge

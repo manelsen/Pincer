@@ -22,6 +22,8 @@ defmodule Pincer.Core do
       SessionScopePolicy,
       SessionResolver,
       Session.Context,
+      MemoryTypes,
+      MemoryObservability,
       ChannelInteractionPolicy,
       StreamingPolicy,
       RetryPolicy,

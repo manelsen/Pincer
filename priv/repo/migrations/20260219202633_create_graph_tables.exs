@@ -3,24 +3,25 @@ defmodule Pincer.Repo.Migrations.CreateGraphTables do
 
   def change do
     create table(:nodes, primary_key: false) do
-      add :id, :uuid, primary_key: true
-      add :type, :string # bug, fix, file
-      add :data, :map
+      add(:id, :uuid, primary_key: true)
+      add(:type, :string, null: false)
+      add(:data, :map, null: false)
       timestamps()
     end
 
-    create index(:nodes, [:type])
+    create(index(:nodes, [:type]))
+    create(index(:nodes, [:inserted_at]))
 
     create table(:edges, primary_key: false) do
-      add :id, :uuid, primary_key: true
-      add :from_id, :uuid
-      add :to_id, :uuid
-      add :type, :string # occurs_in, solves
+      add(:id, :uuid, primary_key: true)
+      add(:from_id, :uuid, null: false)
+      add(:to_id, :uuid, null: false)
+      add(:type, :string, null: false)
       timestamps()
     end
 
-    create index(:edges, [:from_id])
-    create index(:edges, [:to_id])
-    create index(:edges, [:type])
+    create(index(:edges, [:from_id]))
+    create(index(:edges, [:to_id]))
+    create(index(:edges, [:type]))
   end
 end

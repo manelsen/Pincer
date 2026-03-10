@@ -3,13 +3,19 @@ defmodule Pincer.Repo.Migrations.CreateMessages do
 
   def change do
     create table(:messages) do
-      add :session_id, :string
-      add :role, :string
-      add :content, :text
+      add(:session_id, :string, null: false)
+      add(:role, :string, null: false)
+      add(:content, :text, null: false)
 
       timestamps()
     end
 
-    create index(:messages, [:session_id])
+    create(index(:messages, [:session_id]))
+
+    execute("""
+    CREATE INDEX messages_content_fts_idx
+    ON messages
+    USING GIN (to_tsvector('simple', COALESCE(content, '')))
+    """)
   end
 end

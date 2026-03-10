@@ -58,6 +58,7 @@ defmodule Pincer.Storage.Graph.Node do
           id: binary() | nil,
           type: String.t(),
           data: map(),
+          embedding: Pgvector.Ecto.Vector.t() | nil,
           inserted_at: NaiveDateTime.t() | nil,
           updated_at: NaiveDateTime.t() | nil
         }
@@ -66,7 +67,7 @@ defmodule Pincer.Storage.Graph.Node do
   schema "nodes" do
     field(:type, :string)
     field(:data, :map)
-    field(:embedding, :binary)
+    field(:embedding, Pgvector.Ecto.Vector)
     timestamps()
   end
 
