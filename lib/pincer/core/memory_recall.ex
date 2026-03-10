@@ -36,17 +36,20 @@ defmodule Pincer.Core.MemoryRecall do
           source_hits: %{
             messages: [recall_hit()],
             documents: [recall_hit()],
-            semantic: [recall_hit()]
+            semantic: [recall_hit()],
+            graph: [recall_hit()]
           },
           source_counts: %{
             messages: non_neg_integer(),
             documents: non_neg_integer(),
-            semantic: non_neg_integer()
+            semantic: non_neg_integer(),
+            graph: non_neg_integer()
           },
           source_outcomes: %{
             messages: :ok | :error | :skipped,
             documents: :ok | :error | :skipped,
-            semantic: :ok | :error | :skipped
+            semantic: :ok | :error | :skipped,
+            graph: :ok | :error | :skipped
           },
           prompt_block: String.t()
         }
@@ -125,14 +128,16 @@ defmodule Pincer.Core.MemoryRecall do
           include_forgotten: Keyword.get(opts, :include_forgotten, false)
         )
       else
-        {%{messages: [], documents: [], semantic: []}, [],
+        {%{messages: [], documents: [], semantic: [], graph: []}, [],
          %{
            message_hits: 0,
            document_hits: 0,
            semantic_hits: 0,
+           graph_hits: 0,
            message_outcome: :skipped,
            document_outcome: :skipped,
-           semantic_outcome: :skipped
+           semantic_outcome: :skipped,
+           graph_outcome: :skipped
          }}
       end
 
@@ -166,12 +171,14 @@ defmodule Pincer.Core.MemoryRecall do
       source_counts: %{
         messages: recall_stats.message_hits,
         documents: recall_stats.document_hits,
-        semantic: recall_stats.semantic_hits
+        semantic: recall_stats.semantic_hits,
+        graph: recall_stats.graph_hits
       },
       source_outcomes: %{
         messages: recall_stats.message_outcome,
         documents: recall_stats.document_outcome,
-        semantic: recall_stats.semantic_outcome
+        semantic: recall_stats.semantic_outcome,
+        graph: recall_stats.graph_outcome
       },
       prompt_block: prompt_block
     }
@@ -254,17 +261,38 @@ defmodule Pincer.Core.MemoryRecall do
           {[], 0, :skipped}
       end
 
+    {graph_hits, graph_count, graph_outcome} =
+      if incident_query?(query) do
+        search_source(
+          :graph,
+          fn -> storage.search_graph_history(query, limit) end,
+          telemetry,
+          telemetry_opts
+        )
+      else
+        maybe_emit_search_telemetry(
+          telemetry,
+          %{duration_ms: 0, hit_count: 0},
+          search_metadata(telemetry_opts, :graph, :skipped),
+          telemetry_opts
+        )
+
+        {[], 0, :skipped}
+      end
+
     filtered_messages = filter_message_hits(message_hits, telemetry_opts)
 
     source_hits = %{
       messages: Enum.map(filtered_messages, &normalize_hit/1),
       documents: Enum.map(document_hits, &normalize_hit/1),
-      semantic: Enum.map(semantic_hits, &normalize_hit/1)
+      semantic: Enum.map(semantic_hits, &normalize_hit/1),
+      graph: Enum.map(graph_hits, &normalize_hit/1)
     }
 
     hits =
       source_hits.messages
       |> Kernel.++(merge_document_hits(source_hits.documents, source_hits.semantic))
+      |> Kernel.++(source_hits.graph)
       |> select_recall_hits(limit)
 
     {source_hits, hits,
@@ -272,9 +300,11 @@ defmodule Pincer.Core.MemoryRecall do
        message_hits: length(filtered_messages),
        document_hits: document_count,
        semantic_hits: semantic_count,
+       graph_hits: graph_count,
        message_outcome: message_outcome,
        document_outcome: document_outcome,
-       semantic_outcome: semantic_outcome
+       semantic_outcome: semantic_outcome,
+       graph_outcome: graph_outcome
      }}
   end
 
@@ -357,6 +387,15 @@ defmodule Pincer.Core.MemoryRecall do
   end
 
   defp extract_session_id(_), do: nil
+
+  defp incident_query?(query) when is_binary(query) do
+    query
+    |> String.downcase()
+    |> String.split(~r/[^[:alnum:]_]+/u, trim: true)
+    |> Enum.any?(&(&1 in ["bug", "fix", "timeout", "incident", "deploy", "retry", "retries"]))
+  end
+
+  defp incident_query?(_query), do: false
 
   defp normalize_hit(hit) do
     %{

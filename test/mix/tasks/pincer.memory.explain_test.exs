@@ -79,7 +79,7 @@ defmodule Mix.Tasks.Pincer.MemoryExplainTest do
     assert output =~ "Pincer Memory Explain"
     assert output =~ "Query: deploy timeout webhook"
     assert output =~ "Eligible: yes"
-    assert output =~ "Source hits: messages=1 documents=1 semantic=0"
+    assert output =~ "Source hits: messages=1 documents=1 semantic=0 graph=0"
     assert output =~ "Prefers concise postmortems."
     assert output =~ "session://explain/snippet/1"
     assert output =~ "session-a"

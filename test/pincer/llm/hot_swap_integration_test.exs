@@ -51,6 +51,7 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
     def search_messages(_q, _l), do: {:ok, []}
     def search_documents(_q, _l), do: {:ok, []}
     def search_similar(_t, _v, _l), do: {:ok, []}
+    def search_graph_history(_q, _l), do: {:ok, []}
   end
 
   setup do

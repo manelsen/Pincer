@@ -29,6 +29,7 @@ defmodule Pincer.Core.MemoryDiagnostics do
           messages: [map()],
           documents: [map()],
           semantic: [map()],
+          graph: [map()],
           sessions: [map()],
           notes: [String.t()]
         }
@@ -106,6 +107,7 @@ defmodule Pincer.Core.MemoryDiagnostics do
         messages: recall.source_hits.messages,
         documents: recall.source_hits.documents,
         semantic: recall.source_hits.semantic,
+        graph: recall.source_hits.graph,
         sessions: filter_sessions(related_sessions, opts),
         notes: explain_notes(recall)
       }
@@ -123,6 +125,7 @@ defmodule Pincer.Core.MemoryDiagnostics do
     []
     |> maybe_prepend("Query is not eligible for runtime recall.", not recall.recall?)
     |> maybe_prepend("Semantic search skipped.", recall.source_outcomes.semantic == :skipped)
+    |> maybe_prepend("Graph recall skipped.", recall.source_outcomes.graph == :skipped)
     |> Enum.reverse()
   end
 
