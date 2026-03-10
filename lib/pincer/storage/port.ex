@@ -6,7 +6,7 @@ defmodule Pincer.Storage.Port do
   It follows the Ports and Adapters (Hexagonal) architecture pattern, where:
 
   - **Port** (this module) - Defines the interface/contract
-  - **Adapter** - Concrete implementation (e.g., `Pincer.Storage.Adapters.SQLite`)
+  - **Adapter** - Concrete implementation (e.g., `Pincer.Storage.Adapters.Postgres`)
 
   ## Implementing an Adapter
 

@@ -16,10 +16,32 @@ Pincer is a sophisticated AI agent framework built on Elixir/OTP, emphasizing fa
    mix pincer.onboard
    ```
 
-3. **Start Chatting**:
+3. **Start PostgreSQL**:
+   ```bash
+   docker compose up -d postgres
+   mix ecto.create
+   mix ecto.migrate
+   ```
+
+4. **Start Chatting**:
    ```bash
    mix pincer.chat
    ```
+
+## 🗄️ Database
+
+Pincer now targets `PostgreSQL + pgvector` directly.
+
+- Default local credentials are `postgres/postgres`
+- Default local database names are `pincer_dev`, `pincer_test`, and `pincer_mvp`
+- Runtime overrides are supported via:
+  - `PINCER_DB_HOST`
+  - `PINCER_DB_PORT`
+  - `PINCER_DB_USER`
+  - `PINCER_DB_PASSWORD`
+  - `PINCER_DB_NAME`
+  - `PINCER_DB_POOL_SIZE`
+  - `PINCER_DB_SSL`
 
 ## 📚 Documentation
 
@@ -81,12 +103,15 @@ mix pincer.agent pair
   Runs operational diagnostics for config, tokens, and DM policy.
 - `mix pincer.security_audit [--strict] [--config path/to/config.yaml]`
   Runs a security-focused audit for channels and gateway posture.
-- `mix pincer.onboard [--non-interactive] [--yes] [--db-path ...] [--provider ...] [--model ...]`
-  Bootstraps config plus the per-agent `.pincer` template scaffold.
+- `mix pincer.onboard [--non-interactive] [--yes] [--db-name ...] [--provider ...] [--model ...]`
+  Bootstraps config plus the per-agent `.pincer` template scaffold. In the PostgreSQL setup, `--db-name` writes the database name into `config.yaml`.
 
 ## 🧪 Testing
 
 ```bash
+docker compose up -d postgres
+mix ecto.create
+mix ecto.migrate
 mix test --warnings-as-errors
 ```
 

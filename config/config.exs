@@ -7,7 +7,7 @@ config :telegex,
   token: System.get_env("TELEGRAM_BOT_TOKEN"),
   caller_adapter: {Finch, [name: Pincer.Finch]}
 
-config :pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite
+config :pincer, :storage_adapter, Pincer.Storage.Adapters.Postgres
 
 config :pincer, :llm_providers, %{
   "google" => %{
@@ -85,7 +85,10 @@ config :logger, :handlers, [
   }
 ]
 
-config :pincer, Pincer.Infra.Repo, log: false
+config :pincer, Pincer.Infra.Repo,
+  adapter: Ecto.Adapters.Postgres,
+  types: Pincer.Infra.PostgrexTypes,
+  log: false
 
 config :pincer, :webhook_token, System.get_env("PINCER_WEBHOOK_TOKEN", "")
 

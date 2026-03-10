@@ -8,6 +8,8 @@ defmodule Pincer.Core.Executor do
   """
 
   require Logger
+  alias Pincer.Core.AgentPaths
+  alias Pincer.Core.MemoryRecall
 
   @max_recursion_depth 15
   @approval_timeout_ms 60_000
@@ -244,13 +246,29 @@ defmodule Pincer.Core.Executor do
   defp augment_history(history, memory, time) do
     case history do
       [%{"role" => "system", "content" => content} = sys | rest] ->
-        learnings = fetch_active_learnings()
+        workspace_path = Process.get(:workspace_path, File.cwd!())
+
+        runtime_memory =
+          if memory != "" do
+            memory
+          else
+            AgentPaths.read_file(AgentPaths.memory_path(workspace_path))
+          end
+
+        safe_memory = MemoryRecall.sanitize_for_prompt(runtime_memory)
+        {learnings, learnings_count} = fetch_active_learnings()
+
+        recall =
+          MemoryRecall.build(history,
+            workspace_path: workspace_path,
+            learnings_count: learnings_count
+          ).prompt_block
 
         new_content =
-          if memory != "" do
-            "#{content}\n\n### TEMPORAL CONTEXT\nCURRENT TIME: #{time}\n\n### NARRATIVE MEMORY\n#{memory}#{learnings}"
+          if safe_memory != "" do
+            "#{content}\n\n### TEMPORAL CONTEXT\nCURRENT TIME: #{time}\n\n### NARRATIVE MEMORY\n#{safe_memory}#{learnings}#{recall}"
           else
-            "#{content}\n\n### TEMPORAL CONTEXT\nCURRENT TIME: #{time}#{learnings}"
+            "#{content}\n\n### TEMPORAL CONTEXT\nCURRENT TIME: #{time}#{learnings}#{recall}"
           end
 
         [%{sys | "content" => new_content} | rest]
@@ -263,18 +281,24 @@ defmodule Pincer.Core.Executor do
   defp fetch_active_learnings do
     case Pincer.Ports.Storage.list_recent_learnings(3) do
       [] ->
-        ""
+        {"", 0}
 
       learnings ->
         formatted =
           Enum.map_join(learnings, "\n", fn l ->
             case l.type do
-              :error -> "- [AVOID ERROR] Tool `#{l.tool}` failed recently: #{l.error}"
-              :learning -> "- [LESSON] #{l.summary}"
+              :error ->
+                safe_error = MemoryRecall.sanitize_for_prompt(l.error)
+                "- [AVOID ERROR] Tool `#{l.tool}` failed recently: #{safe_error}"
+
+              :learning ->
+                safe_summary = MemoryRecall.sanitize_for_prompt(l.summary)
+                "- [LESSON] #{safe_summary}"
             end
           end)
 
-        "\n\n### RECENT LEARNINGS & ERRORS (Self-Improvement)\nAvoid repeating these recent mistakes:\n#{formatted}"
+        {"\n\n### RECENT LEARNINGS & ERRORS (Self-Improvement)\nAvoid repeating these recent mistakes:\n#{formatted}",
+         length(learnings)}
     end
   end
 

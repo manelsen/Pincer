@@ -76,7 +76,7 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 ### Escopo
 - `lib/pincer/adapters/cron/scheduler.ex`
 - `config/config.exs`
-- testes de regressao em `test/pincer/adapters/cron/scheduler_test.exs` e `test/pincer/config/db_paths_test.exs`
+- testes de regressao em `test/pincer/adapters/cron/scheduler_test.exs` e `test/pincer/config/db_defaults_test.exs`
 
 ### Regras
 - No tick do scheduler, erro de banco `no such table: cron_jobs` nao pode derrubar o processo.
@@ -153,11 +153,220 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 
 ---
 
+## Incremento 2026-03-09 (Memoria Operacional P0/P1)
+
+### Objetivo
+- Fechar o gap principal de memoria do Pincer: `recall operacional` durante o loop do agente.
+- Adicionar busca textual no storage transacional para historico e snippets.
+- Separar memoria narrativa do agente de memoria aprendida do usuario.
+- Sanitizar memoria antes de injeta-la no prompt para reduzir risco de prompt injection.
+- Fechar o loop do `Archivist`, persistindo snippets semanticamente recuperaveis.
+
+### Interfaces/Public API
+- `Pincer.Ports.Storage.search_messages/2`
+- `Pincer.Ports.Storage.search_documents/2`
+- `Pincer.Core.MemoryRecall.build/2`
+- `Pincer.Core.MemoryRecall.eligible_query?/1`
+- `Pincer.Core.MemoryRecall.sanitize_for_prompt/1`
+- `Pincer.Core.Orchestration.Archivist.consolidate/3`
+  - passa a atualizar `USER.md` com memoria aprendida do usuario
+  - passa a indexar snippets extraidos no storage semantico/textual
+
+### Regras
+- O `Executor` deve realizar uma etapa de recall antes de chamar o LLM quando houver uma query elegivel.
+- O recall v1 deve combinar:
+  - `MEMORY.md` sanitizado
+  - `USER.md` sanitizado
+  - hits textuais de historico de mensagens
+  - hits textuais de snippets/documentos
+  - hits semanticos de documentos quando embeddings estiverem disponiveis
+- O bloco de recall deve ser compacto, citar a origem de cada hit e rotular a memoria como dado nao-confiavel.
+- Conteudo de memoria nao pode ser injetado cru no prompt quando contiver instrucoes como:
+  - `ignore previous instructions`
+  - `system:`
+  - blocos `<thinking>` / `tool_calls` / fences markdown
+- O storage transacional da epoca deve manter indice textual para:
+  - `messages`
+  - documentos/snippets em `nodes` do tipo `document`
+- O `Archivist` deve:
+  - atualizar `MEMORY.md` como hoje
+  - atualizar uma secao gerenciada de memoria do usuario em `USER.md`
+  - indexar snippets extraidos para busca textual e semantica
+  - manter ingestao de bug/fix
+
+### Criterios de aceite
+1. Teste de unidade prova que `MemoryRecall` classifica queries, sanitiza memoria e formata citacoes.
+2. Teste de integracao prova que o `Executor` injeta recall automatico no prompt antes da chamada ao LLM.
+3. Teste de integracao prova busca textual em `messages` e em `document` snippets via adapter de storage.
+4. Teste de regressao prova que memoria com padroes de prompt injection e neutralizada antes da injecao.
+5. Teste de integracao prova que o `Archivist` atualiza `USER.md`, indexa snippets e preserva ingestao de bug/fix.
+6. Testes existentes de sessao/memoria continuam verdes.
+
+---
+
+## Incremento 2026-03-09 (Memoria P2: tipos, ranking, forget e busca cruzada)
+
+### Objetivo
+- Formalizar tipos de memoria semantica no storage.
+- Permitir `forget/archive` seletivo por item de memoria.
+- Expor busca cruzada entre sessoes como API dedicada.
+- Melhorar ranking de memoria com metadados de importancia, acesso e recencia.
+- Enriquecer citacoes com `source` e `line-range` quando houver metadata suficiente.
+
+### Interfaces/Public API
+- `Pincer.Ports.Storage.index_memory/5`
+- `Pincer.Ports.Storage.search_documents/3`
+- `Pincer.Ports.Storage.search_sessions/2`
+- `Pincer.Ports.Storage.forget_memory/1`
+- `Pincer.Core.MemoryTypes.normalize/1`
+- `Pincer.Core.MemoryTypes.valid?/1`
+
+### Regras
+- Toda memoria semantica persistida em `nodes` do tipo `document` deve carregar `memory_type`.
+- Tipos v1 suportados:
+  - `reference`
+  - `technical_fact`
+  - `bug_solution`
+  - `user_preference`
+  - `architecture_decision`
+  - `session_summary`
+- `index_document/3` deve permanecer por compatibilidade, delegando para `index_memory/5`.
+- `search_documents/3` deve aceitar filtros por:
+  - `memory_type`
+  - `session_id`
+  - `include_forgotten`
+- O ranking de documentos deve considerar:
+  - score textual/semantico bruto
+  - `importance`
+  - `access_count`
+  - `inserted_at` como desempate
+- Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.
+- `forget_memory/1` nao apaga fisicamente o item; marca `forgotten_at` e o remove dos resultados padrao.
+- `search_sessions/2` deve retornar hits agrupados ou identificados por `session_id`, permitindo busca cruzada explicita.
+- Citacoes devem incluir `line_start/line_end` quando armazenados no metadata do item.
+
+### Criterios de aceite
+1. Teste de unidade valida normalizacao dos `memory_type`.
+2. Teste de integracao prova que documentos com `importance` maior rankeiam acima de equivalentes menos importantes.
+3. Teste de integracao prova que `forget_memory/1` esconde o item por padrao, mas ele continua recuperavel com `include_forgotten: true`.
+4. Teste de integracao prova que `search_sessions/2` encontra hits em sessoes diferentes e preserva citacao por sessao.
+5. Teste de integracao prova que o `Archivist` persiste snippets com `memory_type`, `importance` e `session_id`.
+6. Suite completa permanece verde.
+
+---
+
+## Incremento 2026-03-10 (Migracao Direta para Postgres + pgvector)
+
+### Objetivo
+- Migrar o storage principal do Pincer de SQLite para PostgreSQL.
+- Substituir embeddings binarios por colunas vetoriais com `pgvector`.
+- Preservar a API publica do port `Pincer.Ports.Storage`.
+- Trocar busca textual baseada em SQLite FTS5 por FTS do PostgreSQL.
+- Remover o acoplamento operacional a arquivos `db/*.db` no onboarding/config.
+
+### Escopo
+- `mix.exs`
+- `config/*.exs`
+- `config.yaml`
+- `lib/pincer/repo.ex`
+- `lib/pincer/config.ex`
+- `lib/pincer/storage/message.ex`
+- `lib/pincer/storage/graph/node.ex`
+- `lib/pincer/storage/adapters/*.ex`
+- `priv/repo/migrations/*.exs`
+- `docker-compose.yml`
+- `Dockerfile`
+- `infrastructure/docker/entrypoint.sh`
+- testes de storage/onboarding/smoke relevantes
+
+### Interfaces/Public API
+- `Pincer.Infra.Repo`
+  - passa a usar `Ecto.Adapters.Postgres`
+- `Pincer.Storage.Graph.Node.embedding`
+  - passa de `:binary` para `Pgvector.Ecto.Vector`
+- `Pincer.Storage.Message.embedding`
+  - passa de `:binary` para `Pgvector.Ecto.Vector`
+- `Pincer.Ports.Storage`
+  - mantem callbacks publicos atuais sem alterar assinatura
+
+### Regras
+- A migracao e direta; nao deve existir camada de compatibilidade com SQLite no caminho principal.
+- O banco padrao do projeto passa a ser PostgreSQL.
+- A extensao `vector` deve ser habilitada nas migrations.
+- As colunas de embedding devem usar tipo vetorial nativo do `pgvector`, sem serializacao manual com `term_to_binary`.
+- A busca textual deve usar capacidades nativas do PostgreSQL.
+- O onboarding/config padrao deve gerar configuracao de Postgres, nao caminho de arquivo SQLite.
+- O stack local via Docker Compose deve incluir um servico de Postgres pronto para desenvolvimento.
+
+### Criterios de aceite
+1. `mix deps.get` resolve `postgrex` e `pgvector`.
+2. O `Repo` sobe com adapter Postgres e configuracao de host/porta/database.
+3. `index_document/index_memory/search_similar` usam vetor nativo e nao mais cosine manual em Elixir.
+4. `search_messages/search_documents` usam FTS do PostgreSQL.
+5. Onboarding, config defaults e smoke tests deixam de assumir `db/*.db`.
+6. Suite relevante permanece verde com Postgres disponivel.
+
+---
+
+## Incremento 2026-03-10 (Memoria P3A: observabilidade basica)
+
+### Objetivo
+- Adicionar observabilidade basica ao pipeline de memoria sem deps novas.
+- Medir recall operacional no runtime com eventos de telemetry.
+- Disponibilizar um snapshot local e deterministico para diagnostico de memoria.
+
+### Interfaces/Public API
+- `Pincer.Core.Telemetry.emit_memory_search/2`
+- `Pincer.Core.Telemetry.emit_memory_recall/2`
+- `Pincer.Core.MemoryObservability.start_link/1`
+- `Pincer.Core.MemoryObservability.snapshot/0`
+- `Pincer.Core.MemoryObservability.reset/0`
+- `Pincer.Core.MemoryRecall.build/2`
+  - passa a emitir telemetry de busca e recall
+
+### Regras
+- O pipeline de recall deve emitir um evento `[:pincer, :memory, :search]` para cada fonte consultada:
+  - `messages`
+  - `documents`
+  - `semantic`
+- Cada evento de busca deve incluir no minimo:
+  - `duration_ms`
+  - `hit_count`
+  - `count`
+  - metadata com `source`, `outcome`, `session_id` e `query_length` quando disponivel
+- O pipeline de recall deve emitir um evento consolidado `[:pincer, :memory, :recall]` por build contendo no minimo:
+  - `duration_ms`
+  - `total_hits`
+  - `message_hits`
+  - `document_hits`
+  - `semantic_hits`
+  - `prompt_chars`
+  - `learnings_count`
+- `MemoryObservability` deve agregar estes eventos localmente e expor snapshot deterministico com:
+  - contadores totais
+  - medias simples
+  - breakdown por fonte
+  - ultimo evento de busca
+  - ultimo evento de recall
+- O snapshot deve ser seguro para testes:
+  - `reset/0` limpa acumuladores
+  - quando nao houver eventos, `snapshot/0` retorna zeros/defaults coerentes
+- Nenhum evento de observabilidade deve incluir o texto cru da query ou conteudo da memoria.
+
+### Criterios de aceite
+1. Teste de unidade prova que `emit_memory_search/2` e `emit_memory_recall/2` publicam eventos com contrato minimo.
+2. Teste de unidade prova que `MemoryObservability.snapshot/0` agrega contadores e medias corretamente.
+3. Teste de integracao prova que `MemoryRecall.build/2` emite eventos de busca e recall e atualiza o snapshot.
+4. Teste de regressao prova que `snapshot/0` retorna defaults estaveis apos `reset/0`.
+5. Suite relevante permanece verde.
+
+---
+
 ## 0. Incremento 2026-02-22 (Onboard + DB em `./db`)
 
 ### Objetivo
 - Entregar base de onboarding linux-style (`mix pincer.onboard`).
-- Padronizar bancos SQLite em `./db`.
+- Padronizar a configuracao inicial de banco do projeto.
 
 ### Interfaces Públicas
 ```elixir
@@ -169,17 +378,17 @@ Pincer.Core.Onboard.apply_plan/2
 ```bash
 mix pincer.onboard
 mix pincer.onboard --non-interactive --yes
-mix pincer.onboard --non-interactive --db-path db/custom.db
+mix pincer.onboard --non-interactive --db-name pincer_custom
 ```
 
 ### Critérios de aceite
-1. `mix pincer.onboard --non-interactive --yes` cria `config.yaml`, `db/`, `sessions/`, `memory/`.
-2. Config padrão aponta DB para `db/pincer_mvp.db`.
-3. `config/dev.exs` e `config/test.exs` usam paths em `db/`.
+1. `mix pincer.onboard --non-interactive --yes` cria `config.yaml`, `sessions/` e `memory/`.
+2. Config padrão aponta para Postgres em `localhost:5432`, database `pincer_mvp`.
+3. `config/dev.exs` e `config/test.exs` usam defaults de Postgres coerentes com o ambiente local.
 4. Implementação coberta por testes em:
    - `test/pincer/core/onboard_test.exs`
    - `test/mix/tasks/pincer.onboard_test.exs`
-   - `test/pincer/config/db_paths_test.exs`
+   - `test/pincer/config/db_defaults_test.exs`
 
 ### Erros amigáveis (incremento atual)
 - Objetivo: mapear os erros mais comuns para mensagens claras ao usuário final.
@@ -799,7 +1008,7 @@ channels:
     - model default do provider estiver ausente/vazio.
   - quando `config.yaml` existir, onboarding deve carregar e fazer merge seguro com defaults (sem apagar chaves custom);
   - combinações inválidas:
-    - usar `--db-path`, `--provider` ou `--model` sem capability `config_yaml` deve falhar com erro explícito.
+    - usar `--db-name`, `--provider` ou `--model` sem capability `config_yaml` deve falhar com erro explícito.
 - Critérios de aceite:
   1. testes de core cobrem preflight válido/inválido com hints e merge profundo determinístico;
   2. testes do mix task cobrem falha de matriz de flags com mensagem clara;

@@ -1,7 +1,7 @@
 defmodule Pincer.Adapters.Tools.Scheduler do
   @moduledoc """
   Pincer's definitive tool for scheduling proactive tasks in the future
-  using Cron notation in the SQLite database.
+  using Cron notation in the PostgreSQL database.
   """
   @behaviour Pincer.Ports.Tool
   alias Pincer.Ports.Cron

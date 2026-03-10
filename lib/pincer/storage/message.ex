@@ -17,7 +17,7 @@ defmodule Pincer.Storage.Message do
   | `session_id` | `string` | Conversation session identifier |
   | `role` | `string` | Message origin (user/assistant/system) |
   | `content` | `string` | Message text content |
-  | `embedding` | `binary` | Vector embedding for semantic search (optional) |
+  | `embedding` | `vector` | Vector embedding for semantic search (optional) |
   | `inserted_at` | `utc_datetime` | Creation timestamp |
   | `updated_at` | `utc_datetime` | Last update timestamp |
 
@@ -40,7 +40,7 @@ defmodule Pincer.Storage.Message do
         add :session_id, :string, null: false
         add :role, :string, null: false
         add :content, :string, null: false
-        add :embedding, :binary
+        add :embedding, :vector
 
         timestamps()
       end
@@ -57,7 +57,7 @@ defmodule Pincer.Storage.Message do
           session_id: String.t(),
           role: String.t(),
           content: String.t(),
-          embedding: binary() | nil,
+          embedding: Pgvector.Ecto.Vector.t() | nil,
           inserted_at: NaiveDateTime.t() | nil,
           updated_at: NaiveDateTime.t() | nil
         }
@@ -66,7 +66,7 @@ defmodule Pincer.Storage.Message do
     field(:session_id, :string)
     field(:role, :string)
     field(:content, :string)
-    field(:embedding, :binary)
+    field(:embedding, Pgvector.Ecto.Vector)
 
     timestamps()
   end
@@ -82,7 +82,7 @@ defmodule Pincer.Storage.Message do
 
   ## Optional Fields
 
-    - `embedding` - Vector embedding binary data
+    - `embedding` - Vector embedding data
 
   ## Examples
 

@@ -67,8 +67,13 @@ defmodule Pincer.Core.Onboard do
   def defaults do
     %{
       "database" => %{
-        "adapter" => "Ecto.Adapters.SQLite3",
-        "database" => "db/pincer_mvp.db"
+        "adapter" => "Ecto.Adapters.PostgreSQL",
+        "hostname" => "localhost",
+        "port" => 5432,
+        "username" => "postgres",
+        "password" => "postgres",
+        "database" => "pincer_mvp",
+        "pool_size" => 10
       },
       "channels" => %{
         "telegram" => %{
@@ -185,7 +190,7 @@ defmodule Pincer.Core.Onboard do
   def preflight(config) when is_map(config) do
     issues =
       []
-      |> maybe_add_invalid_db_path(get_in(config, ["database", "database"]))
+      |> maybe_add_invalid_db_name(get_in(config, ["database", "database"]))
       |> maybe_add_missing_provider_or_model(config)
 
     if issues == [], do: :ok, else: {:error, issues}
@@ -357,7 +362,6 @@ defmodule Pincer.Core.Onboard do
     base = Pincer.Core.AgentPaths.base_dir()
 
     [
-      {:mkdir_p, "db"},
       {:mkdir_p, base},
       {:mkdir_p, "sessions"},
       {:mkdir_p, "memory"}
@@ -574,7 +578,7 @@ defmodule Pincer.Core.Onboard do
   end
 
   defp build_remote_onboard_command(config, capabilities) do
-    db_path = get_in(config, ["database", "database"]) |> normalize_string() || "db/pincer_mvp.db"
+    db_name = get_in(config, ["database", "database"]) |> normalize_string() || "pincer_mvp"
     provider = get_in(config, ["llm", "provider"]) |> normalize_string() || "z_ai"
     model = get_in(config, ["llm", provider, "default_model"]) |> normalize_string() || "glm-4.7"
 
@@ -582,7 +586,7 @@ defmodule Pincer.Core.Onboard do
       "mix pincer.onboard",
       "--non-interactive",
       "--yes",
-      "--db-path #{shell_quote(db_path)}",
+      "--db-name #{shell_quote(db_name)}",
       "--provider #{shell_quote(provider)}",
       "--model #{shell_quote(model)}"
     ]
@@ -657,34 +661,36 @@ defmodule Pincer.Core.Onboard do
     %{id: id, severity: :warn, message: message, hint: hint, meta: meta}
   end
 
-  defp maybe_add_invalid_db_path(issues, db_path) do
+  defp maybe_add_invalid_db_name(issues, db_name) do
     cond do
-      not is_binary(db_path) or String.trim(db_path) == "" ->
+      not is_binary(db_name) or String.trim(db_name) == "" ->
         [
           %{
-            id: :invalid_db_path,
+            id: :invalid_db_name,
             message: "database.database is empty or invalid",
-            hint: "Use a relative path like db/pincer_mvp.db"
+            hint: "Use a PostgreSQL database name like pincer_mvp"
           }
           | issues
         ]
 
-      Path.type(db_path) == :absolute ->
+      String.contains?(db_name, "/") or String.contains?(db_name, "\\") ->
         [
           %{
-            id: :invalid_db_path,
-            message: "database.database must be a relative path",
-            hint: "Use a relative path like db/pincer_mvp.db"
+            id: :invalid_db_name,
+            message:
+              "database.database must be a PostgreSQL database name, not a filesystem path",
+            hint: "Use a database name like pincer_mvp"
           }
           | issues
         ]
 
-      Enum.member?(Path.split(db_path), "..") ->
+      String.contains?(db_name, "..") or
+          not Regex.match?(~r/^[a-zA-Z0-9_][a-zA-Z0-9_-]*$/, db_name) ->
         [
           %{
-            id: :invalid_db_path,
-            message: "database.database cannot contain path traversal segments",
-            hint: "Use a relative path inside the workspace, e.g. db/pincer_mvp.db"
+            id: :invalid_db_name,
+            message: "database.database contains unsupported characters",
+            hint: "Use letters, numbers, underscore or hyphen, e.g. pincer_mvp"
           }
           | issues
         ]

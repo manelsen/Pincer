@@ -118,6 +118,7 @@ defmodule Pincer.Application do
     children = [
       Pincer.Infra.PubSub,
       Pincer.Core.Orchestration.Blackboard,
+      Pincer.Core.MemoryObservability,
       {Finch, name: Pincer.Finch},
       {Pincer.Infra.Repo, repo_config},
       Pincer.Core.Heartbeat,
