@@ -12,15 +12,6 @@ defmodule Pincer.Core.MemoryRecall do
 
   @default_limit 5
   @eligible_keywords ~r/\b(remember|recall|memory|before|previous|last|history|learn|incident|preference|prefer|deploy|timeout|bug|context|lembra|memoria|antes|ultimo|anterior|aprend|prefere|incidente)\b/iu
-  @danger_patterns [
-    {~r/```(?:\w+)?/u, ""},
-    {~r/<thinking>.*?<\/thinking>/isu, "[filtered hidden reasoning]"},
-    {~r/\b(ignore|disregard)\b.{0,40}\b(previous|above)\b.{0,20}\binstructions?\b/iu,
-     "[filtered prompt-injection]"},
-    {~r/^\s*(system|assistant|developer|user)\s*:/imu, "[filtered role]:"},
-    {~r/\btool_calls?\b/iu, "[filtered tool-calls]"}
-  ]
-
   @type recall_hit :: %{
           optional(:kind) => atom() | String.t(),
           optional(:role) => String.t(),
@@ -58,7 +49,7 @@ defmodule Pincer.Core.MemoryRecall do
   def sanitize_for_prompt(text) when not is_binary(text), do: ""
 
   def sanitize_for_prompt(text) do
-    Enum.reduce(@danger_patterns, text, fn {pattern, replacement}, acc ->
+    Enum.reduce(danger_patterns(), text, fn {pattern, replacement}, acc ->
       String.replace(acc, pattern, replacement)
     end)
     |> String.replace(~r/\n{3,}/u, "\n\n")
@@ -272,8 +263,8 @@ defmodule Pincer.Core.MemoryRecall do
 
   defp content_to_text(content) when is_list(content) do
     Enum.map_join(content, " ", fn
-      %{"text" => text} -> text
       %{"type" => "text", "text" => text} -> text
+      %{"text" => text} -> text
       _ -> ""
     end)
     |> String.trim()
@@ -296,6 +287,17 @@ defmodule Pincer.Core.MemoryRecall do
 
   defp query_length(query) when is_binary(query), do: String.length(query)
   defp query_length(_query), do: 0
+
+  defp danger_patterns do
+    [
+      {~r/```(?:\w+)?/u, ""},
+      {~r/<thinking>.*?<\/thinking>/isu, "[filtered hidden reasoning]"},
+      {~r/\b(ignore|disregard)\b.{0,40}\b(previous|above)\b.{0,20}\binstructions?\b/iu,
+       "[filtered prompt-injection]"},
+      {~r/^\s*(system|assistant|developer|user)\s*:/imu, "[filtered role]:"},
+      {~r/\btool_calls?\b/iu, "[filtered tool-calls]"}
+    ]
+  end
 
   defp duration_ms(started_at) do
     System.monotonic_time()
