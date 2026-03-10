@@ -198,6 +198,18 @@ defmodule Pincer.Storage.Adapters.Postgres do
   end
 
   @impl true
+  def memory_report(limit \\ 5) do
+    {:ok,
+     %{
+       total_documents: total_documents(),
+       forgotten_documents: forgotten_documents(),
+       by_type: memory_counts_by_type(),
+       top_documents: top_documents(limit),
+       top_sessions: top_sessions(limit)
+     }}
+  end
+
+  @impl true
   def forget_memory(source) do
     case find_node_by_path("document", source) do
       nil ->
@@ -227,9 +239,9 @@ defmodule Pincer.Storage.Adapters.Postgres do
     |> then(fn rows ->
       {:ok,
        Enum.map(rows, fn {node, distance} ->
-         score = rank_memory_score(node, 1.0 - distance)
+         scoring = score_document(node, :semantic, 1.0 - distance, [])
          touch_memory_access(node)
-         document_result(node, score)
+         document_result(node, scoring)
        end)}
     end)
   end
@@ -342,22 +354,24 @@ defmodule Pincer.Storage.Adapters.Postgres do
       ts_query ->
         {sql, params} = search_documents_sql(ts_query, limit, opts)
 
+        query_tokens = search_tokens(query)
+
         case Ecto.Adapters.SQL.query(Repo, sql, params) do
           {:ok, %{rows: rows}} ->
             results =
               rows
               |> Enum.map(fn [node_id, score] ->
                 node = Repo.get!(Node, node_id)
-                ranked_score = rank_memory_score(node, score)
+                scoring = score_document(node, :text, score, query_tokens)
                 touch_memory_access(node)
-                {node, ranked_score}
+                {node, scoring}
               end)
               |> Enum.sort_by(
-                fn {node, ranked_score} -> {ranked_score, node.inserted_at} end,
+                fn {node, scoring} -> {scoring.score, node.inserted_at} end,
                 :desc
               )
-              |> Enum.map(fn {node, ranked_score} ->
-                document_result(node, ranked_score)
+              |> Enum.map(fn {node, scoring} ->
+                document_result(node, scoring)
               end)
 
             {:ok, results}
@@ -407,13 +421,15 @@ defmodule Pincer.Storage.Adapters.Postgres do
           (Keyword.get(opts, :include_forgotten, false) or not memory_forgotten?(node.data))
       end)
       |> Enum.map(fn node ->
-        score =
+        signal_score =
           tokens
           |> Enum.count(&String.contains?(String.downcase(node.data["content"] || ""), &1))
-          |> rank_memory_score(node)
+          |> Kernel./(max(length(tokens), 1))
+
+        scoring = score_document(node, :text, signal_score, tokens)
 
         touch_memory_access(node)
-        document_result(node, score)
+        document_result(node, scoring)
       end)
       |> Enum.sort_by(& &1.score, :desc)
       |> Enum.take(limit)
@@ -483,20 +499,90 @@ defmodule Pincer.Storage.Adapters.Postgres do
     :ok
   end
 
-  defp document_result(node, score) do
+  defp document_result(node, scoring) do
     %{
       kind: :document,
       role: "document",
       content: node.data["content"],
       source: node.data["path"],
       citation: build_citation(node.data),
-      score: score,
+      score: scoring.score,
+      signal: scoring.signal,
+      signal_score: scoring.signal_score,
+      signals: [scoring.signal],
+      score_components: scoring.score_components,
       memory_type: node.data["memory_type"] || "reference",
       importance: node.data["importance"] || 5,
       access_count: (node.data["access_count"] || 0) + 1,
       session_id: node.data["session_id"],
       forgotten?: memory_forgotten?(node.data)
     }
+  end
+
+  defp total_documents do
+    from(n in Node, where: n.type == "document", select: count(n.id))
+    |> Repo.one()
+  end
+
+  defp forgotten_documents do
+    from(n in Node,
+      where: n.type == "document",
+      where: fragment("COALESCE(?->>'forgotten_at', '') <> ''", n.data),
+      select: count(n.id)
+    )
+    |> Repo.one()
+  end
+
+  defp memory_counts_by_type do
+    from(n in Node,
+      where: n.type == "document",
+      group_by: fragment("COALESCE(?->>'memory_type', 'reference')", n.data),
+      select: {fragment("COALESCE(?->>'memory_type', 'reference')", n.data), count(n.id)}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  defp top_documents(limit) do
+    from(n in Node,
+      where: n.type == "document",
+      order_by: [
+        desc: fragment("COALESCE((?->>'access_count')::int, 0)", n.data),
+        desc: fragment("COALESCE((?->>'importance')::int, 0)", n.data),
+        desc: n.inserted_at
+      ],
+      limit: ^limit
+    )
+    |> Repo.all()
+    |> Enum.map(fn node ->
+      %{
+        source: node.data["path"],
+        memory_type: node.data["memory_type"] || "reference",
+        importance: node.data["importance"] || 5,
+        access_count: node.data["access_count"] || 0,
+        session_id: node.data["session_id"],
+        forgotten?: memory_forgotten?(node.data),
+        citation: build_citation(node.data)
+      }
+    end)
+  end
+
+  defp top_sessions(limit) do
+    from(n in Node,
+      where: n.type == "document",
+      where: fragment("COALESCE(?->>'session_id', '') <> ''", n.data),
+      group_by: fragment("?->>'session_id'", n.data),
+      order_by: [
+        desc: count(n.id),
+        asc: fragment("?->>'session_id'", n.data)
+      ],
+      limit: ^limit,
+      select: {fragment("?->>'session_id'", n.data), count(n.id)}
+    )
+    |> Repo.all()
+    |> Enum.map(fn {session_id, document_count} ->
+      %{session_id: session_id, document_count: document_count}
+    end)
   end
 
   defp build_citation(data) do
@@ -514,21 +600,160 @@ defmodule Pincer.Storage.Adapters.Postgres do
     end
   end
 
-  defp rank_memory_score(%Node{} = node, base_score), do: rank_memory_score(base_score, node.data)
-  defp rank_memory_score(base_score, %Node{} = node), do: rank_memory_score(node, base_score)
+  defp score_document(%Node{} = node, signal, raw_signal_score, query_tokens) do
+    signal_score = normalize_signal_score(signal, raw_signal_score)
+    metadata = metadata_boosts(node, query_tokens)
 
-  defp rank_memory_score(base_score, data) when is_map(data) do
-    importance_boost = (data["importance"] || 5) / 10
-    access_boost = (data["access_count"] || 0) * 0.05
-
-    recency_boost =
-      case data["last_accessed_at"] || data["inserted_at"] do
-        nil -> 0.0
-        _ -> 0.05
-      end
-
-    base_score + importance_boost + access_boost + recency_boost
+    %{
+      score: signal_score + metadata.total,
+      signal: signal,
+      signal_score: signal_score,
+      score_components:
+        metadata.components
+        |> Map.put(signal, signal_score)
+        |> Map.put(:metadata_total, metadata.total)
+    }
   end
+
+  defp normalize_signal_score(:text, score) do
+    score
+    |> Kernel.*(20.0)
+    |> clamp_score()
+  end
+
+  defp normalize_signal_score(:semantic, score), do: clamp_score(score)
+
+  defp normalize_signal_score(_signal, score), do: clamp_score(score)
+
+  defp clamp_score(score) when is_number(score), do: min(1.0, max(0.0, score * 1.0))
+  defp clamp_score(_score), do: 0.0
+
+  defp metadata_boosts(node, query_tokens) do
+    importance = min(0.35, (node.data["importance"] || 5) / 10 * 0.35)
+
+    access =
+      node.data["access_count"]
+      |> Kernel.||(0)
+      |> Kernel.+(1)
+      |> :math.log10()
+      |> Kernel.*(0.12)
+      |> min(0.18)
+
+    freshness = freshness_boost(node)
+    graph = graph_boost(node, query_tokens)
+    total = importance + access + freshness + graph
+
+    %{
+      total: total,
+      components: %{
+        importance: importance,
+        access: access,
+        freshness: freshness,
+        graph: graph
+      }
+    }
+  end
+
+  defp freshness_boost(node) do
+    timestamp =
+      parse_timestamp(node.data["last_accessed_at"]) || naive_to_datetime(node.inserted_at)
+
+    case timestamp do
+      nil ->
+        0.0
+
+      datetime ->
+        age_days = max(DateTime.diff(DateTime.utc_now(), datetime, :second), 0) / 86_400
+        0.18 * :math.exp(-age_days / 30)
+    end
+  end
+
+  defp graph_boost(node, query_tokens) do
+    path = node.data["path"]
+
+    if is_binary(path) do
+      {bug_count, fix_count, overlap_count} = graph_signal_for_path(path, query_tokens)
+
+      incident_bonus =
+        if incident_query?(query_tokens) and (bug_count > 0 or fix_count > 0), do: 0.05, else: 0.0
+
+      overlap_bonus = min(0.08, overlap_count * 0.04)
+
+      boost =
+        0.18 + min(0.12, bug_count * 0.10) + min(0.15, fix_count * 0.15) + incident_bonus +
+          overlap_bonus
+
+      if bug_count > 0 or fix_count > 0, do: min(0.45, boost), else: 0.0
+    else
+      0.0
+    end
+  end
+
+  defp graph_signal_for_path(path, query_tokens) do
+    case find_node_by_path("file", path) do
+      nil ->
+        {0, 0, 0}
+
+      file_node ->
+        bug_nodes =
+          from(b in Node,
+            join: e in Edge,
+            on: e.from_id == b.id,
+            where: e.to_id == ^file_node.id and e.type == "occurs_in" and b.type == "bug"
+          )
+          |> Repo.all()
+
+        bug_ids = Enum.map(bug_nodes, & &1.id)
+
+        fix_nodes =
+          if bug_ids == [] do
+            []
+          else
+            from(f in Node,
+              join: e in Edge,
+              on: e.from_id == f.id,
+              where: e.to_id in ^bug_ids and e.type == "solves" and f.type == "fix"
+            )
+            |> Repo.all()
+          end
+
+        overlap_count =
+          (Enum.map(bug_nodes, &(&1.data["description"] || "")) ++
+             Enum.map(fix_nodes, &(&1.data["summary"] || "")))
+          |> Enum.join(" ")
+          |> String.downcase()
+          |> then(fn graph_text ->
+            Enum.count(query_tokens, &String.contains?(graph_text, &1))
+          end)
+
+        {length(bug_nodes), length(fix_nodes), overlap_count}
+    end
+  end
+
+  defp incident_query?(tokens) do
+    Enum.any?(
+      tokens,
+      &(&1 in ["bug", "fix", "timeout", "incident", "deploy", "retry", "retries"])
+    )
+  end
+
+  defp parse_timestamp(nil), do: nil
+
+  defp parse_timestamp(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, datetime, _offset} -> datetime
+      _ -> nil
+    end
+  end
+
+  defp parse_timestamp(_value), do: nil
+
+  defp naive_to_datetime(nil), do: nil
+
+  defp naive_to_datetime(%NaiveDateTime{} = datetime),
+    do: DateTime.from_naive!(datetime, "Etc/UTC")
+
+  defp naive_to_datetime(_value), do: nil
 
   defp extract_session_id("session:" <> rest) do
     rest

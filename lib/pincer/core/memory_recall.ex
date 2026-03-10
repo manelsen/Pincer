@@ -28,6 +28,29 @@ defmodule Pincer.Core.MemoryRecall do
           prompt_block: String.t()
         }
 
+  @type explain_result :: %{
+          query: String.t() | nil,
+          recall?: boolean(),
+          user_memory: String.t(),
+          hits: [recall_hit()],
+          source_hits: %{
+            messages: [recall_hit()],
+            documents: [recall_hit()],
+            semantic: [recall_hit()]
+          },
+          source_counts: %{
+            messages: non_neg_integer(),
+            documents: non_neg_integer(),
+            semantic: non_neg_integer()
+          },
+          source_outcomes: %{
+            messages: :ok | :error | :skipped,
+            documents: :ok | :error | :skipped,
+            semantic: :ok | :error | :skipped
+          },
+          prompt_block: String.t()
+        }
+
   @doc """
   Returns whether a query is eligible for runtime recall.
   """
@@ -61,6 +84,21 @@ defmodule Pincer.Core.MemoryRecall do
   """
   @spec build([map()], keyword()) :: result()
   def build(history, opts \\ []) do
+    explanation = explain(history, opts)
+
+    %{
+      query: explanation.query,
+      recall?: explanation.recall?,
+      hits: explanation.hits,
+      prompt_block: explanation.prompt_block
+    }
+  end
+
+  @doc """
+  Returns detailed recall diagnostics grouped by source.
+  """
+  @spec explain([map()], keyword()) :: explain_result()
+  def explain(history, opts \\ []) do
     workspace_path = Keyword.get(opts, :workspace_path, Process.get(:workspace_path, File.cwd!()))
     storage = Keyword.get(opts, :storage, Pincer.Ports.Storage)
     embedding_fun = Keyword.get(opts, :embedding_fun, &default_embedding/1)
@@ -68,6 +106,7 @@ defmodule Pincer.Core.MemoryRecall do
     limit = Keyword.get(opts, :limit, @default_limit)
     learnings_count = Keyword.get(opts, :learnings_count, 0)
     session_id = Keyword.get(opts, :session_id, Process.get(:session_id))
+    emit_telemetry? = Keyword.get(opts, :emit_telemetry?, true)
 
     query = last_user_query(history)
     recall? = eligible_query?(query)
@@ -75,39 +114,65 @@ defmodule Pincer.Core.MemoryRecall do
     user_memory = read_learned_user_memory(workspace_path) |> sanitize_for_prompt()
     started_at = System.monotonic_time()
 
-    {hits, recall_stats} =
+    {source_hits, hits, recall_stats} =
       if recall? do
         recall_hits(storage, embedding_fun, query, limit, telemetry,
           session_id: session_id,
-          query_length: query_length
+          query_length: query_length,
+          emit_telemetry?: emit_telemetry?,
+          session_id_filter: Keyword.get(opts, :session_id),
+          memory_type: Keyword.get(opts, :memory_type),
+          include_forgotten: Keyword.get(opts, :include_forgotten, false)
         )
       else
-        {[], %{message_hits: 0, document_hits: 0, semantic_hits: 0}}
+        {%{messages: [], documents: [], semantic: []}, [],
+         %{
+           message_hits: 0,
+           document_hits: 0,
+           semantic_hits: 0,
+           message_outcome: :skipped,
+           document_outcome: :skipped,
+           semantic_outcome: :skipped
+         }}
       end
 
     prompt_block = format_prompt_block(user_memory, hits)
 
-    telemetry.emit_memory_recall(
-      %{
-        duration_ms: duration_ms(started_at),
-        total_hits: length(hits),
-        message_hits: recall_stats.message_hits,
-        document_hits: recall_stats.document_hits,
-        semantic_hits: recall_stats.semantic_hits,
-        prompt_chars: String.length(prompt_block),
-        learnings_count: learnings_count
-      },
-      %{
-        eligible: recall?,
-        session_id: session_id,
-        query_length: query_length
-      }
-    )
+    if emit_telemetry? do
+      telemetry.emit_memory_recall(
+        %{
+          duration_ms: duration_ms(started_at),
+          total_hits: length(hits),
+          message_hits: recall_stats.message_hits,
+          document_hits: recall_stats.document_hits,
+          semantic_hits: recall_stats.semantic_hits,
+          prompt_chars: String.length(prompt_block),
+          learnings_count: learnings_count
+        },
+        %{
+          eligible: recall?,
+          session_id: session_id,
+          query_length: query_length
+        }
+      )
+    end
 
     %{
       query: query,
       recall?: recall?,
+      user_memory: user_memory,
       hits: hits,
+      source_hits: source_hits,
+      source_counts: %{
+        messages: recall_stats.message_hits,
+        documents: recall_stats.document_hits,
+        semantic: recall_stats.semantic_hits
+      },
+      source_outcomes: %{
+        messages: recall_stats.message_outcome,
+        documents: recall_stats.document_outcome,
+        semantic: recall_stats.semantic_outcome
+      },
       prompt_block: prompt_block
     }
   end
@@ -146,7 +211,7 @@ defmodule Pincer.Core.MemoryRecall do
   end
 
   defp recall_hits(storage, embedding_fun, query, limit, telemetry, telemetry_opts) do
-    {message_hits, message_count} =
+    {message_hits, _message_count, message_outcome} =
       search_source(
         :messages,
         fn -> storage.search_messages(query, limit) end,
@@ -154,45 +219,62 @@ defmodule Pincer.Core.MemoryRecall do
         telemetry_opts
       )
 
-    {document_hits, document_count} =
+    document_search_opts = document_search_opts(telemetry_opts)
+
+    {document_hits, document_count, document_outcome} =
       search_source(
         :documents,
-        fn -> storage.search_documents(query, limit) end,
+        fn -> storage.search_documents(query, limit, document_search_opts) end,
         telemetry,
         telemetry_opts
       )
 
-    {semantic_hits, semantic_count} =
+    {semantic_hits, semantic_count, semantic_outcome} =
       case embedding_fun.(query) do
         {:ok, vector} when is_list(vector) ->
-          search_source(
-            :semantic,
-            fn -> storage.search_similar("document", vector, limit) end,
+          {hits, _count, outcome} =
+            search_source(
+              :semantic,
+              fn -> storage.search_similar("document", vector, limit) end,
+              telemetry,
+              telemetry_opts
+            )
+
+          filtered_hits = filter_document_hits(hits, telemetry_opts)
+          {filtered_hits, length(filtered_hits), outcome}
+
+        _ ->
+          maybe_emit_search_telemetry(
             telemetry,
+            %{duration_ms: 0, hit_count: 0},
+            search_metadata(telemetry_opts, :semantic, :skipped),
             telemetry_opts
           )
 
-        _ ->
-          telemetry.emit_memory_search(
-            %{duration_ms: 0, hit_count: 0},
-            search_metadata(telemetry_opts, :semantic, :skipped)
-          )
-
-          {[], 0}
+          {[], 0, :skipped}
       end
 
-    hits =
-      (message_hits ++ document_hits ++ semantic_hits)
-      |> Enum.map(&normalize_hit/1)
-      |> Enum.reject(&(Map.get(&1, :content, "") == ""))
-      |> Enum.uniq_by(&{Map.get(&1, :source), Map.get(&1, :content)})
-      |> Enum.take(limit)
+    filtered_messages = filter_message_hits(message_hits, telemetry_opts)
 
-    {hits,
+    source_hits = %{
+      messages: Enum.map(filtered_messages, &normalize_hit/1),
+      documents: Enum.map(document_hits, &normalize_hit/1),
+      semantic: Enum.map(semantic_hits, &normalize_hit/1)
+    }
+
+    hits =
+      source_hits.messages
+      |> Kernel.++(merge_document_hits(source_hits.documents, source_hits.semantic))
+      |> select_recall_hits(limit)
+
+    {source_hits, hits,
      %{
-       message_hits: message_count,
+       message_hits: length(filtered_messages),
        document_hits: document_count,
-       semantic_hits: semantic_count
+       semantic_hits: semantic_count,
+       message_outcome: message_outcome,
+       document_outcome: document_outcome,
+       semantic_outcome: semantic_outcome
      }}
   end
 
@@ -211,13 +293,70 @@ defmodule Pincer.Core.MemoryRecall do
 
     hit_count = length(hits)
 
-    telemetry.emit_memory_search(
+    maybe_emit_search_telemetry(
+      telemetry,
       %{duration_ms: duration_ms(started_at), hit_count: hit_count},
-      search_metadata(telemetry_opts, source, outcome)
+      search_metadata(telemetry_opts, source, outcome),
+      telemetry_opts
     )
 
-    {hits, hit_count}
+    {hits, hit_count, outcome}
   end
+
+  defp maybe_emit_search_telemetry(telemetry, measurements, metadata, opts) do
+    if Keyword.get(opts, :emit_telemetry?, true) do
+      telemetry.emit_memory_search(measurements, metadata)
+    end
+  end
+
+  defp document_search_opts(opts) do
+    opts
+    |> Keyword.take([:memory_type, :session_id, :include_forgotten])
+  end
+
+  defp filter_message_hits(hits, opts) do
+    case Keyword.get(opts, :session_id_filter) do
+      nil ->
+        hits
+
+      session_id ->
+        Enum.filter(
+          hits,
+          &(extract_session_id(Map.get(&1, :source) || Map.get(&1, "source")) == session_id)
+        )
+    end
+  end
+
+  defp filter_document_hits(hits, opts) do
+    hits
+    |> Enum.filter(fn hit ->
+      case Keyword.get(opts, :session_id_filter) do
+        nil -> true
+        session_id -> (Map.get(hit, :session_id) || Map.get(hit, "session_id")) == session_id
+      end
+    end)
+    |> Enum.filter(fn hit ->
+      case Keyword.get(opts, :memory_type) do
+        nil ->
+          true
+
+        memory_type ->
+          (Map.get(hit, :memory_type) || Map.get(hit, "memory_type")) == to_string(memory_type)
+      end
+    end)
+    |> Enum.reject(fn hit ->
+      not Keyword.get(opts, :include_forgotten, false) and
+        (Map.get(hit, :forgotten?) || Map.get(hit, "forgotten?")) == true
+    end)
+  end
+
+  defp extract_session_id("session:" <> rest) do
+    rest
+    |> String.split(":", parts: 2)
+    |> List.first()
+  end
+
+  defp extract_session_id(_), do: nil
 
   defp normalize_hit(hit) do
     %{
@@ -230,8 +369,124 @@ defmodule Pincer.Core.MemoryRecall do
       citation:
         Map.get(hit, :citation) || Map.get(hit, "citation") ||
           Map.get(hit, :source) || Map.get(hit, "source") || "memory",
-      score: Map.get(hit, :score) || Map.get(hit, "score")
+      score: Map.get(hit, :score) || Map.get(hit, "score"),
+      signal: Map.get(hit, :signal) || Map.get(hit, "signal"),
+      signal_score: Map.get(hit, :signal_score) || Map.get(hit, "signal_score"),
+      signals:
+        Map.get(hit, :signals) || Map.get(hit, "signals") ||
+          [Map.get(hit, :signal) || Map.get(hit, "signal")] |> Enum.reject(&is_nil/1),
+      score_components:
+        Map.get(hit, :score_components) || Map.get(hit, "score_components") || %{},
+      memory_type: Map.get(hit, :memory_type) || Map.get(hit, "memory_type"),
+      session_id: Map.get(hit, :session_id) || Map.get(hit, "session_id"),
+      forgotten?: Map.get(hit, :forgotten?) || Map.get(hit, "forgotten?")
     }
+  end
+
+  defp merge_document_hits(document_hits, semantic_hits) do
+    (document_hits ++ semantic_hits)
+    |> Enum.reject(&(Map.get(&1, :content, "") == ""))
+    |> Enum.group_by(&{Map.get(&1, :source), Map.get(&1, :content)})
+    |> Enum.map(fn {_key, hits} -> merge_document_group(hits) end)
+  end
+
+  defp merge_document_group([hit]), do: hit
+
+  defp merge_document_group(hits) do
+    representative = Enum.max_by(hits, &score_value(&1))
+
+    signal_scores =
+      Enum.reduce(hits, %{}, fn hit, acc ->
+        case Map.get(hit, :signal) do
+          nil ->
+            acc
+
+          signal ->
+            Map.update(
+              acc,
+              signal,
+              Map.get(hit, :signal_score, score_value(hit)),
+              &max(&1, Map.get(hit, :signal_score, score_value(hit)))
+            )
+        end
+      end)
+
+    metadata_total =
+      case Enum.map(hits, &(get_in(&1, [:score_components, :metadata_total]) || 0.0)) do
+        [] -> 0.0
+        values -> Enum.max(values)
+      end
+
+    combined_score = metadata_total + Enum.sum(Map.values(signal_scores))
+
+    combined_components =
+      hits
+      |> Enum.reduce(%{}, fn hit, acc ->
+        Map.merge(acc, Map.get(hit, :score_components, %{}), fn _key, left, right ->
+          max(left, right)
+        end)
+      end)
+      |> Map.put(:metadata_total, metadata_total)
+
+    representative
+    |> Map.put(:score, combined_score)
+    |> Map.put(:signal_score, Enum.sum(Map.values(signal_scores)))
+    |> Map.put(:signals, signal_scores |> Map.keys() |> Enum.sort())
+    |> Map.put(:score_components, combined_components)
+  end
+
+  defp select_recall_hits(hits, limit) do
+    hits
+    |> Enum.reject(&(Map.get(&1, :content, "") == ""))
+    |> do_select_recall_hits(limit, %{sessions: %{}, types: %{}}, [])
+    |> Enum.reverse()
+  end
+
+  defp do_select_recall_hits(_hits, 0, _seen, acc), do: acc
+  defp do_select_recall_hits([], _limit, _seen, acc), do: acc
+
+  defp do_select_recall_hits(hits, limit, seen, acc) do
+    best = Enum.max_by(hits, &diversified_score(&1, seen))
+    remaining = List.delete(hits, best)
+    session_id = hit_session_id(best)
+    memory_type = Map.get(best, :memory_type)
+
+    next_seen = %{
+      sessions: bump_counter(seen.sessions, session_id),
+      types: bump_counter(seen.types, memory_type)
+    }
+
+    do_select_recall_hits(remaining, limit - 1, next_seen, [best | acc])
+  end
+
+  defp diversified_score(hit, seen) do
+    session_penalty =
+      hit
+      |> hit_session_id()
+      |> then(&Map.get(seen.sessions, &1, 0))
+      |> Kernel.*(0.08)
+
+    type_penalty =
+      hit
+      |> Map.get(:memory_type)
+      |> then(&Map.get(seen.types, &1, 0))
+      |> Kernel.*(0.04)
+
+    score_value(hit) - session_penalty - type_penalty
+  end
+
+  defp bump_counter(map, nil), do: map
+  defp bump_counter(map, key), do: Map.update(map, key, 1, &(&1 + 1))
+
+  defp hit_session_id(hit) do
+    Map.get(hit, :session_id) || extract_session_id(Map.get(hit, :source))
+  end
+
+  defp score_value(hit) do
+    case Map.get(hit, :score) do
+      value when is_number(value) -> value * 1.0
+      _ -> 0.0
+    end
   end
 
   defp read_learned_user_memory(workspace_path) do

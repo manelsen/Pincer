@@ -15,6 +15,7 @@ defmodule Pincer.Core.MemoryObservabilityTest do
 
     assert snapshot.recall.count == 0
     assert snapshot.recall.avg_duration_ms == 0.0
+    assert snapshot.recall.empty_count == 0
     assert snapshot.recall.total_hits == 0
     assert snapshot.search.count == 0
     assert snapshot.search.avg_duration_ms == 0.0
@@ -51,6 +52,19 @@ defmodule Pincer.Core.MemoryObservabilityTest do
       %{eligible: true, session_id: "s-1", query_length: 20}
     )
 
+    Telemetry.emit_memory_recall(
+      %{
+        duration_ms: 2,
+        total_hits: 0,
+        message_hits: 0,
+        document_hits: 0,
+        semantic_hits: 0,
+        prompt_chars: 8,
+        learnings_count: 0
+      },
+      %{eligible: true, session_id: "s-1", query_length: 20}
+    )
+
     snapshot = MemoryObservability.snapshot()
 
     assert snapshot.search.count == 2
@@ -60,16 +74,17 @@ defmodule Pincer.Core.MemoryObservabilityTest do
     assert snapshot.search.by_source.messages.total_hits == 2
     assert snapshot.search.by_source.semantic.skipped_count == 1
 
-    assert snapshot.recall.count == 1
-    assert snapshot.recall.eligible_count == 1
+    assert snapshot.recall.count == 2
+    assert snapshot.recall.eligible_count == 2
+    assert snapshot.recall.empty_count == 1
     assert snapshot.recall.total_hits == 2
-    assert snapshot.recall.prompt_chars == 120
+    assert snapshot.recall.prompt_chars == 128
     assert snapshot.recall.learnings_count == 1
-    assert snapshot.recall.avg_duration_ms == 18.0
+    assert snapshot.recall.avg_duration_ms == 10.0
 
     assert snapshot.last_search.source == :semantic
     assert snapshot.last_search.outcome == :skipped
     assert snapshot.last_recall.session_id == "s-1"
-    assert snapshot.last_recall.total_hits == 2
+    assert snapshot.last_recall.total_hits == 0
   end
 end
