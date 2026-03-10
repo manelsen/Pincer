@@ -9,7 +9,12 @@ defmodule Pincer.Core.TelemetryTest do
     :ok =
       :telemetry.attach_many(
         handler_id,
-        [[:pincer, :error], [:pincer, :retry]],
+        [
+          [:pincer, :error],
+          [:pincer, :retry],
+          [:pincer, :memory, :search],
+          [:pincer, :memory, :recall]
+        ],
         fn event, measurements, metadata, pid ->
           send(pid, {:telemetry, event, measurements, metadata})
         end,
@@ -37,5 +42,53 @@ defmodule Pincer.Core.TelemetryTest do
     assert_receive {:telemetry, [:pincer, :retry], %{count: 1, wait_ms: 42}, metadata}
     assert metadata.class == :http_429
     assert metadata.action == :chat_completion
+  end
+
+  test "emit_memory_search/2 publishes search event with normalized measurements" do
+    Telemetry.emit_memory_search(%{duration_ms: 12, hit_count: 3}, %{
+      source: :messages,
+      outcome: :ok,
+      session_id: "s-1",
+      query_length: 24
+    })
+
+    assert_receive {:telemetry, [:pincer, :memory, :search],
+                    %{count: 1, duration_ms: 12, hit_count: 3}, metadata}
+
+    assert metadata.source == :messages
+    assert metadata.outcome == :ok
+    assert metadata.session_id == "s-1"
+    assert metadata.query_length == 24
+  end
+
+  test "emit_memory_recall/2 publishes aggregated recall event" do
+    Telemetry.emit_memory_recall(
+      %{
+        duration_ms: 9,
+        total_hits: 4,
+        message_hits: 1,
+        document_hits: 2,
+        semantic_hits: 1,
+        prompt_chars: 180,
+        learnings_count: 2
+      },
+      %{eligible: true, session_id: "s-2", query_length: 31}
+    )
+
+    assert_receive {:telemetry, [:pincer, :memory, :recall],
+                    %{
+                      count: 1,
+                      duration_ms: 9,
+                      total_hits: 4,
+                      message_hits: 1,
+                      document_hits: 2,
+                      semantic_hits: 1,
+                      prompt_chars: 180,
+                      learnings_count: 2
+                    }, metadata}
+
+    assert metadata.eligible == true
+    assert metadata.session_id == "s-2"
+    assert metadata.query_length == 31
   end
 end

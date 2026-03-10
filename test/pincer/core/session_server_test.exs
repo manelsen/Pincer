@@ -57,6 +57,24 @@ defmodule Pincer.Core.Session.ServerTest do
     def index_document(_path, _content, _vector), do: :ok
 
     @impl true
+    def index_memory(_path, _content, _memory_type, _vector, _opts), do: :ok
+
+    @impl true
+    def search_messages(_query, _limit), do: {:ok, []}
+
+    @impl true
+    def search_documents(_query, _limit), do: {:ok, []}
+
+    @impl true
+    def search_documents(_query, _limit, _opts), do: {:ok, []}
+
+    @impl true
+    def search_sessions(_query, _limit), do: {:ok, []}
+
+    @impl true
+    def forget_memory(_source), do: :ok
+
+    @impl true
     def search_similar(_type, _vector, _limit), do: {:ok, []}
 
     defp agent do

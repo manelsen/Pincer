@@ -1,6 +1,6 @@
 defmodule Pincer.StorageSmokeTest do
   @moduledoc """
-  Smoke test to verify SQLite connection via the Storage Port.
+  Smoke test to verify PostgreSQL defaults via the Storage Port.
   """
   use ExUnit.Case
 
@@ -12,13 +12,13 @@ defmodule Pincer.StorageSmokeTest do
 
   test "storage port is configured" do
     adapter = Application.get_env(:pincer, :storage_adapter)
-    assert adapter == Pincer.Storage.Adapters.SQLite
+    assert adapter == Pincer.Storage.Adapters.Postgres
   end
 
-  test "repo is using sqlite3 adapter" do
+  test "repo is using postgres adapter" do
     config = Pincer.Infra.Repo.config()
-    assert config[:adapter] == Ecto.Adapters.SQLite3
-    # In test env, it uses db/pincer_test.db from test.exs
-    assert config[:database] =~ "pincer_test.db"
+    assert config[:adapter] == Ecto.Adapters.Postgres
+    assert config[:database] == "pincer_test"
+    assert config[:hostname] == "localhost"
   end
 end
