@@ -4,9 +4,11 @@ defmodule Pincer.Core.OnboardTest do
   alias Pincer.Core.Onboard
 
   describe "defaults/0" do
-    test "includes database path under db/" do
+    test "includes postgres database defaults" do
       defaults = Onboard.defaults()
-      assert get_in(defaults, ["database", "database"]) == "db/pincer_mvp.db"
+      assert get_in(defaults, ["database", "adapter"]) == "Ecto.Adapters.PostgreSQL"
+      assert get_in(defaults, ["database", "hostname"]) == "localhost"
+      assert get_in(defaults, ["database", "database"]) == "pincer_mvp"
     end
 
     test "includes whatsapp channel scaffold disabled by default" do
@@ -18,9 +20,10 @@ defmodule Pincer.Core.OnboardTest do
   end
 
   describe "plan/1" do
-    test "includes creation of db folder" do
+    test "creates runtime workspace directories without local db folder" do
       plan = Onboard.plan(Onboard.defaults())
-      assert {:mkdir_p, "db"} in plan
+      refute {:mkdir_p, "db"} in plan
+      assert {:mkdir_p, "sessions"} in plan
     end
   end
 
@@ -33,7 +36,6 @@ defmodule Pincer.Core.OnboardTest do
     test "plan/2 scopes operations by selected capabilities" do
       assert {:ok, plan} = Onboard.plan(Onboard.defaults(), capabilities: ["workspace_dirs"])
 
-      assert {:mkdir_p, "db"} in plan
       assert {:mkdir_p, Pincer.Core.AgentPaths.base_dir()} in plan
       assert {:mkdir_p, "sessions"} in plan
       assert {:mkdir_p, "memory"} in plan
@@ -74,7 +76,6 @@ defmodule Pincer.Core.OnboardTest do
       assert {:ok, report} = Onboard.apply_plan(plan, root: tmp)
       assert is_map(report)
 
-      assert File.dir?(Path.join(tmp, "db"))
       assert File.dir?(Path.join(tmp, Pincer.Core.AgentPaths.base_dir()))
       assert File.dir?(Path.join(tmp, "sessions"))
       assert File.dir?(Path.join(tmp, "memory"))
@@ -96,7 +97,8 @@ defmodule Pincer.Core.OnboardTest do
              )
 
       {:ok, config} = YamlElixir.read_from_file(Path.join(tmp, "config.yaml"))
-      assert config["database"]["database"] == "db/pincer_mvp.db"
+      assert config["database"]["database"] == "pincer_mvp"
+      assert config["database"]["hostname"] == "localhost"
     end
   end
 
@@ -105,14 +107,14 @@ defmodule Pincer.Core.OnboardTest do
       assert :ok = Onboard.preflight(Onboard.defaults())
     end
 
-    test "returns error issues with hint for invalid db path" do
-      config = put_in(Onboard.defaults(), ["database", "database"], "../outside.db")
+    test "returns error issues with hint for invalid database name" do
+      config = put_in(Onboard.defaults(), ["database", "database"], "../outside")
 
       assert {:error, issues} = Onboard.preflight(config)
 
       assert Enum.any?(issues, fn issue ->
-               issue.id == :invalid_db_path and
-                 String.contains?(issue.hint, "Use a relative path")
+               issue.id == :invalid_db_name and
+                 String.contains?(issue.hint, "database name")
              end)
     end
 
@@ -133,7 +135,7 @@ defmodule Pincer.Core.OnboardTest do
   describe "merge_config/2" do
     test "deep-merges defaults and existing config without dropping custom keys" do
       existing = %{
-        "database" => %{"database" => "db/existing.db"},
+        "database" => %{"database" => "existing_db", "hostname" => "db.internal"},
         "llm" => %{
           "provider" => "z_ai",
           "z_ai" => %{
@@ -150,7 +152,8 @@ defmodule Pincer.Core.OnboardTest do
 
       merged = Onboard.merge_config(Onboard.defaults(), existing)
 
-      assert get_in(merged, ["database", "database"]) == "db/existing.db"
+      assert get_in(merged, ["database", "database"]) == "existing_db"
+      assert get_in(merged, ["database", "hostname"]) == "db.internal"
       assert get_in(merged, ["llm", "z_ai", "base_url"]) == "https://custom.example/v1"
       assert get_in(merged, ["llm", "custom_provider", "default_model"]) == "cp-model"
       assert get_in(merged, ["custom_section", "keep_me"]) == true
@@ -214,7 +217,7 @@ defmodule Pincer.Core.OnboardTest do
     test "builds deterministic remote bootstrap command and steps" do
       config =
         Onboard.defaults()
-        |> put_in(["database", "database"], "db/remote.db")
+        |> put_in(["database", "database"], "remote_db")
         |> put_in(["llm", "provider"], "openrouter")
         |> put_in(["llm", "openrouter", "default_model"], "openrouter/free")
 
@@ -229,7 +232,7 @@ defmodule Pincer.Core.OnboardTest do
       assert plan.target == "deploy@vps.example.com"
       assert plan.project_path == "/srv/pincer"
       assert String.contains?(plan.onboard_command, "mix pincer.onboard --non-interactive --yes")
-      assert String.contains?(plan.onboard_command, "--db-path 'db/remote.db'")
+      assert String.contains?(plan.onboard_command, "--db-name 'remote_db'")
       assert String.contains?(plan.onboard_command, "--provider 'openrouter'")
       assert String.contains?(plan.onboard_command, "--model 'openrouter/free'")
       assert String.contains?(plan.onboard_command, "--capabilities 'workspace_dirs,config_yaml'")

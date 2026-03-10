@@ -38,7 +38,7 @@ defmodule Pincer.Core.ErrorClassTest do
                description: ""
              }) == :stream_payload
 
-      assert ErrorClass.classify(%Exqlite.Error{message: "no such table: events"}) == :db_schema
+      assert ErrorClass.classify(%RuntimeError{message: "undefined table: events"}) == :db_schema
     end
 
     test "falls back to unknown class" do
