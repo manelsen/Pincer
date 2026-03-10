@@ -198,6 +198,42 @@ defmodule Pincer.Storage.Adapters.Postgres do
   end
 
   @impl true
+  def search_graph_history(query, limit \\ 5) do
+    tokens = search_tokens(query)
+
+    if tokens == [] do
+      {:ok, []}
+    else
+      query =
+        from(b in Node,
+          join: occurs in Edge,
+          on: occurs.from_id == b.id and occurs.type == "occurs_in",
+          join: f in Node,
+          on: f.id == occurs.to_id and f.type == "file",
+          left_join: solves in Edge,
+          on: solves.to_id == b.id and solves.type == "solves",
+          left_join: fx in Node,
+          on: fx.id == solves.from_id and fx.type == "fix",
+          where: b.type == "bug",
+          select: %{
+            bug: fragment("COALESCE(?->>'description', '')", b.data),
+            fix: fragment("COALESCE(?->>'summary', '')", fx.data),
+            file: fragment("COALESCE(?->>'path', '')", f.data)
+          }
+        )
+
+      {:ok,
+       query
+       |> Repo.all()
+       |> Enum.map(&graph_history_result(&1, tokens))
+       |> Enum.filter(&(&1.score > 0.0))
+       |> Enum.sort_by(&{-&1.score, &1.file})
+       |> Enum.uniq_by(&{&1.bug, &1.fix, &1.file})
+       |> Enum.take(limit)}
+    end
+  end
+
+  @impl true
   def memory_report(limit \\ 5) do
     {:ok,
      %{
@@ -728,6 +764,25 @@ defmodule Pincer.Storage.Adapters.Postgres do
 
         {length(bug_nodes), length(fix_nodes), overlap_count}
     end
+  end
+
+  defp graph_history_result(%{bug: bug, fix: fix, file: file}, query_tokens) do
+    graph_text = Enum.join([bug, fix, file], " ") |> String.downcase()
+    overlap = Enum.count(query_tokens, &String.contains?(graph_text, &1))
+    normalized = overlap / max(length(query_tokens), 1)
+    incident_bonus = if incident_query?(query_tokens), do: 0.1, else: 0.0
+    score = min(1.0, normalized + incident_bonus)
+
+    %{
+      kind: :graph,
+      bug: bug,
+      fix: fix,
+      file: file,
+      content: "Bug: #{bug}. Fix: #{fix}. File: #{file}",
+      source: "graph://#{file}",
+      citation: "graph #{file}",
+      score: score
+    }
   end
 
   defp incident_query?(tokens) do
