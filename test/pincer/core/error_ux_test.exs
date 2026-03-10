@@ -44,7 +44,7 @@ defmodule Pincer.Core.ErrorUXTest do
     end
 
     test "maps database schema issue" do
-      msg = ErrorUX.friendly(%Exqlite.Error{message: "no such table: cron_jobs"})
+      msg = ErrorUX.friendly(%RuntimeError{message: "undefined table: cron_jobs"})
       assert msg =~ "nao esta migrado"
     end
 

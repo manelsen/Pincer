@@ -354,7 +354,7 @@ defmodule Pincer.Core.Session.Server do
   def handle_call(:reset, _from, state) do
     Logger.info("[SESSION] #{state.session_id} resetting history...")
 
-    # 1. Clear SQLite
+    # 1. Clear persisted transcripts in Postgres
     Pincer.Ports.Storage.delete_messages(state.session_id)
 
     # 2. Reset RAM (keep only the initial system prompt)
@@ -614,7 +614,7 @@ defmodule Pincer.Core.Session.Server do
   end
 
   def set_model(id, provider, model) do
-    GenServer.call(via_tuple(id), {:set_model, provider, model})
+    GenServer.call(via_tuple(id), {:set_model, provider, model}, 15_000)
   end
 
   def set_thinking(id, level),

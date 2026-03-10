@@ -7,7 +7,7 @@ defmodule Pincer.Adapters.Cron.SchedulerTest do
 
   test "keeps scheduler alive when cron_jobs table is missing" do
     missing_table_fetcher = fn ->
-      raise %Exqlite.Error{message: "no such table: cron_jobs"}
+      raise %RuntimeError{message: "undefined table: cron_jobs"}
     end
 
     parent = self()

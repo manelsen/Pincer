@@ -28,7 +28,6 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
       end)
 
     assert File.exists?("config.yaml")
-    assert File.dir?("db")
     assert File.dir?(Pincer.Core.AgentPaths.base_dir())
     assert File.dir?("sessions")
     assert File.dir?("memory")
@@ -37,18 +36,19 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     assert File.exists?("#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/HISTORY.md")
 
     {:ok, config} = YamlElixir.read_from_file("config.yaml")
-    assert config["database"]["database"] == "db/pincer_mvp.db"
+    assert config["database"]["database"] == "pincer_mvp"
+    assert config["database"]["hostname"] == "localhost"
     assert output =~ "npm install --prefix infrastructure/whatsapp"
     assert output =~ "channels.whatsapp.enabled=true"
   end
 
-  test "db-path flag overrides database output" do
+  test "db-name flag overrides database output" do
     capture_io(fn ->
-      Mix.Task.run(@task, ["--non-interactive", "--yes", "--db-path", "db/custom.db"])
+      Mix.Task.run(@task, ["--non-interactive", "--yes", "--db-name", "custom_db"])
     end)
 
     {:ok, config} = YamlElixir.read_from_file("config.yaml")
-    assert config["database"]["database"] == "db/custom.db"
+    assert config["database"]["database"] == "custom_db"
   end
 
   test "capabilities flag limits onboarding operations" do
@@ -61,7 +61,6 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
       ])
     end)
 
-    assert File.dir?("db")
     assert File.dir?(Pincer.Core.AgentPaths.base_dir())
     assert File.dir?("sessions")
     assert File.dir?("memory")
@@ -91,21 +90,21 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
           "--yes",
           "--capabilities",
           "workspace_dirs,memory_file",
-          "--db-path",
-          "db/custom.db"
+          "--db-name",
+          "custom_db"
         ])
       end)
     end
   end
 
-  test "preflight fails with hint for invalid db path" do
+  test "preflight fails with hint for invalid database name" do
     assert_raise Mix.Error, ~r/Onboarding preflight failed/, fn ->
       capture_io(fn ->
         Mix.Task.run(@task, [
           "--non-interactive",
           "--yes",
-          "--db-path",
-          "../outside.db"
+          "--db-name",
+          "../outside"
         ])
       end)
     end
@@ -116,7 +115,8 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
       "config.yaml",
       """
       database:
-        database: "db/existing.db"
+        database: "existing_db"
+        hostname: "db.internal"
       llm:
         provider: "z_ai"
         z_ai:
@@ -131,12 +131,13 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     )
 
     capture_io(fn ->
-      Mix.Task.run(@task, ["--non-interactive", "--yes", "--db-path", "db/merged.db"])
+      Mix.Task.run(@task, ["--non-interactive", "--yes", "--db-name", "merged_db"])
     end)
 
     {:ok, config} = YamlElixir.read_from_file("config.yaml")
 
-    assert config["database"]["database"] == "db/merged.db"
+    assert config["database"]["database"] == "merged_db"
+    assert config["database"]["hostname"] == "db.internal"
     assert config["custom_section"]["keep_me"] == true
     assert config["llm"]["custom_provider"]["default_model"] == "cp-model"
     assert config["llm"]["z_ai"]["base_url"] == "https://custom.example/v1"
@@ -169,8 +170,8 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
           "/srv/pincer",
           "--capabilities",
           "workspace_dirs,config_yaml",
-          "--db-path",
-          "db/remote.db",
+          "--db-name",
+          "remote_db",
           "--provider",
           "openrouter",
           "--model",
