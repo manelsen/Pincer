@@ -1,7 +1,7 @@
 FROM golang:1.25 AS whatsapp-builder
 
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends libsqlite3-dev build-essential && \
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
     rm -rf /var/lib/apt/lists/*
 COPY infrastructure/whatsapp ./infrastructure/whatsapp
 RUN cd infrastructure/whatsapp && go build -o whatsapp_bridge main.go
@@ -50,7 +50,7 @@ ENV MIX_ENV=prod \
     HEX_HOME=/app/.hex
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates libsqlite3-0 inotify-tools nodejs npm python3 python3-venv python3-pip && \
+    apt-get install -y --no-install-recommends ca-certificates inotify-tools nodejs npm postgresql-client python3 python3-venv python3-pip && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --gid "${APP_GID}" pincer && \
     useradd --uid "${APP_UID}" --gid pincer --home /app --shell /bin/sh --create-home pincer
@@ -79,7 +79,7 @@ COPY --from=builder /root/.mix /app/.mix
 COPY --from=builder /root/.hex /app/.hex
 COPY infrastructure/docker/entrypoint.sh /app/infrastructure/docker/entrypoint.sh
 
-RUN mkdir -p /app/db /app/logs /app/sessions /app/memory /app/workspaces && \
+RUN mkdir -p /app/logs /app/sessions /app/memory /app/workspaces && \
     chmod +x /app/infrastructure/docker/entrypoint.sh && \
     chown -R pincer:pincer /app
 

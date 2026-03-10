@@ -32,8 +32,13 @@ channels:
     default_source: "external"
     default_session_id: "webhook_main"
 database:
-  adapter: "Ecto.Adapters.SQLite3"
-  database: "db/pincer_mvp.db"
+  adapter: "Ecto.Adapters.PostgreSQL"
+  hostname: "localhost"
+  port: 5432
+  username: "postgres"
+  password: "postgres"
+  database: "pincer_mvp"
+  pool_size: 10
 llm:
   opencode_zen:
     base_url: "https://opencode.ai/zen/v1/chat/completions"

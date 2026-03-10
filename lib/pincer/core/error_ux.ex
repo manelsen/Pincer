@@ -66,11 +66,24 @@ defmodule Pincer.Core.ErrorUX do
   defp friendly_normalized({:retry_timeout, _}, _scope),
     do: "Atingi o tempo maximo de tentativas para este provedor. Tente novamente em instantes."
 
-  defp friendly_normalized(%Exqlite.Error{message: msg}, _scope) when is_binary(msg) do
-    if String.contains?(msg, "no such table") do
-      "O banco local nao esta migrado (tabela ausente). Execute as migracoes e tente novamente."
+  defp friendly_normalized(%Postgrex.Error{postgres: %{code: :undefined_table}}, _scope),
+    do: "O banco nao esta migrado (tabela ausente). Execute as migracoes e tente novamente."
+
+  defp friendly_normalized(%Postgrex.Error{} = error, _scope) do
+    msg = Exception.message(error)
+
+    if db_schema_message?(msg) do
+      "O banco nao esta migrado (tabela ausente). Execute as migracoes e tente novamente."
     else
-      "Falha no banco local. Verifique migracoes e disponibilidade do arquivo de banco."
+      "Falha no banco PostgreSQL. Verifique migracoes e disponibilidade do servico."
+    end
+  end
+
+  defp friendly_normalized(%RuntimeError{message: msg}, _scope) when is_binary(msg) do
+    if db_schema_message?(msg) do
+      "O banco nao esta migrado (tabela ausente). Execute as migracoes e tente novamente."
+    else
+      "Tive um erro tecnico temporario. Tente novamente em instantes. Se persistir, use /status."
     end
   end
 
@@ -118,5 +131,14 @@ defmodule Pincer.Core.ErrorUX do
       String.contains?(down, "input tokens") or
       String.contains?(down, "max_tokens") or
       String.contains?(down, "max_completion_tokens")
+  end
+
+  defp db_schema_message?(msg) when is_binary(msg) do
+    down = String.downcase(msg)
+
+    (String.contains?(down, "no such table") or
+       String.contains?(down, "undefined table") or
+       String.contains?(down, "does not exist")) and
+      (String.contains?(down, "table") or String.contains?(down, "relation"))
   end
 end

@@ -1,8 +1,8 @@
 defmodule Pincer.Infra.Repo do
   @moduledoc """
-  SQLite3 Ecto repository for persistent storage (messages, sessions, jobs).
+  PostgreSQL Ecto repository for persistent storage and pgvector-backed search.
   """
   use Ecto.Repo,
     otp_app: :pincer,
-    adapter: Ecto.Adapters.SQLite3
+    adapter: Ecto.Adapters.Postgres
 end

@@ -19,8 +19,12 @@ defmodule Pincer.Infra.Config do
   The `config.yaml` file should contain:
 
       database:
-        adapter: "Ecto.Adapters.SQLite3"
-        database: "db/pincer.db"
+        adapter: "Ecto.Adapters.PostgreSQL"
+        hostname: "localhost"
+        port: 5432
+        username: "postgres"
+        password: "postgres"
+        database: "pincer"
 
       llm:
         provider: "opencode_zen"
@@ -193,11 +197,25 @@ defmodule Pincer.Infra.Config do
 
           ecto_config =
             case db_config["adapter"] do
-              "Ecto.Adapters.SQLite3" ->
-                Keyword.put(ecto_config, :adapter, Ecto.Adapters.SQLite3)
-
               "Ecto.Adapters.PostgreSQL" ->
-                Keyword.put(ecto_config, :adapter, Ecto.Adapters.PostgreSQL)
+                ecto_config
+                |> Keyword.put(:adapter, Ecto.Adapters.Postgres)
+                |> Keyword.put(:types, Pincer.Infra.PostgrexTypes)
+                |> maybe_put_runtime_override(:hostname, "PINCER_DB_HOST")
+                |> maybe_put_runtime_override(:port, "PINCER_DB_PORT", &String.to_integer/1)
+                |> maybe_put_runtime_override(:username, "PINCER_DB_USER")
+                |> maybe_put_runtime_override(:password, "PINCER_DB_PASSWORD")
+                |> maybe_put_runtime_override(:database, "PINCER_DB_NAME")
+                |> maybe_put_runtime_override(
+                  :pool_size,
+                  "PINCER_DB_POOL_SIZE",
+                  &String.to_integer/1
+                )
+                |> maybe_put_runtime_override(
+                  :ssl,
+                  "PINCER_DB_SSL",
+                  &(&1 in ["1", "true", "TRUE"])
+                )
 
               _ ->
                 ecto_config
@@ -271,6 +289,19 @@ defmodule Pincer.Infra.Config do
   @spec fetch!(atom()) :: term()
   def fetch!(key) do
     Application.fetch_env!(:pincer, key)
+  end
+
+  defp maybe_put_runtime_override(config, key, env_key, caster \\ & &1) do
+    case System.get_env(env_key) do
+      nil ->
+        config
+
+      "" ->
+        config
+
+      value ->
+        Keyword.put(config, key, caster.(value))
+    end
   end
 
   @doc """
