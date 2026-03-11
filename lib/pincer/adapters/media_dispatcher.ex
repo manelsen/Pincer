@@ -18,7 +18,10 @@ defmodule Pincer.Adapters.MediaDispatcher do
   """
   @impl true
   def transcribe_audio(audio_binary, opts \\ []) when is_binary(audio_binary) do
-    Pincer.Ports.LLM.transcribe_audio(audio_binary, Keyword.put_new(opts, :provider, "groq_whisper"))
+    Pincer.Ports.LLM.transcribe_audio(
+      audio_binary,
+      Keyword.put_new(opts, :provider, "groq_whisper")
+    )
   end
 
   @doc """

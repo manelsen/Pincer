@@ -133,7 +133,10 @@ defmodule Pincer.Storage.Graph.Node do
     node
     |> cast(attrs, [:type, :data, :embedding, :importance_score, :access_count, :last_accessed_at])
     |> validate_required([:type, :data])
-    |> validate_number(:importance_score, greater_than_or_equal_to: 0.0, less_than_or_equal_to: 1.0)
+    |> validate_number(:importance_score,
+      greater_than_or_equal_to: 0.0,
+      less_than_or_equal_to: 1.0
+    )
     |> validate_number(:access_count, greater_than_or_equal_to: 0)
   end
 end
