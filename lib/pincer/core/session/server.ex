@@ -354,6 +354,22 @@ defmodule Pincer.Core.Session.Server do
   def handle_call(:reset, _from, state) do
     Logger.info("[SESSION] #{state.session_id} resetting history...")
 
+    history = state.history
+    session_id = state.session_id
+
+    Task.start(fn ->
+      message_count = history |> Enum.reject(&(&1["role"] == "system")) |> length()
+      reset_at = DateTime.utc_now()
+
+      snapshot_content =
+        "session_id=#{session_id} message_count=#{message_count} reset_at=#{DateTime.to_iso8601(reset_at)}"
+
+      case Pincer.Core.Memory.record_session(snapshot_content, session_id: session_id) do
+        {:ok, _} -> :ok
+        {:error, reason} -> Logger.info("[SESSION] reset snapshot skipped: #{inspect(reason)}")
+      end
+    end)
+
     # 1. Clear persisted transcripts in Postgres
     Pincer.Ports.Storage.delete_messages(state.session_id)
 
@@ -452,8 +468,15 @@ defmodule Pincer.Core.Session.Server do
 
       {:reply, {:ok, :butler_notified}, %{state | history: new_history}}
     else
+      model_override_with_thinking =
+        if state.thinking_level != nil and is_map(state.model_override) do
+          Map.put(state.model_override, :thinking_level, state.thinking_level)
+        else
+          state.model_override
+        end
+
       executor_opts = [
-        model_override: state.model_override,
+        model_override: model_override_with_thinking,
         workspace_path: state.workspace_path
       ]
 

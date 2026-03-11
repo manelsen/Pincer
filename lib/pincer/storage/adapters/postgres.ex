@@ -14,6 +14,7 @@ defmodule Pincer.Storage.Adapters.Postgres do
 
   alias Pincer.Core.MemoryTypes
   alias Pincer.Infra.Repo
+  alias Pincer.Storage.Checkpoint
   alias Pincer.Storage.Graph.{Edge, Node}
   alias Pincer.Storage.Message
   import Ecto.Query
@@ -80,25 +81,73 @@ defmodule Pincer.Storage.Adapters.Postgres do
 
   @impl true
   def save_learning(category, summary) do
-    data = %{
-      "category" => category,
-      "summary" => summary,
-      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
-    }
+    pattern_key = build_pattern_key(category, summary)
+    now = DateTime.utc_now()
 
-    create_node("learning", data)
+    case find_node_by_pattern_key(pattern_key) do
+      nil ->
+        data = %{
+          "category" => category,
+          "summary" => summary,
+          "timestamp" => DateTime.to_iso8601(now),
+          "structured_id" => build_structured_id("LRN", summary),
+          "pattern_key" => pattern_key,
+          "recurrence_count" => 1,
+          "first_seen_at" => DateTime.to_iso8601(now),
+          "last_seen_at" => DateTime.to_iso8601(now)
+        }
+
+        create_node("learning", data)
+
+      existing ->
+        next_count = (existing.data["recurrence_count"] || 1) + 1
+
+        next_data =
+          existing.data
+          |> Map.put("recurrence_count", next_count)
+          |> Map.put("last_seen_at", DateTime.to_iso8601(now))
+
+        existing
+        |> Node.changeset(%{data: next_data})
+        |> Repo.update()
+    end
   end
 
   @impl true
   def save_tool_error(tool, args, error) do
-    data = %{
-      "tool" => tool,
-      "args" => args,
-      "error" => error,
-      "timestamp" => DateTime.utc_now() |> DateTime.to_iso8601()
-    }
+    category = tool
+    summary = to_string(error)
+    pattern_key = build_pattern_key(category, summary)
+    now = DateTime.utc_now()
 
-    create_node("tool_error", data)
+    case find_node_by_pattern_key(pattern_key) do
+      nil ->
+        data = %{
+          "tool" => tool,
+          "args" => args,
+          "error" => error,
+          "timestamp" => DateTime.to_iso8601(now),
+          "structured_id" => build_structured_id("ERR", summary),
+          "pattern_key" => pattern_key,
+          "recurrence_count" => 1,
+          "first_seen_at" => DateTime.to_iso8601(now),
+          "last_seen_at" => DateTime.to_iso8601(now)
+        }
+
+        create_node("tool_error", data)
+
+      existing ->
+        next_count = (existing.data["recurrence_count"] || 1) + 1
+
+        next_data =
+          existing.data
+          |> Map.put("recurrence_count", next_count)
+          |> Map.put("last_seen_at", DateTime.to_iso8601(now))
+
+        existing
+        |> Node.changeset(%{data: next_data})
+        |> Repo.update()
+    end
   end
 
   @impl true
@@ -523,13 +572,19 @@ defmodule Pincer.Storage.Adapters.Postgres do
     do: is_binary(data["forgotten_at"]) and String.trim(data["forgotten_at"]) != ""
 
   defp touch_memory_access(%Node{data: data} = node) do
+    now = DateTime.utc_now()
+
     next_data =
       data
       |> Map.put("access_count", (data["access_count"] || 0) + 1)
-      |> Map.put("last_accessed_at", DateTime.utc_now() |> DateTime.to_iso8601())
+      |> Map.put("last_accessed_at", DateTime.to_iso8601(now))
 
     node
-    |> Node.changeset(%{data: next_data})
+    |> Node.changeset(%{
+      data: next_data,
+      access_count: node.access_count + 1,
+      last_accessed_at: DateTime.truncate(now, :second)
+    })
     |> Repo.update()
 
     :ok
@@ -868,5 +923,68 @@ defmodule Pincer.Storage.Adapters.Postgres do
   defp add_optional_clause(clauses, params, next_index, value, builder) do
     {clause, param} = builder.(value, next_index)
     {clauses ++ [clause], params ++ [param], next_index + 1}
+  end
+
+  # ---------------------------------------------------------------------------
+  # LRN-01 / LRN-02 helpers
+  # ---------------------------------------------------------------------------
+
+  defp build_structured_id(prefix, content) do
+    date = Date.utc_today() |> Date.to_string() |> String.replace("-", "")
+    seq = :crypto.hash(:sha256, content) |> Base.encode16() |> String.slice(-8, 8)
+    "#{prefix}-#{date}-#{seq}"
+  end
+
+  defp build_pattern_key(category, summary) do
+    :crypto.hash(:sha256, category <> "::" <> summary)
+    |> Base.encode16()
+    |> String.slice(0, 8)
+  end
+
+  defp find_node_by_pattern_key(pattern_key) do
+    from(n in Node,
+      where: fragment("?->>'pattern_key' = ?", n.data, ^pattern_key)
+    )
+    |> Repo.one()
+  end
+
+  # ---------------------------------------------------------------------------
+  # CHK-01 checkpoint helpers
+  # ---------------------------------------------------------------------------
+
+  @impl true
+  def save_checkpoint(session_id, checkpoint) do
+    now = DateTime.utc_now() |> DateTime.truncate(:second)
+
+    # Invalidate any previous running/paused checkpoints for this session
+    from(c in Checkpoint,
+      where: c.session_id == ^session_id and c.status in ["running", "paused"]
+    )
+    |> Repo.update_all(set: [status: "paused", updated_at: now])
+
+    attrs =
+      checkpoint
+      |> Map.put(:session_id, session_id)
+      |> Map.put(:status, Map.get(checkpoint, :status, "running"))
+
+    %Checkpoint{}
+    |> Checkpoint.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @impl true
+  def load_checkpoint(session_id, _opts \\ []) do
+    result =
+      from(c in Checkpoint,
+        where: c.session_id == ^session_id and c.status in ["running", "paused"],
+        order_by: [desc: c.inserted_at],
+        limit: 1
+      )
+      |> Repo.one()
+
+    case result do
+      nil -> {:error, :not_found}
+      checkpoint -> {:ok, checkpoint}
+    end
   end
 end

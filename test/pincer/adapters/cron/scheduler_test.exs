@@ -27,8 +27,8 @@ defmodule Pincer.Adapters.Cron.SchedulerTest do
           )
 
         send(parent, {:started, pid})
-        # Wait a bit for the async tick to log
-        Process.sleep(50)
+        # Wait for the async tick to log (generous budget for loaded CI)
+        Process.sleep(200)
       end)
 
     pid =
@@ -42,7 +42,7 @@ defmodule Pincer.Adapters.Cron.SchedulerTest do
     second_log =
       capture_log(fn ->
         send(pid, :tick)
-        Process.sleep(25)
+        Process.sleep(100)
       end)
 
     refute second_log =~ "cron_jobs table missing"

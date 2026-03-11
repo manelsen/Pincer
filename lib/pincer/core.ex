@@ -46,6 +46,7 @@ defmodule Pincer.Core do
       Graph.Runner,
       Graph.Sync,
       Graph.Watcher,
-      Heartbeat.GitHubWatcher
+      Heartbeat.GitHubWatcher,
+      HookDispatcher
     ]
 end
