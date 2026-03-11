@@ -148,6 +148,48 @@ defmodule Pincer.Adapters.Tools.SafeShellDynamicProfileTest do
                  )
       end)
     end
+
+    test "blocks home-relative path arguments" do
+      with_temp_workspace(fn root ->
+        assert {:error, _} =
+                 SafeShell.approved_command_allowed?("cat ~/.ssh/config",
+                   workspace_root: root,
+                   workspace_restrict: true
+                 )
+      end)
+    end
+
+    test "blocks windows absolute path arguments" do
+      with_temp_workspace(fn root ->
+        assert {:error, _} =
+                 SafeShell.approved_command_allowed?("cat C:\\Windows\\win.ini",
+                   workspace_root: root,
+                   workspace_restrict: true
+                 )
+      end)
+    end
+
+    test "blocks null bytes in path arguments" do
+      with_temp_workspace(fn root ->
+        assert {:error, _} =
+                 SafeShell.approved_command_allowed?("cat lib/\x00evil",
+                   workspace_root: root,
+                   workspace_restrict: true
+                 )
+      end)
+    end
+
+    test "allows workspace-relative file arguments that stay confined" do
+      with_temp_workspace(fn root ->
+        write_file(root, "README.md", "hello\n")
+
+        assert :ok =
+                 SafeShell.approved_command_allowed?("cat README.md",
+                   workspace_root: root,
+                   workspace_restrict: true
+                 )
+      end)
+    end
   end
 
   defp with_temp_workspace(fun) do
