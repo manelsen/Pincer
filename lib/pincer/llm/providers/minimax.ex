@@ -112,5 +112,4 @@ defmodule Pincer.LLM.Providers.MiniMax do
   end
 
   defp build_auth_headers(_api_key, _group_id), do: []
-
 end
