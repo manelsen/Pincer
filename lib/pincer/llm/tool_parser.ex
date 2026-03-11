@@ -44,8 +44,10 @@ defmodule Pincer.LLM.ToolParser do
         end)
       end
 
+    trimmed_content = String.trim(cleaned_content)
+
     assistant_msg
-    |> Map.put("content", if(cleaned_content == "", do: nil, else: String.trim(cleaned_content)))
+    |> Map.put("content", if(trimmed_content == "", do: nil, else: trimmed_content))
     |> Map.put("tool_calls", final_calls)
   end
 
@@ -86,17 +88,18 @@ defmodule Pincer.LLM.ToolParser do
     params =
       Regex.scan(param_regex, inner_xml)
       |> Enum.into(%{}, fn [_, name, value] ->
-        {String.trim(name), String.trim(value)}
+        normalized_name = String.trim(name)
+        {normalized_name, normalize_parameter_value(normalized_name, value)}
       end)
 
     if map_size(params) > 0 do
-      tool_name = infer_tool_name(params)
+      {tool_name, normalized_params} = normalize_tool_call(params)
 
       %{
         "type" => "function",
         "function" => %{
           "name" => tool_name,
-          "arguments" => Jason.encode!(params)
+          "arguments" => Jason.encode!(normalized_params)
         }
       }
     else
@@ -104,13 +107,62 @@ defmodule Pincer.LLM.ToolParser do
     end
   end
 
+  defp normalize_tool_call(params) do
+    tool_name = infer_tool_name(params)
+
+    normalized_params =
+      cond do
+        anchored_edit_payload?(params) ->
+          %{
+            "action" => "anchored_edit",
+            "path" => params["path"],
+            "edits" => [
+              %{
+                "op" => Map.get(params, "op", "replace"),
+                "anchor" => params["anchor"],
+                "content" => params["content"]
+              }
+              |> maybe_put_end_anchor(params)
+            ]
+          }
+
+        true ->
+          params
+      end
+
+    {tool_name, normalized_params}
+  end
+
   # Infers what Pincer tool best matches the provided parameter payload
   defp infer_tool_name(params) do
     cond do
-      Map.has_key?(params, "command") -> "run_command"
+      Map.has_key?(params, "command") -> "safe_shell"
+      anchored_edit_payload?(params) -> "file_system"
       Map.has_key?(params, "path") and Map.has_key?(params, "content") -> "file_system"
-      Map.has_key?(params, "path") -> "read_file"
+      Map.has_key?(params, "path") -> "file_system"
       true -> "unknown_tool"
     end
   end
+
+  defp anchored_edit_payload?(params) do
+    Map.has_key?(params, "path") and Map.has_key?(params, "anchor") and
+      Map.has_key?(params, "content")
+  end
+
+  defp maybe_put_end_anchor(edit, %{"end_anchor" => end_anchor}) when is_binary(end_anchor) do
+    Map.put(edit, "end_anchor", end_anchor)
+  end
+
+  defp maybe_put_end_anchor(edit, _params), do: edit
+
+  defp normalize_parameter_value(name, value)
+
+  defp normalize_parameter_value(name, value)
+       when name in ["content", "old_text", "new_text"] and is_binary(value) do
+    value
+    |> String.trim_leading("\n")
+    |> String.trim_trailing()
+  end
+
+  defp normalize_parameter_value(_name, value) when is_binary(value), do: String.trim(value)
 end

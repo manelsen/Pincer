@@ -2600,3 +2600,443 @@ config = ~y"""
   5. `/pair <codigo_generico>` cria um agente novo com ID hexadecimal opaco e workspace próprio;
   6. workspaces e bootstrap de agentes explícitos/dinâmicos não copiam persona legada da raiz;
   7. suíte verde com `mix test --warnings-as-errors`.
+
+## Incremento 2026-03-10 (Tool Suite de Arquivos v1)
+
+### Objetivo
+- elevar a tool `file_system` de leitura passiva para uma suíte mínima útil de trabalho em código;
+- adicionar `write`, `search` e `patch` sem abrir escapes fora do workspace;
+- manter compatibilidade com chamadas legadas que chegam apenas com `path + content`.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.FileSystem.spec/0`
+- `Pincer.Adapters.Tools.FileSystem.execute/2`
+
+### Regras
+- a tool `file_system` passa a suportar:
+  - `list`
+  - `read`
+  - `write`
+  - `search`
+  - `patch`
+- `write`:
+  - exige `path` e `content`;
+  - cria diretórios pais quando necessário;
+  - sobrescreve o arquivo alvo;
+  - falha ao apontar para diretório.
+- `search`:
+  - exige `query`;
+  - aceita `path` de arquivo ou diretório;
+  - quando `path` for diretório, faz busca recursiva em arquivos regulares;
+  - não deve seguir symlinks;
+  - retorna resultados com caminho relativo e número da linha.
+- `patch`:
+  - exige `path`, `old_text` e `new_text`;
+  - opera por substituição textual exata;
+  - falha quando `old_text` não existe;
+  - falha quando houver múltiplas ocorrências e `replace_all` não estiver ativo.
+- chamadas sem `action` devem inferir:
+  - `write` quando houver `content`;
+  - `patch` quando houver `old_text` e `new_text`;
+  - `search` quando houver `query`;
+  - `read` quando houver apenas `path`.
+- todas as novas ações devem respeitar a mesma política de confinement do workspace usada em `read`.
+
+### Critérios de aceite
+1. Teste prova que `write` cria/atualiza arquivo dentro do workspace.
+2. Teste prova que chamada legada com `path + content` funciona como `write`.
+3. Teste prova que `search` encontra hits recursivos com `path:line`.
+4. Teste prova que `patch` substitui ocorrência única e persiste o arquivo.
+5. Teste prova que `patch` rejeita caso ambíguo sem `replace_all`.
+6. Teste prova que `write/search/patch` continuam bloqueando caminhos fora do workspace.
+
+## Incremento 2026-03-10 (Tool Suite de Arquivos v1.1)
+
+### Objetivo
+- completar a suite de arquivos com operacoes basicas de mutacao segura;
+- permitir fluxos comuns sem recorrer ao shell para tudo;
+- manter a regra de `trash > rm`.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.FileSystem.spec/0`
+- `Pincer.Adapters.Tools.FileSystem.execute/2`
+
+### Regras
+- a tool `file_system` passa a suportar adicionalmente:
+  - `append`
+  - `mkdir`
+  - `delete_to_trash`
+- `append`:
+  - exige `path` e `content`;
+  - cria diretórios pais quando necessário;
+  - cria o arquivo se ele ainda não existir;
+  - falha ao apontar para diretório.
+- `mkdir`:
+  - exige `path`;
+  - cria diretórios recursivamente;
+  - falha quando o caminho já existir como arquivo.
+- `delete_to_trash`:
+  - move arquivo ou diretório para um diretório de lixo dentro do workspace;
+  - não pode apagar o root do workspace;
+  - não pode mover itens que já estejam no trash interno;
+  - deve retornar o destino final para recuperação manual.
+
+### Critérios de aceite
+1. Teste prova que `append` preserva o conteúdo existente e acrescenta o novo.
+2. Teste prova que `mkdir` cria diretórios recursivos.
+3. Teste prova que `delete_to_trash` move um arquivo para o trash interno.
+4. Teste prova que `delete_to_trash` rejeita tentar mover o root do workspace.
+
+## Incremento 2026-03-10 (Tool Suite de Arquivos v1.2)
+
+### Objetivo
+- cobrir operações de movimentação e duplicação sem depender de shell;
+- manter semântica segura dentro do workspace;
+- evitar overwrite implícito.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.FileSystem.spec/0`
+- `Pincer.Adapters.Tools.FileSystem.execute/2`
+
+### Regras
+- a tool `file_system` passa a suportar adicionalmente:
+  - `copy`
+  - `move`
+- ambas exigem:
+  - `path`
+  - `destination`
+- ambas:
+  - falham se o destino já existir e `overwrite` não for `true`;
+  - exigem que origem e destino permaneçam dentro do workspace;
+  - criam diretórios pais do destino quando necessário.
+- `copy`:
+  - copia arquivo regular;
+  - para diretórios, copia recursivamente.
+- `move`:
+  - move arquivo ou diretório;
+  - não pode mover o root do workspace;
+  - não pode mover um diretório para dentro de seu próprio descendente.
+
+### Critérios de aceite
+1. Teste prova que `copy` duplica um arquivo sem remover a origem.
+2. Teste prova que `move` realoca um arquivo dentro do workspace.
+3. Teste prova que `copy` rejeita sobrescrever destino sem `overwrite`.
+4. Teste prova que `move` rejeita mover diretório para dentro dele mesmo.
+
+## Incremento 2026-03-10 (Core Tool: Git Inspect)
+
+### Objetivo
+- adicionar uma tool nativa de inspeção Git para operações de leitura frequentes;
+- reduzir dependência de shell para workflows comuns de código;
+- manter tudo confinado ao workspace.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.GitInspect.spec/0`
+- `Pincer.Adapters.Tools.GitInspect.execute/2`
+
+### Regras
+- a tool `git_inspect` suporta:
+  - `status`
+  - `diff`
+  - `log`
+  - `branches`
+- parâmetros:
+  - `action` obrigatório;
+  - `repo_path` opcional, default `.` dentro do workspace;
+  - `target_path` opcional para `diff`;
+  - `limit` opcional para `log`, default `10`, max `50`.
+- a tool:
+  - deve validar `repo_path` e `target_path` com confinement de workspace;
+  - deve falhar claramente quando o caminho não for um repositório Git;
+  - deve usar apenas comandos Git de leitura.
+
+### Critérios de aceite
+1. Teste prova que `status` retorna branch e arquivo modificado.
+2. Teste prova que `diff` com `target_path` retorna patch do arquivo pedido.
+3. Teste prova que `log` respeita `limit`.
+4. Teste prova que a tool rejeita `repo_path` fora do workspace.
+
+## Incremento 2026-03-10 (Tool Suite de Arquivos v1.3)
+
+### Objetivo
+- melhorar a precisão de leitura e inspeção da tool de arquivos;
+- reduzir contexto desperdiçado em leituras grandes;
+- tornar a busca mais seletiva.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.FileSystem.spec/0`
+- `Pincer.Adapters.Tools.FileSystem.execute/2`
+
+### Regras
+- a tool `file_system` passa a suportar adicionalmente:
+  - `stat`
+- `read`:
+  - aceita `from_line` opcional;
+  - aceita `line_count` opcional;
+  - quando presentes, retorna apenas a faixa pedida.
+- `search`:
+  - aceita `extension` opcional;
+  - aceita `case_sensitive` opcional;
+  - `extension` filtra arquivos por extensão antes da leitura.
+- `stat`:
+  - exige `path`;
+  - retorna ao menos tipo, tamanho, caminho relativo e `mtime`.
+
+### Critérios de aceite
+1. Teste prova que `stat` retorna metadados do arquivo.
+2. Teste prova que `read` com faixa de linhas retorna apenas o trecho solicitado.
+3. Teste prova que `search` com `extension` filtra os hits corretamente.
+
+## Incremento 2026-03-10 (Tool Suite de Arquivos v1.4)
+
+### Objetivo
+- melhorar discovery de arquivos no workspace;
+- permitir navegação recursiva controlada;
+- tornar leitura de logs e arquivos longos mais prática.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.FileSystem.spec/0`
+- `Pincer.Adapters.Tools.FileSystem.execute/2`
+
+### Regras
+- a tool `file_system` passa a suportar adicionalmente:
+  - `find`
+- `list`:
+  - aceita `recursive` opcional;
+  - quando `true`, retorna caminhos relativos aninhados.
+- `read`:
+  - aceita `tail_lines` opcional;
+  - quando presente, retorna apenas as ultimas linhas pedidas;
+  - `tail_lines` e `from_line/line_count` nao podem ser combinados.
+- `find`:
+  - exige `path`;
+  - aceita `glob` opcional;
+  - aceita `type` opcional com valores `file`, `directory` e `any`;
+  - aceita `extension` opcional para filtrar apenas arquivos;
+  - respeita `max_results`.
+
+### Critérios de aceite
+1. Teste prova que `list` recursivo retorna caminhos relativos aninhados.
+2. Teste prova que `read` com `tail_lines` retorna apenas o final do arquivo.
+3. Teste prova que `find` encontra arquivos por `glob` e `extension`.
+
+## Incremento 2026-03-10 (Tool Suite de Arquivos v1.5)
+
+### Objetivo
+- tornar edicoes de arquivo mais robustas contra contexto stale;
+- evitar patch textual baseado em reproducao de whitespace;
+- permitir edicoes cirurgicas referenciando linhas verificaveis.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.FileSystem.spec/0`
+- `Pincer.Adapters.Tools.FileSystem.execute/2`
+
+### Regras
+- `read`:
+  - aceita `hashline` opcional;
+  - quando `true`, cada linha retornada vem no formato `{line}#{hash}|{content}`.
+- a tool `file_system` passa a suportar adicionalmente:
+  - `anchored_edit`
+- `anchored_edit`:
+  - exige `path`;
+  - exige `edits`;
+  - suporta `replace`, `insert_after` e `insert_before`;
+  - cada edit referencia uma linha via `anchor`;
+  - `replace` pode aceitar `end_anchor` opcional para substituir uma faixa;
+  - deve validar todos os anchors antes de escrever;
+  - quando o arquivo mudou desde a leitura, deve falhar sem escrever e devolver contexto com anchors atualizados.
+- o hash:
+  - deve ser derivado do conteudo da linha;
+  - deve permanecer estavel para a mesma linha lida;
+  - pode ignorar variacoes de whitespace para reduzir fragilidade operacional.
+
+### Critérios de aceite
+1. Teste prova que `read` com `hashline` retorna linhas no formato `line#id|content`.
+2. Teste prova que `anchored_edit` substitui uma linha usando apenas `anchor`.
+3. Teste prova que `anchored_edit` consegue inserir linha apos um `anchor`.
+4. Teste prova que `anchored_edit` rejeita anchor stale e nao grava o arquivo.
+
+## Incremento 2026-03-10 (Tool Suite de Arquivos v1.6)
+
+### Objetivo
+- orientar o agente a preferir o caminho mais robusto de edicao;
+- reduzir uso desnecessario de `patch` textual em codigo fonte.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.FileSystem.spec/0`
+
+### Regras
+- a spec exposta ao LLM deve deixar explicito que:
+  - para editar codigo, o fluxo preferido e `read` com `hashline: true` seguido de `anchored_edit`;
+  - `patch` fica reservado para substituicoes literais exatas e simples.
+- a descricao de `hashline` deve indicar que ele prepara o caminho para `anchored_edit`.
+- a descricao de `edits` deve mencionar `replace`, `insert_after` e `insert_before`.
+
+### Critérios de aceite
+1. Teste prova que a spec do `file_system` recomenda `hashline + anchored_edit` para edicao de codigo.
+2. Teste prova que a spec do `file_system` descreve `patch` como fallback para substituicao literal exata.
+
+## Incremento 2026-03-10 (Shell Invariants + Core Isolation)
+
+### Objetivo
+- garantir por regressao que o Core continue isolado da implementacao concreta de shell;
+- tornar os testes unitarios do lado puro da shell mais rigorosos e invariantes;
+- provar a integracao minima da `SafeShell` sem depender de MCP real.
+
+### Interfaces/Public API
+- `Pincer.Core.WorkspaceGuard.confine_path/2`
+- `Pincer.Core.WorkspaceGuard.command_allowed?/2`
+- `Pincer.Adapters.Tools.SafeShell.approved_command_allowed?/2`
+- `Pincer.Adapters.Tools.SafeShell.execute/2`
+
+### Regras
+- o Core:
+  - nao deve depender diretamente de `Pincer.Adapters.Tools`;
+  - nao deve depender diretamente de `Pincer.Adapters.Tools.SafeShell`.
+- `WorkspaceGuard.confine_path/2`:
+  - rejeita path vazio;
+  - rejeita null bytes;
+  - permite desligar a rejeicao explicita de `..` apenas quando o caminho expandido continua confinado ao root;
+  - continua rejeitando escapes por symlink.
+- `WorkspaceGuard.command_allowed?/2`:
+  - rejeita payload nao-binario;
+  - rejeita comando fora da whitelist;
+  - continua aceitando comandos dinamicos vindos de `CommandProfile` apenas quando o workspace detecta o stack correspondente.
+- `SafeShell.execute/2`:
+  - quando aceita um comando, deve repassar para `ToolRegistry` um `command` sanitizado;
+  - com `restrict_to_workspace`, deve incluir `cwd`;
+  - sem `restrict_to_workspace`, nao deve incluir `cwd`.
+
+### Critérios de aceite
+1. Teste estrutural prova que `lib/pincer/core/**` nao referencia `Pincer.Adapters.Tools`.
+2. Testes de unidade validam invariantes de `WorkspaceGuard` para path vazio, null byte, `..` controlado e comandos invalidos.
+3. Teste de integracao prova que `SafeShell.execute/2` envia `command` sanitizado e `cwd` quando restrito ao workspace.
+4. Teste de integracao prova que `SafeShell.execute/2` nao envia `cwd` quando `restrict_to_workspace: false`.
+
+## Incremento 2026-03-10 (Tool Contracts + Editor Fixtures Stress)
+
+### Objetivo
+- validar que a superficie de tools nativas exposta ao agente permanece coerente;
+- validar editores de arquivo em cima de fixtures completas, nao so strings artificiais;
+- submeter o `anchored_edit` a uma carga maior de edicoes verificaveis.
+
+### Interfaces/Public API
+- `Pincer.Adapters.NativeToolRegistry.list_tools/0`
+- `Pincer.Adapters.Tools.FileSystem.execute/2`
+
+### Regras
+- toda tool nativa listada no registry deve expor spec bem-formada:
+  - `name` string nao-vazia;
+  - `description` string nao-vazia;
+  - `parameters.type == "object"`;
+  - `parameters.properties` map.
+- o teste de fixtures do `file_system` deve:
+  - operar sobre um workspace copiado de fixtures completas;
+  - validar `read`, `find`, `search`, `stat` e os caminhos de edicao;
+  - validar o resultado final dos arquivos editados.
+- o teste de estresse do hash editor deve:
+  - ler arquivo grande com `hashline: true`;
+  - aplicar multiplas edicoes ancoradas em um unico passo;
+  - provar que o resultado final preserva integridade estrutural;
+  - provar que anchors stale continuam sendo rejeitados durante o fluxo.
+
+### Critérios de aceite
+1. Teste prova que todas as tools nativas expostas pelo registry possuem spec estrutural valida.
+2. Teste com fixtures prova que `file_system` encontra, le e edita arquivos reais do workspace esperado.
+3. Teste de estresse prova que `anchored_edit` aplica varias edicoes em arquivo grande sem corromper a estrutura.
+4. Teste de estresse prova que um segundo lote com anchors stale e rejeitado sem gravar.
+
+## Incremento 2026-03-10 (Fallback Tool Parser Alignment)
+
+### Objetivo
+- alinhar o parser heuristico de tools com a superficie real atual do agente;
+- evitar nomes legados de tool no caminho de fallback;
+- favorecer `file_system` e `anchored_edit` quando o payload parecer edicao de codigo.
+
+### Interfaces/Public API
+- `Pincer.LLM.ToolParser.parse/1`
+
+### Regras
+- no caminho heuristico/XML:
+  - `command` deve inferir `safe_shell`, nao `run_command`;
+  - `path` sozinho deve inferir `file_system`, nao `read_file`;
+  - `path + anchor + content` deve ser normalizado para `file_system` com `action: anchored_edit`;
+  - quando `op` estiver ausente nesse caso, assumir `replace`.
+- o parser deve preservar `tool_calls` nativos existentes.
+
+### Critérios de aceite
+1. Teste prova que XML com `command` vira `safe_shell`.
+2. Teste prova que XML com apenas `path` vira `file_system`.
+3. Teste prova que XML com `path + anchor + content` vira `file_system` com `action: anchored_edit` e `edits`.
+
+## Incremento 2026-03-11 (Telegram Sub-Agent UX v1)
+
+### Objetivo
+- transformar progresso de subagente em um painel editavel e legivel no Telegram;
+- evitar spam de mensagens soltas de subagente no canal;
+- mostrar reasoning visivel em bloco preformatado, nao em blockquote.
+
+### Interfaces/Public API
+- `Pincer.Core.SubAgentProgress.apply_event/2`
+- `Pincer.Core.SubAgentProgress.render_dashboard/1`
+- `Pincer.Core.Orchestration.SubAgent`
+- `Pincer.Channels.Telegram.Session`
+- `Pincer.Channels.Telegram.send_message/3`
+
+### Regras
+- `SubAgent` deve continuar emitindo status textual para compatibilidade, mas tambem publicar `{:subagent_progress, event}` no PubSub da sessao pai.
+- `apply_event/2` deve atualizar um tracker deterministico por `agent_id`.
+- `render_dashboard/1` deve gerar um checklist consolidado com:
+  - `agent_id`;
+  - `goal`;
+  - estado de `Started`;
+  - ultimo `tool` conhecido;
+  - ultimo `runtime status` conhecido;
+  - `Finished` ou `Failed`.
+- `Telegram.Session` deve:
+  - consumir `{:subagent_progress, event}`;
+  - criar uma unica mensagem quando o primeiro evento chegar;
+  - editar essa mesma mensagem quando o dashboard mudar;
+  - ignorar `{:agent_status, text}` de subagente para evitar duplicacao.
+- `Telegram.send_message/3` e `update_message/4`, com `skip_reasoning_strip: true`, devem renderizar `<thinking>`/`<thought>` dentro de `<pre>...</pre>`.
+
+### Critérios de aceite
+1. Teste de core prova que `apply_event/2` acumula goal/tool/status/resultado por subagente.
+2. Teste de core prova que `render_dashboard/1` gera checklist consistente para running, finished e failed.
+3. Teste de Telegram Session prova que um `subagent_progress` cria a mensagem inicial e eventos seguintes editam a mesma mensagem.
+4. Teste de Telegram Session prova que `agent_status` de subagente nao gera mensagem duplicada.
+5. Teste de Telegram prova que reasoning visivel e enviado em `<pre>...</pre>`.
+
+## Incremento 2026-03-11 (Channel Actions v1)
+
+### Objetivo
+- expor envio de mensagens entre canais como tool nativa de primeira classe;
+- permitir que o agente use o canal atual por default, sem precisar repetir alvo toda hora;
+- permitir roteamento explicito para Telegram, Discord e WhatsApp.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.ChannelActions.spec/0`
+- `Pincer.Adapters.Tools.ChannelActions.execute/2`
+
+### Regras
+- a tool deve se chamar `channel_actions`.
+- `action` inicial suportada: `send_message`.
+- o alvo pode ser resolvido de tres formas:
+  - `recipient` explicito, junto com `channel`;
+  - `target_session_id` explicito;
+  - contexto atual da sessao (`session_id`), quando o envio for para o mesmo canal/conversa.
+- `execute/2` deve:
+  - ler `session_id` do contexto;
+  - quando necessario, consultar `Session.Server.get_status/1` para inferir `principal_ref`/contexto atual;
+  - rotear para o adapter correto de `Telegram`, `Discord` ou `WhatsApp`;
+  - retornar erro claro para canal nao suportado ou alvo insuficiente.
+- a spec exposta ao LLM deve deixar claro que:
+  - omitir `channel`/`recipient` usa o contexto atual quando possivel;
+  - `target_session_id` pode ser usado para falar com outra conversa do proprio Pincer.
+
+### Critérios de aceite
+1. Teste prova que `send_message` sem alvo explicito usa a conversa atual.
+2. Teste prova que `send_message` com `channel + recipient` roteia para o adapter correto.
+3. Teste prova que `send_message` com `target_session_id` resolve o recipient a partir do prefixo da sessao.
+4. Teste prova que `channel_actions` aparece no registry nativo.
+5. Teste prova que a tool retorna erro claro quando nao consegue resolver destino.

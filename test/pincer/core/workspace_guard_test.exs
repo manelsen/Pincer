@@ -39,4 +39,55 @@ defmodule Pincer.Core.WorkspaceGuardTest do
     assert {:ok, safe} = WorkspaceGuard.confine_path("mix.exs", root: root)
     assert String.ends_with?(safe, "/mix.exs")
   end
+
+  test "confine_path/2 rejects empty paths" do
+    assert {:error, "Invalid path"} = WorkspaceGuard.confine_path("", root: File.cwd!())
+  end
+
+  test "confine_path/2 rejects null bytes" do
+    assert {:error, "Path contains null bytes"} =
+             WorkspaceGuard.confine_path("lib/\x00evil", root: File.cwd!())
+  end
+
+  test "confine_path/2 can allow parent segments when explicitly disabled and still confined" do
+    root = Path.join(File.cwd!(), "trash/ws_guard_relaxed_#{System.unique_integer([:positive])}")
+    nested = Path.join(root, "a/b")
+
+    File.mkdir_p!(nested)
+
+    on_exit(fn ->
+      File.rm_rf(root)
+    end)
+
+    assert {:ok, safe} =
+             WorkspaceGuard.confine_path("a/b/../file.txt",
+               root: root,
+               reject_parent_segments: false
+             )
+
+    assert safe == Path.join(root, "a/file.txt")
+  end
+
+  test "command_allowed?/2 rejects non-binary payloads" do
+    assert {:error, "Invalid command"} = WorkspaceGuard.command_allowed?(123)
+  end
+
+  test "command_allowed?/2 rejects commands outside whitelist" do
+    assert {:error, "Command not in whitelist"} =
+             WorkspaceGuard.command_allowed?("curl https://example.com",
+               workspace_root: File.cwd!()
+             )
+  end
+
+  test "command_allowed?/2 accepts dynamic commands only when stack is detected" do
+    root = Path.join("trash", "ws_guard_dynamic_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(root)
+    File.write!(Path.join(root, "mix.exs"), "defmodule Fixture.MixProject do\nend\n")
+
+    on_exit(fn ->
+      File.rm_rf(root)
+    end)
+
+    assert :ok = WorkspaceGuard.command_allowed?("mix format", workspace_root: root)
+  end
 end

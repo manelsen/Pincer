@@ -66,7 +66,7 @@ defmodule Pincer.LLM.ToolParserTest do
       assert parsed["content"] == "Running migrations."
 
       assert [call] = parsed["tool_calls"]
-      assert call["function"]["name"] == "run_command"
+      assert call["function"]["name"] == "safe_shell"
 
       args = Jason.decode!(call["function"]["arguments"])
       assert args["command"] == "mix ecto.migrate"
@@ -91,7 +91,31 @@ defmodule Pincer.LLM.ToolParserTest do
 
       [native, xml] = parsed["tool_calls"]
       assert native["id"] == "native_1"
-      assert xml["function"]["name"] == "read_file"
+      assert xml["function"]["name"] == "file_system"
+    end
+
+    test "normalizes anchored edit payloads into file_system anchored_edit calls" do
+      msg = %{
+        "role" => "assistant",
+        "content" => """
+        <tool_call>
+        <parameter name="path">lib/pipeline.ex</parameter>
+        <parameter name="anchor">12#VK</parameter>
+        <parameter name="content">  :error</parameter>
+        </tool_call>
+        """
+      }
+
+      assert parsed = ToolParser.parse(msg)
+      assert is_nil(parsed["content"])
+
+      [call] = parsed["tool_calls"]
+      assert call["function"]["name"] == "file_system"
+
+      args = Jason.decode!(call["function"]["arguments"])
+      assert args["path"] == "lib/pipeline.ex"
+      assert args["action"] == "anchored_edit"
+      assert args["edits"] == [%{"op" => "replace", "anchor" => "12#VK", "content" => "  :error"}]
     end
   end
 end
