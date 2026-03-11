@@ -116,30 +116,43 @@ defmodule Pincer.Channels.Telegram.SessionTest do
     Process.sleep(80)
   end
 
-  test "agent status is delivered as user-visible telegram message" do
+  test "non sub-agent status is delivered as user-visible telegram message" do
     chat_id = 45
 
     APIMock
-    |> expect(:send_message, fn ^chat_id, "✅ Sub-Agent a1 finished.", _opts ->
+    |> expect(:send_message, fn ^chat_id, "Status update", _opts ->
       {:ok, %{message_id: 900}}
     end)
 
     {:ok, pid} = Session.start_link(chat_id)
     allow(APIMock, self(), pid)
 
-    send(pid, {:agent_status, "✅ Sub-Agent a1 finished."})
+    send(pid, {:agent_status, "Status update"})
 
     Process.sleep(80)
   end
 
-  test "sub-agent status updates reuse the same telegram message via edit" do
+  test "sub-agent progress creates and updates a single telegram checklist message" do
     chat_id = 46
 
     APIMock
-    |> expect(:send_message, fn ^chat_id, "⚙️ Sub-Agent a1 running: web.", _opts ->
+    |> expect(:send_message, fn ^chat_id, text, _opts ->
+      assert text =~ "Sub-Agent Checklist"
+      assert text =~ "<code>a1</code>"
+      assert text =~ "Goal: review repo"
+      assert text =~ "☑ Started"
+      assert text =~ "☐ Finished"
       {:ok, %{message_id: 910}}
     end)
-    |> expect(:edit_message_text, fn ^chat_id, 910, "✅ Sub-Agent a1 finished.", opts ->
+    |> expect(:edit_message_text, fn ^chat_id, 910, text, opts ->
+      assert text =~ "Last tool: <code>web.search</code>"
+      assert text =~ "☐ Finished"
+      assert opts[:parse_mode] == "HTML"
+      {:ok, %{}}
+    end)
+    |> expect(:edit_message_text, fn ^chat_id, 910, text, opts ->
+      assert text =~ "☑ Finished"
+      assert text =~ "Result: done"
       assert opts[:parse_mode] == "HTML"
       {:ok, %{}}
     end)
@@ -147,7 +160,19 @@ defmodule Pincer.Channels.Telegram.SessionTest do
     {:ok, pid} = Session.start_link(chat_id)
     allow(APIMock, self(), pid)
 
-    send(pid, {:agent_status, "⚙️ Sub-Agent a1 running: web."})
+    send(pid, {:subagent_progress, %{agent_id: "a1", kind: :started, goal: "review repo"}})
+    send(pid, {:subagent_progress, %{agent_id: "a1", kind: :tool, tool: "web.search"}})
+    send(pid, {:subagent_progress, %{agent_id: "a1", kind: :finished, result: "done"}})
+
+    Process.sleep(80)
+  end
+
+  test "sub-agent textual status is ignored when structured progress is available" do
+    chat_id = 47
+
+    {:ok, pid} = Session.start_link(chat_id)
+    allow(APIMock, self(), pid)
+
     send(pid, {:agent_status, "✅ Sub-Agent a1 finished."})
 
     Process.sleep(80)

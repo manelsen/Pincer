@@ -246,25 +246,43 @@ defmodule Pincer.Channels.Telegram do
 
   defp strip_reasoning(other), do: other
 
-  # Wraps reasoning blocks in a stylized blockquote for clear visualization
+  # Wraps reasoning blocks in a preformatted block for stable monospace rendering
   defp format_reasoning(text) when is_binary(text) do
     text
-    |> String.replace(
-      ~r/<thought>(.*?)<\/thought>/is,
-      "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>"
-    )
-    |> String.replace(
-      ~r/<thinking>(.*?)<\/thinking>/is,
-      "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>"
-    )
+    |> then(fn current ->
+      Regex.replace(~r/<thought>(.*?)<\/thought>/is, current, &reasoning_block/1, global: true)
+    end)
+    |> then(fn current ->
+      Regex.replace(~r/<thinking>(.*?)<\/thinking>/is, current, &reasoning_block/1, global: true)
+    end)
     # Handle cases where LLM doesn't close the tag or starts with it
-    |> String.replace(
-      ~r/^.*?think>\s*(.*?)$/is,
-      "<blockquote><b>💭 Reasoning</b>\n\\1</blockquote>"
-    )
+    |> then(fn current ->
+      Regex.replace(~r/^.*?think>\s*(.*?)$/is, current, &reasoning_block/1)
+    end)
   end
 
   defp format_reasoning(other), do: other
+
+  defp reasoning_block([_full, body]), do: reasoning_block(body)
+
+  defp reasoning_block(body) when is_binary(body) do
+    escaped =
+      body
+      |> to_string()
+      |> String.replace(~r/^<(thinking|thought)>/i, "")
+      |> String.replace(~r/<\/(thinking|thought)>$/i, "")
+      |> String.trim()
+      |> html_escape()
+
+    "<b>💭 Reasoning</b>\n<pre>#{escaped}</pre>"
+  end
+
+  defp html_escape(text) do
+    text
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
+  end
 
   @doc """
   Converts standard Markdown and/or safe HTML into Telegram-compatible HTML.

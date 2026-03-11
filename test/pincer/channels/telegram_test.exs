@@ -34,12 +34,12 @@ defmodule Pincer.Channels.TelegramTest do
                )
     end
 
-    test "formats <thinking> when skip_reasoning_strip is enabled" do
+    test "formats <thinking> as preformatted block when skip_reasoning_strip is enabled" do
       chat_id = 101
 
       APIMock
       |> expect(:send_message, fn ^chat_id, text, opts ->
-        assert text =~ "<blockquote><b>💭 Reasoning</b>"
+        assert text =~ "<pre>"
         assert text =~ "segredo"
         assert text =~ "Resposta final"
         assert opts[:parse_mode] == "HTML"
