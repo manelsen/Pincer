@@ -145,6 +145,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
 
     # Post initial status
     Blackboard.post(id, "Started with goal: #{goal}", nil, scope: scope)
+    notify_parent_progress(parent_session_id, %{agent_id: id, kind: :started, goal: goal})
     notify_parent(parent_session_id, "🤖 Sub-Agent [#{id}] started working on: #{goal}")
 
     # Start the Executor, passing *self()* as the session_pid
@@ -178,6 +179,13 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   def handle_info({:executor_finished, _history, response, _usage}, state) do
     Logger.info("[SubAgent #{state.id}] Finished. Posting result.")
     Blackboard.post(state.id, "FINISHED: #{response}", nil, scope: state.scope)
+
+    notify_parent_progress(state.parent_session_id, %{
+      agent_id: state.id,
+      kind: :finished,
+      result: response
+    })
+
     notify_parent(state.parent_session_id, "✅ Sub-Agent [#{state.id}] finished: #{response}")
     {:stop, :normal, state}
   end
@@ -187,6 +195,13 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   def handle_info({:executor_failed, reason}, state) do
     Logger.error("[SubAgent #{state.id}] Failed: #{inspect(reason)}")
     Blackboard.post(state.id, "FAILED: #{inspect(reason)}", nil, scope: state.scope)
+
+    notify_parent_progress(state.parent_session_id, %{
+      agent_id: state.id,
+      kind: :failed,
+      reason: inspect(reason)
+    })
+
     notify_parent(state.parent_session_id, "❌ Sub-Agent [#{state.id}] failed: #{inspect(reason)}")
     {:stop, :normal, state}
   end
@@ -195,6 +210,13 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   @impl GenServer
   def handle_info({:sme_tool_use, tools}, state) do
     Blackboard.post(state.id, "Using tool: #{tools}", nil, scope: state.scope)
+
+    notify_parent_progress(state.parent_session_id, %{
+      agent_id: state.id,
+      kind: :tool,
+      tool: to_string(tools)
+    })
+
     notify_parent(state.parent_session_id, "⚙️ Sub-Agent [#{state.id}] using: #{tools}")
     {:noreply, state}
   end
@@ -204,6 +226,13 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   def handle_info({:llm_runtime_status, payload}, state) when is_map(payload) do
     status = RuntimeStatus.format(payload)
     Blackboard.post(state.id, "LLM_STATUS: " <> status, nil, scope: state.scope)
+
+    notify_parent_progress(state.parent_session_id, %{
+      agent_id: state.id,
+      kind: :llm_status,
+      status: status
+    })
+
     notify_parent(state.parent_session_id, "📐 Sub-Agent [#{state.id}] status: #{status}")
     {:noreply, state}
   end
@@ -218,5 +247,11 @@ defmodule Pincer.Core.Orchestration.SubAgent do
 
   defp notify_parent(session_id, msg) do
     Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:agent_status, msg})
+  end
+
+  defp notify_parent_progress(nil, _event), do: :ok
+
+  defp notify_parent_progress(session_id, event) do
+    Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:subagent_progress, event})
   end
 end
