@@ -16,7 +16,9 @@ defmodule Mix.Tasks.Pincer.PurgeIndices do
     # Ensure the application and Repo are started
     Mix.Task.run("app.start")
 
-    Mix.shell().info("[PURGE] Identifying invalid document indices in 'tmp/' and 'workspaces/'...")
+    Mix.shell().info(
+      "[PURGE] Identifying invalid document indices in 'tmp/' and 'workspaces/'..."
+    )
 
     query =
       from(n in Node,
