@@ -3,6 +3,49 @@ defmodule Pincer.Core.SubAgentProgressTest do
 
   alias Pincer.Core.SubAgentProgress
 
+  test "apply_event accumulates structured state for a running sub-agent" do
+    tracker =
+      %{}
+      |> SubAgentProgress.apply_event(%{agent_id: "a1", kind: :started, goal: "scan repo"})
+      |> SubAgentProgress.apply_event(%{agent_id: "a1", kind: :tool, tool: "file_system.search"})
+      |> SubAgentProgress.apply_event(%{
+        agent_id: "a1",
+        kind: :llm_status,
+        status: "HTTP 429: retry in 2.0s"
+      })
+
+    assert tracker["a1"].goal == "scan repo"
+    assert tracker["a1"].started?
+    assert tracker["a1"].state == :running
+    assert tracker["a1"].last_tool == "file_system.search"
+    assert tracker["a1"].last_status == "HTTP 429: retry in 2.0s"
+  end
+
+  test "render_dashboard shows running, finished and failed checklist states" do
+    tracker =
+      %{}
+      |> SubAgentProgress.apply_event(%{agent_id: "a1", kind: :started, goal: "scan repo"})
+      |> SubAgentProgress.apply_event(%{agent_id: "a1", kind: :tool, tool: "rg"})
+      |> SubAgentProgress.apply_event(%{agent_id: "a2", kind: :started, goal: "deploy"})
+      |> SubAgentProgress.apply_event(%{agent_id: "a2", kind: :finished, result: "done"})
+      |> SubAgentProgress.apply_event(%{agent_id: "a3", kind: :started, goal: "watch logs"})
+      |> SubAgentProgress.apply_event(%{agent_id: "a3", kind: :failed, reason: "timeout"})
+
+    dashboard = SubAgentProgress.render_dashboard(tracker)
+
+    assert dashboard =~ "Sub-Agent Checklist"
+    assert dashboard =~ "`a1`"
+    assert dashboard =~ "Goal: scan repo"
+    assert dashboard =~ "☑ Started"
+    assert dashboard =~ "☐ Finished"
+    assert dashboard =~ "Last tool: `rg`"
+    assert dashboard =~ "`a2`"
+    assert dashboard =~ "☑ Finished"
+    assert dashboard =~ "Result: done"
+    assert dashboard =~ "`a3`"
+    assert dashboard =~ "☒ Failed: timeout"
+  end
+
   test "emits start notification once per agent" do
     messages = [
       %{agent_id: "a1", content: "Started with goal: scan repo"},

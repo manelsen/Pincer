@@ -37,6 +37,7 @@ defmodule Pincer.Core do
       LLM.SkillsSidecarPolicy,
       Tooling.CommandProfile,
       WorkspaceGuard,
+      SubAgentProgress,
       Orchestration.Blackboard,
       Orchestration.SubAgent,
       Orchestration.Scheduler,

@@ -5,6 +5,7 @@ defmodule Pincer.Channels.Telegram.Session do
   """
   use Pincer.Ports.Channel
   alias Pincer.Core.ProjectRouter
+  alias Pincer.Core.SubAgentProgress
   alias Pincer.Core.StreamingPolicy
   alias Pincer.Core.Session.Server
 
@@ -172,12 +173,24 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def handle_info({:agent_status, text}, state) do
-    {:noreply, deliver_status(state, text)}
+    {:noreply, if(subagent_status?(text), do: state, else: deliver_status(state, text))}
   end
 
   @impl true
   def handle_info({:agent_thinking, _text}, state) do
     Telegex.send_chat_action(state.chat_id, "typing")
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:subagent_progress, event}, state) do
+    tracker = SubAgentProgress.apply_event(state.subagent_progress_tracker, event)
+    dashboard = SubAgentProgress.render_dashboard(tracker)
+
+    state =
+      %{state | subagent_progress_tracker: tracker}
+      |> deliver_subagent_dashboard(dashboard)
+
     {:noreply, state}
   end
 
@@ -262,15 +275,15 @@ defmodule Pincer.Channels.Telegram.Session do
   end
 
   defp deliver_status(state, text) do
-    if subagent_status?(text) do
-      deliver_subagent_status(state, text)
-    else
-      Pincer.Channels.Telegram.send_message(state.chat_id, text)
-      state
-    end
+    Pincer.Channels.Telegram.send_message(state.chat_id, text)
+    state
   end
 
-  defp deliver_subagent_status(%{status_message_id: nil} = state, text) do
+  defp deliver_subagent_dashboard(state, nil), do: state
+
+  defp deliver_subagent_dashboard(%{status_message_text: text} = state, text), do: state
+
+  defp deliver_subagent_dashboard(%{status_message_id: nil} = state, text) do
     case Pincer.Channels.Telegram.send_message(state.chat_id, text) do
       {:ok, message_id} ->
         %{state | status_message_id: message_id, status_message_text: text}
@@ -280,14 +293,7 @@ defmodule Pincer.Channels.Telegram.Session do
     end
   end
 
-  defp deliver_subagent_status(
-         %{status_message_id: _message_id, status_message_text: text} = state,
-         text
-       ) do
-    state
-  end
-
-  defp deliver_subagent_status(%{status_message_id: message_id} = state, text) do
+  defp deliver_subagent_dashboard(%{status_message_id: message_id} = state, text) do
     case Pincer.Channels.Telegram.update_message(state.chat_id, message_id, text) do
       :ok ->
         %{state | status_message_text: text}
@@ -393,7 +399,8 @@ defmodule Pincer.Channels.Telegram.Session do
         session_id: session_id,
         status_message_id: nil,
         status_message_text: nil,
-        preview_suppressed: false
+        preview_suppressed: false,
+        subagent_progress_tracker: %{}
       },
       StreamingPolicy.initial_state()
     )
