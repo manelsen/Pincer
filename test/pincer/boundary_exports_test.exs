@@ -52,6 +52,21 @@ defmodule Pincer.BoundaryExportsTest do
     refute source =~ "defmodule HtmlEntities do"
   end
 
+  test "core modules do not depend directly on adapters tools" do
+    core_files = Path.wildcard("lib/pincer/core/**/*.ex")
+    assert core_files != []
+
+    Enum.each(core_files, fn file ->
+      source = File.read!(file)
+
+      refute source =~ "Pincer.Adapters.Tools",
+             "#{file} should not reference adapters tools directly"
+
+      refute source =~ "Pincer.Adapters.Tools.SafeShell",
+             "#{file} should not reference SafeShell directly"
+    end)
+  end
+
   defp boundary_exports(file) do
     file
     |> File.read!()

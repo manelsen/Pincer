@@ -16,6 +16,8 @@ defmodule Pincer.Adapters.NativeToolRegistry do
     Pincer.Adapters.Tools.Scheduler,
     Pincer.Adapters.Tools.Timer,
     Pincer.Adapters.Tools.GitHub,
+    Pincer.Adapters.Tools.GitInspect,
+    Pincer.Adapters.Tools.ChannelActions,
     Pincer.Adapters.Tools.Orchestrator,
     Pincer.Adapters.Tools.BlackboardReader,
     Pincer.Adapters.Tools.SafeShell,

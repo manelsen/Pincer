@@ -56,4 +56,66 @@ defmodule Pincer.Adapters.NativeToolRegistryTest do
              tool["_type"] == :mcp and get_in(tool, ["function", :name]) == "mcp_echo"
            end)
   end
+
+  test "every native tool spec exposed by the registry is structurally valid" do
+    Application.put_env(:pincer, :mcp_manager, MCPManagerTimeoutStub)
+
+    tools =
+      NativeToolRegistry.list_tools()
+      |> Enum.filter(&Map.has_key?(&1, "_module"))
+
+    assert tools != []
+
+    Enum.each(tools, fn tool ->
+      spec =
+        case tool["function"] do
+          %{"function" => inner} -> inner
+          other -> other
+        end
+
+      name = spec[:name] || spec["name"]
+      description = spec[:description] || spec["description"]
+      parameters = spec[:parameters] || spec["parameters"]
+      properties = parameters[:properties] || parameters["properties"]
+      type = parameters[:type] || parameters["type"]
+
+      assert is_binary(name) and name != ""
+      assert is_binary(description) and description != ""
+      assert is_map(parameters)
+      assert type == "object"
+      assert is_map(properties)
+    end)
+
+    names =
+      Enum.map(tools, fn tool ->
+        spec =
+          case tool["function"] do
+            %{"function" => inner} -> inner
+            other -> other
+          end
+
+        spec[:name] || spec["name"]
+      end)
+
+    assert Enum.uniq(names) == names
+  end
+
+  test "channel_actions is exposed by the native registry" do
+    Application.put_env(:pincer, :mcp_manager, MCPManagerTimeoutStub)
+
+    names =
+      NativeToolRegistry.list_tools()
+      |> Enum.filter(&Map.has_key?(&1, "_module"))
+      |> Enum.map(fn tool ->
+        spec =
+          case tool["function"] do
+            %{"function" => inner} -> inner
+            other -> other
+          end
+
+        spec[:name] || spec["name"]
+      end)
+
+    assert "channel_actions" in names
+  end
 end
