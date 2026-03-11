@@ -11,12 +11,13 @@ defmodule Mix.Tasks.Pincer.FullSync do
   @impl Mix.Task
   def run(_args) do
     Mix.Task.run("app.start")
-    
+
     Mix.shell().info("[FULL-SYNC] Starting full repository indexing...")
-    
+
     case Pincer.Core.Graph.Sync.sync_full() do
       {:ok, files} ->
         Mix.shell().info("[FULL-SYNC] Successfully indexed #{length(files)} files.")
+
       {:error, reason} ->
         Mix.shell().error("[FULL-SYNC] Failed: #{inspect(reason)}")
     end

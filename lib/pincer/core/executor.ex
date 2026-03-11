@@ -424,8 +424,11 @@ defmodule Pincer.Core.Executor do
 
   defp summarize_via_llm(messages_text) do
     prompt = [
-      %{"role" => "user", "content" =>
-        "Summarize this conversation in 3-5 sentences, preserving key decisions and context:\n\n#{messages_text}"}
+      %{
+        "role" => "user",
+        "content" =>
+          "Summarize this conversation in 3-5 sentences, preserving key decisions and context:\n\n#{messages_text}"
+      }
     ]
 
     client =

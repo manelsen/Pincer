@@ -69,3 +69,4 @@ defmodule Fixture.Pipeline do
   def step_38(value), do: value + 38
   def step_39(value), do: value + 39
   def step_40(value), do: value + 40
+end
