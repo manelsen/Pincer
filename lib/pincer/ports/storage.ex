@@ -22,6 +22,12 @@ defmodule Pincer.Ports.Storage do
   @callback forget_memory(String.t()) :: :ok | {:error, term()}
   @callback search_similar(String.t(), [float()], integer()) :: {:ok, [map()]} | {:error, term()}
 
+  @callback save_checkpoint(session_id :: String.t(), checkpoint :: map()) ::
+              {:ok, term()} | {:error, term()}
+
+  @callback load_checkpoint(session_id :: String.t(), opts :: keyword()) ::
+              {:ok, term()} | {:error, term()}
+
   # --- Dispatcher ---
 
   defp adapter do
@@ -52,4 +58,9 @@ defmodule Pincer.Ports.Storage do
   def memory_report(limit), do: adapter().memory_report(limit)
   def forget_memory(source), do: adapter().forget_memory(source)
   def search_similar(type, vector, limit), do: adapter().search_similar(type, vector, limit)
+
+  def save_checkpoint(session_id, checkpoint),
+    do: adapter().save_checkpoint(session_id, checkpoint)
+
+  def load_checkpoint(session_id, opts \\ []), do: adapter().load_checkpoint(session_id, opts)
 end

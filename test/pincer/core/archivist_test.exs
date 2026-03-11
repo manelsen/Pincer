@@ -151,6 +151,10 @@ defmodule Pincer.Core.ArchivistTest do
 
     @impl true
     def forget_memory(_source), do: :ok
+    @impl true
+    def save_checkpoint(_session_id, _checkpoint), do: :ok
+    @impl true
+    def load_checkpoint(_session_id, _opts), do: {:ok, nil}
 
     defp agent do
       Application.fetch_env!(:pincer, :archivist_test_agent)

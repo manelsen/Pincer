@@ -3,7 +3,7 @@ defmodule Pincer.Core.MemoryTypes do
   Canonical memory-type vocabulary for semantic memory entries.
   """
 
-  @types ~w(reference technical_fact bug_solution user_preference architecture_decision session_summary)
+  @types ~w(reference technical_fact bug_solution user_preference architecture_decision session_summary conversation code decision pattern)
 
   @doc """
   Returns the canonical string form for a memory type.

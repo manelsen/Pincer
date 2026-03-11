@@ -127,6 +127,12 @@ defmodule Pincer.Core.ExecutorMemoryRecallTest do
 
     @impl true
     def search_graph_history(_query, _limit), do: {:ok, []}
+
+    @impl true
+    def save_checkpoint(_session_id, _checkpoint), do: :ok
+
+    @impl true
+    def load_checkpoint(_session_id, _opts), do: {:ok, nil}
   end
 
   setup do

@@ -15,6 +15,7 @@ defmodule Pincer.Core.Executor do
   @approval_timeout_ms 60_000
   @markdown_notice_max_chars 12_000
   @markdown_ignored_roots MapSet.new([".git", "_build", "deps", "node_modules", "target"])
+  @tool_result_max_chars Application.compile_env(:pincer, :tool_result_max_chars, 32_000)
 
   # Maximum file size for inline base64 encoding (≈10 MB decoded → ≈13.3 MB base64).
   # Larger files are described as text instead of sent inline.
@@ -45,6 +46,7 @@ defmodule Pincer.Core.Executor do
     Process.put(:workspace_path, workspace_path)
     Process.put(:long_term_memory, long_term_memory)
     Process.put(:executor_deps, deps)
+    Process.put(:executor_run_opts, opts)
     init_markdown_tracker(workspace_path)
 
     try do
@@ -170,8 +172,10 @@ defmodule Pincer.Core.Executor do
         _ -> 8_000
       end
 
+    context_strategy = Keyword.get(Process.get(:executor_run_opts, []), :context_strategy)
+
     # 1. Prune history using the episodic Sweet Spot architecture
-    pruned_history = prune_history(history, sweet_spot_limit)
+    pruned_history = prune_history(history, sweet_spot_limit, context_strategy: context_strategy)
 
     augmented_history = augment_history(pruned_history, long_term_memory, current_time)
 
@@ -307,39 +311,44 @@ defmodule Pincer.Core.Executor do
   # "Lost in the Middle" context is dropped. The agent must use GraphMemory to recall old facts.
   @max_recent_messages 15
 
-  defp prune_history([], _safe_limit), do: []
+  defp prune_history([], _safe_limit, _opts), do: []
 
-  defp prune_history([%{"role" => "system"} = system_msg | rest], safe_limit) do
-    # 1. Enforce strict episodic window (drop the "Lost in the Middle")
-    recent_messages =
-      if length(rest) > @max_recent_messages do
-        Enum.drop(rest, length(rest) - @max_recent_messages)
-      else
-        rest
-      end
-
-    # 2. Reverse to process newest messages first for the token cap
-    reversed_recent = Enum.reverse(recent_messages)
-
-    # 3. Accumulate tokens backwards
-    {kept_messages, _tokens} =
-      Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
-        msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
-        new_total = acc_tokens + msg_tokens
-
-        # We always keep at least one message (the newest one), even if it's huge
-        if new_total <= safe_limit or acc_msgs == [] do
-          {:cont, {[msg | acc_msgs], new_total}}
+  defp prune_history([%{"role" => "system"} = system_msg | rest], safe_limit, opts) do
+    if Keyword.get(opts, :context_strategy) == :conversation_summary and
+         length(rest) > 30 do
+      summarize_and_prune(system_msg, rest, safe_limit)
+    else
+      # 1. Enforce strict episodic window (drop the "Lost in the Middle")
+      recent_messages =
+        if length(rest) > @max_recent_messages do
+          Enum.drop(rest, length(rest) - @max_recent_messages)
         else
-          {:halt, {acc_msgs, acc_tokens}}
+          rest
         end
-      end)
 
-    # 4. Reconstruct chronologically (system prompt + kept episodic memory)
-    [system_msg | kept_messages]
+      # 2. Reverse to process newest messages first for the token cap
+      reversed_recent = Enum.reverse(recent_messages)
+
+      # 3. Accumulate tokens backwards
+      {kept_messages, _tokens} =
+        Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
+          msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
+          new_total = acc_tokens + msg_tokens
+
+          # We always keep at least one message (the newest one), even if it's huge
+          if new_total <= safe_limit or acc_msgs == [] do
+            {:cont, {[msg | acc_msgs], new_total}}
+          else
+            {:halt, {acc_msgs, acc_tokens}}
+          end
+        end)
+
+      # 4. Reconstruct chronologically (system prompt + kept episodic memory)
+      [system_msg | kept_messages]
+    end
   end
 
-  defp prune_history(history, safe_limit) do
+  defp prune_history(history, safe_limit, _opts) do
     # Fallback for histories without a system prompt at the head (usually testing only)
     recent_messages =
       if length(history) > @max_recent_messages do
@@ -363,6 +372,72 @@ defmodule Pincer.Core.Executor do
       end)
 
     kept_messages
+  end
+
+  defp summarize_and_prune(system_msg, rest, safe_limit) do
+    recent_count = min(@max_recent_messages, length(rest))
+    recent_messages = Enum.drop(rest, length(rest) - recent_count)
+    to_summarize = Enum.drop(rest, recent_count)
+
+    messages_text =
+      Enum.map_join(to_summarize, "\n", fn msg ->
+        role = msg["role"] || "unknown"
+        content = msg["content"] || ""
+        "#{role}: #{content}"
+      end)
+
+    summary =
+      case summarize_via_llm(messages_text) do
+        {:ok, text} ->
+          text
+
+        _ ->
+          Logger.warning("[EXECUTOR] conversation_summary LLM call failed; skipping summary.")
+          nil
+      end
+
+    if summary do
+      summary_msg = %{
+        "role" => "system",
+        "content" => "## Previous Conversation Summary\n\n#{summary}"
+      }
+
+      reversed_recent = Enum.reverse(recent_messages)
+
+      {kept_messages, _tokens} =
+        Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
+          msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
+          new_total = acc_tokens + msg_tokens
+
+          if new_total <= safe_limit or acc_msgs == [] do
+            {:cont, {[msg | acc_msgs], new_total}}
+          else
+            {:halt, {acc_msgs, acc_tokens}}
+          end
+        end)
+
+      [system_msg, summary_msg | kept_messages]
+    else
+      prune_history([system_msg | rest], safe_limit, [])
+    end
+  end
+
+  defp summarize_via_llm(messages_text) do
+    prompt = [
+      %{"role" => "user", "content" =>
+        "Summarize this conversation in 3-5 sentences, preserving key decisions and context:\n\n#{messages_text}"}
+    ]
+
+    client =
+      case Process.get(:executor_deps) do
+        %{llm_client: c} -> c
+        _ -> Pincer.Ports.LLM
+      end
+
+    case client.chat_completion(prompt, []) do
+      {:ok, %{"content" => content}, _usage} when is_binary(content) -> {:ok, content}
+      _ -> {:error, :summary_failed}
+    end
   end
 
   defp handle_stream(stream, history, session_id, session_pid, depth, model_override, deps) do
@@ -610,7 +685,17 @@ defmodule Pincer.Core.Executor do
 
     maybe_send_markdown_artifacts(session_pid)
 
-    %{"role" => "tool", "tool_call_id" => call_id, "name" => name, "content" => to_string(result)}
+    text = to_string(result)
+
+    text =
+      if String.length(text) > @tool_result_max_chars do
+        truncated = String.slice(text, 0, @tool_result_max_chars)
+        truncated <> "\n[...resultado truncado — #{String.length(text)} chars originais]"
+      else
+        text
+      end
+
+    %{"role" => "tool", "tool_call_id" => call_id, "name" => name, "content" => text}
   end
 
   defp execute_tool_via_registry(_invalid_call, _session_pid, _session_id, _registry) do

@@ -8,50 +8,50 @@ channels:
     token_env: "DISCORD_BOT_TOKEN"
   telegram:
     adapter: "Pincer.Channels.Telegram"
+    dm_policy:
+      mode: "pairing"
     enabled: true
     token_env: "TELEGRAM_BOT_TOKEN"
-    dm_policy:
-      mode: "pairing"
-  whatsapp:
-    adapter: "Pincer.Channels.WhatsApp"
-    enabled: false
-    dm_policy:
-      mode: "pairing"
-    bridge:
-      command: "./infrastructure/whatsapp/whatsapp_bridge"
-      args: []
-      auth_dir: "sessions/whatsapp"
-      qr_ascii: true
-      qr_ascii_small: true
-      pairing_phone: ""
   webhook:
     adapter: "Pincer.Channels.Webhook"
-    enabled: false
-    token_env: "PINCER_WEBHOOK_TOKEN"
-    session_mode: "per_sender"
-    default_source: "external"
     default_session_id: "webhook_main"
+    default_source: "external"
+    enabled: false
+    session_mode: "per_sender"
+    token_env: "PINCER_WEBHOOK_TOKEN"
+  whatsapp:
+    adapter: "Pincer.Channels.WhatsApp"
+    bridge:
+      args: []
+      auth_dir: "sessions/whatsapp"
+      command: "./infrastructure/whatsapp/whatsapp_bridge"
+      pairing_phone: ""
+      qr_ascii: true
+      qr_ascii_small: true
+    dm_policy:
+      mode: "pairing"
+    enabled: false
 database:
   adapter: "Ecto.Adapters.PostgreSQL"
+  database: "pincer_mvp"
   hostname: "localhost"
+  password: "postgres"
+  pool_size: 10
   port: 5432
   username: "postgres"
-  password: "postgres"
-  database: "pincer_mvp"
-  pool_size: 10
 llm:
-  opencode_zen:
-    base_url: "https://opencode.ai/zen/v1/chat/completions"
-    default_model: "kimi-k2.5-free"
-  openrouter:
-    base_url: "https://openrouter.ai/api/v1/chat/completions"
-    default_model: "openrouter/free"
   groq:
     base_url: "https://api.groq.com/openai/v1/chat/completions"
     default_model: "llama-3.3-70b-versatile"
   groq_whisper:
     base_url: "https://api.groq.com/openai/v1/audio/transcriptions"
     default_model: "whisper-large-v3-turbo"
+  opencode_zen:
+    base_url: "https://opencode.ai/zen/v1/chat/completions"
+    default_model: "kimi-k2.5-free"
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1/chat/completions"
+    default_model: "openrouter/free"
   provider: "z_ai"
   z_ai:
     base_url: "https://api.z.ai/api/coding/paas/v4/chat/completions"
@@ -65,7 +65,7 @@ mcp:
       args: ["-y", "@modelcontextprotocol/server-github"]
       command: "npx"
     shell:
-      command: "infrastructure/mcp/venv/bin/python3"
       args: ["infrastructure/mcp/shell_server.py"]
+      command: "infrastructure/mcp/venv/bin/python3"
 tools:
   restrict_to_workspace: true

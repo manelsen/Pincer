@@ -9,7 +9,8 @@ config :pincer, Pincer.Infra.Repo,
   database: System.get_env("PINCER_DB_NAME", "pincer_test"),
   pool: Ecto.Adapters.SQL.Sandbox,
   pool_size: 10,
-  types: Pincer.Infra.PostgrexTypes
+  types: Pincer.Infra.PostgrexTypes,
+  ssl: false
 
 config :nostrum, token: "DUMMY_TOKEN"
 
