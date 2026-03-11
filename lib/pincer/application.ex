@@ -36,6 +36,9 @@ defmodule Pincer.Application do
       ├── Pincer.Core.Session.Registry
       │   Registry for active sessions (unique keys)
       │
+      ├── Pincer.Core.HookDispatcher
+      │   Lifecycle hook registry and dispatcher
+      │
       ├── Pincer.Core.Session.Supervisor
       │   DynamicSupervisor for user sessions
       │
@@ -126,6 +129,7 @@ defmodule Pincer.Application do
       {DynamicSupervisor, strategy: :one_for_one, name: Pincer.MCP.Supervisor},
       Pincer.Adapters.Connectors.MCP.Manager,
       {Registry, keys: :unique, name: Pincer.Core.Session.Registry},
+      Pincer.Core.HookDispatcher,
       Pincer.Core.Session.Supervisor,
       Pincer.Core.Project.Registry,
       Pincer.Core.Project.Supervisor,
