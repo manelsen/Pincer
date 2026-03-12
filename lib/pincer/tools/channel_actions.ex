@@ -23,18 +23,32 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
     %{
       name: "channel_actions",
       description:
-        "Sends operational messages through Telegram, Discord or WhatsApp. If channel and recipient are omitted, uses the current session conversation when possible.",
+        "Sends operational messages, files, or replies through Telegram, Discord or WhatsApp. If channel and recipient are omitted, uses the current session conversation when possible.",
       parameters: %{
         type: "object",
         properties: %{
           action: %{
             type: "string",
-            enum: ["send_message"],
-            description: "Channel action to execute."
+            enum: ["send_message", "send_file", "reply_to"],
+            description:
+              "Channel action: 'send_message' (plain text), 'send_file' (upload a file from workspace), 'reply_to' (reply to a specific message)."
           },
           content: %{
             type: "string",
-            description: "Message text to send."
+            description: "Message text (required for 'send_message' and 'reply_to')."
+          },
+          path: %{
+            type: "string",
+            description: "Workspace-relative file path (required for 'send_file')."
+          },
+          caption: %{
+            type: "string",
+            description: "Optional caption text when sending a file."
+          },
+          message_id: %{
+            type: "string",
+            description:
+              "ID of the message to reply to (required for 'reply_to'). Telegram: integer as string."
           },
           channel: %{
             type: "string",
@@ -51,7 +65,7 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
               "Optional explicit Pincer session target like telegram_123, discord_456 or whatsapp_551199..."
           }
         },
-        required: ["action", "content"]
+        required: ["action"]
       }
     }
   end
@@ -60,6 +74,8 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
   def execute(args, context \\ %{}) do
     case Map.get(args, "action") do
       "send_message" -> send_message(args, context)
+      "send_file" -> send_file(args, context)
+      "reply_to" -> reply_to(args, context)
       action when is_binary(action) -> {:error, "Unsupported channel_actions action: #{action}"}
       _ -> {:error, "Missing or invalid 'action'."}
     end
@@ -68,12 +84,50 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
   defp send_message(args, context) do
     with {:ok, content} <- fetch_required_string(args, "content"),
          {:ok, {channel, recipient}} <- resolve_destination(args, context),
-         {:ok, _message_id} <- dispatch(channel, recipient, content) do
+         {:ok, _message_id} <- dispatch(channel, recipient, content, []) do
       {:ok, "Message sent via #{channel} to #{recipient}."}
     else
       {:error, reason} when is_binary(reason) -> {:error, reason}
       {:error, reason} -> {:error, inspect(reason)}
       other -> {:error, "Failed to send channel message: #{inspect(other)}"}
+    end
+  end
+
+  defp send_file(args, context) do
+    workspace = Map.get(context, "workspace_path") || File.cwd!()
+
+    with {:ok, rel_path} <- fetch_required_string(args, "path"),
+         abs_path = Path.join(workspace, rel_path),
+         true <- File.exists?(abs_path) || {:error, "File not found: #{rel_path}"},
+         {:ok, binary} <- File.read(abs_path),
+         {:ok, {channel, recipient}} <- resolve_destination(args, context) do
+      filename = Path.basename(abs_path)
+      caption = Map.get(args, "caption", "")
+      files = [%{name: filename, body: binary}]
+
+      case dispatch_file(channel, recipient, files, caption) do
+        {:ok, _} -> {:ok, "File '#{filename}' sent via #{channel} to #{recipient}."}
+        {:error, reason} when is_binary(reason) -> {:error, reason}
+        {:error, reason} -> {:error, inspect(reason)}
+      end
+    else
+      true -> {:error, "Unexpected error resolving file path."}
+      {:error, reason} when is_binary(reason) -> {:error, reason}
+      {:error, reason} -> {:error, inspect(reason)}
+      other -> {:error, "Failed to send file: #{inspect(other)}"}
+    end
+  end
+
+  defp reply_to(args, context) do
+    with {:ok, content} <- fetch_required_string(args, "content"),
+         {:ok, message_id} <- fetch_required_string(args, "message_id"),
+         {:ok, {channel, recipient}} <- resolve_destination(args, context),
+         {:ok, _} <- dispatch(channel, recipient, content, reply_to_message_id: message_id) do
+      {:ok, "Reply sent via #{channel} to #{recipient} (re: #{message_id})."}
+    else
+      {:error, reason} when is_binary(reason) -> {:error, reason}
+      {:error, reason} -> {:error, inspect(reason)}
+      other -> {:error, "Failed to send reply: #{inspect(other)}"}
     end
   end
 
@@ -129,16 +183,29 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
     end
   end
 
-  defp dispatch(:telegram, recipient, content) do
-    telegram_adapter().send_message(recipient, content, [])
+  defp dispatch(:telegram, recipient, content, opts) do
+    telegram_adapter().send_message(recipient, content, opts)
   end
 
-  defp dispatch(:discord, recipient, content) do
-    discord_adapter().send_message(recipient, content, [])
+  defp dispatch(:discord, recipient, content, opts) do
+    discord_adapter().send_message(recipient, content, opts)
   end
 
-  defp dispatch(:whatsapp, recipient, content) do
-    whatsapp_adapter().send_message(recipient, content, [])
+  defp dispatch(:whatsapp, recipient, content, opts) do
+    whatsapp_adapter().send_message(recipient, content, opts)
+  end
+
+  defp dispatch_file(:telegram, recipient, files, caption) do
+    telegram_adapter().send_message(recipient, caption, files: files)
+  end
+
+  defp dispatch_file(:discord, recipient, files, caption) do
+    discord_adapter().send_message(recipient, caption, files: files)
+  end
+
+  defp dispatch_file(:whatsapp, _recipient, files, _caption) do
+    filename = files |> List.first(%{}) |> Map.get(:name, "file")
+    {:error, "File sending is not supported on WhatsApp (file: #{filename})."}
   end
 
   defp normalize_channel(channel) when is_atom(channel),
