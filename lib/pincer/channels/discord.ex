@@ -782,24 +782,28 @@ defmodule Pincer.Channels.Discord do
     defp build_status_content(session_id) do
       ensure_brain_session_started(session_id)
 
-      case Pincer.Core.Session.Server.get_status(session_id) do
-        {:ok, state} ->
-          provider = if state.model_override, do: state.model_override.provider, else: "Default"
-          model = if state.model_override, do: state.model_override.model, else: "Default"
-          status = if state.status == :working, do: "🏗️ Busy", else: "😴 Idle"
+      try do
+        case Pincer.Core.Session.Server.get_status(session_id) do
+          {:ok, state} ->
+            provider = if state.model_override, do: state.model_override.provider, else: "Default"
+            model = if state.model_override, do: state.model_override.model, else: "Default"
+            status = if state.status == :working, do: "🏗️ Busy", else: "😴 Idle"
 
-          """
-          📊 **Session Status**
-          ━━━━━━━━━━━━━━━
-          🆔 **ID**: `#{session_id}`
-          📡 **Status**: #{status}
-          🏢 **Provider**: `#{provider}`
-          🤖 **Model**: `#{model}`
-          📜 **History**: #{length(state.history)} messages
-          """
+            """
+            📊 **Session Status**
+            ━━━━━━━━━━━━━━━
+            🆔 **ID**: `#{session_id}`
+            📡 **Status**: #{status}
+            🏢 **Provider**: `#{provider}`
+            🤖 **Model**: `#{model}`
+            📜 **History**: #{length(state.history)} messages
+            """
 
-        _ ->
-          "❌ Could not get session status."
+          _ ->
+            "❌ Could not get session status."
+        end
+      catch
+        :exit, {:timeout, _} -> "⏳ Session is starting up, please try again shortly."
       end
     end
 

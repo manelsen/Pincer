@@ -109,13 +109,20 @@ defmodule Pincer.Core.ExecutorHexTest do
       session_id = "tool_exec_markdown_session"
       history = [%{"role" => "user", "content" => "Generate markdown"}]
 
-      rel_path =
-        Path.join("trash", "executor_markdown_#{System.unique_integer([:positive])}.md")
+      # Use an absolute workspace so CWD changes from async: false tests don't affect us.
+      workspace =
+        Path.join(
+          System.tmp_dir!(),
+          "pincer_executor_md_#{System.unique_integer([:positive])}"
+        )
 
-      abs_path = Path.expand(rel_path, File.cwd!())
+      File.mkdir_p!(workspace)
+
+      rel_path = Path.join("trash", "executor_markdown_#{System.unique_integer([:positive])}.md")
+      abs_path = Path.join(workspace, rel_path)
 
       on_exit(fn ->
-        File.rm(abs_path)
+        File.rm_rf!(workspace)
       end)
 
       Pincer.MockToolRegistry
@@ -154,7 +161,8 @@ defmodule Pincer.Core.ExecutorHexTest do
       {:ok, _pid} =
         Pincer.Core.Executor.start(session_pid, session_id, history,
           tool_registry: Pincer.MockToolRegistry,
-          llm_client: Pincer.MockLLMClient
+          llm_client: Pincer.MockLLMClient,
+          workspace_path: workspace
         )
 
       assert_receive {:sme_status, :executor, markdown_notice}, 5000
