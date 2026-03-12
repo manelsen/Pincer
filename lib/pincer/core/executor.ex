@@ -688,17 +688,24 @@ defmodule Pincer.Core.Executor do
 
     maybe_send_markdown_artifacts(session_pid)
 
-    text = to_string(result)
+    content =
+      case result do
+        parts when is_list(parts) ->
+          # Multimodal tool result (e.g. screenshot_inline): pass parts directly to the LLM.
+          parts
 
-    text =
-      if String.length(text) > @tool_result_max_chars do
-        truncated = String.slice(text, 0, @tool_result_max_chars)
-        truncated <> "\n[...resultado truncado — #{String.length(text)} chars originais]"
-      else
-        text
+        _ ->
+          text = to_string(result)
+
+          if String.length(text) > @tool_result_max_chars do
+            truncated = String.slice(text, 0, @tool_result_max_chars)
+            truncated <> "\n[...resultado truncado — #{String.length(text)} chars originais]"
+          else
+            text
+          end
       end
 
-    %{"role" => "tool", "tool_call_id" => call_id, "name" => name, "content" => text}
+    %{"role" => "tool", "tool_call_id" => call_id, "name" => name, "content" => content}
   end
 
   defp execute_tool_via_registry(_invalid_call, _session_pid, _session_id, _registry) do
@@ -796,7 +803,7 @@ defmodule Pincer.Core.Executor do
 
   # Returns the provider key that will be used for the next LLM call.
   defp get_active_provider(nil) do
-    registry = Application.get_env(:pincer, :llm_providers, %{})
+    registry = Application.get_env(:pincer, :llm_providers, %{}) || %{}
 
     Application.get_env(
       :pincer,
@@ -812,7 +819,7 @@ defmodule Pincer.Core.Executor do
 
   # Returns true when the provider config declares native file/multimodal support.
   defp provider_supports_files?(provider_id) do
-    registry = Application.get_env(:pincer, :llm_providers, %{})
+    registry = Application.get_env(:pincer, :llm_providers, %{}) || %{}
     config = Map.get(registry, provider_id, %{})
     Map.get(config, :supports_files, false)
   end
