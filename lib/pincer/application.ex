@@ -156,6 +156,13 @@ defmodule Pincer.Application do
 
     # Only start Code Reloader in dev env
     children =
+      if Application.get_env(:pincer, :enable_browser, false) do
+        children ++ [Pincer.Adapters.Browser.Pool]
+      else
+        children
+      end
+
+    children =
       if Mix.env() == :dev do
         children ++ [Pincer.Core.Reloader]
       else
