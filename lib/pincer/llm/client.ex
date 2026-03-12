@@ -566,7 +566,7 @@ defmodule Pincer.LLM.Client do
 
   defp model_selection_registry do
     llm_registry = llm_config_registry()
-    providers_registry = Application.get_env(:pincer, :llm_providers, %{})
+    providers_registry = Application.get_env(:pincer, :llm_providers, %{}) || %{}
 
     # Merge both, with llm_config_registry (config.yaml) taking precedence
     Map.merge(providers_registry, llm_registry)

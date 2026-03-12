@@ -52,6 +52,7 @@ defmodule Pincer.Channels.SmokeTest do
 
     # Setup Mock LLM
     original_llm = Application.get_env(:pincer, :llm_providers)
+    original_default = Application.get_env(:pincer, :default_llm_provider)
 
     Application.put_env(:pincer, :llm_providers, %{
       "test_provider" => %{adapter: MockStreamProvider, default_model: "test"}
@@ -64,7 +65,17 @@ defmodule Pincer.Channels.SmokeTest do
     Application.put_env(:pincer, :discord_api, DiscordAPIMock)
 
     on_exit(fn ->
-      Application.put_env(:pincer, :llm_providers, original_llm)
+      if is_nil(original_llm) do
+        Application.delete_env(:pincer, :llm_providers)
+      else
+        Application.put_env(:pincer, :llm_providers, original_llm)
+      end
+
+      if is_nil(original_default) do
+        Application.delete_env(:pincer, :default_llm_provider)
+      else
+        Application.put_env(:pincer, :default_llm_provider, original_default)
+      end
     end)
 
     verify_on_exit!()

@@ -8,7 +8,8 @@ defmodule Pincer.Ports.ToolRegistry do
 
   defp adapters do
     # Pure dynamic lookup from configuration. No hardcoded adapters here.
-    Application.get_env(:pincer, :tool_adapters, [])
+    # Guard against nil stored explicitly (e.g., test on_exit restoring unset env).
+    Application.get_env(:pincer, :tool_adapters) || []
   end
 
   def list_tools do
