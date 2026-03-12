@@ -25,7 +25,10 @@ defmodule Pincer.Adapters.NativeToolRegistry do
     Pincer.Adapters.Tools.GraphMemory,
     Pincer.Adapters.Tools.CodeSkeleton,
     Pincer.Adapters.Tools.Learning,
-    Pincer.Adapters.Tools.ExternalKnowledge
+    Pincer.Adapters.Tools.ExternalKnowledge,
+    Pincer.Adapters.Tools.Browser,
+    Pincer.Adapters.Tools.Media,
+    Pincer.Adapters.Tools.Workflow
   ]
 
   @impl true

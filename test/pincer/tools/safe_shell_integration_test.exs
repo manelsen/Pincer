@@ -23,7 +23,11 @@ defmodule Pincer.Adapters.Tools.SafeShellIntegrationTest do
     Application.put_env(:pincer, :tool_adapters, [FakeRunCommandRegistry])
 
     on_exit(fn ->
-      Application.put_env(:pincer, :tool_adapters, previous_tool_adapters)
+      if is_nil(previous_tool_adapters) do
+        Application.delete_env(:pincer, :tool_adapters)
+      else
+        Application.put_env(:pincer, :tool_adapters, previous_tool_adapters)
+      end
     end)
 
     root =

@@ -27,6 +27,7 @@ defmodule Pincer.Core.Session.Server do
     principal_ref = Keyword.get(opts, :principal_ref)
     conversation_ref = Keyword.get(opts, :conversation_ref)
     blackboard_scope = Keyword.get(opts, :blackboard_scope, root_agent_id)
+    llm_client = Keyword.get(opts, :llm_client)
 
     ensure_opts = [bootstrap?: bootstrap?]
 
@@ -60,7 +61,8 @@ defmodule Pincer.Core.Session.Server do
       usage_display: "off",
       token_usage_total: %{"prompt_tokens" => 0, "completion_tokens" => 0},
       input_buffer: [],
-      debounce_timer: nil
+      debounce_timer: nil,
+      llm_client: llm_client
     }
 
     # 4. Build final history
@@ -91,19 +93,29 @@ defmodule Pincer.Core.Session.Server do
   def handle_info(:recovery_catch_up, state) do
     Logger.info("[SESSION] #{state.session_id} Maestro performing recovery catch-up...")
 
-    # Read everything from Blackboard that happened since this agent was last alive
-    case Blackboard.fetch_new(state.last_blackboard_id, scope: state.blackboard_scope) do
-      {[], _} ->
-        {:noreply, state}
+    # Fetch asynchronously so the GenServer stays responsive to calls during the O(n) journal scan.
+    parent = self()
+    since_id = state.last_blackboard_id
+    scope = state.blackboard_scope
 
-      {messages, new_last_id} ->
-        Logger.info(
-          "[SESSION] #{state.session_id} Caught up with #{length(messages)} missed messages."
-        )
+    Task.start(fn ->
+      case Blackboard.fetch_new(since_id, scope: scope) do
+        {[], _} -> :ok
+        {messages, new_last_id} -> send(parent, {:recovery_catch_up_done, messages, new_last_id})
+      end
+    end)
 
-        # During boot, process silently without broadcasting to external channels
-        process_blackboard_messages(messages, new_last_id, state, broadcast?: false)
-    end
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:recovery_catch_up_done, messages, new_last_id}, state) do
+    Logger.info(
+      "[SESSION] #{state.session_id} Caught up with #{length(messages)} missed messages."
+    )
+
+    # During boot, process silently without broadcasting to external channels
+    process_blackboard_messages(messages, new_last_id, state, broadcast?: false)
   end
 
   @impl true
@@ -475,10 +487,11 @@ defmodule Pincer.Core.Session.Server do
           state.model_override
         end
 
-      executor_opts = [
-        model_override: model_override_with_thinking,
-        workspace_path: state.workspace_path
-      ]
+      executor_opts =
+        [model_override: model_override_with_thinking, workspace_path: state.workspace_path]
+        |> then(fn opts ->
+          if state.llm_client, do: Keyword.put(opts, :llm_client, state.llm_client), else: opts
+        end)
 
       {:ok, pid} = Executor.start(self(), state.session_id, new_history, executor_opts)
 
