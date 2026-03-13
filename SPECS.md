@@ -3070,3 +3070,39 @@ config = ~y"""
 1. Teste de core prova `send`, `edit` e `noop` da politica.
 2. Teste de core prova que `mark_sent/3` e `mark_edited/2` atualizam o estado corretamente.
 3. Testes existentes de Telegram e Discord continuam verdes, sem regressao de upsert de status.
+
+## Incremento 2026-03-13 (Core Stream Delivery Helper v1)
+
+### Objetivo
+- tirar das sessoes de canal a coreografia de `partial/final` com fallback `edit -> send`;
+- manter `Core` como dono da semantica de preview/finalizacao;
+- deixar Telegram e Discord apenas injetarem callbacks de transporte.
+
+### Interfaces/Public API
+- `Pincer.Core.StreamDelivery.handle_partial/5`
+- `Pincer.Core.StreamDelivery.handle_final/3`
+- `Pincer.Core.StreamingPolicy`
+- `Pincer.Channels.Telegram.Session`
+- `Pincer.Channels.Discord.Session`
+
+### Regras
+- `handle_partial/5` deve:
+  - delegar acumulacao e decisao de preview para `StreamingPolicy`;
+  - usar callback `send` quando ainda nao existir `message_id`;
+  - usar callback `edit` quando existir `message_id`, com fallback para `send` se o edit falhar;
+  - devolver o estado do canal atualizado com `StreamingPolicy.assign/2`.
+- `handle_final/3` deve:
+  - delegar decisao final para `StreamingPolicy.on_final/2`;
+  - enviar mensagem final unica quando nao houver preview;
+  - editar a preview existente quando houver `message_id`, com fallback para `send` se o edit falhar;
+  - resetar o estado de streaming no retorno.
+- O helper deve aceitar callbacks de transporte por keyword list:
+  - `send: (text -> result)`
+  - `edit: (message_id, text -> result)`
+
+### Critérios de aceite
+1. Teste de core prova que `partial` inicial cria preview via `send` e persiste `message_id`.
+2. Teste de core prova que `partial` com `edit` falhando faz fallback para `send`.
+3. Teste de core prova que `final` com preview existente edita in-place e reseta o estado.
+4. Teste de core prova que `final` com `edit` falhando faz fallback para `send` e ainda reseta o estado.
+5. Telegram e Discord continuam verdes usando o helper central.
