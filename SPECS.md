@@ -3175,3 +3175,39 @@ config = ~y"""
 3. Teste de core prova fallback `edit -> send`.
 4. Teste de core prova `noop` para texto repetido.
 5. Telegram e Discord continuam verdes usando o helper.
+
+## Incremento 2026-03-13 (Core Project Flow Delivery v1)
+
+### Objetivo
+- centralizar a reacao de canais a `ProjectRouter.on_agent_response/1` e `on_agent_error/1`;
+- remover duplicacao de mensagem `"Project Runner: ..."` e de `process_input/2`;
+- deixar os canais injetarem apenas o callback de envio.
+
+### Interfaces/Public API
+- `Pincer.Core.ProjectFlowDelivery.on_response/3`
+- `Pincer.Core.ProjectFlowDelivery.on_error/3`
+- `Pincer.Channels.Telegram.Session`
+- `Pincer.Channels.Discord.Session`
+
+### Regras
+- `on_response/3` deve:
+  - consultar `ProjectRouter.on_agent_response/1`;
+  - enviar `"Project Runner: #{progress.status_message}"` quando houver progresso;
+  - chamar `Session.Server.process_input/2` somente em `{:next, progress}`;
+  - retornar `:ok` para qualquer caminho.
+- `on_error/3` deve:
+  - consultar `ProjectRouter.on_agent_error/1`;
+  - enviar `"Project Runner: #{progress.status_message}"` em `{:retry, progress}` e `{:paused, progress}`;
+  - chamar `Session.Server.process_input/2` somente em `{:retry, progress}`;
+  - retornar `:ok` para qualquer caminho.
+- os dois helpers devem aceitar dependencias injetaveis por keyword:
+  - `router`
+  - `session_server`
+  - `send_message`
+
+### Critérios de aceite
+1. Teste de core prova que `on_response/3` envia mensagem e reexecuta prompt em `:next`.
+2. Teste de core prova que `on_response/3` envia mensagem sem reexecucao em `:completed`.
+3. Teste de core prova que `on_error/3` envia mensagem e reexecuta prompt em `:retry`.
+4. Teste de core prova que `on_error/3` envia mensagem sem reexecucao em `:paused`.
+5. Telegram e Discord continuam verdes usando o helper.
