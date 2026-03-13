@@ -8,7 +8,7 @@ defmodule Pincer.Core.OnboardTest do
       defaults = Onboard.defaults()
       assert get_in(defaults, ["database", "adapter"]) == "Ecto.Adapters.PostgreSQL"
       assert get_in(defaults, ["database", "hostname"]) == "localhost"
-      assert get_in(defaults, ["database", "database"]) == "pincer_mvp"
+      assert get_in(defaults, ["database", "database"]) == "pincer"
     end
 
     test "includes whatsapp channel scaffold disabled by default" do
@@ -97,7 +97,7 @@ defmodule Pincer.Core.OnboardTest do
              )
 
       {:ok, config} = YamlElixir.read_from_file(Path.join(tmp, "config.yaml"))
-      assert config["database"]["database"] == "pincer_mvp"
+      assert config["database"]["database"] == "pincer"
       assert config["database"]["hostname"] == "localhost"
     end
   end

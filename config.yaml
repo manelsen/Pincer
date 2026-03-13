@@ -33,7 +33,7 @@ channels:
     enabled: false
 database:
   adapter: "Ecto.Adapters.PostgreSQL"
-  database: "pincer_mvp"
+  database: "pincer"
   hostname: "localhost"
   password: "postgres"
   pool_size: 10
@@ -58,9 +58,6 @@ llm:
     default_model: "glm-4.7"
 mcp:
   servers:
-    filesystem:
-      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
-      command: "npx"
     github:
       args: ["-y", "@modelcontextprotocol/server-github"]
       command: "npx"

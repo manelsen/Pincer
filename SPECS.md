@@ -605,7 +605,7 @@ mix pincer.onboard --non-interactive --db-name pincer_custom
 
 ### Critérios de aceite
 1. `mix pincer.onboard --non-interactive --yes` cria `config.yaml`, `sessions/` e `memory/`.
-2. Config padrão aponta para Postgres em `localhost:5432`, database `pincer_mvp`.
+2. Config padrão aponta para Postgres em `localhost:5432`, database `pincer`.
 3. `config/dev.exs` e `config/test.exs` usam defaults de Postgres coerentes com o ambiente local.
 4. Implementação coberta por testes em:
    - `test/pincer/core/onboard_test.exs`
