@@ -49,8 +49,8 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   @max_search_results 100
   @search_skip_dirs [".git", "_build", "deps", "node_modules"]
   @snippet_limit 160
-  @hashline_dict String.graphemes("ZPMQVRWSNKTXJBYH")
-  @line_ref_regex ~r/^(\d+)#([A-Z0-9]{2})$/
+  @hashline_dict "ZPMQVRWSNKTXJBYH" |> String.graphemes() |> List.to_tuple()
+  @line_ref_regex ~r/^(\d+)#([A-Z]{5})$/
   # Determine workspace root at runtime
   defp get_workspace_root, do: File.cwd!()
 
@@ -173,27 +173,38 @@ defmodule Pincer.Adapters.Tools.FileSystem do
 
   @impl true
   def execute(args, context \\ %{}) do
-    action = infer_action(args)
-    raw_path = Map.get(args, "path", default_path(action))
+    # DEBUG: Log incoming arguments
+    Logger.debug("[FILE-SYSTEM] Incoming args: #{inspect(args)}")
 
-    workspace_root = Map.get(context, "workspace_path") || get_workspace_root()
+    action = infer_action(args)
+    raw_path = get_arg(args, "path") || default_path(action)
+
+    workspace_root = Map.get(context, "workspace_path") || Map.get(context, :workspace_path) || get_workspace_root()
 
     with {:ok, safe_path} <- validate_action_path(action, raw_path, workspace_root),
          {:ok, normalized_args} <- normalize_args_for_action(action, args, workspace_root) do
       perform_action(action, safe_path, normalized_args, workspace_root)
     else
       {:error, reason} ->
-        Logger.warning("[FILE-SYSTEM] Security violation: #{reason} (Path: #{raw_path})")
+        Logger.warning("[FILE-SYSTEM] Security violation: #{reason} (Path: #{inspect(raw_path)})")
         {:error, reason}
     end
   end
 
-  defp infer_action(%{"action" => action}) when is_binary(action), do: action
-  defp infer_action(%{"content" => _content}), do: "write"
-  defp infer_action(%{"old_text" => _old_text, "new_text" => _new_text}), do: "patch"
-  defp infer_action(%{"query" => _query}), do: "search"
-  defp infer_action(%{"path" => _path}), do: "read"
-  defp infer_action(_args), do: nil
+  defp infer_action(args) do
+    cond do
+      a = get_arg(args, "action") -> a
+      get_arg(args, "content") -> "write"
+      get_arg(args, "old_text") and get_arg(args, "new_text") -> "patch"
+      get_arg(args, "query") -> "search"
+      get_arg(args, "path") -> "read"
+      true -> nil
+    end
+  end
+
+  defp get_arg(map, key) when is_map(map) do
+    Map.get(map, key) || Map.get(map, String.to_atom(key))
+  end
 
   defp default_path("list"), do: "."
   defp default_path("search"), do: "."
@@ -244,7 +255,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp perform_action("list", path, args, workspace_root) do
-    if Map.get(args, "recursive", false) == true do
+    if get_arg(args, "recursive") == true do
       case list_recursive(path, workspace_root) do
         {:ok, entries} ->
           {:ok,
@@ -270,55 +281,59 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     end
   end
 
-  defp perform_action("write", path, %{"content" => content}, workspace_root)
-       when is_binary(content) do
-    case File.stat(path) do
-      {:ok, %{type: :directory}} ->
-        {:error, "Cannot write to a directory."}
+  defp perform_action("write", path, args, workspace_root) do
+    content = get_arg(args, "content")
 
-      _ ->
-        path
-        |> Path.dirname()
-        |> File.mkdir_p()
+    if is_binary(content) do
+      case File.stat(path) do
+        {:ok, %{type: :directory}} ->
+          {:error, "Cannot write to a directory."}
 
-        case File.write(path, content) do
-          :ok ->
-            {:ok,
-             "Wrote #{byte_size(content)} bytes to '#{relative_to_workspace(path, workspace_root)}'."}
+        _ ->
+          path
+          |> Path.dirname()
+          |> File.mkdir_p()
 
-          {:error, reason} ->
-            {:error, "Error writing file: #{inspect(reason)}"}
-        end
+          case File.write(path, content) do
+            :ok ->
+              {:ok,
+               "Wrote #{byte_size(content)} bytes to '#{relative_to_workspace(path, workspace_root)}'."}
+
+            {:error, reason} ->
+              {:error, "Error writing file: #{inspect(reason)}"}
+          end
+      end
+    else
+      {:error, "Write action requires string 'content'."}
     end
   end
 
-  defp perform_action("write", _path, _args, _workspace_root),
-    do: {:error, "Write action requires string 'content'."}
+  defp perform_action("append", path, args, workspace_root) do
+    content = get_arg(args, "content")
 
-  defp perform_action("append", path, %{"content" => content}, workspace_root)
-       when is_binary(content) do
-    case File.stat(path) do
-      {:ok, %{type: :directory}} ->
-        {:error, "Cannot append to a directory."}
+    if is_binary(content) do
+      case File.stat(path) do
+        {:ok, %{type: :directory}} ->
+          {:error, "Cannot append to a directory."}
 
-      _ ->
-        path
-        |> Path.dirname()
-        |> File.mkdir_p()
+        _ ->
+          path
+          |> Path.dirname()
+          |> File.mkdir_p()
 
-        case File.write(path, content, [:append]) do
-          :ok ->
-            {:ok,
-             "Appended #{byte_size(content)} bytes to '#{relative_to_workspace(path, workspace_root)}'."}
+          case File.write(path, content, [:append]) do
+            :ok ->
+              {:ok,
+               "Appended #{byte_size(content)} bytes to '#{relative_to_workspace(path, workspace_root)}'."}
 
-          {:error, reason} ->
-            {:error, "Error appending file: #{inspect(reason)}"}
-        end
+            {:error, reason} ->
+              {:error, "Error appending file: #{inspect(reason)}"}
+          end
+      end
+    else
+      {:error, "Append action requires string 'content'."}
     end
   end
-
-  defp perform_action("append", _path, _args, _workspace_root),
-    do: {:error, "Append action requires string 'content'."}
 
   defp perform_action("mkdir", path, _args, workspace_root) do
     case File.stat(path) do
@@ -340,8 +355,8 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp perform_action("copy", path, args, workspace_root) do
-    destination = Map.fetch!(args, "_destination_path")
-    overwrite? = Map.get(args, "overwrite", false) == true
+    destination = get_arg(args, "_destination_path")
+    overwrite? = get_arg(args, "overwrite") == true
 
     with :ok <- ensure_destination_available(destination, overwrite?),
          :ok <- ensure_parent_directory(destination),
@@ -354,8 +369,8 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp perform_action("move", path, args, workspace_root) do
-    destination = Map.fetch!(args, "_destination_path")
-    overwrite? = Map.get(args, "overwrite", false) == true
+    destination = get_arg(args, "_destination_path")
+    overwrite? = get_arg(args, "overwrite") == true
 
     with :ok <- ensure_not_workspace_root(path, workspace_root),
          :ok <- ensure_not_descendant_move(path, destination),
@@ -372,7 +387,12 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   defp perform_action("find", path, args, workspace_root) do
     with {:ok, find_opts} <- normalize_find_opts(args),
          {:ok, entries} <-
-           find_paths(path, workspace_root, normalize_max_results(args["max_results"]), find_opts) do
+           find_paths(
+             path,
+             workspace_root,
+             normalize_max_results(get_arg(args, "max_results")),
+             find_opts
+           ) do
       case entries do
         [] ->
           {:ok, "No paths found in '#{relative_to_workspace(path, workspace_root)}'."}
@@ -405,7 +425,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
              path,
              workspace_root,
              query,
-             normalize_max_results(args["max_results"]),
+             normalize_max_results(get_arg(args, "max_results")),
              search_opts
            ) do
       case matches do
@@ -502,7 +522,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp fetch_string(args, key) do
-    case Map.get(args, key) do
+    case get_arg(args, key) do
       value when is_binary(value) -> {:ok, value}
       _ -> {:error, "Missing or invalid '#{key}'."}
     end
@@ -539,7 +559,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
 
   defp normalize_search_opts(args) do
     extension =
-      case Map.get(args, "extension") do
+      case get_arg(args, "extension") do
         nil -> nil
         value when is_binary(value) -> normalize_extension(value)
         _ -> :invalid
@@ -550,8 +570,8 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     else
       {:ok,
        %{
-         query: normalize_query(Map.get(args, "query"), Map.get(args, "case_sensitive", false)),
-         case_sensitive?: Map.get(args, "case_sensitive", false) == true,
+         query: normalize_query(get_arg(args, "query"), get_arg(args, "case_sensitive") == true),
+         case_sensitive?: get_arg(args, "case_sensitive") == true,
          extension: extension
        }}
     end
@@ -559,20 +579,20 @@ defmodule Pincer.Adapters.Tools.FileSystem do
 
   defp normalize_find_opts(args) do
     type =
-      case Map.get(args, "type", "any") do
+      case get_arg(args, "type") || "any" do
         value when value in ["file", "directory", "any"] -> value
         _ -> :invalid
       end
 
     extension =
-      case Map.get(args, "extension") do
+      case get_arg(args, "extension") do
         nil -> nil
         value when is_binary(value) -> normalize_extension(value)
         _ -> :invalid
       end
 
     glob =
-      case Map.get(args, "glob") do
+      case get_arg(args, "glob") do
         nil -> "*"
         value when is_binary(value) and value != "" -> value
         _ -> :invalid
@@ -586,26 +606,29 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     end
   end
 
-  defp normalize_anchored_edits(%{"edits" => edits}) when is_list(edits) and edits != [] do
-    edits
-    |> Enum.with_index(1)
-    |> Enum.reduce_while({:ok, []}, fn {edit, index}, {:ok, acc} ->
-      case normalize_anchored_edit(edit, index) do
-        {:ok, normalized} -> {:cont, {:ok, acc ++ [normalized]}}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
+  defp normalize_anchored_edits(args) do
+    edits = get_arg(args, "edits")
+
+    if is_list(edits) and edits != [] do
+      edits
+      |> Enum.with_index(1)
+      |> Enum.reduce_while({:ok, []}, fn {edit, index}, {:ok, acc} ->
+        case normalize_anchored_edit(edit, index) do
+          {:ok, normalized} -> {:cont, {:ok, acc ++ [normalized]}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+    else
+      {:error, "'anchored_edit' requires a non-empty 'edits' list."}
+    end
   end
 
-  defp normalize_anchored_edits(_args),
-    do: {:error, "'anchored_edit' requires a non-empty 'edits' list."}
-
   defp normalize_anchored_edit(edit, index) when is_map(edit) do
-    with {:ok, op} <- normalize_anchored_op(Map.get(edit, "op"), index),
+    with {:ok, op} <- normalize_anchored_op(get_arg(edit, "op"), index),
          {:ok, anchor} <- fetch_anchored_ref(edit, "anchor", index),
          {:ok, content} <- fetch_required_string(edit, "content") do
       end_anchor =
-        case Map.get(edit, "end_anchor") do
+        case get_arg(edit, "end_anchor") do
           nil -> nil
           value when is_binary(value) -> value
           _ -> :invalid
@@ -639,7 +662,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
        "Edit #{index} has invalid 'op'. Expected replace, insert_after, or insert_before."}
 
   defp fetch_anchored_ref(args, key, index) do
-    case Map.get(args, key) do
+    case get_arg(args, key) do
       value when is_binary(value) and value != "" -> {:ok, value}
       _ -> {:error, "Edit #{index} is missing '#{key}'."}
     end
@@ -880,7 +903,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
 
   defp patch_content(content, old_text, new_text, args) do
     occurrences = :binary.matches(content, old_text) |> length()
-    replace_all? = Map.get(args, "replace_all", false) == true
+    replace_all? = get_arg(args, "replace_all") == true
 
     cond do
       occurrences == 0 ->
@@ -900,16 +923,18 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     Path.relative_to(path, workspace_root)
   end
 
-  defp render_read_output(content, %{"hashline" => true} = args, original_content) do
-    {:ok, format_hashlined_content(content, args, original_content)}
+  defp render_read_output(content, args, original_content) do
+    if get_arg(args, "hashline") == true do
+      {:ok, format_hashlined_content(content, args, original_content)}
+    else
+      {:ok, content}
+    end
   end
 
-  defp render_read_output(content, _args, _original_content), do: {:ok, content}
-
   defp slice_read_content(content, args) do
-    from_line = normalize_from_line(Map.get(args, "from_line"))
-    line_count = normalize_line_count(Map.get(args, "line_count"))
-    tail_lines = normalize_line_count(Map.get(args, "tail_lines"))
+    from_line = normalize_from_line(get_arg(args, "from_line"))
+    line_count = normalize_line_count(get_arg(args, "line_count"))
+    tail_lines = normalize_line_count(get_arg(args, "tail_lines"))
 
     cond do
       not is_nil(tail_lines) ->
@@ -946,8 +971,8 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp invalid_read_range?(args) do
-    Map.has_key?(args, "tail_lines") and
-      (Map.has_key?(args, "from_line") or Map.has_key?(args, "line_count"))
+    (get_arg(args, "tail_lines") != nil) and
+      (get_arg(args, "from_line") != nil or get_arg(args, "line_count") != nil)
   end
 
   defp normalize_from_line(value) when is_integer(value) and value > 0, do: value
@@ -993,11 +1018,14 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp hashline_start_line(args, original_content, rendered_lines) do
-    cond do
-      is_integer(Map.get(args, "from_line")) and Map.get(args, "from_line") > 0 ->
-        Map.get(args, "from_line")
+    from_line = get_arg(args, "from_line")
+    tail_lines = get_arg(args, "tail_lines")
 
-      is_integer(Map.get(args, "tail_lines")) and Map.get(args, "tail_lines") > 0 ->
+    cond do
+      is_integer(from_line) and from_line > 0 ->
+        from_line
+
+      is_integer(tail_lines) and tail_lines > 0 ->
         {all_lines, _} = split_content_lines(original_content)
         max(length(all_lines) - length(rendered_lines) + 1, 1)
 
@@ -1248,10 +1276,12 @@ defmodule Pincer.Adapters.Tools.FileSystem do
         "#{line_number}:#{stripped}"
       end
 
-    <<byte, _::binary>> = :crypto.hash(:sha256, seed)
-    first = Enum.at(@hashline_dict, div(byte, 16))
-    second = Enum.at(@hashline_dict, rem(byte, 16))
-    first <> second
+    hash_bin = :crypto.hash(:sha256, seed)
+    <<n1::4, n2::4, n3::4, n4::4, n5::4, _::bitstring>> = hash_bin
+
+    [n1, n2, n3, n4, n5]
+    |> Enum.map(&elem(@hashline_dict, &1))
+    |> Enum.join()
   end
 
   defp format_mtime({{year, month, day}, {hour, minute, second}}) do
