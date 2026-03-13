@@ -48,6 +48,7 @@ defmodule Pincer.Utils.Text do
   def strip_reasoning(text) when is_binary(text) do
     text
     |> String.replace(~r/<(?:thought|thinking)\b[^>]*>[\s\S]*?<\/(?:thought|thinking)>/i, "")
+    |> String.replace(~r/\A\s*<(?:thought|thinking)\b[^>]*>[\s\S]*\z/i, "")
     |> String.replace(~r/^think>.*?(?:\n\n|\r\n\r\n|$)/is, "")
     |> String.trim()
   end
@@ -104,7 +105,7 @@ defmodule Pincer.Utils.Text do
       |> Enum.reverse()
 
     Enum.reduce(matches, text, fn {start, len}, acc ->
-      String.slice(acc, 0, start) <> String.slice(acc, start + len..-1//1)
+      String.slice(acc, 0, start) <> String.slice(acc, (start + len)..-1//1)
     end)
   end
 
@@ -118,7 +119,7 @@ defmodule Pincer.Utils.Text do
       |> Enum.reverse()
 
     Enum.reduce(matches, text, fn {start, len}, acc ->
-      String.slice(acc, 0, start) <> String.slice(acc, start + len..-1//1)
+      String.slice(acc, 0, start) <> String.slice(acc, (start + len)..-1//1)
     end)
   end
 
@@ -152,7 +153,9 @@ defmodule Pincer.Utils.Text do
 
     # Support <function=NAME> and <tool_call> formats
     # Uses a lookahead to allow multiple calls in one message without mandatory closing tags if at EOF
-    regex = ~r/<(?:function=([a-zA-Z0-9_-]+)|tool_call)>(.*?)(?=<function=|<tool_call>|$|<\/function>|<\/tool_call>)/is
+    regex =
+      ~r/<(?:function=([a-zA-Z0-9_-]+)|tool_call)>(.*?)(?=<function=|<tool_call>|$|<\/function>|<\/tool_call>)/is
+
     matches = Regex.scan(regex, content, return: :index)
 
     {clean_text, tool_calls} =
@@ -191,7 +194,7 @@ defmodule Pincer.Utils.Text do
 
         # Remove the tag from the text
         new_text =
-          String.slice(acc_text, 0, start) <> String.slice(acc_text, start + len..-1//1)
+          String.slice(acc_text, 0, start) <> String.slice(acc_text, (start + len)..-1//1)
 
         {new_text, [call | acc_calls]}
       end)
@@ -231,7 +234,8 @@ defmodule Pincer.Utils.Text do
 
   defp strip_stray_xml_closers(text, regions) do
     # Regex for </function> or </parameter> or </think> etc
-    regex = ~r/<\s*\/\s*(?:function|tool_call|parameter|think|thinking|thought|antthinking|final)\b[^<>]*>/i
+    regex =
+      ~r/<\s*\/\s*(?:function|tool_call|parameter|think|thinking|thought|antthinking|final)\b[^<>]*>/i
 
     matches =
       Regex.scan(regex, text, return: :index)
@@ -240,7 +244,7 @@ defmodule Pincer.Utils.Text do
       |> Enum.reverse()
 
     Enum.reduce(matches, text, fn {start, len}, acc ->
-      String.slice(acc, 0, start) <> String.slice(acc, start + len..-1//1)
+      String.slice(acc, 0, start) <> String.slice(acc, (start + len)..-1//1)
     end)
   end
 end
