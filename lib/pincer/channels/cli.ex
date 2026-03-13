@@ -149,7 +149,7 @@ defmodule Pincer.Channels.CLI do
   # The macro now handles handle_info({:deliver_message, ...}) by calling send_message/2
 
   def handle_info({:agent_response, text, _usage}, state) do
-    send_to_frontend(state, text)
+    if text && text != "", do: send_to_frontend(state, text)
     {:noreply, state}
   end
 
@@ -159,23 +159,25 @@ defmodule Pincer.Channels.CLI do
   end
 
   def handle_info({:agent_status, text}, state) do
-    send_to_frontend(state, text)
+    if text && text != "", do: send_to_frontend(state, text)
     {:noreply, state}
   end
 
   def handle_info({:agent_thinking, text}, state) do
-    send_to_frontend(state, text)
+    if text && text != "", do: send_to_frontend(state, text)
     {:noreply, state}
   end
 
   def handle_info({:agent_error, text}, state) do
-    if state.frontend_pid do
-      send(
-        state.frontend_pid,
-        {:cli_output, IO.ANSI.red() <> "[ERROR]: #{text}" <> IO.ANSI.reset()}
-      )
-    else
-      Logger.error("[CLI Error (Detached)]: #{text}")
+    if text && text != "" do
+      if state.frontend_pid do
+        send(
+          state.frontend_pid,
+          {:cli_output, IO.ANSI.red() <> "[ERROR]: #{text}" <> IO.ANSI.reset()}
+        )
+      else
+        Logger.error("[CLI Error (Detached)]: #{text}")
+      end
     end
 
     {:noreply, state}
