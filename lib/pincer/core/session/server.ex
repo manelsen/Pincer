@@ -12,6 +12,7 @@ defmodule Pincer.Core.Session.Server do
   alias Pincer.Ports.LLM
   alias Pincer.Ports.Storage
   alias Pincer.Core.AgentPaths
+  alias Pincer.Core.ErrorUX
   alias Pincer.Core.Executor
   alias Pincer.Core.SubAgentProgress
   alias Pincer.Infra.PubSub
@@ -291,11 +292,7 @@ defmodule Pincer.Core.Session.Server do
   def handle_info({:executor_failed, reason}, state) do
     Logger.error("[SESSION] #{state.session_id} Executor failed: #{inspect(reason)}")
 
-    error_msg =
-      case reason do
-        {:http_error, code, body} -> "❌ **LLM Error (#{code})**: #{extract_error_message(body)}"
-        other -> "❌ **Executor Error**: #{inspect(other)}"
-      end
+    error_msg = "❌ #{ErrorUX.friendly(reason, scope: :executor)}"
 
     publish(state.session_id, {:agent_response, error_msg})
     {:noreply, %{state | status: :idle, worker_pid: nil}}
@@ -536,15 +533,6 @@ defmodule Pincer.Core.Session.Server do
 
   defp map_input_to_history(input) when is_binary(input),
     do: %{"role" => "user", "content" => input}
-
-  defp extract_error_message(body) when is_binary(body) do
-    case Jason.decode(body) do
-      {:ok, %{"error" => %{"message" => msg}}} -> msg
-      _ -> body
-    end
-  end
-
-  defp extract_error_message(body), do: inspect(body)
 
   defp publish(session_id, event) do
     PubSub.broadcast("session:#{session_id}", event)
