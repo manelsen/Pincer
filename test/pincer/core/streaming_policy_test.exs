@@ -20,6 +20,19 @@ defmodule Pincer.Core.StreamingPolicyTest do
       assert new_state.buffer == "Hello world"
       assert action == :noop
     end
+
+    test "supports preview suppression while still accumulating buffer in core state" do
+      state = StreamingPolicy.initial_state()
+
+      {new_state, action} =
+        StreamingPolicy.on_partial(state, "synthetic", 1_000,
+          suppress_preview?: fn _state, _token -> true end
+        )
+
+      assert new_state.buffer == "synthetic"
+      assert new_state.preview_suppressed == true
+      assert action == :noop
+    end
   end
 
   describe "on_final/2" do
@@ -47,6 +60,31 @@ defmodule Pincer.Core.StreamingPolicyTest do
       {_reset_state, action} = StreamingPolicy.on_final(state, "   ")
 
       assert action == {:edit_final, 13, "Buffered"}
+    end
+  end
+
+  describe "extract/1 and assign/2" do
+    test "round-trips streaming fields through arbitrary channel state maps" do
+      channel_state = %{chat_id: 42, message_id: 8, buffer: "abc", last_update: 10, other: :ok}
+
+      extracted = StreamingPolicy.extract(channel_state)
+      reassigned = StreamingPolicy.assign(%{chat_id: 42, other: :ok}, extracted)
+
+      assert extracted == %{
+               message_id: 8,
+               buffer: "abc",
+               last_update: 10,
+               preview_suppressed: false
+             }
+
+      assert reassigned == %{
+               chat_id: 42,
+               other: :ok,
+               message_id: 8,
+               buffer: "abc",
+               last_update: 10,
+               preview_suppressed: false
+             }
     end
   end
 end
