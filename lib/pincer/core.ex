@@ -30,6 +30,7 @@ defmodule Pincer.Core do
       StreamDelivery,
       ResponseEnvelope,
       StatusMessagePolicy,
+      StatusDelivery,
       RetryPolicy,
       Telemetry,
       AuthProfiles,
