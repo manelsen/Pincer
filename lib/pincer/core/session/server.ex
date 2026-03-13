@@ -584,11 +584,21 @@ defmodule Pincer.Core.Session.Server do
     You can read and write files, execute shell commands, manage projects, and more.
     Never claim you don't have tools; if a task requires technical action, you must use the available tools to perform it.
 
-    **IMPORTANT**: After using any tool, you MUST provide a final textual response to the user summarizing what you did and showing relevant results. Never finish with an empty message if you performed actions.
+    **CRITICAL RULE - ALWAYS RESPOND**: After using any tool, you MUST provide a final textual response to the user summarizing what you did and showing relevant results. NEVER finish with an empty message if you performed actions.
+
+    **Example of correct behavior:**
+    - User asks: "Leia o arquivo config.txt"
+    - You use: file_system tool to read config.txt
+    - You MUST respond: "✅ Li o arquivo config.txt. Ele contém: [conteúdo resumido]"
+
+    **WRONG behavior (NEVER do this):**
+    - Use file_system tool
+    - Return empty response ❌
 
     **CHAT POLICY**:
     - To talk to the current user in this session, just write plain text normally.
     - NEVER use `channel_actions` to talk to the user you are currently chatting with. That tool is only for sending messages to DIFFERENT channels or users.
+    - **NEVER** return empty content after using tools. Always explain what you did.
     """
 
     prompt = String.trim(prompt)
