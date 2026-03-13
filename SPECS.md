@@ -3143,3 +3143,35 @@ config = ~y"""
 3. Teste de core prova que Discord nao anexa usage.
 4. Teste de core prova flags de delivery para Telegram com reasoning visivel e oculto.
 5. `Telegram.Session` passa a usar o modulo puro sem regressao nos testes existentes.
+
+## Incremento 2026-03-13 (Core Status Delivery Helper v1)
+
+### Objetivo
+- extrair o upsert de mensagens de status para um helper unico de `Core`;
+- remover duplicacao de fallback `edit -> send` em Telegram e Discord;
+- manter `StatusMessagePolicy` como modulo de decisao pura e o helper como orquestrador de efeitos.
+
+### Interfaces/Public API
+- `Pincer.Core.StatusDelivery.deliver/3`
+- `Pincer.Core.StatusMessagePolicy`
+- `Pincer.Channels.Telegram.Session`
+- `Pincer.Channels.Discord.Session`
+
+### Regras
+- `deliver/3` deve:
+  - consultar `StatusMessagePolicy.next_action/2`;
+  - chamar callback `send` quando a policy retornar `{:send, text}`;
+  - chamar callback `edit` quando a policy retornar `{:edit, message_id, text}`;
+  - em caso de falha no `edit`, fazer fallback para `send`;
+  - atualizar o estado com `mark_sent/3` ou `mark_edited/2`;
+  - preservar o estado quando a policy retornar `:noop` ou quando o transporte falhar.
+- callbacks aceitos:
+  - `send: (text -> result)`
+  - `edit: (message_id, text -> result)`
+
+### Critérios de aceite
+1. Teste de core prova envio inicial e persistencia do `message_id`.
+2. Teste de core prova `edit` bem-sucedido sem trocar `message_id`.
+3. Teste de core prova fallback `edit -> send`.
+4. Teste de core prova `noop` para texto repetido.
+5. Telegram e Discord continuam verdes usando o helper.
