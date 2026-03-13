@@ -62,10 +62,22 @@ defmodule Pincer.Core.Session.Server do
       token_usage_total: %{"prompt_tokens" => 0, "completion_tokens" => 0},
       input_buffer: [],
       debounce_timer: nil,
-      llm_client: llm_client
+      llm_client: llm_client,
+      watcher_pid: nil
     }
 
-    # 4. Build final history
+    # 4. Start Graph Watcher for this workspace
+    state =
+      if Application.get_env(:pincer, :enable_graph_watcher, true) do
+        case Pincer.Core.Graph.Watcher.start_link(workspace_root: workspace_path) do
+          {:ok, pid} -> %{state | watcher_pid: pid}
+          _ -> state
+        end
+      else
+        state
+      end
+
+    # 5. Build final history
     history =
       if Enum.empty?(persisted),
         do: [%{"role" => "system", "content" => get_system_prompt(state)}],
@@ -189,9 +201,20 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
+  def handle_info({:agent_partial, _token}, state) do
+    # Ignore self-broadcast tokens (intended for external channels)
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:agent_status, _status}, state) do
+    # Ignore self-broadcast status updates
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info({:agent_response, _content, _usage}, state) do
-    # Ignore the broadcast copy returned via PubSub;
-    # history is already updated via :assistant_reply_finished or :executor_finished
+    # Ignore self-broadcast response (history handled via executor_finished)
     {:noreply, state}
   end
 
@@ -231,12 +254,6 @@ defmodule Pincer.Core.Session.Server do
           _ -> {:noreply, state}
         end
     end
-  end
-
-  @impl true
-  def handle_info({:agent_status, _status}, state) do
-    # Ignore status updates (e.g. "Typing...") at the session server level
-    {:noreply, state}
   end
 
   @impl true
@@ -287,6 +304,12 @@ defmodule Pincer.Core.Session.Server do
   @impl true
   def handle_info({:sme_status, _sme_name, msg}, state) do
     publish(state.session_id, {:agent_status, msg})
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:sme_tool_use, tools}, state) do
+    publish(state.session_id, {:agent_status, "🛠️ Usando ferramentas: #{tools}"})
     {:noreply, state}
   end
 
@@ -567,7 +590,16 @@ defmodule Pincer.Core.Session.Server do
 
   @doc false
   def bootstrap_active?(workspace_path, opts \\ []) when is_binary(workspace_path) do
-    AgentPaths.bootstrap_active?(workspace_path, opts)
+    # Even if the BOOTSTRAP.md file exists, if we already have IDENTITY and SOUL,
+    # it means the ritual is done.
+    has_identity? = File.exists?(AgentPaths.identity_path(workspace_path))
+    has_soul? = File.exists?(AgentPaths.soul_path(workspace_path))
+
+    if has_identity? and has_soul? do
+      false
+    else
+      AgentPaths.bootstrap_active?(workspace_path, opts)
+    end
   end
 
   defp persist_assistant_response(_session_id, response) when not is_binary(response), do: :ok

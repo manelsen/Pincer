@@ -10,6 +10,7 @@ defmodule Pincer.Core.Executor do
   require Logger
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.MemoryRecall
+  alias Pincer.Utils.Text
 
   @max_recursion_depth 15
   @approval_timeout_ms 60_000
@@ -444,9 +445,10 @@ defmodule Pincer.Core.Executor do
   end
 
   defp handle_stream(stream, history, session_id, session_pid, depth, model_override, deps) do
-    {full_content, full_tool_calls} =
-      Enum.reduce(stream, {"", %{}}, fn chunk, {acc_text, acc_tools} ->
-        process_chunk(chunk, acc_text, acc_tools, session_pid)
+    # State: {full_content, tool_calls_map, stream_buffer, is_filtering?}
+    {full_content, full_tool_calls, _, _} =
+      Enum.reduce(stream, {"", %{}, "", false}, fn chunk, {acc_text, acc_tools, buffer, filtering?} ->
+        process_chunk(chunk, acc_text, acc_tools, buffer, filtering?, session_pid)
       end)
 
     tool_calls_list = format_tool_calls(full_tool_calls)
@@ -469,19 +471,17 @@ defmodule Pincer.Core.Executor do
     )
   end
 
-  defp process_chunk(chunk, acc_text, acc_tools, session_pid) do
+  defp process_chunk(chunk, acc_text, acc_tools, buffer, filtering?, session_pid) do
     case chunk do
       %{"choices" => [%{"delta" => delta}]} ->
         tool_deltas = delta["tool_calls"]
+        content = delta["content"] || ""
 
-        new_text =
-          case {tool_deltas, delta["content"]} do
-            {nil, token} when is_binary(token) and token != "" ->
-              send(session_pid, {:agent_stream_token, token})
-              acc_text <> token
-
-            _ ->
-              acc_text
+        {new_text, new_buffer, new_filtering} =
+          if is_binary(content) and content != "" do
+            handle_content_token(content, acc_text, buffer, filtering?, session_pid)
+          else
+            {acc_text, buffer, filtering?}
           end
 
         new_tools =
@@ -491,10 +491,43 @@ defmodule Pincer.Core.Executor do
             acc_tools
           end
 
-        {new_text, new_tools}
+        {new_text, new_tools, new_buffer, new_filtering}
 
       _ ->
-        {acc_text, acc_tools}
+        {acc_text, acc_tools, buffer, filtering?}
+    end
+  end
+
+  defp handle_content_token(token, acc_text, buffer, filtering?, session_pid) do
+    new_buffer = buffer <> token
+
+    # Tags that should trigger filtering during stream
+    tags = ["<function", "<parameter", "<think", "<thought", "<antthinking", "<relevant-memories", "<relevant_memories", "<final"]
+
+    should_start_filtering = not filtering? and Enum.any?(tags, &String.contains?(new_buffer, &1))
+
+    cond do
+      # 1. Start filtering if we see the beginning of any suspicious tag
+      should_start_filtering ->
+        # Find which tag triggered it to extract text before it
+        trigger_tag = Enum.find(tags, &String.contains?(new_buffer, &1))
+        [text_before | _] = String.split(new_buffer, trigger_tag, parts: 2)
+        if text_before != "", do: send(session_pid, {:agent_stream_token, text_before})
+        {acc_text <> text_before, new_buffer, true}
+
+      # 2. Stop filtering if we see the end of a tag or a closing tag
+      filtering? and (String.contains?(new_buffer, ">") or String.contains?(new_buffer, "</")) ->
+        # Stop filtering when tag seems complete, but keep buffering for next tags
+        {acc_text <> token, new_buffer, false}
+
+      # 3. Currently filtering: keep buffering, send nothing to user
+      filtering? ->
+        {acc_text <> token, new_buffer, true}
+
+      # 4. Normal flow: send token directly
+      true ->
+        send(session_pid, {:agent_stream_token, token})
+        {acc_text <> token, "", false}
     end
   end
 
@@ -567,6 +600,34 @@ defmodule Pincer.Core.Executor do
          deps,
          usage
        ) do
+    content = assistant_msg["content"]
+
+    # DEBUG: Log exact LLM output
+    Logger.debug("[EXECUTOR] RAW LLM CONTENT: #{inspect(content)}")
+
+    # 1. OpenClaw-inspired: Intercept XML tools and Strip scaffolding
+    {clean_content, xml_calls} = Text.extract_xml_tool_calls(content)
+
+    if xml_calls != [] do
+      Logger.debug("[EXECUTOR] EXTRACTED XML TOOL CALLS: #{inspect(xml_calls)}")
+    end
+
+    final_content = Text.strip_internal_scaffolding(clean_content)
+
+    # Reconstruct message with cleaned content and merged tool calls
+    existing_calls = assistant_msg["tool_calls"] || []
+
+    if existing_calls != [] do
+      Logger.debug("[EXECUTOR] NATIVE TOOL CALLS: #{inspect(existing_calls)}")
+    end
+
+    all_calls = existing_calls ++ xml_calls
+
+    assistant_msg =
+      assistant_msg
+      |> Map.put("content", if(final_content == "", do: nil, else: final_content))
+      |> Map.put("tool_calls", if(all_calls == [], do: nil, else: all_calls))
+
     case assistant_msg do
       %{"tool_calls" => tool_calls} when is_list(tool_calls) and tool_calls != [] ->
         normalized_tool_calls = Enum.map(tool_calls, &ensure_tool_call_type/1)
@@ -595,7 +656,17 @@ defmodule Pincer.Core.Executor do
           "[EXECUTOR] LLM stream finished. Text length: #{String.length(content || "")}"
         )
 
-        {:ok, history ++ [assistant_msg], content, usage}
+        # Synthesize a fallback if LLM is too laconic after tool usage
+        final_content =
+          if (is_nil(content) or String.trim(content) == "") and depth > 0 do
+            "✅ Concluído."
+          else
+            content
+          end
+
+        assistant_msg = Map.put(assistant_msg, "content", final_content)
+
+        {:ok, history ++ [assistant_msg], final_content, usage}
 
       _ ->
         {:error, {:invalid_assistant_message, assistant_msg}}
@@ -965,27 +1036,46 @@ defmodule Pincer.Core.Executor do
     identical_sequence_loop?(history) or high_frequency_loop?(history)
   end
 
-  # Check 1 (original): 3+ consecutive assistant messages with identical tool_call sets.
+  # Check 1: 3+ consecutive assistant messages with identical tool_call sets (name + args).
   defp identical_sequence_loop?(history) do
-    tool_calls =
-      Enum.filter(Enum.take(history, -6), fn
-        %{"tool_calls" => calls} -> not is_nil(calls)
-        _ -> false
+    # Take the last 6 messages, but only look at the assistant ones with tool calls
+    assistant_msgs =
+      history
+      |> Enum.take(-10)
+      |> Enum.filter(fn
+        %{"role" => "assistant", "tool_calls" => calls} ->
+          is_list(calls) and length(calls) > 0
+
+        _ ->
+          false
       end)
 
-    if length(tool_calls) >= 3 do
-      first = List.first(tool_calls)["tool_calls"]
-      Enum.all?(tool_calls, fn msg -> msg["tool_calls"] == first end)
+    if length(assistant_msgs) >= 3 do
+      # Compare the fingerprints of the last 3 assistant messages with tool calls
+      fingerprints =
+        assistant_msgs
+        |> Enum.take(-3)
+        |> Enum.map(fn %{"tool_calls" => calls} ->
+          calls
+          |> Enum.map(fn call ->
+            {get_in(call, ["function", "name"]), get_in(call, ["function", "arguments"])}
+          end)
+          |> Enum.sort()
+        end)
+
+      # If all 3 are identical, we are in a loop
+      [f1, f2, f3] = fingerprints
+      f1 == f2 and f2 == f3
     else
       false
     end
   end
 
-  # Check 2 (new): any single tool name appearing 5+ times in the last 10 assistant turns.
+  # Check 2: any single tool name appearing 10+ times in the last 15 assistant turns.
   defp high_frequency_loop?(history) do
     recent_names =
       history
-      |> Enum.take(-10)
+      |> Enum.take(-15)
       |> Enum.flat_map(fn
         %{"tool_calls" => calls} when not is_nil(calls) ->
           Enum.map(calls, fn tc -> get_in(tc, ["function", "name"]) end)
@@ -997,7 +1087,7 @@ defmodule Pincer.Core.Executor do
 
     Enum.any?(
       Enum.frequencies(recent_names),
-      fn {_tool, count} -> count >= 5 end
+      fn {_tool, count} -> count >= 10 end
     )
   end
 
