@@ -10,6 +10,7 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
 
   @behaviour Pincer.Ports.Tool
 
+  require Logger
   alias Pincer.Core.Bindings
   alias Pincer.Channels.Discord
   alias Pincer.Channels.Telegram
@@ -72,6 +73,9 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
 
   @impl true
   def execute(args, context \\ %{}) do
+    Logger.debug("[CHANNEL-ACTIONS] Incoming args: #{inspect(args)}")
+    Logger.debug("[CHANNEL-ACTIONS] Context: #{inspect(context)}")
+
     case Map.get(args, "action") do
       "send_message" -> send_message(args, context)
       "send_file" -> send_file(args, context)
