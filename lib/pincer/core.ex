@@ -8,6 +8,7 @@ defmodule Pincer.Core do
       Project.Server,
       Project.Supervisor,
       ProjectRouter,
+      ProjectFlowDelivery,
       ProjectOrchestrator,
       Structs.IncomingMessage,
       Executor,
