@@ -187,7 +187,8 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     end)
   end
 
-  defp handle_response(%Req.Response{status: 200, body: body}) do
+  @doc false
+  def handle_response(%Req.Response{status: 200, body: body}) do
     case body do
       %{"choices" => [%{"message" => message} | _]} ->
         usage = body["usage"]
@@ -206,6 +207,25 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
 
         {:ok, message, usage}
 
+      %{"error" => error} = error_body when is_map(error) ->
+        Logger.error("Provider returned error payload: #{inspect(error_body)}")
+
+        message =
+          cond do
+            is_binary(error["message"]) -> error["message"]
+            is_binary(error[:message]) -> error[:message]
+            true -> inspect(error_body)
+          end
+
+        code =
+          cond do
+            is_integer(error["code"]) -> error["code"]
+            is_integer(error[:code]) -> error[:code]
+            true -> 400
+          end
+
+        {:error, {:provider_error, code, message}}
+
       error_body when is_map(error_body) ->
         Logger.error("Unexpected response format: #{inspect(error_body)}")
         {:error, :unexpected_response_format}
@@ -216,7 +236,8 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     end
   end
 
-  defp handle_response(%Req.Response{status: status, body: body} = response) do
+  @doc false
+  def handle_response(%Req.Response{status: status, body: body} = response) do
     error_msg =
       if is_binary(body) and String.starts_with?(body, "<!") do
         "HTML Error Page (Start: #{String.slice(body, 0, 50)}...)"

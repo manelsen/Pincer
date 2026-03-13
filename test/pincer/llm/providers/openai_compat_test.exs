@@ -2,6 +2,7 @@ defmodule Pincer.LLM.Providers.OpenAICompatTest do
   use ExUnit.Case, async: true
 
   alias Pincer.LLM.Providers.OpenAICompat
+  alias Req.Response
 
   describe "build_request_body/5 token budget" do
     test "injects explicit max_tokens with context-aware clamp" do
@@ -83,6 +84,18 @@ defmodule Pincer.LLM.Providers.OpenAICompatTest do
         })
 
       assert get_in(chunks, [Access.at(0), "choices", Access.at(0), "delta", "content"]) == "ok"
+    end
+  end
+
+  describe "handle_response provider errors" do
+    test "normalizes provider error payloads instead of flagging unexpected format" do
+      response = %Response{
+        status: 200,
+        body: %{"error" => %{"code" => 400, "message" => "Provider returned error"}}
+      }
+
+      assert {:error, {:provider_error, 400, "Provider returned error"}} =
+               OpenAICompat.handle_response(response)
     end
   end
 end

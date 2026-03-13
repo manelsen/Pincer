@@ -37,6 +37,24 @@ defmodule Pincer.Core.ErrorUXTest do
       assert msg =~ "ferramentas"
     end
 
+    test "maps missing credentials and auth cooldown with explicit next step" do
+      assert ErrorUX.friendly({:missing_credentials, "OPENAI_API_KEY"}) =~ "OPENAI_API_KEY"
+      assert ErrorUX.friendly(:all_profiles_cooling_down) =~ "cooldown"
+    end
+
+    test "maps provider payload/format failures with provider-specific guidance" do
+      assert ErrorUX.friendly({:provider_error, 400, "Provider returned error"}) =~
+               "fora do formato esperado"
+
+      assert ErrorUX.friendly(:non_json_response) =~ "nao-JSON"
+      assert ErrorUX.friendly(:empty_response) =~ "resposta vazia"
+    end
+
+    test "maps quota exhaustion separately from generic 429" do
+      assert ErrorUX.friendly({:http_error, 429, "insufficient_quota"}) =~ "saldo/quota"
+      assert ErrorUX.friendly({:http_error, 429, "rate limit"}) =~ "429"
+    end
+
     test "maps transport errors" do
       assert ErrorUX.friendly(%Req.TransportError{reason: :timeout}) =~ "Timeout"
       assert ErrorUX.friendly(%Req.TransportError{reason: :econnrefused}) =~ "Conexao recusada"
@@ -77,7 +95,7 @@ defmodule Pincer.Core.ErrorUXTest do
       assert msg =~ "streaming"
       assert msg =~ "/reset"
 
-      assert ErrorUX.friendly({:invalid_stream_response, :bad}) =~ "formato invalido"
+      assert ErrorUX.friendly({:invalid_stream_response, :bad}) =~ "streaming"
     end
 
     test "maps undefined function and file missing" do
