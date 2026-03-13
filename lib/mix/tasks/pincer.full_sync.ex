@@ -14,7 +14,7 @@ defmodule Mix.Tasks.Pincer.FullSync do
 
     Mix.shell().info("[FULL-SYNC] Starting full repository indexing...")
 
-    case Pincer.Core.Graph.Sync.sync_full() do
+    case Pincer.Core.Graph.Sync.sync_full(File.cwd!()) do
       {:ok, files} ->
         Mix.shell().info("[FULL-SYNC] Successfully indexed #{length(files)} files.")
 

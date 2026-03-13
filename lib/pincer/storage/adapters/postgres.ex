@@ -169,15 +169,24 @@ defmodule Pincer.Storage.Adapters.Postgres do
   end
 
   @impl true
-  def index_document(path, content, vector) do
-    index_memory(path, content, "reference", vector, [])
+  def get_document_metadata(path, workspace_root) do
+    case find_node_by_path("document", path, workspace_root) do
+      nil -> nil
+      node -> node.data
+    end
+  end
+
+  @impl true
+  def index_document(path, content, vector, metadata \\ %{}) do
+    index_memory(path, content, "reference", vector, Map.to_list(metadata))
   end
 
   @impl true
   def index_memory(path, content, memory_type, vector, opts \\ []) do
     metadata = build_memory_metadata(path, content, memory_type, opts)
+    workspace_root = Keyword.get(opts, :workspace_root)
 
-    case find_node_by_path("document", path) do
+    case find_node_by_path("document", path, workspace_root) do
       nil ->
         case create_node("document", metadata) do
           {:ok, node} ->
@@ -332,25 +341,33 @@ defmodule Pincer.Storage.Adapters.Postgres do
   end
 
   defp ensure_node(type, data) do
-    case Repo.all(
-           from(n in Node,
-             where: n.type == ^type and fragment("?->>'path' = ?", n.data, ^data["path"])
-           )
-         ) do
-      [] ->
+    path = data["path"]
+    workspace_root = data["workspace_root"]
+
+    case find_node_by_path(type, path, workspace_root) do
+      nil ->
         {:ok, node} = create_node(type, data)
         node
 
-      [node | _] ->
+      node ->
         node
     end
   end
 
-  defp find_node_by_path(type, path) do
-    from(n in Node,
-      where: n.type == ^type and fragment("?->>'path' = ?", n.data, ^path)
-    )
-    |> Repo.one()
+  defp find_node_by_path(type, path, workspace_root \\ nil) do
+    query =
+      from(n in Node,
+        where: n.type == ^type and fragment("?->>'path' = ?", n.data, ^path)
+      )
+
+    query =
+      if workspace_root do
+        from(n in query, where: fragment("?->>'workspace_root' = ?", n.data, ^workspace_root))
+      else
+        query
+      end
+
+    Repo.one(query)
   end
 
   defp create_node(type, data) do
@@ -503,6 +520,7 @@ defmodule Pincer.Storage.Adapters.Postgres do
 
         Enum.all?(tokens, &String.contains?(haystack, &1)) and
           document_matches_opts?(node.data, opts) and
+          match_workspace?(node.data, opts) and
           (Keyword.get(opts, :include_forgotten, false) or not memory_forgotten?(node.data))
       end)
       |> Enum.map(fn node ->
@@ -542,6 +560,7 @@ defmodule Pincer.Storage.Adapters.Postgres do
       "last_accessed_at" => Keyword.get(opts, :last_accessed_at),
       "forgotten_at" => Keyword.get(opts, :forgotten_at),
       "session_id" => Keyword.get(opts, :session_id),
+      "workspace_root" => Keyword.get(opts, :workspace_root),
       "line_start" => Keyword.get(opts, :line_start),
       "line_end" => Keyword.get(opts, :line_end)
     }
@@ -566,6 +585,13 @@ defmodule Pincer.Storage.Adapters.Postgres do
       end
 
     type_match? and session_match?
+  end
+
+  defp match_workspace?(data, opts) do
+    case Keyword.get(opts, :workspace_root) do
+      nil -> true
+      workspace_root -> data["workspace_root"] == workspace_root
+    end
   end
 
   defp memory_forgotten?(data),
@@ -895,6 +921,15 @@ defmodule Pincer.Storage.Adapters.Postgres do
         next_index,
         Keyword.get(opts, :session_id),
         fn session_id, idx -> {"n.data->>'session_id' = $#{idx}", session_id} end
+      )
+
+    {clauses, params, _next_index} =
+      add_optional_clause(
+        clauses,
+        params,
+        next_index,
+        Keyword.get(opts, :workspace_root),
+        fn workspace_root, idx -> {"n.data->>'workspace_root' = $#{idx}", workspace_root} end
       )
 
     clauses =
