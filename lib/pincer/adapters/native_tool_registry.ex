@@ -38,11 +38,11 @@ defmodule Pincer.Adapters.NativeToolRegistry do
         case m.spec() do
           list when is_list(list) ->
             Enum.map(list, fn s ->
-              %{"type" => "function", "function" => s, "_module" => m}
+              s |> normalize_spec() |> Map.put("_module", m)
             end)
 
           single ->
-            [%{"type" => "function", "function" => single, "_module" => m}]
+            [single |> normalize_spec() |> Map.put("_module", m)]
         end
       end)
 
@@ -55,32 +55,65 @@ defmodule Pincer.Adapters.NativeToolRegistry do
     native_specs ++ mcp_specs
   end
 
+  defp normalize_spec(%{"type" => "function", "function" => _} = spec), do: spec
+
+  defp normalize_spec(function_spec) when is_map(function_spec) do
+    %{"type" => "function", "function" => function_spec}
+  end
+
   @impl true
   def execute_tool(name, args, context) do
     # 1. Check native tools
     native_match =
       Enum.find(@native_tools, fn m ->
         case m.spec() do
-          list when is_list(list) -> Enum.any?(list, fn s -> s.name == name end)
-          single -> single.name == name
+          list when is_list(list) ->
+            Enum.any?(list, fn s ->
+              spec = normalize_spec(s)
+              (spec["function"]["name"] || spec["function"][:name]) == name
+            end)
+
+          single ->
+            spec = normalize_spec(single)
+            (spec["function"]["name"] || spec["function"][:name]) == name
         end
       end)
 
     cond do
       native_match ->
-        execute_native(native_match, name, args, context)
+        Logger.info("[TOOL] Executing native: #{name} with args: #{inspect(args)}")
+        result = execute_native(native_match, name, args, context)
+
+        case result do
+          {:ok, _} -> Logger.info("[TOOL] SUCCESS: #{name}")
+          {:error, reason} -> Logger.error("[TOOL] ERROR: #{name} -> #{inspect(reason)}")
+        end
+
+        result
 
       # 2. Check MCP
       true ->
+        Logger.info("[TOOL] Executing MCP: #{name} with args: #{inspect(args)}")
+
         case mcp_manager().execute_tool(name, args) do
-          {:ok, c} -> {:ok, c}
-          {:error, :tool_not_found} -> {:error, "Tool #{name} not found."}
-          {:error, r} -> {:error, "Error: #{inspect(r)}"}
+          {:ok, c} ->
+            Logger.info("[TOOL] SUCCESS: #{name}")
+            {:ok, c}
+
+          {:error, :tool_not_found} ->
+            Logger.error("[TOOL] NOT FOUND: #{name}")
+            {:error, "Tool #{name} not found."}
+
+          {:error, r} ->
+            Logger.error("[TOOL] ERROR: #{name} -> #{inspect(r)}")
+            {:error, "Error: #{inspect(r)}"}
         end
     end
   end
 
   defp execute_native(module, name, args, context) do
+    # Ensure keys are consistent (strings vs atoms)
+    # Most tools expect string keys from JSON decode
     args_with_context =
       args
       |> Map.merge(context)
