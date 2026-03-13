@@ -14,96 +14,80 @@ defmodule Pincer.Core.Executor do
 
   @max_recursion_depth 15
   @approval_timeout_ms 60_000
-  @markdown_notice_max_chars 12_000
-  @markdown_ignored_roots MapSet.new([".git", "_build", "deps", "node_modules", "target"])
   @tool_result_max_chars Application.compile_env(:pincer, :tool_result_max_chars, 32_000)
 
-  # Maximum file size for inline base64 encoding (≈10 MB decoded → ≈13.3 MB base64).
-  # Larger files are described as text instead of sent inline.
-  @max_inline_bytes 10_485_760
+  # Maximum size for inline data (6MB default for Gemini/Google)
+  @max_inline_bytes 6_291_456
+
+  @type executor_dependency :: %{
+          llm_client: module(),
+          tool_registry: module(),
+          file_fetcher: (String.t() -> {:ok, String.t()} | {:error, any()})
+        }
 
   @doc """
-  Starts a new executor task.
+  Runs the executor logic for a session.
+  Dispatches to the provider and handles recursive tool usage.
   """
-  def start(session_pid, session_id, history, opts \\ []) do
-    Task.start(fn ->
-      run(session_pid, session_id, history, opts)
-    end)
-  end
+  def run(session_pid, session_id, history, opts \\ []) do
+    # 1. Resolve Dependencies
+    deps = %{
+      llm_client: opts[:llm_client] || Pincer.Ports.LLM,
+      tool_registry: opts[:tool_registry] || Pincer.Ports.ToolRegistry,
+      file_fetcher: opts[:file_fetcher] || (&default_file_fetch/1)
+    }
 
-  @doc false
-  def run(session_pid, session_id, history, opts) do
-    Logger.metadata(session_id: session_id)
-    Logger.info("[EXECUTOR] Starting cycle for #{session_id}")
-
-    deps = resolve_dependencies(opts)
-
-    model_override = Keyword.get(opts, :model_override)
-    long_term_memory = Keyword.get(opts, :long_term_memory, "")
-    workspace_path = Keyword.get(opts, :workspace_path, File.cwd!())
-
-    Process.put(:session_pid, session_pid)
-    Process.put(:session_id, session_id)
+    # Store workspace path in process dictionary for easy access in nested calls
+    workspace_path = opts[:workspace_path] || AgentPaths.workspace_root(session_id)
     Process.put(:workspace_path, workspace_path)
-    Process.put(:long_term_memory, long_term_memory)
     Process.put(:executor_deps, deps)
     Process.put(:executor_run_opts, opts)
-    init_markdown_tracker(workspace_path)
+
+    # 2. Setup initial state
+    Logger.info("[EXECUTOR] Starting cycle for #{session_id}")
 
     try do
-      case run_loop(history, session_id, session_pid, 0, model_override, deps) do
-        {:ok, final_history, response, usage} ->
-          send(session_pid, {:executor_finished, final_history, response, usage})
+      # 3. Enter recursion loop
+      # Initial call uses depth 0
+      run_loop(history, session_id, session_pid, 0, opts[:model_override], deps)
+    after
+      Process.delete(:workspace_path)
+      Process.delete(:executor_deps)
+      Process.delete(:executor_run_opts)
+      Process.delete(:consecutive_errors)
+    end
+    |> case do
+      {:ok, final_history, final_content, usage} ->
+        send(session_pid, {:executor_finished, final_history, final_content, usage})
+        :ok
 
-        {:error, reason} ->
-          send(session_pid, {:executor_failed, reason})
-      end
-    rescue
-      e ->
-        send(session_pid, {:executor_failed, e})
+      {:error, reason} ->
+        send(session_pid, {:executor_failed, reason})
+        :error
     end
   end
 
-  defp resolve_dependencies(opts) do
-    %{
-      tool_registry: Keyword.get(opts, :tool_registry, Pincer.Ports.ToolRegistry),
-      llm_client: Keyword.get(opts, :llm_client, Pincer.Ports.LLM),
-      # file_fetcher: fn url -> {:ok, base64} | {:error, reason} end
-      # Overridable in tests to avoid real HTTP calls during attachment inlining.
-      file_fetcher: Keyword.get(opts, :file_fetcher, &Pincer.Core.Executor.default_file_fetch/1)
-    }
+  @doc """
+  Alternative entry point using `spawn_link` for parallel execution.
+  """
+  def start(session_pid, session_id, history, opts \\ []) do
+    pid =
+      spawn_link(fn ->
+        run(session_pid, session_id, history, opts)
+      end)
+
+    {:ok, pid}
   end
+
+  # --- Multi-modal support helpers ---
 
   @doc false
-  @spec resolve_attachment_url(String.t(), String.t() | nil) ::
-          {:ok, String.t()} | {:error, :invalid_attachment_url | :telegram_token_missing}
-  def resolve_attachment_url(url, token \\ nil)
-
-  def resolve_attachment_url("telegram://file/" <> file_path, token) do
-    normalized_path = String.trim(file_path)
-
-    cond do
-      normalized_path == "" ->
-        {:error, :invalid_attachment_url}
-
-      true ->
-        resolved_token =
-          token || Application.get_env(:telegex, :token) || System.get_env("TELEGRAM_BOT_TOKEN")
-
-        if is_binary(resolved_token) and String.trim(resolved_token) != "" do
-          {:ok, "https://api.telegram.org/file/bot#{resolved_token}/#{normalized_path}"}
-        else
-          {:error, :telegram_token_missing}
-        end
-    end
-  end
-
   def resolve_attachment_url(url, _token) when is_binary(url), do: {:ok, url}
   def resolve_attachment_url(_url, _token), do: {:error, :invalid_attachment_url}
 
   @doc false
   def default_file_fetch(url) do
-    with {:ok, resolved_url} <- resolve_attachment_url(url),
+    with {:ok, resolved_url} <- resolve_attachment_url(url, nil),
          {:ok, response} <-
            Req.get(resolved_url, receive_timeout: 60_000, max_body_length: @max_inline_bytes) do
       case response do
@@ -121,26 +105,64 @@ defmodule Pincer.Core.Executor do
     end
   end
 
-  defp run_loop(history, session_id, session_pid, depth, model_override, deps) do
+  defp run_loop(logical_history, session_id, session_pid, depth, model_override, deps) do
     if depth > @max_recursion_depth, do: raise("Excessive recursion in Executor")
 
     updated_model_override = check_messages(model_override)
 
-    if loop_detected?(history) do
+    if loop_detected?(logical_history) do
       send(session_pid, {:executor_failed, "Tool loop detected. Aborting."})
       {:error, :tool_loop}
     else
-      # At depth 0, we do the full pruning and augmentation once.
-      # In recursive turns (depth > 0), we use the history as-is because
-      # it already contains the augmented system prompt and the current turn context.
-      ready_history =
+      # Prompt history preparation: Only prune and augment at the beginning of the cycle (Depth 0)
+      prompt_history =
         if depth == 0 do
-          prepare_ready_history(history, model_override)
+          prepare_prompt_history(logical_history, model_override)
         else
-          history
+          # At depth > 0, we should have been using run_loop_recursive which passes prompt_history
+          raise "run_loop called with depth > 0 without prompt_history context"
         end
 
-      do_run_loop(ready_history, session_id, session_pid, depth, updated_model_override, deps)
+      do_run_loop(
+        logical_history,
+        prompt_history,
+        session_id,
+        session_pid,
+        depth,
+        updated_model_override,
+        deps
+      )
+    end
+  end
+
+  # Internal recursive entry point that carries both histories to preserve context
+  # without re-pruning (which causes amnesia when tool results are large).
+  defp run_loop_recursive(
+         logical_history,
+         prompt_history,
+         session_id,
+         session_pid,
+         depth,
+         model_override,
+         deps
+       ) do
+    if depth > @max_recursion_depth, do: raise("Excessive recursion in Executor")
+
+    updated_model_override = check_messages(model_override)
+
+    if loop_detected?(logical_history) do
+      send(session_pid, {:executor_failed, "Tool loop detected. Aborting."})
+      {:error, :tool_loop}
+    else
+      do_run_loop(
+        logical_history,
+        prompt_history,
+        session_id,
+        session_pid,
+        depth,
+        updated_model_override,
+        deps
+      )
     end
   end
 
@@ -154,11 +176,10 @@ defmodule Pincer.Core.Executor do
     end
   end
 
-  defp prepare_ready_history(history, model_override) do
+  defp prepare_prompt_history(history, model_override) do
     long_term_memory = Process.get(:long_term_memory, "")
     current_time = DateTime.utc_now() |> DateTime.to_string()
 
-    # Determine Sweet Spot token limit based on active provider's context window.
     active_provider = get_active_provider(model_override)
 
     sweet_spot_limit =
@@ -169,17 +190,25 @@ defmodule Pincer.Core.Executor do
 
     context_strategy = Keyword.get(Process.get(:executor_run_opts, []), :context_strategy)
 
-    # 1. Prune history using the episodic Sweet Spot architecture
+    # 1. Prune only once
     pruned_history = prune_history(history, sweet_spot_limit, context_strategy: context_strategy)
 
-    # 2. Augment the pruned history with memory and time
+    # 2. Augment with dynamic context (Memory, Time, Recall)
     augmented_history = augment_history(pruned_history, long_term_memory, current_time)
 
-    # 3. Resolve lazy attachment_refs
+    # 3. Resolve lazy attachments
     resolve_lazy_attachments(augmented_history, active_provider)
   end
 
-  defp do_run_loop(ready_history, session_id, session_pid, depth, model_override, deps) do
+  defp do_run_loop(
+         logical_history,
+         prompt_history,
+         session_id,
+         session_pid,
+         depth,
+         model_override,
+         deps
+       ) do
     Logger.info("[EXECUTOR] do_run_loop (Depth: #{depth})")
 
     client_opts =
@@ -197,15 +226,16 @@ defmodule Pincer.Core.Executor do
     tools_spec = deps.tool_registry.list_tools()
 
     Logger.info(
-      "[EXECUTOR] Sending prompt to LLM (STREAMING). History size: #{length(ready_history)}"
+      "[EXECUTOR] Sending prompt to LLM (STREAMING). History size: #{length(prompt_history)}"
     )
 
-    case deps.llm_client.stream_completion(ready_history, [tools: tools_spec] ++ client_opts) do
+    case deps.llm_client.stream_completion(prompt_history, [tools: tools_spec] ++ client_opts) do
       {:ok, stream} ->
         try do
           handle_stream(
             stream,
-            ready_history,
+            logical_history,
+            prompt_history,
             session_id,
             session_pid,
             depth,
@@ -220,8 +250,8 @@ defmodule Pincer.Core.Executor do
 
             fallback_chat_completion(
               error,
-              ready_history,
-              ready_history,
+              logical_history,
+              prompt_history,
               session_id,
               session_pid,
               depth,
@@ -244,8 +274,8 @@ defmodule Pincer.Core.Executor do
 
         fallback_chat_completion(
           reason,
-          ready_history,
-          ready_history,
+          logical_history,
+          prompt_history,
           session_id,
           session_pid,
           depth,
@@ -254,6 +284,244 @@ defmodule Pincer.Core.Executor do
           client_opts,
           tools_spec
         )
+    end
+  end
+
+  defp fallback_chat_completion(
+         reason,
+         logical_history,
+         prompt_history,
+         session_id,
+         session_pid,
+         depth,
+         model_override,
+         deps,
+         client_opts,
+         tools_spec
+       ) do
+    Logger.warning("[EXECUTOR] Falling back to chat completion. Reason: #{inspect(reason)}")
+
+    case deps.llm_client.chat_completion(prompt_history, [tools: tools_spec] ++ client_opts) do
+      {:ok, assistant_msg, usage} ->
+        finalize_assistant_message(
+          assistant_msg,
+          logical_history,
+          prompt_history,
+          session_id,
+          session_pid,
+          depth,
+          model_override,
+          deps,
+          usage
+        )
+
+      {:error, reason} ->
+        Logger.error("[EXECUTOR] Fallback chat completion failed: #{inspect(reason)}")
+        send(session_pid, {:executor_failed, reason})
+        {:error, reason}
+    end
+  end
+
+  defp handle_stream(
+         stream,
+         logical_history,
+         prompt_history,
+         session_id,
+         session_pid,
+         depth,
+         model_override,
+         deps
+       ) do
+    # State: {full_content, tool_calls_map, stream_buffer, is_filtering?}
+    {full_content, full_tool_calls, _, _} =
+      Enum.reduce(stream, {"", %{}, "", false}, fn chunk, {acc_text, acc_tools, buffer, filtering?} ->
+        process_chunk(chunk, acc_text, acc_tools, buffer, filtering?, session_pid)
+      end)
+
+    tool_calls_list = format_tool_calls(full_tool_calls)
+
+    assistant_msg = %{
+      "role" => "assistant",
+      "content" => if(full_content == "", do: nil, else: full_content),
+      "tool_calls" => tool_calls_list
+    }
+
+    finalize_assistant_message(
+      assistant_msg,
+      logical_history,
+      prompt_history,
+      session_id,
+      session_pid,
+      depth,
+      model_override,
+      deps,
+      nil
+    )
+  end
+
+  defp process_chunk(chunk, acc_text, acc_tools, buffer, filtering?, session_pid) do
+    case chunk do
+      %{"choices" => [%{"delta" => delta}]} ->
+        tool_deltas = delta["tool_calls"]
+        content = delta["content"] || ""
+
+        {new_text, new_buffer, new_filtering} =
+          if is_binary(content) and content != "" do
+            handle_content_token(content, acc_text, buffer, filtering?, session_pid)
+          else
+            {acc_text, buffer, filtering?}
+          end
+
+        new_tools =
+          if tool_deltas do
+            merge_tool_deltas(acc_tools, tool_deltas)
+          else
+            acc_tools
+          end
+
+        {new_text, new_tools, new_buffer, new_filtering}
+
+      _ ->
+        {acc_text, acc_tools, buffer, filtering?}
+    end
+  end
+
+  defp handle_content_token(token, acc_text, buffer, filtering?, session_pid) do
+    new_buffer = buffer <> token
+
+    # Tags that should trigger filtering during stream
+    tags = [
+      "<function",
+      "<parameter",
+      "<tool_call",
+      "<think",
+      "<thought",
+      "<antthinking",
+      "<relevant-memories",
+      "<relevant_memories",
+      "<final"
+    ]
+
+    should_start_filtering = not filtering? and Enum.any?(tags, &String.contains?(new_buffer, &1))
+
+    cond do
+      # 1. Start filtering if we see the beginning of any suspicious tag
+      should_start_filtering ->
+        # Find which tag triggered it to extract text before it
+        trigger_tag = Enum.find(tags, &String.contains?(new_buffer, &1))
+        [text_before | _] = String.split(new_buffer, trigger_tag, parts: 2)
+        if text_before != "", do: send(session_pid, {:agent_stream_token, text_before})
+        {acc_text <> text_before, new_buffer, true}
+
+      # 2. Stop filtering if we see the end of a tag or a closing tag
+      filtering? and (String.contains?(new_buffer, ">") or String.contains?(new_buffer, "</")) ->
+        # Stop filtering when tag seems complete, but keep buffering for next tags
+        {acc_text <> token, new_buffer, false}
+
+      # 3. Currently filtering: keep buffering, send nothing to user
+      filtering? ->
+        {acc_text <> token, new_buffer, true}
+
+      # 4. Normal flow: send token directly
+      true ->
+        send(session_pid, {:agent_stream_token, token})
+        {acc_text <> token, "", false}
+    end
+  end
+
+  defp finalize_assistant_message(
+         assistant_msg,
+         logical_history,
+         prompt_history,
+         session_id,
+         session_pid,
+         depth,
+         model_override,
+         deps,
+         usage
+       ) do
+    content = assistant_msg["content"]
+
+    # DEBUG: Log exact LLM output
+    Logger.debug("[EXECUTOR] RAW LLM CONTENT: #{inspect(content)}")
+
+    # 1. OpenClaw-inspired: Intercept XML tools and Strip scaffolding
+    {clean_content, xml_calls} = Text.extract_xml_tool_calls(content)
+
+    if xml_calls != [] do
+      Logger.debug("[EXECUTOR] EXTRACTED XML TOOL CALLS: #{inspect(xml_calls)}")
+    end
+
+    final_content = Text.strip_internal_scaffolding(clean_content)
+
+    # Reconstruct message with cleaned content and merged tool calls
+    existing_calls = assistant_msg["tool_calls"] || []
+
+    if existing_calls != [] do
+      Logger.debug("[EXECUTOR] NATIVE TOOL CALLS: #{inspect(existing_calls)}")
+    end
+
+    all_calls = existing_calls ++ xml_calls
+
+    assistant_msg =
+      assistant_msg
+      |> Map.put("content", if(final_content == "", do: nil, else: final_content))
+      |> Map.put("tool_calls", if(all_calls == [], do: nil, else: all_calls))
+
+    case assistant_msg do
+      %{"tool_calls" => tool_calls} when is_list(tool_calls) and tool_calls != [] ->
+        normalized_tool_calls = Enum.map(tool_calls, &ensure_tool_call_type/1)
+        assistant_msg = Map.put(assistant_msg, "tool_calls", normalized_tool_calls)
+
+        tool_names =
+          normalized_tool_calls
+          |> Enum.map(&tool_call_name/1)
+          |> Enum.reject(&is_nil_or_blank/1)
+          |> Enum.join(", ")
+
+        tool_names = if tool_names == "", do: "unknown_tool", else: tool_names
+        Logger.info("[EXECUTOR] LLM decided to use tools: #{tool_names}")
+        send(session_pid, {:sme_tool_use, tool_names})
+
+        tool_results =
+          Enum.map(normalized_tool_calls, fn call ->
+            execute_tool_via_registry(call, session_pid, session_id, deps.tool_registry)
+          end)
+
+        # Update both histories for the next turn
+        new_logical_history = logical_history ++ [assistant_msg] ++ tool_results
+        new_prompt_history = prompt_history ++ [assistant_msg] ++ tool_results
+
+        run_loop_recursive(
+          new_logical_history,
+          new_prompt_history,
+          session_id,
+          session_pid,
+          depth + 1,
+          model_override,
+          deps
+        )
+
+      %{"content" => content} ->
+        Logger.info(
+          "[EXECUTOR] LLM stream finished. Text length: #{String.length(content || "")}"
+        )
+
+        # Synthesize a fallback if LLM is too laconic after tool usage
+        final_content =
+          if (is_nil(content) or String.trim(content) == "") and depth > 0 do
+            "✅ Concluído."
+          else
+            content
+          end
+
+        assistant_msg = Map.put(assistant_msg, "content", final_content)
+
+        # IMPORTANT: Return clean logical history to session
+        {:ok, logical_history ++ [assistant_msg], final_content, usage}
+
+      _ ->
+        {:error, {:invalid_assistant_message, assistant_msg}}
     end
   end
 
@@ -453,235 +721,6 @@ defmodule Pincer.Core.Executor do
     end
   end
 
-  defp handle_stream(stream, history, session_id, session_pid, depth, model_override, deps) do
-    # State: {full_content, tool_calls_map, stream_buffer, is_filtering?}
-    {full_content, full_tool_calls, _, _} =
-      Enum.reduce(stream, {"", %{}, "", false}, fn chunk, {acc_text, acc_tools, buffer, filtering?} ->
-        process_chunk(chunk, acc_text, acc_tools, buffer, filtering?, session_pid)
-      end)
-
-    tool_calls_list = format_tool_calls(full_tool_calls)
-
-    assistant_msg = %{
-      "role" => "assistant",
-      "content" => if(full_content == "", do: nil, else: full_content),
-      "tool_calls" => tool_calls_list
-    }
-
-    finalize_assistant_message(
-      assistant_msg,
-      history,
-      session_id,
-      session_pid,
-      depth,
-      model_override,
-      deps,
-      nil
-    )
-  end
-
-  defp process_chunk(chunk, acc_text, acc_tools, buffer, filtering?, session_pid) do
-    case chunk do
-      %{"choices" => [%{"delta" => delta}]} ->
-        tool_deltas = delta["tool_calls"]
-        content = delta["content"] || ""
-
-        {new_text, new_buffer, new_filtering} =
-          if is_binary(content) and content != "" do
-            handle_content_token(content, acc_text, buffer, filtering?, session_pid)
-          else
-            {acc_text, buffer, filtering?}
-          end
-
-        new_tools =
-          if tool_deltas do
-            merge_tool_deltas(acc_tools, tool_deltas)
-          else
-            acc_tools
-          end
-
-        {new_text, new_tools, new_buffer, new_filtering}
-
-      _ ->
-        {acc_text, acc_tools, buffer, filtering?}
-    end
-  end
-
-  defp handle_content_token(token, acc_text, buffer, filtering?, session_pid) do
-    new_buffer = buffer <> token
-
-    # Tags that should trigger filtering during stream
-    tags = ["<function", "<parameter", "<think", "<thought", "<antthinking", "<relevant-memories", "<relevant_memories", "<final"]
-
-    should_start_filtering = not filtering? and Enum.any?(tags, &String.contains?(new_buffer, &1))
-
-    cond do
-      # 1. Start filtering if we see the beginning of any suspicious tag
-      should_start_filtering ->
-        # Find which tag triggered it to extract text before it
-        trigger_tag = Enum.find(tags, &String.contains?(new_buffer, &1))
-        [text_before | _] = String.split(new_buffer, trigger_tag, parts: 2)
-        if text_before != "", do: send(session_pid, {:agent_stream_token, text_before})
-        {acc_text <> text_before, new_buffer, true}
-
-      # 2. Stop filtering if we see the end of a tag or a closing tag
-      filtering? and (String.contains?(new_buffer, ">") or String.contains?(new_buffer, "</")) ->
-        # Stop filtering when tag seems complete, but keep buffering for next tags
-        {acc_text <> token, new_buffer, false}
-
-      # 3. Currently filtering: keep buffering, send nothing to user
-      filtering? ->
-        {acc_text <> token, new_buffer, true}
-
-      # 4. Normal flow: send token directly
-      true ->
-        send(session_pid, {:agent_stream_token, token})
-        {acc_text <> token, "", false}
-    end
-  end
-
-  defp format_tool_calls(full_tool_calls) do
-    if map_size(full_tool_calls) > 0 do
-      full_tool_calls
-      |> Map.values()
-      |> Enum.sort_by(& &1["index"])
-      |> Enum.map(fn map -> Map.delete(map, "index") end)
-    else
-      nil
-    end
-  end
-
-  defp fallback_chat_completion(
-         stream_reason,
-         ready_history,
-         history,
-         session_id,
-         session_pid,
-         depth,
-         model_override,
-         deps,
-         client_opts,
-         tools_spec
-       ) do
-    Logger.warning("[EXECUTOR] Streaming fallback reason: #{inspect(stream_reason)}")
-
-    case deps.llm_client.chat_completion(ready_history, [tools: tools_spec] ++ client_opts) do
-      {:ok, message, usage} when is_map(message) ->
-        assistant_msg = %{
-          "role" => "assistant",
-          "content" => message["content"],
-          "tool_calls" => message["tool_calls"]
-        }
-
-        finalize_assistant_message(
-          assistant_msg,
-          history,
-          session_id,
-          session_pid,
-          depth,
-          model_override,
-          deps,
-          usage
-        )
-
-      {:ok, other} ->
-        {:error, {:invalid_chat_response, other}}
-
-      {:error, {:missing_credentials, env_key}} ->
-        msg =
-          "❌ **Credentials Missing**: The environment variable `#{env_key}` is not set or is empty."
-
-        Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:agent_response, msg})
-        {:error, :missing_credentials}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp finalize_assistant_message(
-         assistant_msg,
-         history,
-         session_id,
-         session_pid,
-         depth,
-         model_override,
-         deps,
-         usage
-       ) do
-    content = assistant_msg["content"]
-
-    # DEBUG: Log exact LLM output
-    Logger.debug("[EXECUTOR] RAW LLM CONTENT: #{inspect(content)}")
-
-    # 1. OpenClaw-inspired: Intercept XML tools and Strip scaffolding
-    {clean_content, xml_calls} = Text.extract_xml_tool_calls(content)
-
-    if xml_calls != [] do
-      Logger.debug("[EXECUTOR] EXTRACTED XML TOOL CALLS: #{inspect(xml_calls)}")
-    end
-
-    final_content = Text.strip_internal_scaffolding(clean_content)
-
-    # Reconstruct message with cleaned content and merged tool calls
-    existing_calls = assistant_msg["tool_calls"] || []
-
-    if existing_calls != [] do
-      Logger.debug("[EXECUTOR] NATIVE TOOL CALLS: #{inspect(existing_calls)}")
-    end
-
-    all_calls = existing_calls ++ xml_calls
-
-    assistant_msg =
-      assistant_msg
-      |> Map.put("content", if(final_content == "", do: nil, else: final_content))
-      |> Map.put("tool_calls", if(all_calls == [], do: nil, else: all_calls))
-
-    case assistant_msg do
-      %{"tool_calls" => tool_calls} when is_list(tool_calls) and tool_calls != [] ->
-        normalized_tool_calls = Enum.map(tool_calls, &ensure_tool_call_type/1)
-        assistant_msg = Map.put(assistant_msg, "tool_calls", normalized_tool_calls)
-
-        tool_names =
-          normalized_tool_calls
-          |> Enum.map(&tool_call_name/1)
-          |> Enum.reject(&is_nil_or_blank/1)
-          |> Enum.join(", ")
-
-        tool_names = if tool_names == "", do: "unknown_tool", else: tool_names
-        Logger.info("[EXECUTOR] LLM decided to use tools: #{tool_names}")
-        send(session_pid, {:sme_tool_use, tool_names})
-
-        tool_results =
-          Enum.map(normalized_tool_calls, fn call ->
-            execute_tool_via_registry(call, session_pid, session_id, deps.tool_registry)
-          end)
-
-        new_history = history ++ [assistant_msg] ++ tool_results
-        run_loop(new_history, session_id, session_pid, depth + 1, model_override, deps)
-
-      %{"content" => content} ->
-        Logger.info(
-          "[EXECUTOR] LLM stream finished. Text length: #{String.length(content || "")}"
-        )
-
-        # Synthesize a fallback if LLM is too laconic after tool usage
-        final_content =
-          if (is_nil(content) or String.trim(content) == "") and depth > 0 do
-            "✅ Concluído."
-          else
-            content
-          end
-
-        assistant_msg = Map.put(assistant_msg, "content", final_content)
-
-        {:ok, history ++ [assistant_msg], final_content, usage}
-
-      _ ->
-        {:error, {:invalid_assistant_message, assistant_msg}}
-    end
-  end
-
   defp merge_tool_deltas(acc, deltas) when is_list(deltas) do
     Enum.reduce(deltas, acc, fn delta, inner_acc ->
       index = read_map_field(delta, "index", :index)
@@ -699,12 +738,12 @@ defmodule Pincer.Core.Executor do
       type_delta =
         delta
         |> read_map_field("type", :type)
-        |> normalize_tool_call_type()
+        |> normalize_binary()
 
       name_delta =
         function_delta
         |> read_map_field("name", :name)
-        |> normalize_delta_fragment()
+        |> normalize_binary()
 
       updated = Map.put(existing, "id", read_map_field(delta, "id", :id) || existing["id"])
       updated = Map.put(updated, "type", type_delta || existing["type"] || "function")
@@ -808,237 +847,110 @@ defmodule Pincer.Core.Executor do
 
     Pincer.Infra.PubSub.broadcast(
       "session:#{session_id}",
-      {:agent_thinking, "Waiting for confirmation for: `#{command}`..."}
+      {:approval_required, call_id, command}
     )
 
-    Pincer.Infra.PubSub.broadcast(
-      "session:#{session_id}",
-      {:approval_requested, call_id, command}
-    )
-
+    # We wait synchronously here but the session GenServer remains responsive
+    # to the user input because this is running in a spawned task.
     receive do
-      {:tool_approval, ^call_id, :granted} ->
-        Logger.info("[EXECUTOR] Approval granted for #{command}")
-        workspace_restrict = restrict_to_workspace_enabled?()
-        workspace_root = Process.get(:workspace_path) || File.cwd!()
+      {:tool_approval_result, ^call_id, :approved} ->
+        Logger.info("[EXECUTOR] Command approved: #{command}")
 
-        case Pincer.Core.WorkspaceGuard.command_allowed?(command,
-               workspace_restrict: workspace_restrict,
-               workspace_root: workspace_root
-             ) do
-          :ok ->
-            case registry.execute_tool(
-                   "run_command",
-                   %{"command" => command, "cwd" => workspace_root},
-                   %{"session_id" => session_id}
-                 ) do
-              {:ok, res} -> res
-              {:error, r} -> "Post-approval error: #{inspect(r)}"
-            end
-
-          {:error, reason} ->
-            Logger.warning(
-              "[EXECUTOR] Approved command denied by workspace restriction policy: #{reason}"
-            )
-
-            "ERROR: Command denied by workspace restriction policy. #{reason}"
+        case registry.execute_tool("safe_shell", %{"command" => command, "skip_approval" => true}, %{
+               "session_id" => session_id
+             }) do
+          {:ok, result} -> result
+          {:error, reason} -> "Error: #{inspect(reason)}"
         end
 
-      {:tool_approval, ^call_id, :denied} ->
-        Logger.warning("[EXECUTOR] Approval denied for #{command}")
-        "ERROR: Command execution denied by user."
+      {:tool_approval_result, ^call_id, :rejected} ->
+        Logger.info("[EXECUTOR] Command rejected: #{command}")
+        "Error: Command rejected by user."
     after
       @approval_timeout_ms ->
-        "ERROR: Timeout waiting for user approval."
+        Logger.warning("[EXECUTOR] Approval timeout for: #{command}")
+        "Error: Command timed out waiting for approval."
     end
   end
 
-  defp restrict_to_workspace_enabled? do
-    tools = Application.get_env(:pincer, :tools, %{})
+  defp maybe_send_markdown_artifacts(session_pid) do
+    workspace_path = Process.get(:workspace_path)
 
-    case read_tools_setting(tools, ["restrict_to_workspace", "restrictToWorkspace"]) do
-      false -> false
-      _ -> true
-    end
-  end
+    if workspace_path do
+      case File.ls(workspace_path) do
+        {:ok, files} ->
+          # List files ending in .md
+          files
+          |> Enum.filter(&String.ends_with?(&1, ".md"))
+          |> Enum.each(fn file ->
+            # Only send if it was modified recently (e.g. in this cycle)
+            # This is a bit naive, but for now we'll just check if it exists
+            # We skip BOOTSTRAP.md as it's system-internal
+            if file != "BOOTSTRAP.md" do
+              path = Path.join(workspace_path, file)
 
-  defp read_tools_setting(map, keys) when is_map(map) and is_list(keys) do
-    Enum.find_value(keys, fn key ->
-      Map.get(map, key) ||
-        Enum.find_value(map, fn
-          {existing_key, value} when is_atom(existing_key) ->
-            if Atom.to_string(existing_key) == key, do: value
+              case File.read(path) do
+                {:ok, content} ->
+                  msg = "📝 **Artefato Atualizado**: `#{file}`\n\n#{truncate_markdown(content)}"
+                  send(session_pid, {:agent_status, msg})
 
-          _ ->
-            nil
-        end)
-    end)
-  end
+                _ ->
+                  :ok
+              end
+            end
+          end)
 
-  defp read_tools_setting(_map, _keys), do: nil
-
-  # ---------------------------------------------------------------------------
-  # Lazy attachment resolution
-  # ---------------------------------------------------------------------------
-
-  # Returns the provider key that will be used for the next LLM call.
-  defp get_active_provider(nil) do
-    registry = Application.get_env(:pincer, :llm_providers, %{}) || %{}
-
-    Application.get_env(
-      :pincer,
-      :default_llm_provider,
-      case Map.keys(registry) do
-        [first | _] -> first
-        _ -> "mock"
+        _ ->
+          :ok
       end
-    )
+    end
   end
 
-  defp get_active_provider(%{provider: provider}), do: provider
-
-  # Returns true when the provider config declares native file/multimodal support.
-  defp provider_supports_files?(provider_id) do
-    registry = Application.get_env(:pincer, :llm_providers, %{}) || %{}
-    config = Map.get(registry, provider_id, %{})
-    Map.get(config, :supports_files, false)
-  end
-
-  # Walk the history and resolve any attachment_ref parts.
-  defp resolve_lazy_attachments(history, provider_id) do
-    supports = provider_supports_files?(provider_id)
-    Enum.map(history, &resolve_message_attachments(&1, supports))
-  end
-
-  defp resolve_message_attachments(%{"content" => parts} = msg, supports) when is_list(parts) do
-    resolved = Enum.map(parts, &resolve_part(&1, supports))
-    %{msg | "content" => resolved}
-  end
-
-  defp resolve_message_attachments(msg, _supports), do: msg
-
-  defp resolve_part(%{"type" => "attachment_ref"} = ref, _supports = true) do
-    %{"url" => url, "mime_type" => mime, "filename" => filename, "size" => size} = ref
-
-    if size > @max_inline_bytes do
-      Logger.warning(
-        "[EXECUTOR] Attachment '#{filename}' (#{size} bytes) exceeds inline limit; describing as text."
-      )
-
-      %{
-        "type" => "text",
-        "text" =>
-          "[File: #{filename} — #{size} bytes — exceeds inline limit (#{@max_inline_bytes} bytes). " <>
-            "Use a file-reading tool or reduce the document size.]"
-      }
+  defp truncate_markdown(content) do
+    if String.length(content) > 1000 do
+      String.slice(content, 0, 1000) <> "\n\n[...conteúdo truncado]"
     else
-      case download_as_base64(url) do
-        {:ok, data} ->
-          Logger.info("[EXECUTOR] Inlined attachment '#{filename}' (#{size} bytes, #{mime}).")
-          %{"type" => "inline_data", "mime_type" => mime, "data" => data}
-
-        {:error, reason} ->
-          Logger.error(
-            "[EXECUTOR] Failed to download attachment '#{filename}': #{inspect(reason)}"
-          )
-
-          %{"type" => "text", "text" => "[Failed to download '#{filename}': #{inspect(reason)}]"}
-      end
+      content
     end
   end
 
-  defp resolve_part(%{"type" => "attachment_ref", "mime_type" => mime} = ref, _supports = false)
-       when is_binary(mime) do
-    if String.starts_with?(String.downcase(mime), "text/") do
-      resolve_text_attachment_for_text_only_provider(ref)
+  defp format_tool_calls(full_tool_calls) do
+    if map_size(full_tool_calls) > 0 do
+      full_tool_calls
+      |> Map.values()
+      |> Enum.sort_by(& &1["index"])
+      |> Enum.map(fn map -> Map.delete(map, "index") end)
     else
-      resolve_unsupported_attachment_ref(ref)
+      nil
     end
   end
 
-  defp resolve_part(%{"type" => "attachment_ref"} = ref, _supports = false) do
-    resolve_unsupported_attachment_ref(ref)
+  defp normalize_tool_call(%{"id" => id, "function" => %{"name" => name, "arguments" => args}}),
+    do: {id, name, args}
+
+  defp normalize_tool_call(%{id: id, function: %{name: name, arguments: args}}),
+    do: {id, name, args}
+
+  defp normalize_tool_call(call) do
+    id = call["id"] || call[:id] || "call_unknown"
+    f = call["function"] || call[:function] || %{}
+    name = f["name"] || f[:name] || "unknown"
+    args = f["arguments"] || f[:arguments] || "{}"
+    {id, name, args}
   end
 
-  defp resolve_part(part, _supports), do: part
-
-  defp resolve_unsupported_attachment_ref(ref) do
-    %{"filename" => filename, "size" => size} = ref
-
-    %{
-      "type" => "text",
-      "text" =>
-        "[File '#{filename}' (#{size} bytes) not processed — the active provider does not support file reading. " <>
-          "Switch to a multimodal model (e.g. Gemini) to read PDFs and images.]"
-    }
-  end
-
-  defp resolve_text_attachment_for_text_only_provider(ref) do
-    %{"filename" => filename, "size" => size, "url" => url} = ref
-
-    if size > @max_inline_bytes do
-      case download_as_base64(url) do
-        {:ok, data} ->
-          case Base.decode64(data) do
-            {:ok, binary} ->
-              # Read a 10KB preview
-              preview = String.slice(binary_to_utf8(binary), 0, 10_000)
-
-              %{
-                "type" => "text",
-                "text" =>
-                  "--- Content of #{filename} (PREVIEW - #{size} bytes) ---\n#{preview}\n\n[... File too large for full inlining. Use 'read_file' or 'grep' to see specific parts if needed.]"
-              }
-
-            :error ->
-              %{
-                "type" => "text",
-                "text" => "[Failed to decode text file '#{filename}' to UTF-8.]"
-              }
-          end
-
-        {:error, reason} ->
-          %{"type" => "text", "text" => "[Failed to download '#{filename}': #{inspect(reason)}]"}
-      end
-    else
-      case download_as_base64(url) do
-        {:ok, data} ->
-          case Base.decode64(data) do
-            {:ok, binary} ->
-              safe_text = binary_to_utf8(binary)
-              %{"type" => "text", "text" => "--- Content of #{filename} ---\n#{safe_text}"}
-
-            :error ->
-              %{
-                "type" => "text",
-                "text" => "[Failed to decode text file '#{filename}' to UTF-8.]"
-              }
-          end
-
-        {:error, reason} ->
-          %{"type" => "text", "text" => "[Failed to download '#{filename}': #{inspect(reason)}]"}
-      end
+  defp parse_tool_arguments(json) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, args} -> args
+      _ -> %{}
     end
   end
 
-  defp binary_to_utf8(binary) when is_binary(binary) do
-    if String.valid?(binary) do
-      binary
-    else
-      :unicode.characters_to_binary(binary, :latin1, :utf8)
-    end
-  rescue
-    _ -> binary
-  end
+  defp parse_tool_arguments(args) when is_map(args), do: args
+  defp parse_tool_arguments(_), do: %{}
 
-  defp download_as_base64(url) do
-    fetcher =
-      case Process.get(:executor_deps) do
-        %{file_fetcher: f} -> f
-        _ -> &Pincer.Core.Executor.default_file_fetch/1
-      end
-
-    fetcher.(url)
+  defp ensure_tool_call_type(call) do
+    call |> Map.put_new("type", "function")
   end
 
   defp loop_detected?(history) do
@@ -1047,7 +959,7 @@ defmodule Pincer.Core.Executor do
 
   # Check 1: 3+ consecutive assistant messages with identical tool_call sets (name + args).
   defp identical_sequence_loop?(history) do
-    # Take the last 6 messages, but only look at the assistant ones with tool calls
+    # Take the last 10 messages, but only look at the assistant ones with tool calls
     assistant_msgs =
       history
       |> Enum.take(-10)
@@ -1073,8 +985,10 @@ defmodule Pincer.Core.Executor do
         end)
 
       # If all 3 are identical, we are in a loop
-      [f1, f2, f3] = fingerprints
-      f1 == f2 and f2 == f3
+      case fingerprints do
+        [f1, f2, f3] -> f1 == f2 and f2 == f3
+        _ -> false
+      end
     else
       false
     end
@@ -1101,306 +1015,89 @@ defmodule Pincer.Core.Executor do
   end
 
   defp tool_call_name(tool_call) when is_map(tool_call) do
-    tool_call
-    |> read_map_field("function", :function)
-    |> read_map_field("name", :name)
-    |> normalize_binary()
+    get_in(tool_call, ["function", "name"]) || get_in(tool_call, [:function, :name])
   end
 
   defp tool_call_name(_), do: nil
 
-  defp normalize_tool_call(tool_call) do
-    call_id =
-      tool_call
-      |> read_map_field("id", :id)
-      |> normalize_binary()
-      |> case do
-        nil -> "tool_call_" <> Integer.to_string(System.unique_integer([:positive]))
-        value -> value
-      end
-
-    function = read_map_field(tool_call, "function", :function)
-
-    name =
-      function
-      |> read_map_field("name", :name)
-      |> normalize_binary()
-      |> case do
-        nil -> "unknown_tool"
-        value -> value
-      end
-
-    raw_arguments = read_map_field(function, "arguments", :arguments)
-
-    {call_id, name, raw_arguments}
-  end
-
-  defp parse_tool_arguments(nil), do: %{}
-  defp parse_tool_arguments(args) when is_map(args), do: normalize_map_keys(args)
-
-  defp parse_tool_arguments(args_json) when is_binary(args_json) do
-    trimmed = String.trim(args_json)
-
-    if trimmed == "" do
-      %{}
+  defp get_active_provider(model_override) do
+    if model_override do
+      model_override.provider
     else
-      case Jason.decode(trimmed) do
-        {:ok, decoded} when is_map(decoded) ->
-          normalize_map_keys(decoded)
-
-        {:ok, decoded} ->
-          decoded
-
-        _ ->
-          args_json
-      end
+      Pincer.Infra.Config.get(:llm)["provider"] || "openrouter"
     end
   end
 
-  defp parse_tool_arguments(other), do: other
-
-  defp normalize_map_keys(map) when is_map(map) do
-    Enum.reduce(map, %{}, fn {key, value}, acc ->
-      normalized_key =
-        cond do
-          is_binary(key) -> key
-          is_atom(key) -> Atom.to_string(key)
-          true -> to_string(key)
-        end
-
-      normalized_value =
-        cond do
-          is_map(value) -> normalize_map_keys(value)
-          is_list(value) -> Enum.map(value, &normalize_nested_value/1)
-          true -> value
-        end
-
-      Map.put(acc, normalized_key, normalized_value)
-    end)
-  end
-
-  defp normalize_map_keys(other), do: other
-
-  defp normalize_nested_value(value) when is_map(value), do: normalize_map_keys(value)
-
-  defp normalize_nested_value(value) when is_list(value),
-    do: Enum.map(value, &normalize_nested_value/1)
-
-  defp normalize_nested_value(value), do: value
-
-  defp normalize_delta_fragment(nil), do: ""
-  defp normalize_delta_fragment(fragment) when is_binary(fragment), do: fragment
-  defp normalize_delta_fragment(fragment), do: to_string(fragment)
-
-  defp normalize_arguments_fragment(nil), do: ""
-  defp normalize_arguments_fragment(fragment) when is_binary(fragment), do: fragment
-
-  defp normalize_arguments_fragment(fragment) do
-    case Jason.encode(fragment) do
-      {:ok, json} -> json
-      _ -> inspect(fragment)
-    end
-  end
-
-  defp ensure_tool_call_type(tool_call) when is_map(tool_call) do
-    type =
-      tool_call
-      |> read_map_field("type", :type)
-      |> normalize_tool_call_type()
-      |> case do
-        nil -> "function"
-        value -> value
-      end
-
-    Map.put(tool_call, "type", type)
-  end
-
-  defp ensure_tool_call_type(other), do: other
-
-  defp normalize_tool_call_type(nil), do: nil
-
-  defp normalize_tool_call_type(type) when is_binary(type) do
-    case String.trim(type) do
-      "" -> nil
-      value -> value
-    end
-  end
-
-  defp normalize_tool_call_type(type) when is_atom(type),
-    do: type |> Atom.to_string() |> normalize_tool_call_type()
-
-  defp normalize_tool_call_type(_), do: nil
-
-  defp init_markdown_tracker(workspace_path) do
-    root = Path.expand(workspace_path)
-    Process.put(:executor_markdown_root, root)
-    Process.put(:executor_markdown_snapshot, markdown_snapshot(root))
-  rescue
-    error ->
-      Logger.warning(
-        "[EXECUTOR] Failed to initialize markdown tracker: #{Exception.message(error)}"
-      )
-
-      Process.put(:executor_markdown_root, nil)
-      Process.put(:executor_markdown_snapshot, %{})
-  end
-
-  defp maybe_send_markdown_artifacts(session_pid) when is_pid(session_pid) do
-    root = Process.get(:executor_markdown_root)
-    previous = Process.get(:executor_markdown_snapshot, %{})
-
-    if is_binary(root) and is_map(previous) do
-      current = markdown_snapshot(root)
-
-      changed_rel_paths =
-        current
-        |> Enum.filter(fn {rel_path, metadata} ->
-          Map.get(previous, rel_path) != metadata
-        end)
-        |> Enum.map(&elem(&1, 0))
-        |> Enum.sort()
-
-      Enum.each(changed_rel_paths, fn rel_path ->
-        case read_markdown_notice_content(root, rel_path) do
-          {:ok, content} ->
-            send(session_pid, {:sme_status, :executor, markdown_notice(rel_path, content)})
-
-          :error ->
-            :ok
-        end
-      end)
-
-      Process.put(:executor_markdown_snapshot, current)
-    end
-  rescue
-    error ->
-      Logger.warning("[EXECUTOR] Markdown artifact tracking failed: #{Exception.message(error)}")
-  end
-
-  defp maybe_send_markdown_artifacts(_session_pid), do: :ok
-
-  defp markdown_snapshot(root) do
-    root
-    |> collect_markdown_files()
-    |> Enum.reduce(%{}, fn rel_path, acc ->
-      full_path = Path.join(root, rel_path)
-
-      case File.stat(full_path, time: :posix) do
-        {:ok, %File.Stat{type: :regular, mtime: mtime, size: size}} ->
-          Map.put(acc, rel_path, %{mtime: mtime, size: size})
-
-        _ ->
-          acc
-      end
-    end)
-  rescue
-    _ -> %{}
-  end
-
-  defp collect_markdown_files(root) do
-    walk_markdown_files(root, "", [])
-  end
-
-  defp walk_markdown_files(root, rel_dir, acc) do
-    current_dir = if rel_dir == "", do: root, else: Path.join(root, rel_dir)
-
-    case File.ls(current_dir) do
-      {:ok, entries} ->
-        Enum.reduce(entries, acc, fn entry, inner_acc ->
-          rel_path = if rel_dir == "", do: entry, else: Path.join(rel_dir, entry)
-          full_path = Path.join(root, rel_path)
-
-          cond do
-            ignored_markdown_path?(rel_path) ->
-              inner_acc
-
-            true ->
-              case File.stat(full_path) do
-                {:ok, %File.Stat{type: :directory}} ->
-                  walk_markdown_files(root, rel_path, inner_acc)
-
-                {:ok, %File.Stat{type: :regular}} ->
-                  if markdown_file?(rel_path) do
-                    [rel_path | inner_acc]
-                  else
-                    inner_acc
-                  end
-
-                _ ->
-                  inner_acc
+  defp resolve_lazy_attachments(history, provider) do
+    Enum.map(history, fn msg ->
+      if is_list(msg["content"]) do
+        resolved_content =
+          Enum.map(msg["content"], fn
+            %{"type" => "attachment", "attachment" => att} = part ->
+              case resolve_attachment_part(att, provider) do
+                {:ok, resolved} -> resolved
+                {:error, _} -> part
               end
-          end
-        end)
 
-      {:error, _reason} ->
-        acc
+            part ->
+              part
+          end)
+
+        Map.put(msg, "content", resolved_content)
+      else
+        msg
+      end
+    end)
+  end
+
+  defp resolve_attachment_part(att, provider) do
+    resolve_attachment_fallback(att, provider)
+  end
+
+  defp resolve_attachment_fallback(att, _provider) do
+    # Generic fallback: download and encode as base64 inlineData if it is an image or PDF
+    case att.mime_type do
+      mime when mime in ["image/png", "image/jpeg", "image/webp", "application/pdf"] ->
+        case download_as_base64(att.url) do
+          {:ok, b64} ->
+            {:ok,
+             %{
+               "type" => "image_url",
+               "image_url" => %{"url" => "data:#{mime};base64,#{b64}"}
+             }}
+
+          error ->
+            error
+        end
+
+      _ ->
+        {:error, :unsupported_fallback}
     end
   end
 
-  defp ignored_markdown_path?(rel_path) when is_binary(rel_path) do
-    case Path.split(rel_path) do
-      [head | _tail] -> MapSet.member?(@markdown_ignored_roots, head)
-      _ -> false
-    end
+  defp download_as_base64(url) do
+    fetcher =
+      case Process.get(:executor_deps) do
+        %{file_fetcher: f} -> f
+        _ -> &Pincer.Core.Executor.default_file_fetch/1
+      end
+
+    fetcher.(url)
   end
 
-  defp ignored_markdown_path?(_), do: false
-
-  defp markdown_file?(rel_path) when is_binary(rel_path) do
-    String.downcase(Path.extname(rel_path)) == ".md"
-  end
-
-  defp markdown_file?(_), do: false
-
-  defp read_markdown_notice_content(root, rel_path) do
-    full_path = Path.join(root, rel_path)
-
-    case File.read(full_path) do
-      {:ok, content} ->
-        truncated =
-          if String.length(content) > @markdown_notice_max_chars do
-            String.slice(content, 0, @markdown_notice_max_chars) <>
-              "\n\n[... markdown truncated for preview ...]"
-          else
-            content
-          end
-
-        {:ok, truncated}
-
-      {:error, _reason} ->
-        :error
-    end
-  end
-
-  defp markdown_notice(rel_path, content) do
-    """
-    📄 Markdown artifact updated: `#{rel_path}`
-
-    #{content}
-    """
-    |> String.trim()
-  end
-
-  defp read_map_field(map, string_key, atom_key) when is_map(map) do
+  defp read_map_field(map, string_key, atom_key) do
     Map.get(map, string_key) || Map.get(map, atom_key)
   end
 
-  defp read_map_field(_map, _string_key, _atom_key), do: nil
+  defp normalize_arguments_fragment(nil), do: ""
+  defp normalize_arguments_fragment(bin) when is_binary(bin), do: bin
+  defp normalize_arguments_fragment(map) when is_map(map), do: Jason.encode!(map)
+  defp normalize_arguments_fragment(_), do: ""
 
-  defp normalize_binary(value) when is_binary(value) do
-    case String.trim(value) do
-      "" -> nil
-      trimmed -> trimmed
-    end
-  end
-
-  defp normalize_binary(value) when is_atom(value),
-    do: value |> Atom.to_string() |> normalize_binary()
-
-  defp normalize_binary(value) when is_integer(value),
-    do: value |> Integer.to_string() |> normalize_binary()
-
-  defp normalize_binary(_), do: nil
+  defp normalize_binary(nil), do: nil
+  defp normalize_binary(bin) when is_binary(bin), do: bin
+  defp normalize_binary(atom) when is_atom(atom), do: atom |> Atom.to_string() |> normalize_binary()
+  defp normalize_binary(other), do: other |> Kernel.inspect() |> normalize_binary()
 
   defp is_nil_or_blank(nil), do: true
   defp is_nil_or_blank(value) when is_binary(value), do: String.trim(value) == ""
