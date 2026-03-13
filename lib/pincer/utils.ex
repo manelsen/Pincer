@@ -6,6 +6,7 @@ defmodule Pincer.Utils do
       MessageSplitter,
       TokenCounter,
       Tokenizer,
-      CodeSkeleton
+      CodeSkeleton,
+      Text
     ]
 end
