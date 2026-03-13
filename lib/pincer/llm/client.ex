@@ -639,101 +639,106 @@ defmodule Pincer.LLM.Client do
          failover_state,
          auth_context
        ) do
-    state = failover_state || FailoverPolicy.initial_state()
-    maybe_cooldown_auth_profile(auth_context, reason)
-    CooldownStore.cooldown_provider(state.current_provider, reason)
-    {action, next_state} = FailoverPolicy.next_action(reason, state)
+    if RetryPolicy.fail_fast?(reason) do
+      CoreTelemetry.emit_error(reason, %{action: :stream_completion, failover_action: :fail_fast})
+      {:error, reason}
+    else
+      state = failover_state || FailoverPolicy.initial_state()
+      maybe_cooldown_auth_profile(auth_context, reason)
+      CooldownStore.cooldown_provider(state.current_provider, reason)
+      {action, next_state} = FailoverPolicy.next_action(reason, state)
 
-    case action do
-      :retry_same ->
-        CoreTelemetry.emit_error(reason, %{
-          action: :stream_completion,
-          failover_action: :retry_same
-        })
+      case action do
+        :retry_same ->
+          CoreTelemetry.emit_error(reason, %{
+            action: :stream_completion,
+            failover_action: :retry_same
+          })
 
-        notify_runtime_status(%{
-          kind: :failover,
-          action: :stream_completion,
-          failover_action: :retry_same,
-          provider: next_state.current_provider,
-          model: next_state.current_model,
-          reason: reason_label(reason)
-        })
+          notify_runtime_status(%{
+            kind: :failover,
+            action: :stream_completion,
+            failover_action: :retry_same,
+            provider: next_state.current_provider,
+            model: next_state.current_model,
+            reason: reason_label(reason)
+          })
 
-        stream_completion(messages,
-          provider: next_state.current_provider,
-          model: next_state.current_model,
-          tools: tools,
-          failover_state: next_state
-        )
+          stream_completion(messages,
+            provider: next_state.current_provider,
+            model: next_state.current_model,
+            tools: tools,
+            failover_state: next_state
+          )
 
-      {:fallback_model, provider, model} ->
-        CoreTelemetry.emit_error(reason, %{
-          action: :stream_completion,
-          failover_action: :fallback_model,
-          provider: provider,
-          model: model
-        })
+        {:fallback_model, provider, model} ->
+          CoreTelemetry.emit_error(reason, %{
+            action: :stream_completion,
+            failover_action: :fallback_model,
+            provider: provider,
+            model: model
+          })
 
-        notify_runtime_status(%{
-          kind: :failover,
-          action: :stream_completion,
-          failover_action: :fallback_model,
-          provider: provider,
-          model: model,
-          reason: reason_label(reason)
-        })
+          notify_runtime_status(%{
+            kind: :failover,
+            action: :stream_completion,
+            failover_action: :fallback_model,
+            provider: provider,
+            model: model,
+            reason: reason_label(reason)
+          })
 
-        stream_completion(messages,
-          provider: provider,
-          model: model,
-          tools: tools,
-          failover_state: next_state
-        )
+          stream_completion(messages,
+            provider: provider,
+            model: model,
+            tools: tools,
+            failover_state: next_state
+          )
 
-      {:fallback_provider, provider, model} ->
-        CoreTelemetry.emit_error(reason, %{
-          action: :stream_completion,
-          failover_action: :fallback_provider,
-          provider: provider,
-          model: model
-        })
+        {:fallback_provider, provider, model} ->
+          CoreTelemetry.emit_error(reason, %{
+            action: :stream_completion,
+            failover_action: :fallback_provider,
+            provider: provider,
+            model: model
+          })
 
-        notify_runtime_status(%{
-          kind: :failover,
-          action: :stream_completion,
-          failover_action: :fallback_provider,
-          provider: provider,
-          model: model,
-          reason: reason_label(reason)
-        })
+          notify_runtime_status(%{
+            kind: :failover,
+            action: :stream_completion,
+            failover_action: :fallback_provider,
+            provider: provider,
+            model: model,
+            reason: reason_label(reason)
+          })
 
-        stream_completion(messages,
-          provider: provider,
-          model: model,
-          tools: tools,
-          failover_state: next_state
-        )
+          stream_completion(messages,
+            provider: provider,
+            model: model,
+            tools: tools,
+            failover_state: next_state
+          )
 
-      :stop ->
-        attempts = next_state |> FailoverPolicy.summarize_attempts() |> Map.get(:attempts, [])
+        :stop ->
+          attempts = next_state |> FailoverPolicy.summarize_attempts() |> Map.get(:attempts, [])
 
-        CoreTelemetry.emit_error(reason, %{
-          action: :stream_completion,
-          failover_action: :stop,
-          failover_attempts: length(attempts)
-        })
+          CoreTelemetry.emit_error(reason, %{
+            action: :stream_completion,
+            failover_action: :stop,
+            failover_attempts: length(attempts)
+          })
 
-        notify_runtime_status(%{
-          kind: :failover,
-          action: :stream_completion,
-          failover_action: :stop,
-          provider: next_state.current_provider,
-          model: next_state.current_model,
-          reason: reason_label(reason)
-        })
+          notify_runtime_status(%{
+            kind: :failover,
+            action: :stream_completion,
+            failover_action: :stop,
+            provider: next_state.current_provider,
+            model: next_state.current_model,
+            reason: reason_label(reason)
+          })
 
-        {:error, reason}
+          {:error, reason}
+      end
     end
   end
 
@@ -752,101 +757,106 @@ defmodule Pincer.LLM.Client do
          failover_state,
          auth_context
        ) do
-    state = failover_state || FailoverPolicy.initial_state()
-    maybe_cooldown_auth_profile(auth_context, reason)
-    CooldownStore.cooldown_provider(state.current_provider, reason)
-    {action, next_state} = FailoverPolicy.next_action(reason, state)
+    if RetryPolicy.fail_fast?(reason) do
+      CoreTelemetry.emit_error(reason, %{action: :chat_completion, failover_action: :fail_fast})
+      {:error, reason}
+    else
+      state = failover_state || FailoverPolicy.initial_state()
+      maybe_cooldown_auth_profile(auth_context, reason)
+      CooldownStore.cooldown_provider(state.current_provider, reason)
+      {action, next_state} = FailoverPolicy.next_action(reason, state)
 
-    case action do
-      :retry_same ->
-        CoreTelemetry.emit_error(reason, %{
-          action: :chat_completion,
-          failover_action: :retry_same
-        })
+      case action do
+        :retry_same ->
+          CoreTelemetry.emit_error(reason, %{
+            action: :chat_completion,
+            failover_action: :retry_same
+          })
 
-        notify_runtime_status(%{
-          kind: :failover,
-          action: :chat_completion,
-          failover_action: :retry_same,
-          provider: next_state.current_provider,
-          model: next_state.current_model,
-          reason: reason_label(reason)
-        })
+          notify_runtime_status(%{
+            kind: :failover,
+            action: :chat_completion,
+            failover_action: :retry_same,
+            provider: next_state.current_provider,
+            model: next_state.current_model,
+            reason: reason_label(reason)
+          })
 
-        chat_completion(messages,
-          provider: next_state.current_provider,
-          model: next_state.current_model,
-          tools: tools,
-          failover_state: next_state
-        )
+          chat_completion(messages,
+            provider: next_state.current_provider,
+            model: next_state.current_model,
+            tools: tools,
+            failover_state: next_state
+          )
 
-      {:fallback_model, provider, model} ->
-        CoreTelemetry.emit_error(reason, %{
-          action: :chat_completion,
-          failover_action: :fallback_model,
-          provider: provider,
-          model: model
-        })
+        {:fallback_model, provider, model} ->
+          CoreTelemetry.emit_error(reason, %{
+            action: :chat_completion,
+            failover_action: :fallback_model,
+            provider: provider,
+            model: model
+          })
 
-        notify_runtime_status(%{
-          kind: :failover,
-          action: :chat_completion,
-          failover_action: :fallback_model,
-          provider: provider,
-          model: model,
-          reason: reason_label(reason)
-        })
+          notify_runtime_status(%{
+            kind: :failover,
+            action: :chat_completion,
+            failover_action: :fallback_model,
+            provider: provider,
+            model: model,
+            reason: reason_label(reason)
+          })
 
-        chat_completion(messages,
-          provider: provider,
-          model: model,
-          tools: tools,
-          failover_state: next_state
-        )
+          chat_completion(messages,
+            provider: provider,
+            model: model,
+            tools: tools,
+            failover_state: next_state
+          )
 
-      {:fallback_provider, provider, model} ->
-        CoreTelemetry.emit_error(reason, %{
-          action: :chat_completion,
-          failover_action: :fallback_provider,
-          provider: provider,
-          model: model
-        })
+        {:fallback_provider, provider, model} ->
+          CoreTelemetry.emit_error(reason, %{
+            action: :chat_completion,
+            failover_action: :fallback_provider,
+            provider: provider,
+            model: model
+          })
 
-        notify_runtime_status(%{
-          kind: :failover,
-          action: :chat_completion,
-          failover_action: :fallback_provider,
-          provider: provider,
-          model: model,
-          reason: reason_label(reason)
-        })
+          notify_runtime_status(%{
+            kind: :failover,
+            action: :chat_completion,
+            failover_action: :fallback_provider,
+            provider: provider,
+            model: model,
+            reason: reason_label(reason)
+          })
 
-        chat_completion(messages,
-          provider: provider,
-          model: model,
-          tools: tools,
-          failover_state: next_state
-        )
+          chat_completion(messages,
+            provider: provider,
+            model: model,
+            tools: tools,
+            failover_state: next_state
+          )
 
-      :stop ->
-        attempts = next_state |> FailoverPolicy.summarize_attempts() |> Map.get(:attempts, [])
+        :stop ->
+          attempts = next_state |> FailoverPolicy.summarize_attempts() |> Map.get(:attempts, [])
 
-        CoreTelemetry.emit_error(reason, %{
-          action: :chat_completion,
-          failover_action: :stop,
-          failover_attempts: length(attempts)
-        })
+          CoreTelemetry.emit_error(reason, %{
+            action: :chat_completion,
+            failover_action: :stop,
+            failover_attempts: length(attempts)
+          })
 
-        notify_runtime_status(%{
-          kind: :failover,
-          action: :chat_completion,
-          failover_action: :stop,
-          provider: next_state.current_provider,
-          model: next_state.current_model,
-          reason: reason_label(reason)
-        })
+          notify_runtime_status(%{
+            kind: :failover,
+            action: :chat_completion,
+            failover_action: :stop,
+            provider: next_state.current_provider,
+            model: next_state.current_model,
+            reason: reason_label(reason)
+          })
 
-        {:error, reason}
+          {:error, reason}
+      end
     end
   end
 

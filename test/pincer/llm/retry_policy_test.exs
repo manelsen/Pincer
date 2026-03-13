@@ -13,6 +13,9 @@ defmodule Pincer.LLM.RetryPolicyTest do
       send(self(), {:retry_policy_call, config[:scenario], call_number})
 
       case {config[:scenario], call_number} do
+        {:provider_error, _} ->
+          {:error, {:provider_error, 400, "Provider returned error"}}
+
         {:http_400, _} ->
           {:error, {:http_error, 400, "bad request"}}
 
@@ -114,6 +117,22 @@ defmodule Pincer.LLM.RetryPolicyTest do
 
     assert_received {:retry_policy_call, :http_401, 1}
     refute_received {:retry_policy_call, :http_401, 2}
+  end
+
+  test "fails fast on provider payload errors without failover status noise" do
+    put_provider_scenario(:provider_error)
+    Process.put(:session_pid, self())
+
+    on_exit(fn ->
+      Process.delete(:session_pid)
+    end)
+
+    assert {:error, {:provider_error, 400, "Provider returned error"}} =
+             Client.chat_completion([])
+
+    assert_received {:retry_policy_call, :provider_error, 1}
+    refute_received {:retry_policy_call, :provider_error, 2}
+    refute_receive {:llm_runtime_status, %{kind: :failover}}, 200
   end
 
   test "handles terminal HTTP 400 without crashing when retry/cooldown configs are malformed lists" do
