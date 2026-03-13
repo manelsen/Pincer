@@ -9,7 +9,13 @@ defmodule Pincer.Ports.ToolRegistry do
   defp adapters do
     # Pure dynamic lookup from configuration. No hardcoded adapters here.
     # Guard against nil stored explicitly (e.g., test on_exit restoring unset env).
-    Application.get_env(:pincer, :tool_adapters) || []
+    (Application.get_env(:pincer, :tool_adapters) || [])
+    |> Enum.map(fn
+      mod when is_atom(mod) -> mod
+      mod_str when is_binary(mod_str) -> Module.concat([mod_str])
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
   end
 
   def list_tools do

@@ -62,9 +62,11 @@ config :pincer, :llm_providers, %{
 
 config :pincer, :default_llm_provider, "openrouter"
 
+config :pincer, :tool_adapters, [Pincer.Adapters.NativeToolRegistry]
+
 # Configuração de Logs
 config :logger,
-  level: :info,
+  level: :debug,
   colors: [enabled: true, info: :cyan, warn: :yellow, error: :red, debug: :magenta]
 
 config :logger, :console,
