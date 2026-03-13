@@ -20,6 +20,28 @@ defmodule Pincer.Core.ErrorClassTest do
       assert ErrorClass.classify(reason) == :context_overflow
     end
 
+    test "classifies tool-calling unsupported and provider payload errors" do
+      assert ErrorClass.classify(
+               {:http_error, 400, "`tool calling` is not supported with this model"}
+             ) ==
+               :tool_calling_unsupported
+
+      assert ErrorClass.classify({:provider_error, 400, "Provider returned error"}) ==
+               :provider_payload
+    end
+
+    test "classifies credential and provider-availability failures" do
+      assert ErrorClass.classify({:missing_credentials, "OPENAI_API_KEY"}) == :missing_credentials
+      assert ErrorClass.classify(:all_profiles_cooling_down) == :auth_cooling_down
+      assert ErrorClass.classify(:non_json_response) == :provider_non_json
+      assert ErrorClass.classify(:empty_response) == :provider_empty
+    end
+
+    test "classifies quota exhaustion separately from generic 429" do
+      assert ErrorClass.classify({:http_error, 429, "insufficient_quota"}) == :quota_exhausted
+      assert ErrorClass.classify({:http_error, 429, "rate limited"}) == :http_429
+    end
+
     test "classifies transport and process failures" do
       assert ErrorClass.classify(%Req.TransportError{reason: :timeout}) == :transport_timeout
       assert ErrorClass.classify(%Req.TransportError{reason: :econnrefused}) == :transport_connect

@@ -3211,3 +3211,46 @@ config = ~y"""
 3. Teste de core prova que `on_error/3` envia mensagem e reexecuta prompt em `:retry`.
 4. Teste de core prova que `on_error/3` envia mensagem sem reexecucao em `:paused`.
 5. Telegram e Discord continuam verdes usando o helper.
+
+## Incremento 2026-03-13 (Top 10 Error Routing v1)
+
+### Objetivo
+- tratar individualmente os erros operacionais mais comuns;
+- transformar payloads de erro de provider em classes roteaveis;
+- alinhar `ErrorClass` e `ErrorUX` para sugerir a via certa de resolucao.
+
+### Interfaces/Public API
+- `Pincer.Core.ErrorClass.classify/1`
+- `Pincer.Core.ErrorUX.friendly/2`
+- `Pincer.LLM.Providers.OpenAICompat.handle_response/1`
+
+### Top 10 classes alvo
+- `:missing_credentials`
+- `:auth_cooling_down`
+- `:tool_calling_unsupported`
+- `:context_overflow`
+- `:quota_exhausted`
+- `:http_429`
+- `:provider_payload`
+- `:provider_non_json`
+- `:provider_empty`
+- `:transport_timeout`
+
+### Regras
+- `OpenAICompat.handle_response/1` deve converter `%{"error" => ...}` em `{:provider_error, code, message}`.
+- `ErrorClass.classify/1` deve:
+  - reconhecer `provider_error`, credenciais ausentes, cooldown de perfil, quota e erros de provider;
+  - distinguir quota esgotada de rate limit generico;
+  - continuar classificando transporte, DB e stream payload.
+- `ErrorUX.friendly/2` deve gerar orientacao especifica por classe:
+  - configurar credencial;
+  - aguardar cooldown;
+  - trocar modelo/provider;
+  - usar `/reset`;
+  - revisar endpoint;
+  - aguardar e repetir.
+
+### Critérios de aceite
+1. Teste de provider prova que `%{"error" => ...}` vira `{:provider_error, code, message}`.
+2. Teste de core prova classificacao individual das classes novas.
+3. Teste de UX prova mensagens distintas para credenciais, cooldown, quota e payload de provider.
