@@ -5,6 +5,7 @@ defmodule Pincer.Channels.Telegram.Session do
   """
   use Pincer.Ports.Channel
   alias Pincer.Core.ProjectRouter
+  alias Pincer.Core.ResponseEnvelope
   alias Pincer.Core.SubAgentProgress
   alias Pincer.Core.StatusMessagePolicy
   alias Pincer.Core.StreamDelivery
@@ -113,29 +114,26 @@ defmodule Pincer.Channels.Telegram.Session do
        state,
        token,
        System.system_time(:millisecond),
-       stream_transport(state),
+       stream_transport(state, session_status(state.session_id)),
        suppress_preview?: &suppress_preview?/2
      )}
   end
 
   @impl true
   def handle_info({:agent_response, text, usage}, state) do
-    display =
-      try do
-        case Pincer.Core.Session.Server.get_status(state.session_id) do
-          {:ok, %{usage_display: d}} -> d
-          _ -> "off"
-        end
-      catch
-        :exit, _reason -> "off"
-      end
+    session_status = session_status(state.session_id)
 
-    safe_text = text || ""
-    usage_line = format_usage_line(usage, display)
-    text_with_usage = safe_text <> usage_line
+    text_with_usage =
+      ResponseEnvelope.build(:telegram, text, usage, Map.get(session_status, :usage_display))
 
     if text_with_usage != "" do
-      state = StreamDelivery.handle_final(state, text_with_usage, stream_transport(state))
+      state =
+        StreamDelivery.handle_final(
+          state,
+          text_with_usage,
+          stream_transport(state, session_status)
+        )
+
       maybe_advance_project_flow(state)
       {:noreply, state}
     else
@@ -181,35 +179,21 @@ defmodule Pincer.Channels.Telegram.Session do
   @impl true
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp format_usage_line(nil, _display), do: ""
-  defp format_usage_line(_usage, "off"), do: ""
-
-  defp format_usage_line(usage, "tokens") do
-    in_t = usage["prompt_tokens"] || 0
-    out_t = usage["completion_tokens"] || 0
-    "\n\n<i>📊 #{in_t} in · #{out_t} out</i>"
-  end
-
-  defp format_usage_line(usage, "full") do
-    total = (usage["prompt_tokens"] || 0) + (usage["completion_tokens"] || 0)
-    "\n\n<i>📊 total: #{total} tokens</i>"
-  end
-
-  defp send_opts_for_session(session_id) do
+  defp session_status(session_id) do
     try do
       case Pincer.Core.Session.Server.get_status(session_id) do
-        {:ok, %{reasoning_visible: true}} -> [skip_reasoning_strip: true]
-        _ -> []
+        {:ok, status} when is_map(status) -> status
+        _ -> %{}
       end
     catch
-      :exit, _reason -> []
+      :exit, _reason -> %{}
     end
   rescue
-    _ -> []
+    _ -> %{}
   end
 
-  defp stream_transport(state) do
-    opts = send_opts_for_session(state.session_id)
+  defp stream_transport(state, session_status) do
+    opts = ResponseEnvelope.delivery_options(:telegram, session_status)
 
     [
       send: fn text ->
