@@ -129,6 +129,8 @@ defmodule Pincer.Core.ExecutorToolFallbackTest do
 
     refute response =~ "private chain of thought"
     refute response =~ "<thinking>"
+    refute response =~ "✅ Concluído"
+    assert response =~ "Nao consegui fechar uma resposta final"
     assert response =~ "Ferramentas utilizadas: my_tool"
   end
 end
