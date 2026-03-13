@@ -28,6 +28,7 @@ defmodule Pincer.Core do
       ChannelInteractionPolicy,
       StreamingPolicy,
       StreamDelivery,
+      ResponseEnvelope,
       StatusMessagePolicy,
       RetryPolicy,
       Telemetry,
