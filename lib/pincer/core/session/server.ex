@@ -585,7 +585,12 @@ defmodule Pincer.Core.Session.Server do
     Never claim you don't have tools; if a task requires technical action, you must use the available tools to perform it.
 
     **IMPORTANT**: After using any tool, you MUST provide a final textual response to the user summarizing what you did and showing relevant results. Never finish with an empty message if you performed actions.
+
+    **CHAT POLICY**:
+    - To talk to the current user in this session, just write plain text normally.
+    - NEVER use `channel_actions` to talk to the user you are currently chatting with. That tool is only for sending messages to DIFFERENT channels or users.
     """
+
     String.trim(prompt)
   end
 
