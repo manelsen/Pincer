@@ -11,6 +11,7 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.ContextOverflowRecovery
   alias Pincer.Core.MemoryRecall
+  alias Pincer.Core.ToolOnlyOutcomeFormatter
   alias Pincer.Core.TurnOutcomePolicy
   alias Pincer.Utils.Text
 
@@ -663,7 +664,8 @@ defmodule Pincer.Core.Executor do
             # IMPORTANT: Return clean logical history to session
             {:ok, logical_history ++ [assistant_msg], final_content, usage}
 
-          {:tool_summary, final_content} ->
+          {:tool_only, tool_messages} ->
+            final_content = ToolOnlyOutcomeFormatter.format(tool_messages)
             assistant_msg = Map.put(assistant_msg, "content", final_content)
             {:ok, logical_history ++ [assistant_msg], final_content, usage}
 

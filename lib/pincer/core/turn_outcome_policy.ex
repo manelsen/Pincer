@@ -7,7 +7,9 @@ defmodule Pincer.Core.TurnOutcomePolicy do
   """
 
   @type outcome ::
-          {:final_text, String.t()} | {:tool_summary, String.t()} | {:error, :empty_response}
+          {:final_text, String.t()}
+          | {:tool_only, [map()]}
+          | {:error, :empty_response}
 
   @spec resolve(map()) :: outcome()
   def resolve(attrs) when is_map(attrs) do
@@ -23,7 +25,7 @@ defmodule Pincer.Core.TurnOutcomePolicy do
         {:final_text, streamed_text}
 
       tool_messages != [] ->
-        {:tool_summary, build_tool_summary(tool_messages)}
+        {:tool_only, tool_messages}
 
       true ->
         {:error, :empty_response}
@@ -40,48 +42,4 @@ defmodule Pincer.Core.TurnOutcomePolicy do
   end
 
   defp visible_text(other), do: other |> to_string() |> visible_text()
-
-  defp build_tool_summary(tool_messages) do
-    tool_summary =
-      tool_messages
-      |> Enum.take(5)
-      |> Enum.map(fn msg ->
-        tool_name = msg["name"] || "tool"
-
-        result_preview =
-          case msg["content"] do
-            nil ->
-              ""
-
-            content when is_binary(content) ->
-              content
-              |> String.split("\n")
-              |> Enum.take(3)
-              |> Enum.join(" ")
-              |> String.slice(0, 100)
-
-            _ ->
-              ""
-          end
-
-        "- #{tool_name}: #{result_preview}"
-      end)
-      |> Enum.join("\n")
-
-    used_tools =
-      tool_messages
-      |> Enum.map(&(&1["name"] || "tool"))
-      |> Enum.uniq()
-      |> Enum.join(", ")
-
-    """
-    ✅ Concluído. Ferramentas utilizadas: #{used_tools}
-
-    Resumo das ações:
-    #{tool_summary}
-
-    (O assistente não forneceu uma resposta detalhada. Use /verbose on para mais informações.)
-    """
-    |> String.trim()
-  end
 end

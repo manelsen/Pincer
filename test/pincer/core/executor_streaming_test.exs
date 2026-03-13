@@ -239,6 +239,8 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     assert_receive {:sme_tool_use, "my_tool"}, 2000
 
     assert_receive {:executor_finished, _history, response, _usage}, 2000
+    refute response =~ "✅ Concluído"
+    assert response =~ "Nao consegui fechar uma resposta final"
     assert response =~ "Ferramentas utilizadas: my_tool"
     assert response =~ "Tool Result"
   end

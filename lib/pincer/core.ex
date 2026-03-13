@@ -31,6 +31,7 @@ defmodule Pincer.Core do
       StreamDelivery,
       ContextOverflowRecovery,
       TurnOutcomePolicy,
+      ToolOnlyOutcomeFormatter,
       ResponseEnvelope,
       StatusMessagePolicy,
       StatusDelivery,

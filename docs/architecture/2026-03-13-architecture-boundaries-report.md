@@ -443,10 +443,10 @@ Completed slices:
 - status upsert/delivery policy moved into [Pincer.Core.StatusMessagePolicy](/home/micelio/git/Pincer/lib/pincer/core/status_message_policy.ex) and [Pincer.Core.StatusDelivery](/home/micelio/git/Pincer/lib/pincer/core/status_delivery.ex)
 - project flow delivery moved into [Pincer.Core.ProjectFlowDelivery](/home/micelio/git/Pincer/lib/pincer/core/project_flow_delivery.ex)
 - turn outcome classification moved into [Pincer.Core.TurnOutcomePolicy](/home/micelio/git/Pincer/lib/pincer/core/turn_outcome_policy.ex)
+- tool-only degraded-response formatting moved into [Pincer.Core.ToolOnlyOutcomeFormatter](/home/micelio/git/Pincer/lib/pincer/core/tool_only_outcome_formatter.ex)
 
 Still open inside Phase 1:
 
-- split `tool-only` outcome formatting away from outcome classification itself
 - isolate memory recall augmentation and prompt assembly behind smaller pure/core seams
 - reduce remaining imperative logic in channel session glue, especially around edge-case delivery/error paths
 - keep removing direct operational assumptions from `Executor`

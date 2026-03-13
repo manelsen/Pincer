@@ -24,7 +24,7 @@ defmodule Pincer.Core.TurnOutcomePolicyTest do
   end
 
   test "builds tool-only summary when no visible answer exists after tools" do
-    assert {:tool_summary, summary} =
+    assert {:tool_only, tool_messages} =
              TurnOutcomePolicy.resolve(%{
                final_text: nil,
                streamed_text: nil,
@@ -34,8 +34,8 @@ defmodule Pincer.Core.TurnOutcomePolicyTest do
                tool_call_count: 0
              })
 
-    assert summary =~ "Ferramentas utilizadas: file_system"
-    assert summary =~ "README.md"
+    assert [%{"name" => "file_system", "content" => "Files in workspace\nREADME.md"}] =
+             tool_messages
   end
 
   test "returns empty response error when nothing user-visible exists" do
