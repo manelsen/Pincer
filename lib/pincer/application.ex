@@ -86,6 +86,7 @@ defmodule Pincer.Application do
   """
 
   use Application
+  require Logger
 
   @impl true
   @doc """
@@ -112,9 +113,9 @@ defmodule Pincer.Application do
 
     repo_config = Pincer.Infra.Config.get(:repo)
 
-    IO.puts("Starting Bot...")
+    Logger.info("Starting Bot...")
 
-    IO.puts(
+    Logger.info(
       "Enabled channels whitelist: #{inspect(Application.get_env(:pincer, :enabled_channels))}"
     )
 
@@ -139,13 +140,6 @@ defmodule Pincer.Application do
       Pincer.Channels.Discord.SessionSupervisor,
       Pincer.Channels.WhatsApp.SessionSupervisor
     ]
-
-    children =
-      if Application.get_env(:pincer, :enable_graph_watcher, true) do
-        children ++ [Pincer.Core.Graph.Watcher]
-      else
-        children
-      end
 
     children =
       if Application.get_env(:pincer, :enable_heartbeat_watchers, true) do
