@@ -125,8 +125,7 @@ defmodule Pincer.Core.AgentPaths do
     bootstrap? = Keyword.get(opts, :bootstrap?, true)
     bootstrap_file = Keyword.get(opts, :bootstrap_path, bootstrap_path(workspace_path))
 
-    bootstrap? and File.exists?(bootstrap_file) and
-      not (File.exists?(identity_path(workspace_path)) and File.exists?(soul_path(workspace_path)))
+    bootstrap? and File.exists?(bootstrap_file)
   end
 
   @doc """
@@ -208,17 +207,13 @@ defmodule Pincer.Core.AgentPaths do
     seed_file_from_sources(
       bootstrap_path(workspace_path),
       [template_file(template_root, @bootstrap_file), priv_template_path(@bootstrap_file)],
-      if(bootstrap_active?(workspace_path, bootstrap_path: bootstrap_path(workspace_path)),
+      if(Keyword.get(opts, :bootstrap?, true),
         do: default_bootstrap(),
         else: nil
       )
     )
 
-    if not File.exists?(bootstrap_path(workspace_path)) and
-         not (File.exists?(identity_path(workspace_path)) and
-                File.exists?(soul_path(workspace_path))) do
-      File.write!(bootstrap_path(workspace_path), default_bootstrap())
-    end
+    :ok
   end
 
   defp remove_bootstrap(workspace_path) do
