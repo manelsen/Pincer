@@ -52,7 +52,8 @@ defmodule Pincer.LLM.ToolParser do
   end
 
   defp extract_minimax_xml(content) do
-    regex = ~r/<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/i
+    # Resilient regex that doesn't strictly require closing tag if at EOF
+    regex = ~r/<minimax:tool_call>([\s\S]*?)(?:<\/minimax:tool_call>|$)/i
 
     extracted =
       Regex.scan(regex, content)
@@ -67,7 +68,8 @@ defmodule Pincer.LLM.ToolParser do
   end
 
   defp extract_generic_xml(content) do
-    regex = ~r/<tool_call>([\s\S]*?)<\/tool_call>/i
+    # Resilient regex that doesn't strictly require closing tag if at EOF
+    regex = ~r/<tool_call>([\s\S]*?)(?:<\/tool_call>|$)/i
 
     extracted =
       Regex.scan(regex, content)
