@@ -3106,3 +3106,40 @@ config = ~y"""
 3. Teste de core prova que `final` com preview existente edita in-place e reseta o estado.
 4. Teste de core prova que `final` com `edit` falhando faz fallback para `send` e ainda reseta o estado.
 5. Telegram e Discord continuam verdes usando o helper central.
+
+## Incremento 2026-03-13 (Core Response Envelope Policy v1)
+
+### Objetivo
+- mover para `Core` a formacao do texto final visivel e das flags puras de delivery;
+- separar calculo deterministico de efeito (`Session.Server.get_status/1`, `send_message`, `update_message`);
+- reduzir responsabilidade de `Telegram.Session`.
+
+### Interfaces/Public API
+- `Pincer.Core.ResponseEnvelope.build/4`
+- `Pincer.Core.ResponseEnvelope.delivery_options/2`
+- `Pincer.Channels.Telegram.Session`
+
+### Regras
+- `build/4` deve receber:
+  - `channel`
+  - `text`
+  - `usage`
+  - `usage_display`
+- `build/4` deve:
+  - normalizar `nil` para string vazia;
+  - anexar linha de usage somente quando o channel suportar e `usage_display` estiver habilitado;
+  - retornar `""` quando nada precisar ser entregue.
+- `delivery_options/2` deve ser pura e derivar flags de transporte a partir de:
+  - `channel`
+  - `%{reasoning_visible: boolean()}`
+- em v1:
+  - Telegram usa `<i>📊 ...</i>` para `tokens` e `full`;
+  - Discord nao altera o texto final nem produz flags extras;
+  - `reasoning_visible: true` em Telegram gera `[skip_reasoning_strip: true]`.
+
+### Critérios de aceite
+1. Teste de core prova montagem do texto final de Telegram com usage `tokens`.
+2. Teste de core prova montagem do texto final de Telegram com usage `full`.
+3. Teste de core prova que Discord nao anexa usage.
+4. Teste de core prova flags de delivery para Telegram com reasoning visivel e oculto.
+5. `Telegram.Session` passa a usar o modulo puro sem regressao nos testes existentes.
