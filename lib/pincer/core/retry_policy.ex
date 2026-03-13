@@ -30,6 +30,19 @@ defmodule Pincer.Core.RetryPolicy do
     :stream_payload
   ]
 
+  @fail_fast_classes [
+    :missing_credentials,
+    :auth_cooling_down,
+    :tool_calling_unsupported,
+    :context_overflow,
+    :provider_payload,
+    :provider_non_json,
+    :provider_empty,
+    :http_401,
+    :http_403,
+    :http_404
+  ]
+
   @doc """
   Returns `true` when the reason should be retried by request-level logic.
   """
@@ -47,6 +60,12 @@ defmodule Pincer.Core.RetryPolicy do
 
   def retryable?({:timeout, _}), do: true
   def retryable?(_), do: false
+
+  @doc """
+  Returns `true` when the reason should stop immediately without retry/failover noise.
+  """
+  @spec fail_fast?(term()) :: boolean()
+  def fail_fast?(reason), do: ErrorClass.classify(reason) in @fail_fast_classes
 
   @doc """
   Returns `true` when the reason should be treated as transient in logging/ops.
