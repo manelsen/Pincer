@@ -4,12 +4,11 @@ defmodule Pincer.Channels.Discord.Session do
   One process per active Discord channel that listens to PubSub and sends messages via Nostrum.
   """
   use Pincer.Ports.Channel
-  alias Pincer.Core.ProjectRouter
+  alias Pincer.Core.ProjectFlowDelivery
   alias Pincer.Core.StatusDelivery
   alias Pincer.Core.StatusMessagePolicy
   alias Pincer.Core.StreamDelivery
   alias Pincer.Core.StreamingPolicy
-  alias Pincer.Core.Session.Server
 
   @impl Pincer.Ports.Channel
   def start_link(%{channel_id: channel_id} = args) do
@@ -186,51 +185,21 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   defp maybe_advance_project_flow(state) do
-    case ProjectRouter.on_agent_response(state.session_id) do
-      {:next, progress} ->
-        Pincer.Channels.Discord.send_message(
-          "#{state.channel_id}",
-          "Project Runner: #{progress.status_message}"
-        )
-
-        _ = Server.process_input(state.session_id, progress.prompt)
-        :ok
-
-      {:completed, progress} ->
-        Pincer.Channels.Discord.send_message(
-          "#{state.channel_id}",
-          "Project Runner: #{progress.status_message}"
-        )
-
-        :ok
-
-      :noop ->
-        :ok
-    end
+    ProjectFlowDelivery.on_response(
+      state.session_id,
+      send_message: fn text ->
+        Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
+      end
+    )
   end
 
   defp maybe_recover_project_flow(state) do
-    case ProjectRouter.on_agent_error(state.session_id) do
-      {:retry, progress} ->
-        Pincer.Channels.Discord.send_message(
-          "#{state.channel_id}",
-          "Project Runner: #{progress.status_message}"
-        )
-
-        _ = Server.process_input(state.session_id, progress.prompt)
-        :ok
-
-      {:paused, progress} ->
-        Pincer.Channels.Discord.send_message(
-          "#{state.channel_id}",
-          "Project Runner: #{progress.status_message}"
-        )
-
-        :ok
-
-      :noop ->
-        :ok
-    end
+    ProjectFlowDelivery.on_error(
+      state.session_id,
+      send_message: fn text ->
+        Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
+      end
+    )
   end
 
   defp subagent_status?(text) when is_binary(text) do
