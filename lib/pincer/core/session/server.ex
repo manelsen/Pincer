@@ -591,7 +591,9 @@ defmodule Pincer.Core.Session.Server do
     - NEVER use `channel_actions` to talk to the user you are currently chatting with. That tool is only for sending messages to DIFFERENT channels or users.
     """
 
-    String.trim(prompt)
+    prompt = String.trim(prompt)
+    Logger.debug("[SESSION] GENERATED SYSTEM PROMPT:\n#{prompt}")
+    prompt
   end
 
   @doc false
