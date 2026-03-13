@@ -395,21 +395,29 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
 
     tools =
       Enum.reduce(servers, %{}, fn {server_name, pid}, acc ->
-        case Client.list_tools(pid) do
-          {:ok, %{"result" => %{"tools" => tools}}} ->
-            Enum.reduce(tools, acc, fn tool, inner_acc ->
-              if Application.get_env(:pincer, :log_mcp),
-                do: Logger.debug("Tool discovered [#{server_name}]: #{tool["name"]}")
+        if Process.alive?(pid) do
+          try do
+            case Client.list_tools(pid) do
+              {:ok, %{"result" => %{"tools" => tools}}} ->
+                Enum.reduce(tools, acc, fn tool, inner_acc ->
+                  if Application.get_env(:pincer, :log_mcp),
+                    do: Logger.debug("Tool discovered [#{server_name}]: #{tool["name"]}")
 
-              Map.put(inner_acc, tool["name"], %{
-                server_pid: pid,
-                spec: tool,
-                server_name: server_name
-              })
-            end)
+                  Map.put(inner_acc, tool["name"], %{
+                    server_pid: pid,
+                    spec: tool,
+                    server_name: server_name
+                  })
+                end)
 
-          _ ->
-            acc
+              _ ->
+                acc
+            end
+          catch
+            :exit, _reason -> acc
+          end
+        else
+          acc
         end
       end)
 

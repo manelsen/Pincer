@@ -1,4 +1,6 @@
 defmodule Pincer.Infra.Config do
+  require Logger
+
   @moduledoc """
   Configuration loader and manager for the Pincer application.
 
@@ -123,7 +125,7 @@ defmodule Pincer.Infra.Config do
   """
   @spec load() :: :ok | :error
   def load do
-    IO.puts("Loading environment variables from .env...")
+    Logger.info("Loading environment variables from .env...")
 
     case File.read(".env") do
       {:ok, content} ->
@@ -142,7 +144,7 @@ defmodule Pincer.Infra.Config do
         end)
 
       {:error, _} ->
-        IO.puts("Warning: .env file not found.")
+        Logger.warning(".env file not found.")
     end
 
     case YamlElixir.read_from_file(@config_file) do
@@ -155,11 +157,11 @@ defmodule Pincer.Infra.Config do
         env_openrouter = System.get_env("OPENROUTER_API_KEY")
         env_opencode_zen = System.get_env("OPENCODE_ZEN_API_KEY")
 
-        IO.puts(
+        Logger.info(
           "Token ENV Telegram: #{if env_telegram && env_telegram != "", do: "OK", else: "NOT FOUND"}"
         )
 
-        IO.puts(
+        Logger.info(
           "Token ENV Opencode Zen: #{if env_opencode_zen && env_opencode_zen != "", do: "OK", else: "NOT FOUND"}"
         )
 
@@ -184,7 +186,7 @@ defmodule Pincer.Infra.Config do
           Application.put_env(:pincer, :llm, merged_llm)
 
           provider = merged_llm["provider"] || merged_llm[:provider] || "openrouter"
-          IO.puts("LLM Provider: #{provider}")
+          Logger.info("LLM Provider: #{provider}")
         end
 
         if db_config = config["database"] do
@@ -227,7 +229,7 @@ defmodule Pincer.Infra.Config do
         :ok
 
       {:error, reason} ->
-        IO.puts("Fatal error: Failed to load config.yaml: #{inspect(reason)}")
+        Logger.error("Fatal error: Failed to load config.yaml: #{inspect(reason)}")
         :error
     end
   end

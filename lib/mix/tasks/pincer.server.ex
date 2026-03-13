@@ -15,6 +15,7 @@ defmodule Mix.Tasks.Pincer.Server do
   """
   use Mix.Task
   use Boundary, classify_to: Pincer.Mix
+  require Logger
 
   @service_name "pincer"
   @service_file "infrastructure/systemd/pincer.service"
@@ -45,12 +46,10 @@ defmodule Mix.Tasks.Pincer.Server do
     # Start the full application and all its dependencies
     case Application.ensure_all_started(:pincer) do
       {:ok, _} ->
-        IO.puts(IO.ANSI.cyan() <> ">>> Pincer Application STARTED <<<" <> IO.ANSI.reset())
+        Logger.info(">>> Pincer Application STARTED <<<")
 
       {:error, reason} ->
-        IO.puts(
-          IO.ANSI.red() <> "!!! FAILED TO START PINCER: #{inspect(reason)}" <> IO.ANSI.reset()
-        )
+        Logger.error("!!! FAILED TO START PINCER: #{inspect(reason)}")
     end
 
     # Keep the process alive

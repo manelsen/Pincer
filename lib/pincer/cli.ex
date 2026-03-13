@@ -128,7 +128,7 @@ defmodule Pincer.CLI do
   defp await_response do
     receive do
       {:cli_output, text} ->
-        IO.puts("\n" <> IO.ANSI.green() <> "[Pincer]: " <> text <> IO.ANSI.reset() <> "\n")
+        IO.puts(IO.ANSI.green() <> "[Pincer]: " <> text <> IO.ANSI.reset())
 
         # If it's a status message, keep waiting for the final response
         if String.starts_with?(text, "📐") or String.starts_with?(text, "⚙️") do
