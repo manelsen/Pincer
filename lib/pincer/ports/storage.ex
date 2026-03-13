@@ -9,7 +9,8 @@ defmodule Pincer.Ports.Storage do
   @callback save_learning(String.t(), String.t()) :: {:ok, term()} | {:error, term()}
   @callback save_tool_error(String.t(), map(), String.t()) :: {:ok, term()} | {:error, term()}
   @callback list_recent_learnings(integer()) :: [map()]
-  @callback index_document(String.t(), String.t(), [float()]) :: :ok | {:error, term()}
+  @callback get_document_metadata(String.t(), String.t()) :: map() | nil
+  @callback index_document(String.t(), String.t(), [float()], map()) :: :ok | {:error, term()}
   @callback index_memory(String.t(), String.t(), String.t(), [float()], keyword()) ::
               :ok | {:error, term()}
   @callback search_messages(String.t(), integer()) :: {:ok, [map()]} | {:error, term()}
@@ -45,7 +46,12 @@ defmodule Pincer.Ports.Storage do
   def save_learning(cat, sum), do: adapter().save_learning(cat, sum)
   def save_tool_error(tool, args, err), do: adapter().save_tool_error(tool, args, err)
   def list_recent_learnings(limit), do: adapter().list_recent_learnings(limit)
-  def index_document(path, content, vector), do: adapter().index_document(path, content, vector)
+
+  def get_document_metadata(path, workspace_root),
+    do: adapter().get_document_metadata(path, workspace_root)
+
+  def index_document(path, content, vector, metadata \\ %{}),
+    do: adapter().index_document(path, content, vector, metadata)
 
   def index_memory(path, content, memory_type, vector, opts \\ []),
     do: adapter().index_memory(path, content, memory_type, vector, opts)

@@ -69,7 +69,10 @@ defmodule Pincer.Core.ExecutorMemoryRecallTest do
     end
 
     @impl true
-    def index_document(_path, _content, _vector), do: :ok
+    def get_document_metadata(_path, _workspace_root), do: nil
+
+    @impl true
+    def index_document(_path, _content, _vector, _metadata), do: :ok
 
     @impl true
     def index_memory(_path, _content, _memory_type, _vector, _opts), do: :ok

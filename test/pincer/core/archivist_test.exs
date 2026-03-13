@@ -91,8 +91,11 @@ defmodule Pincer.Core.ArchivistTest do
     def list_recent_learnings(_limit), do: []
 
     @impl true
-    def index_document(path, content, vector) do
-      index_memory(path, content, "reference", vector, [])
+    def get_document_metadata(_path, _workspace_root), do: nil
+
+    @impl true
+    def index_document(path, content, vector, metadata) do
+      index_memory(path, content, "reference", vector, Map.to_list(metadata))
     end
 
     @impl true

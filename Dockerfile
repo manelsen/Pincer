@@ -49,7 +49,7 @@ ENV MIX_ENV=prod \
     HEX_HOME=/app/.hex
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates inotify-tools nodejs npm postgresql-client python3 python3-venv python3-pip && \
+    apt-get install -y --no-install-recommends ca-certificates inotify-tools git nodejs npm postgresql-client python3 python3-venv python3-pip && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --gid "${APP_GID}" pincer && \
     useradd --uid "${APP_UID}" --gid pincer --home /app --shell /bin/sh --create-home pincer

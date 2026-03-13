@@ -81,7 +81,8 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
     def save_learning(_c, _s), do: {:ok, :ok}
     def save_tool_error(_t, _a, _e), do: {:ok, :ok}
     def list_recent_learnings(_l), do: []
-    def index_document(_p, _c, _v), do: :ok
+    def get_document_metadata(_path, _workspace_root), do: nil
+    def index_document(_p, _c, _v, _metadata), do: :ok
     def search_messages(_q, _l), do: {:ok, []}
     def search_documents(_q, _l), do: {:ok, []}
     def search_similar(_t, _v, _l), do: {:ok, []}
