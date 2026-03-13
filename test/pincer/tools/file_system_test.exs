@@ -413,8 +413,8 @@ defmodule Pincer.Adapters.Tools.FileSystemTest do
                context
              )
 
-    assert output =~ ~r/^1#[A-Z0-9]{2}\|alpha/m
-    assert output =~ ~r/^2#[A-Z0-9]{2}\|  beta\(\)/m
+    assert output =~ ~r/^1#[A-Z]{5}\|alpha/m
+    assert output =~ ~r/^2#[A-Z]{5}\|  beta\(\)/m
   end
 
   test "spec recommends hashlined anchored edits for code changes" do
