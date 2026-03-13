@@ -328,6 +328,29 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Teste prova que pool ausente nao derruba o teste/processo chamador.
 2. `Browser.execute/2` retorna erro descritivo.
 3. `mix test test/pincer/tools/browser_test.exs` passa.
+
+---
+
+## Incremento 2026-03-13 (Tool-Only Outcome nao Pode Fingir Sucesso)
+
+### Objetivo
+- Separar classificacao de outcome de turno da formatacao textual de `tool-only`.
+- Impedir que um turno sem resposta final do assistente seja apresentado como "✅ Concluido".
+
+### Interfaces/Public API
+- `Pincer.Core.TurnOutcomePolicy.resolve/1`
+- `Pincer.Core.ToolOnlyOutcomeFormatter.format/1`
+
+### Regras
+- `TurnOutcomePolicy` deve classificar `tool-only` sem construir o texto final inline.
+- A formatacao de `tool-only` deve deixar claro que houve resposta parcial/incompleta, nao sucesso conclusivo.
+- Se houver erros de ferramentas no material resumido, a mensagem deve assumir limitacao/falha parcial explicitamente.
+- O resumo ainda pode reaproveitar previews curtos dos resultados de tools para diagnostico rapido.
+
+### Criterios de aceite
+1. Teste prova que `TurnOutcomePolicy` retorna um outcome estruturado para `tool-only`, sem string pronta.
+2. Teste prova que `ToolOnlyOutcomeFormatter` nao usa "✅ Concluido" e menciona resposta parcial/incompleta.
+3. Teste de executor/regressao cobre o caso pos-tool sem resposta final detalhada.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.
