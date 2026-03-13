@@ -13,8 +13,11 @@ defmodule Pincer.Utils.LoggerFormatter do
     reset = "\e[0m"
     gray = "\e[90m"
 
+    # Normalize message to string and trim trailing newlines to avoid double spacing
+    msg_str = message |> IO.iodata_to_binary() |> String.trim_trailing()
+
     # Example Output: 22:15:01 [INFO] [session:123] Hello world
-    "#{gray}#{time}#{reset} #{level_tag} #{meta}#{message}\n"
+    "#{gray}#{time}#{reset} #{level_tag} #{meta}#{msg_str}"
   end
 
   defp format_level(level) do
