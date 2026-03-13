@@ -365,7 +365,8 @@ defmodule Pincer.Core.Executor do
     case chunk do
       %{"choices" => [%{"delta" => delta}]} ->
         tool_deltas = delta["tool_calls"]
-        content = delta["content"] || ""
+        # Some providers use "reasoning" or "reasoning_content" for CoT
+        content = delta["content"] || delta["reasoning"] || delta["reasoning_content"] || ""
 
         {new_text, new_buffer, new_filtering} =
           if is_binary(content) and content != "" do
@@ -398,6 +399,7 @@ defmodule Pincer.Core.Executor do
       "<tool_call",
       "<think",
       "<thought",
+      "<thinking",
       "<antthinking",
       "<relevant-memories",
       "<relevant_memories",
@@ -417,8 +419,9 @@ defmodule Pincer.Core.Executor do
 
       # 2. Stop filtering if we see the end of a tag or a closing tag
       filtering? and (String.contains?(new_buffer, ">") or String.contains?(new_buffer, "</")) ->
-        # Stop filtering when tag seems complete, but keep buffering for next tags
-        {acc_text <> token, new_buffer, false}
+        # Stop filtering when tag seems complete.
+        # CRITICAL: Clear the buffer so the tag doesn't trigger case 1 again on the next token!
+        {acc_text <> token, "", false}
 
       # 3. Currently filtering: keep buffering, send nothing to user
       filtering? ->
@@ -512,7 +515,14 @@ defmodule Pincer.Core.Executor do
         # Synthesize a fallback if LLM is too laconic after tool usage
         final_content =
           if (is_nil(content) or String.trim(content) == "") and depth > 0 do
-            "✅ Concluído."
+            # Try to infer what was done from the last tool result in history
+            last_tool_msg = Enum.find(Enum.reverse(logical_history), &(&1["role"] == "tool"))
+
+            if last_tool_msg do
+              "✅ Tarefa `#{last_tool_msg["name"]}` concluída com sucesso."
+            else
+              "✅ Concluído."
+            end
           else
             content
           end
@@ -831,6 +841,9 @@ defmodule Pincer.Core.Executor do
           end
       end
 
+    # DEBUG: Log exact tool output
+    Logger.debug("[EXECUTOR] TOOL RESULT (#{name}): #{inspect(content)}")
+
     %{"role" => "tool", "tool_call_id" => call_id, "name" => name, "content" => content}
   end
 
@@ -1043,7 +1056,10 @@ defmodule Pincer.Core.Executor do
 
   defp clean_tool_map(tool) when is_map(tool) do
     tool
-    |> Enum.reject(fn {k, _v} -> is_binary(k) and String.starts_with?(k, "_") end)
+    |> Enum.reject(fn {k, _v} ->
+      k_str = to_string(k)
+      String.starts_with?(k_str, "_")
+    end)
     |> Enum.map(fn {k, v} -> {k, clean_tool_value(v)} end)
     |> Map.new()
   end
