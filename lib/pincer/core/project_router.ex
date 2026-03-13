@@ -167,8 +167,27 @@ defmodule Pincer.Core.ProjectRouter do
   defp format_status(session_id) do
     case Pincer.Core.Session.Server.get_status(session_id) do
       {:ok, state} ->
-        provider = if state.model_override, do: state.model_override.provider, else: "Default"
-        model = if state.model_override, do: state.model_override.model, else: "Default"
+        # Resolve active model/provider
+        {active_provider, active_model} =
+          if state.model_override do
+            {state.model_override.provider, state.model_override.model}
+          else
+            llm_config = Application.get_env(:pincer, :llm, %{})
+
+            provider =
+              llm_config["provider"] ||
+                Application.get_env(:pincer, :default_llm_provider, "openrouter")
+
+            # Get default model for this provider from registry/config
+            model =
+              case llm_config[provider] do
+                %{"default_model" => m} -> m
+                _ -> "default"
+              end
+
+            {provider, model}
+          end
+
         status = if state.status == :working, do: "working", else: "idle"
 
         in_t = Map.get(state.token_usage_total || %{}, "prompt_tokens", 0)
@@ -180,7 +199,7 @@ defmodule Pincer.Core.ProjectRouter do
         {:ok,
          """
          Session: #{session_id}
-         Model: #{provider}/#{model}
+         Model: #{active_provider}/#{active_model}
          Tokens this session: #{in_t} in · #{out_t} out
          Thinking: #{thinking} | Reasoning: #{reasoning}
          Status: #{status}
