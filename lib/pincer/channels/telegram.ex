@@ -75,6 +75,7 @@ defmodule Pincer.Channels.Telegram do
   require Logger
   alias Pincer.Core.UX
   alias Pincer.Core.UX.MenuPolicy
+  alias Pincer.Utils.Text
 
   @doc """
   Starts the Telegram channel supervisor.
@@ -147,9 +148,9 @@ defmodule Pincer.Channels.Telegram do
   def send_message(chat_id, text, opts \\ []) do
     html_text =
       if Keyword.get(opts, :skip_reasoning_strip, false) do
-        text |> format_reasoning() |> markdown_to_html()
+        text |> Text.format_reasoning_html() |> markdown_to_html()
       else
-        text |> strip_reasoning() |> markdown_to_html()
+        text |> Text.strip_reasoning() |> markdown_to_html()
       end
 
     do_send_message(chat_id, html_text, Keyword.put(opts, :parse_mode, "HTML"))
@@ -162,9 +163,9 @@ defmodule Pincer.Channels.Telegram do
   def update_message(chat_id, message_id, text, opts \\ []) do
     html_text =
       if Keyword.get(opts, :skip_reasoning_strip, false) do
-        text |> format_reasoning() |> markdown_to_html()
+        text |> Text.format_reasoning_html() |> markdown_to_html()
       else
-        text |> strip_reasoning() |> markdown_to_html()
+        text |> Text.strip_reasoning() |> markdown_to_html()
       end
 
     case Pincer.Channels.Telegram.api_client().edit_message_text(chat_id, message_id, html_text,
@@ -233,55 +234,6 @@ defmodule Pincer.Channels.Telegram do
       {:error, reason} ->
         {:error, reason}
     end
-  end
-
-  # Removes thinking blocks common in reasoning models (DeepSeek, Gemini, etc.)
-  defp strip_reasoning(text) when is_binary(text) do
-    text
-    |> String.replace(~r/<thought>.*?<\/thought>/is, "")
-    |> String.replace(~r/<thinking>.*?<\/thinking>/is, "")
-    |> String.replace(~r/^.*?think>\s*/is, "")
-    |> String.trim()
-  end
-
-  defp strip_reasoning(other), do: other
-
-  # Wraps reasoning blocks in a preformatted block for stable monospace rendering
-  defp format_reasoning(text) when is_binary(text) do
-    text
-    |> then(fn current ->
-      Regex.replace(~r/<thought>(.*?)<\/thought>/is, current, &reasoning_block/1, global: true)
-    end)
-    |> then(fn current ->
-      Regex.replace(~r/<thinking>(.*?)<\/thinking>/is, current, &reasoning_block/1, global: true)
-    end)
-    # Handle cases where LLM doesn't close the tag or starts with it
-    |> then(fn current ->
-      Regex.replace(~r/^.*?think>\s*(.*?)$/is, current, &reasoning_block/1)
-    end)
-  end
-
-  defp format_reasoning(other), do: other
-
-  defp reasoning_block([_full, body]), do: reasoning_block(body)
-
-  defp reasoning_block(body) when is_binary(body) do
-    escaped =
-      body
-      |> to_string()
-      |> String.replace(~r/^<(thinking|thought)>/i, "")
-      |> String.replace(~r/<\/(thinking|thought)>$/i, "")
-      |> String.trim()
-      |> html_escape()
-
-    "<b>💭 Reasoning</b>\n<pre>#{escaped}</pre>"
-  end
-
-  defp html_escape(text) do
-    text
-    |> String.replace("&", "&amp;")
-    |> String.replace("<", "&lt;")
-    |> String.replace(">", "&gt;")
   end
 
   @doc """
