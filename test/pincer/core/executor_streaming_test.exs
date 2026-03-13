@@ -54,6 +54,34 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     def provider_config(_provider_id), do: nil
   end
 
+  defmodule EmptyFinalButStreamedLLM do
+    @behaviour Pincer.Ports.LLM
+
+    @impl true
+    def chat_completion(_messages, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def stream_completion(_messages, _opts) do
+      {:ok,
+       [
+         %{"choices" => [%{"delta" => %{"content" => "Texto em stream"}}]},
+         %{"choices" => [%{"delta" => %{}}]}
+       ]}
+    end
+
+    @impl true
+    def list_providers, do: []
+
+    @impl true
+    def list_models(_provider_id), do: []
+
+    @impl true
+    def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def provider_config(_provider_id), do: nil
+  end
+
   defmodule ToolRegistryStub do
     @behaviour Pincer.Ports.ToolRegistry
 
@@ -213,6 +241,17 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     assert_receive {:executor_finished, _history, response, _usage}, 2000
     assert response =~ "Ferramentas utilizadas: my_tool"
     assert response =~ "Tool Result"
+  end
+
+  test "executor reuses streamed visible text when final payload is empty" do
+    history = [%{"role" => "user", "content" => "Oi"}]
+
+    Executor.run(self(), "test_empty_final_but_streamed_session", history,
+      llm_client: EmptyFinalButStreamedLLM
+    )
+
+    assert_receive {:agent_stream_token, "Texto em stream"}, 2_000
+    assert_receive {:executor_finished, _history, "Texto em stream", _usage}, 2_000
   end
 
   test "executor keeps roughly 45 percent of provider context for recent history" do
