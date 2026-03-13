@@ -55,50 +55,76 @@ defmodule Pincer.Adapters.Tools.Web do
 
   @impl true
   def spec do
-    %{
-      name: "web",
-      description: "Web tools for search and content extraction.",
-      parameters: %{
-        type: "object",
-        properties: %{
-          action: %{
-            type: "string",
-            enum: ["search", "fetch"],
-            description: "Action to perform: 'search' to search on Brave, 'fetch' to read a URL."
+    [
+      %{
+        name: "web_search",
+        description: "Search the web using Brave Search and return short textual results.",
+        parameters: %{
+          type: "object",
+          properties: %{
+            query: %{
+              type: "string",
+              description: "Search term."
+            },
+            count: %{
+              type: "integer",
+              description: "Number of results for search (1-10).",
+              default: 5
+            }
           },
-          query: %{
-            type: "string",
-            description: "Search term (required for action='search')."
+          required: ["query"]
+        }
+      },
+      %{
+        name: "web_fetch",
+        description: "Download a URL and extract readable text content.",
+        parameters: %{
+          type: "object",
+          properties: %{
+            url: %{
+              type: "string",
+              description: "URL to download."
+            }
           },
-          url: %{
-            type: "string",
-            description: "URL to download (required for action='fetch')."
-          },
-          count: %{
-            type: "integer",
-            description: "Number of results for search (1-10).",
-            default: 5
-          }
-        },
-        required: ["action"]
+          required: ["url"]
+        }
       }
-    }
+    ]
   end
 
   @impl true
-  def execute(%{"action" => "search", "query" => query} = args) do
+  def execute(args) when is_map(args) do
+    case Map.get(args, "tool_name") do
+      "web_search" ->
+        execute_search(args)
+
+      "web_fetch" ->
+        execute_fetch(args)
+
+      _ ->
+        execute_legacy(args)
+    end
+  end
+
+  defp execute_legacy(%{"action" => "search"} = args), do: execute_search(args)
+  defp execute_legacy(%{"action" => "fetch"} = args), do: execute_fetch(args)
+  defp execute_legacy(_args), do: {:error, "Invalid arguments for web tool."}
+
+  defp execute_search(%{"query" => query} = args) do
     count = Map.get(args, "count", 5)
     do_search(query, count)
   end
 
-  def execute(%{"action" => "fetch", "url" => url}) do
+  defp execute_search(_args), do: {:error, "Missing required parameter: query"}
+
+  defp execute_fetch(%{"url" => url}) do
     case validate_url(url) do
       {:ok, validated_url} -> do_fetch(validated_url, @max_redirects)
       {:error, reason} -> {:error, reason}
     end
   end
 
-  def execute(_), do: {:error, "Invalid arguments for web tool."}
+  defp execute_fetch(_args), do: {:error, "Missing required parameter: url"}
 
   defp validate_url(url) do
     case URI.parse(url) do
