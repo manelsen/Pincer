@@ -9,6 +9,7 @@ defmodule Pincer.Core.Executor do
 
   require Logger
   alias Pincer.Core.AgentPaths
+  alias Pincer.Core.ContextOverflowRecovery
   alias Pincer.Core.MemoryRecall
   alias Pincer.Utils.Text
 
@@ -176,7 +177,7 @@ defmodule Pincer.Core.Executor do
     end
   end
 
-  defp prepare_prompt_history(history, model_override) do
+  defp prepare_prompt_history(history, model_override, opts \\ []) do
     long_term_memory = Process.get(:long_term_memory, "")
     current_time = DateTime.utc_now() |> DateTime.to_string()
 
@@ -188,10 +189,13 @@ defmodule Pincer.Core.Executor do
         _ -> 8_000
       end
 
+    safe_limit_scale = Keyword.get(opts, :safe_limit_scale, 1.0)
+    adjusted_limit = max(1000, trunc(sweet_spot_limit * safe_limit_scale))
+
     context_strategy = Keyword.get(Process.get(:executor_run_opts, []), :context_strategy)
 
     # 1. Prune only once
-    pruned_history = prune_history(history, sweet_spot_limit, context_strategy: context_strategy)
+    pruned_history = prune_history(history, adjusted_limit, context_strategy: context_strategy)
 
     # 2. Augment with dynamic context (Memory, Time, Recall)
     augmented_history = augment_history(pruned_history, long_term_memory, current_time)
@@ -303,18 +307,17 @@ defmodule Pincer.Core.Executor do
        ) do
     Logger.warning("[EXECUTOR] Falling back to chat completion. Reason: #{inspect(reason)}")
 
-    chat_opts =
-      if tool_calling_unsupported?(reason) do
-        Logger.warning(
-          "[EXECUTOR] Provider/model does not support tool calling. Retrying fallback chat completion without tools."
-        )
+    {fallback_history, chat_opts} =
+      build_fallback_request(
+        reason,
+        logical_history,
+        prompt_history,
+        model_override,
+        client_opts,
+        tools_spec
+      )
 
-        client_opts
-      else
-        [tools: tools_spec] ++ client_opts
-      end
-
-    case deps.llm_client.chat_completion(prompt_history, chat_opts) do
+    case deps.llm_client.chat_completion(fallback_history, chat_opts) do
       {:ok, assistant_msg, usage} ->
         finalize_assistant_message(
           assistant_msg,
@@ -332,6 +335,47 @@ defmodule Pincer.Core.Executor do
         Logger.error("[EXECUTOR] Fallback chat completion failed: #{inspect(reason)}")
         send(session_pid, {:executor_failed, reason})
         {:error, reason}
+    end
+  end
+
+  defp build_fallback_request(
+         reason,
+         logical_history,
+         prompt_history,
+         model_override,
+         client_opts,
+         tools_spec
+       ) do
+    case ContextOverflowRecovery.plan(reason, tools_present?: tools_spec != []) do
+      {:retry, %{safe_limit_scale: safe_limit_scale, drop_tools?: drop_tools?}} ->
+        Logger.warning(
+          "[EXECUTOR] Context overflow detected. Rebuilding fallback prompt with scale=#{safe_limit_scale} and drop_tools?=#{drop_tools?}."
+        )
+
+        fallback_history =
+          prepare_prompt_history(logical_history, model_override,
+            safe_limit_scale: safe_limit_scale
+          )
+
+        fallback_opts =
+          if drop_tools? do
+            client_opts
+          else
+            [tools: tools_spec] ++ client_opts
+          end
+
+        {fallback_history, fallback_opts}
+
+      :noop ->
+        if tool_calling_unsupported?(reason) do
+          Logger.warning(
+            "[EXECUTOR] Provider/model does not support tool calling. Retrying fallback chat completion without tools."
+          )
+
+          {prompt_history, client_opts}
+        else
+          {prompt_history, [tools: tools_spec] ++ client_opts}
+        end
     end
   end
 
