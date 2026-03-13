@@ -184,7 +184,7 @@ defmodule Pincer.Core.Executor do
 
     sweet_spot_limit =
       case Pincer.Ports.LLM.provider_config(active_provider) do
-        %{context_window: cw} when is_integer(cw) -> max(1000, trunc(cw * 0.25))
+        %{context_window: cw} when is_integer(cw) -> max(1000, trunc(cw * 0.45))
         _ -> 8_000
       end
 
@@ -303,7 +303,18 @@ defmodule Pincer.Core.Executor do
        ) do
     Logger.warning("[EXECUTOR] Falling back to chat completion. Reason: #{inspect(reason)}")
 
-    case deps.llm_client.chat_completion(prompt_history, [tools: tools_spec] ++ client_opts) do
+    chat_opts =
+      if tool_calling_unsupported?(reason) do
+        Logger.warning(
+          "[EXECUTOR] Provider/model does not support tool calling. Retrying fallback chat completion without tools."
+        )
+
+        client_opts
+      else
+        [tools: tools_spec] ++ client_opts
+      end
+
+    case deps.llm_client.chat_completion(prompt_history, chat_opts) do
       {:ok, assistant_msg, usage} ->
         finalize_assistant_message(
           assistant_msg,
@@ -324,6 +335,62 @@ defmodule Pincer.Core.Executor do
     end
   end
 
+  defp tool_calling_unsupported?({:http_error, _status, msg}) when is_binary(msg) do
+    down = String.downcase(msg)
+
+    String.contains?(down, "tool calling") and
+      (String.contains?(down, "not supported") or String.contains?(down, "unsupported"))
+  end
+
+  defp tool_calling_unsupported?({:http_error, _status, body, _meta}),
+    do: tool_calling_unsupported?({:http_error, nil, body})
+
+  defp tool_calling_unsupported?(_reason), do: false
+
+  defp merge_reasoning_and_content("", ""), do: ""
+
+  defp merge_reasoning_and_content(content, "") when is_binary(content), do: content
+
+  defp merge_reasoning_and_content(content, reasoning)
+       when is_binary(content) and is_binary(reasoning) do
+    trimmed_reasoning = String.trim(reasoning)
+    trimmed_content = String.trim(content)
+
+    cond do
+      trimmed_reasoning == "" ->
+        content
+
+      trimmed_content != "" ->
+        content
+
+      true ->
+        ""
+    end
+  end
+
+  defp reasoning_only_message?(text) when is_binary(text) do
+    trimmed = String.trim(text)
+    Regex.match?(~r/\A<(thinking|thought)\b[^>]*>[\s\S]*?<\/(thinking|thought)>\z/i, trimmed)
+  end
+
+  defp reasoning_only_message?(_text), do: false
+
+  defp strip_reasoning_blocks(text) when is_binary(text) do
+    text
+    |> String.replace(~r/<(?:thinking|thought)\b[^>]*>[\s\S]*?<\/(?:thinking|thought)>/i, "")
+    |> String.trim()
+  end
+
+  defp strip_reasoning_blocks(text), do: text
+
+  defp post_tool_grounding_message do
+    %{
+      "role" => "system",
+      "content" =>
+        "Ground yourself strictly in the tool outputs above. Do not invent files, results, success, or side effects. If a tool failed, found nothing, or returned limited data, say that plainly."
+    }
+  end
+
   defp handle_stream(
          stream,
          logical_history,
@@ -334,18 +401,28 @@ defmodule Pincer.Core.Executor do
          model_override,
          deps
        ) do
-    # State: {full_content, tool_calls_map, stream_buffer, is_filtering?}
-    {full_content, full_tool_calls, _, _} =
-      Enum.reduce(stream, {"", %{}, "", false}, fn chunk,
-                                                   {acc_text, acc_tools, buffer, filtering?} ->
-        process_chunk(chunk, acc_text, acc_tools, buffer, filtering?, session_pid)
+    # State: {full_content, full_reasoning, tool_calls_map, stream_buffer, is_filtering?}
+    {full_content, full_reasoning, full_tool_calls, _, _} =
+      Enum.reduce(stream, {"", "", %{}, "", false}, fn chunk,
+                                                       {acc_text, acc_reasoning, acc_tools,
+                                                        buffer, filtering?} ->
+        process_chunk(
+          chunk,
+          acc_text,
+          acc_reasoning,
+          acc_tools,
+          buffer,
+          filtering?,
+          session_pid
+        )
       end)
 
     tool_calls_list = format_tool_calls(full_tool_calls)
+    content = merge_reasoning_and_content(full_content, full_reasoning)
 
     assistant_msg = %{
       "role" => "assistant",
-      "content" => if(full_content == "", do: nil, else: full_content),
+      "content" => if(content == "", do: nil, else: content),
       "tool_calls" => tool_calls_list
     }
 
@@ -362,18 +439,25 @@ defmodule Pincer.Core.Executor do
     )
   end
 
-  defp process_chunk(chunk, acc_text, acc_tools, buffer, filtering?, session_pid) do
+  defp process_chunk(chunk, acc_text, acc_reasoning, acc_tools, buffer, filtering?, session_pid) do
     case chunk do
       %{"choices" => [%{"delta" => delta}]} ->
         tool_deltas = delta["tool_calls"]
-        # Some providers use "reasoning" or "reasoning_content" for CoT
-        content = delta["content"] || delta["reasoning"] || delta["reasoning_content"] || ""
+        content = delta["content"] || ""
+        reasoning = delta["reasoning"] || delta["reasoning_content"] || ""
 
         {new_text, new_buffer, new_filtering} =
           if is_binary(content) and content != "" do
             handle_content_token(content, acc_text, buffer, filtering?, session_pid)
           else
             {acc_text, buffer, filtering?}
+          end
+
+        new_reasoning =
+          if is_binary(reasoning) and reasoning != "" do
+            acc_reasoning <> reasoning
+          else
+            acc_reasoning
           end
 
         new_tools =
@@ -383,10 +467,10 @@ defmodule Pincer.Core.Executor do
             acc_tools
           end
 
-        {new_text, new_tools, new_buffer, new_filtering}
+        {new_text, new_reasoning, new_tools, new_buffer, new_filtering}
 
       _ ->
-        {acc_text, acc_tools, buffer, filtering?}
+        {acc_text, acc_reasoning, acc_tools, buffer, filtering?}
     end
   end
 
@@ -458,7 +542,14 @@ defmodule Pincer.Core.Executor do
       Logger.debug("[EXECUTOR] EXTRACTED XML TOOL CALLS: #{inspect(xml_calls)}")
     end
 
-    final_content = Text.strip_internal_scaffolding(clean_content)
+    final_content =
+      if reasoning_only_message?(clean_content) do
+        nil
+      else
+        clean_content
+        |> strip_reasoning_blocks()
+        |> Text.strip_internal_scaffolding()
+      end
 
     # Reconstruct message with cleaned content and merged tool calls
     existing_calls = assistant_msg["tool_calls"] || []
@@ -471,7 +562,7 @@ defmodule Pincer.Core.Executor do
 
     assistant_msg =
       assistant_msg
-      |> Map.put("content", if(final_content == "", do: nil, else: final_content))
+      |> Map.put("content", if(final_content in ["", nil], do: nil, else: final_content))
       |> Map.put("tool_calls", if(all_calls == [], do: nil, else: all_calls))
 
     case assistant_msg do
@@ -496,7 +587,9 @@ defmodule Pincer.Core.Executor do
 
         # Update both histories for the next turn
         new_logical_history = logical_history ++ [assistant_msg] ++ tool_results
-        new_prompt_history = prompt_history ++ [assistant_msg] ++ tool_results
+
+        new_prompt_history =
+          prompt_history ++ [assistant_msg] ++ tool_results ++ [post_tool_grounding_message()]
 
         run_loop_recursive(
           new_logical_history,
