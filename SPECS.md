@@ -307,6 +307,27 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Teste prova a resolucao pura dos quatro casos: final, streamed fallback, tool-only e vazio.
 2. `Executor` passa a usar essa politica em vez de sintetizar inline.
 3. Testes relevantes do executor continuam verdes.
+
+---
+
+## Incremento 2026-03-13 (Browser Pool Ausente nao Pode Derrubar o Turno)
+
+### Objetivo
+- Impedir que o tool `browser` propague `exit` quando o pool/processo nao estiver iniciado.
+- Garantir que falha de infraestrutura do browser vire erro normal de tool.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.Browser.execute/2`
+
+### Regras
+- Se o pool do browser estiver ausente ou morrer, `Browser.execute/2` deve retornar `{:error, ...}`.
+- Nao pode escapar `exit(:noproc)` para o `Executor`.
+- A mensagem de erro deve ser acionavel o suficiente para diagnostico operacional.
+
+### Criterios de aceite
+1. Teste prova que pool ausente nao derruba o teste/processo chamador.
+2. `Browser.execute/2` retorna erro descritivo.
+3. `mix test test/pincer/tools/browser_test.exs` passa.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.

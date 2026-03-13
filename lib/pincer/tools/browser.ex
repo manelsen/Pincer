@@ -105,7 +105,16 @@ defmodule Pincer.Adapters.Tools.Browser do
   def execute(%{"action" => action} = args, context \\ %{}) do
     session_id = Map.get(args, "session_id") || Map.get(context, "session_id") || "default"
     pool = Application.get_env(:pincer, :browser_pool, Pincer.Adapters.Browser.Pool)
-    run_action(action, session_id, args, pool)
+
+    try do
+      run_action(action, session_id, args, pool)
+    catch
+      :exit, {:noproc, _} ->
+        {:error, "browser pool unavailable: process not started"}
+
+      :exit, reason ->
+        {:error, "browser pool unavailable: #{Exception.format_exit(reason)}"}
+    end
   end
 
   # ---------------------------------------------------------------------------
