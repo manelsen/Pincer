@@ -148,16 +148,20 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
     end
   end
 
-  defp resolve_destination(_args, %{"session_id" => session_id}) when is_binary(session_id) do
-    with {:ok, state} <- session_server().get_status(session_id),
-         {:ok, destination} <- destination_from_session_state(state, session_id) do
-      {:ok, destination}
+  defp resolve_destination(_args, context) do
+    session_id = Map.get(context, "session_id") || Map.get(context, :session_id)
+
+    if is_binary(session_id) do
+      with {:ok, state} <- session_server().get_status(session_id),
+           {:ok, destination} <- destination_from_session_state(state, session_id) do
+        {:ok, destination}
+      else
+        _ -> {:error, "Could not resolve destination from current session context."}
+      end
     else
-      _ -> {:error, "Could not resolve destination from current session context."}
+      {:error, "Could not resolve destination."}
     end
   end
-
-  defp resolve_destination(_args, _context), do: {:error, "Could not resolve destination."}
 
   defp destination_from_session_state(%{principal_ref: principal_ref}, _session_id)
        when is_binary(principal_ref) do
