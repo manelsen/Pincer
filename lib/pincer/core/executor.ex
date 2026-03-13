@@ -11,6 +11,7 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.ContextOverflowRecovery
   alias Pincer.Core.MemoryRecall
+  alias Pincer.Core.TurnOutcomePolicy
   alias Pincer.Utils.Text
 
   @max_recursion_depth 25
@@ -461,7 +462,11 @@ defmodule Pincer.Core.Executor do
     assistant_msg = %{
       "role" => "assistant",
       "content" => if(content == "", do: nil, else: content),
-      "tool_calls" => tool_calls_list
+      "tool_calls" => tool_calls_list,
+      "streamed_text" =>
+        content
+        |> Text.strip_reasoning()
+        |> Text.strip_internal_scaffolding()
     }
 
     finalize_assistant_message(
@@ -644,69 +649,26 @@ defmodule Pincer.Core.Executor do
           "[EXECUTOR] LLM stream finished. Text length: #{String.length(content || "")}"
         )
 
-        # Synthesize a fallback if LLM is too laconic after tool usage
-        final_content =
-          if (is_nil(content) or String.trim(content) == "") and depth > 0 do
-            # Try to infer what was done from the last tool result in history
-            tool_messages = Enum.filter(Enum.reverse(logical_history), &(&1["role"] == "tool"))
+        tool_messages = Enum.filter(Enum.reverse(logical_history), &(&1["role"] == "tool"))
 
-            if tool_messages != [] do
-              # Build a summary of what was done
-              tool_summary =
-                tool_messages
-                |> Enum.take(5)
-                |> Enum.map(fn msg ->
-                  tool_name = msg["name"] || "tool"
+        case TurnOutcomePolicy.resolve(%{
+               final_text: content,
+               streamed_text: assistant_msg["streamed_text"],
+               tool_messages: if(depth > 0, do: tool_messages, else: []),
+               tool_call_count: 0
+             }) do
+          {:final_text, final_content} ->
+            assistant_msg = Map.put(assistant_msg, "content", final_content)
 
-                  result_preview =
-                    case msg["content"] do
-                      nil ->
-                        ""
+            # IMPORTANT: Return clean logical history to session
+            {:ok, logical_history ++ [assistant_msg], final_content, usage}
 
-                      content when is_binary(content) ->
-                        content
-                        |> String.split("\n")
-                        |> Enum.take(3)
-                        |> Enum.join(" ")
-                        |> String.slice(0, 100)
+          {:tool_summary, final_content} ->
+            assistant_msg = Map.put(assistant_msg, "content", final_content)
+            {:ok, logical_history ++ [assistant_msg], final_content, usage}
 
-                      _ ->
-                        ""
-                    end
-
-                  "- #{tool_name}: #{result_preview}"
-                end)
-                |> Enum.join("\n")
-
-              used_tools =
-                tool_messages
-                |> Enum.map(&(&1["name"] || "tool"))
-                |> Enum.uniq()
-                |> Enum.join(", ")
-
-              """
-              ✅ Concluído. Ferramentas utilizadas: #{used_tools}
-
-              Resumo das ações:
-              #{tool_summary}
-
-              (O assistente não forneceu uma resposta detalhada. Use /verbose on para mais informações.)
-              """
-              |> String.trim()
-            else
-              nil
-            end
-          else
-            content
-          end
-
-        if is_nil(final_content) or String.trim(final_content) == "" do
-          {:error, :empty_response}
-        else
-          assistant_msg = Map.put(assistant_msg, "content", final_content)
-
-          # IMPORTANT: Return clean logical history to session
-          {:ok, logical_history ++ [assistant_msg], final_content, usage}
+          {:error, reason} ->
+            {:error, reason}
         end
 
       _ ->

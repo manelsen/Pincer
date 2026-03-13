@@ -285,6 +285,28 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Teste prova que stream encerrado sem texto final vira `{:executor_failed, :empty_response}`.
 2. Nao ha `executor_finished` nesse caso.
 3. `mix test` dos arquivos alterados passa.
+
+---
+
+## Incremento 2026-03-13 (Turn Outcome Policy)
+
+### Objetivo
+- Centralizar a decisao de texto final visivel do turno em politica pura.
+- Separar `final_text`, `tool-only summary` e `empty_response` do fluxo imperativo do `Executor`.
+
+### Interfaces/Public API
+- `Pincer.Core.TurnOutcomePolicy.resolve/1`
+
+### Regras
+- Se existir texto final explicito, ele vence.
+- Se o final vier vazio mas houver texto visivel ja observado no stream, esse texto deve ser reutilizado.
+- Se nao houver texto visivel, mas houver resultados de tools no turno, a politica pode devolver um resumo `tool-only`.
+- Se nao houver nada user-visible, o resultado deve ser `{:error, :empty_response}`.
+
+### Criterios de aceite
+1. Teste prova a resolucao pura dos quatro casos: final, streamed fallback, tool-only e vazio.
+2. `Executor` passa a usar essa politica em vez de sintetizar inline.
+3. Testes relevantes do executor continuam verdes.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.
