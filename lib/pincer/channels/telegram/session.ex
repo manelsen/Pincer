@@ -151,12 +151,18 @@ defmodule Pincer.Channels.Telegram.Session do
         :exit, _reason -> "off"
       end
 
-    text_with_usage = text <> format_usage_line(usage, display)
+    safe_text = text || ""
+    usage_line = format_usage_line(usage, display)
+    text_with_usage = safe_text <> usage_line
 
-    {stream_state, action} = StreamingPolicy.on_final(streaming_state(state), text_with_usage)
-    deliver_final(state.chat_id, state.session_id, action)
-    maybe_advance_project_flow(state)
-    {:noreply, state |> Map.put(:preview_suppressed, false) |> put_streaming_state(stream_state)}
+    if text_with_usage != "" do
+      {stream_state, action} = StreamingPolicy.on_final(streaming_state(state), text_with_usage)
+      deliver_final(state.chat_id, state.session_id, action)
+      maybe_advance_project_flow(state)
+      {:noreply, state |> Map.put(:preview_suppressed, false) |> put_streaming_state(stream_state)}
+    else
+      {:noreply, state}
+    end
   end
 
   @impl true
