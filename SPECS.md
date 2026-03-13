@@ -351,6 +351,30 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Teste prova que `TurnOutcomePolicy` retorna um outcome estruturado para `tool-only`, sem string pronta.
 2. Teste prova que `ToolOnlyOutcomeFormatter` nao usa "✅ Concluido" e menciona resposta parcial/incompleta.
 3. Teste de executor/regressao cobre o caso pos-tool sem resposta final detalhada.
+
+---
+
+## Incremento 2026-03-13 (Split Web em `web_search` e `web_fetch`)
+
+### Objetivo
+- Separar a interface do tool web leve em duas capacidades explicitas.
+- Reduzir a chance do modelo escolher `browser` para tarefas que pedem apenas busca ou fetch textual.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.Web.spec/0`
+- `Pincer.Adapters.Tools.Web.execute/1`
+
+### Regras
+- O registry deve expor dois tools distintos: `web_search` e `web_fetch`.
+- `web_search` aceita `query` e `count`, sem `action`.
+- `web_fetch` aceita `url`, sem `action`.
+- A logica de SSRF/redirect/extração textual continua valendo para `web_fetch`.
+- Compatibilidade temporaria com a interface antiga `web` pode existir internamente, mas o nome legado nao deve mais ser exposto no registry nativo.
+
+### Criterios de aceite
+1. Teste prova que `NativeToolRegistry.list_tools/0` expõe `web_search` e `web_fetch`, e nao `web`.
+2. Teste prova que o executor aceita deltas com `tool_call.name == "web_search"`.
+3. Teste prova que `Web.execute/1` despacha corretamente por `tool_name` para `web_search` e `web_fetch`.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.
