@@ -7,6 +7,7 @@ defmodule Pincer.Channels.Telegram.Session do
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.SubAgentProgress
   alias Pincer.Core.StatusMessagePolicy
+  alias Pincer.Core.StreamDelivery
   alias Pincer.Core.StreamingPolicy
   alias Pincer.Core.Session.Server
 
@@ -107,34 +108,14 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def handle_info({:agent_partial, token}, state) do
-    now = System.system_time(:millisecond)
-
-    {stream_state, action} =
-      StreamingPolicy.on_partial(StreamingPolicy.extract(state), token, now,
-        suppress_preview?: &suppress_preview?/2
-      )
-
-    state =
-      case action do
-        {:render_preview, preview_text} ->
-          message_id =
-            render_preview(
-              state.chat_id,
-              state.session_id,
-              stream_state.message_id,
-              preview_text
-            )
-
-          StreamingPolicy.assign(
-            state,
-            StreamingPolicy.mark_rendered(stream_state, message_id, now)
-          )
-
-        :noop ->
-          StreamingPolicy.assign(state, stream_state)
-      end
-
-    {:noreply, state}
+    {:noreply,
+     StreamDelivery.handle_partial(
+       state,
+       token,
+       System.system_time(:millisecond),
+       stream_transport(state),
+       suppress_preview?: &suppress_preview?/2
+     )}
   end
 
   @impl true
@@ -154,12 +135,9 @@ defmodule Pincer.Channels.Telegram.Session do
     text_with_usage = safe_text <> usage_line
 
     if text_with_usage != "" do
-      {stream_state, action} =
-        StreamingPolicy.on_final(StreamingPolicy.extract(state), text_with_usage)
-
-      deliver_final(state.chat_id, state.session_id, action)
+      state = StreamDelivery.handle_final(state, text_with_usage, stream_transport(state))
       maybe_advance_project_flow(state)
-      {:noreply, StreamingPolicy.assign(state, stream_state)}
+      {:noreply, state}
     else
       {:noreply, state}
     end
@@ -230,54 +208,17 @@ defmodule Pincer.Channels.Telegram.Session do
     _ -> []
   end
 
-  defp render_preview(chat_id, session_id, nil, text) do
-    case Pincer.Channels.Telegram.send_message(chat_id, text, send_opts_for_session(session_id)) do
-      {:ok, mid} -> mid
-      _ -> nil
-    end
-  end
+  defp stream_transport(state) do
+    opts = send_opts_for_session(state.session_id)
 
-  defp render_preview(chat_id, session_id, message_id, text) do
-    case Pincer.Channels.Telegram.update_message(
-           chat_id,
-           message_id,
-           text,
-           send_opts_for_session(session_id)
-         ) do
-      :ok ->
-        message_id
-
-      {:error, _reason} ->
-        case Pincer.Channels.Telegram.send_message(
-               chat_id,
-               text,
-               send_opts_for_session(session_id)
-             ) do
-          {:ok, new_message_id} -> new_message_id
-          _ -> nil
-        end
-    end
-  end
-
-  defp deliver_final(_chat_id, _session_id, :noop), do: :ok
-
-  defp deliver_final(chat_id, session_id, {:send_final, text}) do
-    Pincer.Channels.Telegram.send_message(chat_id, text, send_opts_for_session(session_id))
-  end
-
-  defp deliver_final(chat_id, session_id, {:edit_final, message_id, text}) do
-    case Pincer.Channels.Telegram.update_message(
-           chat_id,
-           message_id,
-           text,
-           send_opts_for_session(session_id)
-         ) do
-      :ok ->
-        :ok
-
-      {:error, _reason} ->
-        Pincer.Channels.Telegram.send_message(chat_id, text, send_opts_for_session(session_id))
-    end
+    [
+      send: fn text ->
+        Pincer.Channels.Telegram.send_message(state.chat_id, text, opts)
+      end,
+      edit: fn message_id, text ->
+        Pincer.Channels.Telegram.update_message(state.chat_id, message_id, text, opts)
+      end
+    ]
   end
 
   defp deliver_status(state, text) do

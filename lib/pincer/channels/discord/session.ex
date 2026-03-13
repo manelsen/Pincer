@@ -6,6 +6,7 @@ defmodule Pincer.Channels.Discord.Session do
   use Pincer.Ports.Channel
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.StatusMessagePolicy
+  alias Pincer.Core.StreamDelivery
   alias Pincer.Core.StreamingPolicy
   alias Pincer.Core.Session.Server
 
@@ -105,34 +106,20 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def handle_info({:agent_partial, token}, state) do
-    now = System.system_time(:millisecond)
-
-    {stream_state, action} =
-      StreamingPolicy.on_partial(StreamingPolicy.extract(state), token, now)
-
-    state =
-      case action do
-        {:render_preview, preview_text} ->
-          message_id = render_preview(state.channel_id, stream_state.message_id, preview_text)
-
-          StreamingPolicy.assign(
-            state,
-            StreamingPolicy.mark_rendered(stream_state, message_id, now)
-          )
-
-        :noop ->
-          StreamingPolicy.assign(state, stream_state)
-      end
-
-    {:noreply, state}
+    {:noreply,
+     StreamDelivery.handle_partial(
+       state,
+       token,
+       System.system_time(:millisecond),
+       stream_transport(state)
+     )}
   end
 
   @impl true
   def handle_info({:agent_response, text, _usage}, state) do
-    {stream_state, action} = StreamingPolicy.on_final(StreamingPolicy.extract(state), text)
-    deliver_final(state.channel_id, action)
+    state = StreamDelivery.handle_final(state, text, stream_transport(state))
     maybe_advance_project_flow(state)
-    {:noreply, StreamingPolicy.assign(state, stream_state)}
+    {:noreply, state}
   end
 
   @impl true
@@ -162,37 +149,17 @@ defmodule Pincer.Channels.Discord.Session do
   @impl true
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp render_preview(channel_id, nil, text) do
-    case Pincer.Channels.Discord.send_message("#{channel_id}", text) do
-      {:ok, mid} -> mid
-      _ -> nil
-    end
-  end
+  defp stream_transport(state) do
+    channel_id = "#{state.channel_id}"
 
-  defp render_preview(channel_id, message_id, text) do
-    case Pincer.Channels.Discord.update_message("#{channel_id}", message_id, text) do
-      :ok ->
-        message_id
-
-      {:error, _reason} ->
-        case Pincer.Channels.Discord.send_message("#{channel_id}", text) do
-          {:ok, new_message_id} -> new_message_id
-          _ -> nil
-        end
-    end
-  end
-
-  defp deliver_final(_channel_id, :noop), do: :ok
-
-  defp deliver_final(channel_id, {:send_final, text}) do
-    Pincer.Channels.Discord.send_message("#{channel_id}", text)
-  end
-
-  defp deliver_final(channel_id, {:edit_final, message_id, text}) do
-    case Pincer.Channels.Discord.update_message("#{channel_id}", message_id, text) do
-      :ok -> :ok
-      {:error, _reason} -> Pincer.Channels.Discord.send_message("#{channel_id}", text)
-    end
+    [
+      send: fn text ->
+        Pincer.Channels.Discord.send_message(channel_id, text)
+      end,
+      edit: fn message_id, text ->
+        Pincer.Channels.Discord.update_message(channel_id, message_id, text)
+      end
+    ]
   end
 
   defp deliver_status(state, text) do
