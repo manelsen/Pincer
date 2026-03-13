@@ -130,7 +130,17 @@ defmodule Pincer.Core.Executor do
       send(session_pid, {:executor_failed, "Tool loop detected. Aborting."})
       {:error, :tool_loop}
     else
-      do_run_loop(history, session_id, session_pid, depth, updated_model_override, deps)
+      # At depth 0, we do the full pruning and augmentation once.
+      # In recursive turns (depth > 0), we use the history as-is because
+      # it already contains the augmented system prompt and the current turn context.
+      ready_history =
+        if depth == 0 do
+          prepare_ready_history(history, model_override)
+        else
+          history
+        end
+
+      do_run_loop(ready_history, session_id, session_pid, depth, updated_model_override, deps)
     end
   end
 
@@ -144,7 +154,32 @@ defmodule Pincer.Core.Executor do
     end
   end
 
-  defp do_run_loop(history, session_id, session_pid, depth, model_override, deps) do
+  defp prepare_ready_history(history, model_override) do
+    long_term_memory = Process.get(:long_term_memory, "")
+    current_time = DateTime.utc_now() |> DateTime.to_string()
+
+    # Determine Sweet Spot token limit based on active provider's context window.
+    active_provider = get_active_provider(model_override)
+
+    sweet_spot_limit =
+      case Pincer.Ports.LLM.provider_config(active_provider) do
+        %{context_window: cw} when is_integer(cw) -> max(1000, trunc(cw * 0.25))
+        _ -> 8_000
+      end
+
+    context_strategy = Keyword.get(Process.get(:executor_run_opts, []), :context_strategy)
+
+    # 1. Prune history using the episodic Sweet Spot architecture
+    pruned_history = prune_history(history, sweet_spot_limit, context_strategy: context_strategy)
+
+    # 2. Augment the pruned history with memory and time
+    augmented_history = augment_history(pruned_history, long_term_memory, current_time)
+
+    # 3. Resolve lazy attachment_refs
+    resolve_lazy_attachments(augmented_history, active_provider)
+  end
+
+  defp do_run_loop(ready_history, session_id, session_pid, depth, model_override, deps) do
     Logger.info("[EXECUTOR] do_run_loop (Depth: #{depth})")
 
     client_opts =
@@ -159,32 +194,6 @@ defmodule Pincer.Core.Executor do
         client_opts
       end
 
-    long_term_memory = Process.get(:long_term_memory, "")
-    current_time = DateTime.utc_now() |> DateTime.to_string()
-
-    # Determine Sweet Spot token limit based on active provider's context window.
-    # Consensus for complex reasoning ("Lost in the Middle"): cap at ~25% of absolute max.
-    active_provider = get_active_provider(model_override)
-
-    sweet_spot_limit =
-      case Pincer.Ports.LLM.provider_config(active_provider) do
-        %{context_window: cw} when is_integer(cw) -> max(1000, trunc(cw * 0.25))
-        # Default safe reasoning fallback
-        _ -> 8_000
-      end
-
-    context_strategy = Keyword.get(Process.get(:executor_run_opts, []), :context_strategy)
-
-    # 1. Prune history using the episodic Sweet Spot architecture
-    pruned_history = prune_history(history, sweet_spot_limit, context_strategy: context_strategy)
-
-    augmented_history = augment_history(pruned_history, long_term_memory, current_time)
-
-    # Resolve lazy attachment_ref parts based on what the active provider supports.
-    # We resolve a fresh copy here (not modifying the history kept in state) so that
-    # base64-encoded file data never gets persisted back to the session history.
-    ready_history = resolve_lazy_attachments(augmented_history, active_provider)
-
     tools_spec = deps.tool_registry.list_tools()
 
     Logger.info(
@@ -196,7 +205,7 @@ defmodule Pincer.Core.Executor do
         try do
           handle_stream(
             stream,
-            pruned_history,
+            ready_history,
             session_id,
             session_pid,
             depth,
@@ -212,7 +221,7 @@ defmodule Pincer.Core.Executor do
             fallback_chat_completion(
               error,
               ready_history,
-              pruned_history,
+              ready_history,
               session_id,
               session_pid,
               depth,
@@ -236,7 +245,7 @@ defmodule Pincer.Core.Executor do
         fallback_chat_completion(
           reason,
           ready_history,
-          history,
+          ready_history,
           session_id,
           session_pid,
           depth,
