@@ -29,8 +29,13 @@ defmodule Pincer.Adapters.Tools.BrowserTest do
 
     defp stub_response("click", %{"selector" => sel}), do: {:ok, "Clicked: #{sel}"}
     defp stub_response("fill", %{"selector" => sel}), do: {:ok, "Filled #{sel}"}
-    defp stub_response("press", %{"key" => key, "selector" => sel}), do: {:ok, "Pressed #{key} on #{sel}"}
-    defp stub_response("select", %{"value" => v, "selector" => sel}), do: {:ok, "Selected '#{v}' in #{sel}"}
+
+    defp stub_response("press", %{"key" => key, "selector" => sel}),
+      do: {:ok, "Pressed #{key} on #{sel}"}
+
+    defp stub_response("select", %{"value" => v, "selector" => sel}),
+      do: {:ok, "Selected '#{v}' in #{sel}"}
+
     defp stub_response("screenshot", %{"path" => p}), do: {:ok, "Screenshot saved to #{p}"}
     defp stub_response("screenshot_inline", _), do: {:ok, Base.encode64("fake-png-bytes")}
     defp stub_response("text", _), do: {:ok, "Hello World"}
@@ -130,7 +135,11 @@ defmodule Pincer.Adapters.Tools.BrowserTest do
 
   test "navigate delegates to pool with url" do
     assert {:ok, text} =
-             Browser.execute(%{"action" => "navigate", "url" => "https://example.com", "session_id" => "sess1"})
+             Browser.execute(%{
+               "action" => "navigate",
+               "url" => "https://example.com",
+               "session_id" => "sess1"
+             })
 
     assert text =~ "example.com"
     assert_received {:cmd, "sess1", "navigate", %{"url" => "https://example.com"}}
@@ -138,7 +147,11 @@ defmodule Pincer.Adapters.Tools.BrowserTest do
 
   test "click delegates selector to pool" do
     assert {:ok, text} =
-             Browser.execute(%{"action" => "click", "selector" => "button#ok", "session_id" => "s"})
+             Browser.execute(%{
+               "action" => "click",
+               "selector" => "button#ok",
+               "session_id" => "s"
+             })
 
     assert text =~ "button#ok"
     assert_received {:cmd, "s", "click", %{"selector" => "button#ok"}}
@@ -294,8 +307,33 @@ defmodule Pincer.Adapters.Tools.BrowserTest do
     Application.put_env(:pincer, :browser_pool, StubPool)
   end
 
+  test "returns error instead of exiting when browser pool process is missing" do
+    Application.put_env(:pincer, :browser_pool, __MODULE__.MissingProcessPool)
+
+    assert {:error, msg} =
+             Browser.execute(%{
+               "action" => "navigate",
+               "url" => "https://example.com",
+               "session_id" => "s"
+             })
+
+    assert msg =~ "browser pool unavailable"
+  after
+    Application.put_env(:pincer, :browser_pool, StubPool)
+  end
+
   defmodule ErrorPool do
     def cmd(_session_id, _command, _args \\ %{}), do: {:error, "browser not available"}
     def close_session(_session_id), do: {:error, "browser not available"}
+  end
+
+  defmodule MissingProcessPool do
+    def cmd(_session_id, _command, _args \\ %{}) do
+      GenServer.call(__MODULE__, :missing_process)
+    end
+
+    def close_session(_session_id) do
+      GenServer.call(__MODULE__, :missing_process)
+    end
   end
 end
