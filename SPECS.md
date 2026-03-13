@@ -238,6 +238,32 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 - O ranking de documentos deve considerar:
   - score textual/semantico bruto
   - `importance`
+
+---
+
+## Incremento 2026-03-13 (Recuperacao de Context Overflow no Executor)
+
+### Objetivo
+- Transformar `context_overflow` em recuperacao concreta no `Executor`, em vez de apenas falha terminal.
+- Centralizar a decisao de reducao de payload em politica pura de `Core`.
+
+### Interfaces/Public API
+- `Pincer.Core.ContextOverflowRecovery.plan/2`
+- `Pincer.Core.Executor`
+  - `prepare_prompt_history/3` aceita override de escala do limite seguro de contexto
+
+### Regras
+- Quando `ErrorClass.classify(reason) == :context_overflow`, o `Executor` deve:
+  - reconstruir o prompt a partir do historico logico
+  - reduzir agressivamente o limite seguro de contexto
+  - remover `tools` da tentativa de fallback
+- A politica pura nao executa efeitos nem acessa transporte/provider.
+- O fallback deve preservar mensagens recentes e manter o `system` prompt.
+
+### Criterios de aceite
+1. Teste prova que `ContextOverflowRecovery.plan/2` gera retry plan so para `context_overflow`.
+2. Teste prova que o `Executor` refaz o fallback com prompt menor e sem `tools`.
+3. `mix test` dos arquivos novos/alterados passa.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.
