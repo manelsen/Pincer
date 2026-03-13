@@ -5,6 +5,7 @@ defmodule Pincer.Channels.Discord.Session do
   """
   use Pincer.Ports.Channel
   alias Pincer.Core.ProjectRouter
+  alias Pincer.Core.StatusDelivery
   alias Pincer.Core.StatusMessagePolicy
   alias Pincer.Core.StreamDelivery
   alias Pincer.Core.StreamingPolicy
@@ -172,28 +173,16 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   defp deliver_subagent_status(state, text) do
-    case StatusMessagePolicy.next_action(state, text) do
-      :noop ->
-        state
+    channel_id = "#{state.channel_id}"
 
-      {:send, text} ->
-        case Pincer.Channels.Discord.send_message("#{state.channel_id}", text) do
-          {:ok, message_id} -> StatusMessagePolicy.mark_sent(state, message_id, text)
-          _ -> state
-        end
-
-      {:edit, message_id, text} ->
-        case Pincer.Channels.Discord.update_message("#{state.channel_id}", message_id, text) do
-          :ok ->
-            StatusMessagePolicy.mark_edited(state, text)
-
-          {:error, _reason} ->
-            case Pincer.Channels.Discord.send_message("#{state.channel_id}", text) do
-              {:ok, new_message_id} -> StatusMessagePolicy.mark_sent(state, new_message_id, text)
-              _ -> state
-            end
-        end
-    end
+    StatusDelivery.deliver(
+      state,
+      text,
+      send: fn content -> Pincer.Channels.Discord.send_message(channel_id, content) end,
+      edit: fn message_id, content ->
+        Pincer.Channels.Discord.update_message(channel_id, message_id, content)
+      end
+    )
   end
 
   defp maybe_advance_project_flow(state) do

@@ -6,6 +6,7 @@ defmodule Pincer.Channels.Telegram.Session do
   use Pincer.Ports.Channel
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.ResponseEnvelope
+  alias Pincer.Core.StatusDelivery
   alias Pincer.Core.SubAgentProgress
   alias Pincer.Core.StatusMessagePolicy
   alias Pincer.Core.StreamDelivery
@@ -213,28 +214,14 @@ defmodule Pincer.Channels.Telegram.Session do
   defp deliver_subagent_dashboard(state, nil), do: state
 
   defp deliver_subagent_dashboard(state, text) do
-    case StatusMessagePolicy.next_action(state, text) do
-      :noop ->
-        state
-
-      {:send, text} ->
-        case Pincer.Channels.Telegram.send_message(state.chat_id, text) do
-          {:ok, message_id} -> StatusMessagePolicy.mark_sent(state, message_id, text)
-          _ -> state
-        end
-
-      {:edit, message_id, text} ->
-        case Pincer.Channels.Telegram.update_message(state.chat_id, message_id, text) do
-          :ok ->
-            StatusMessagePolicy.mark_edited(state, text)
-
-          {:error, _reason} ->
-            case Pincer.Channels.Telegram.send_message(state.chat_id, text) do
-              {:ok, new_message_id} -> StatusMessagePolicy.mark_sent(state, new_message_id, text)
-              _ -> state
-            end
-        end
-    end
+    StatusDelivery.deliver(
+      state,
+      text,
+      send: fn content -> Pincer.Channels.Telegram.send_message(state.chat_id, content) end,
+      edit: fn message_id, content ->
+        Pincer.Channels.Telegram.update_message(state.chat_id, message_id, content)
+      end
+    )
   end
 
   defp maybe_advance_project_flow(state) do
