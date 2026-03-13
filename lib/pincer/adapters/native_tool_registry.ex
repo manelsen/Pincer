@@ -112,14 +112,17 @@ defmodule Pincer.Adapters.NativeToolRegistry do
   end
 
   defp execute_native(module, name, args, context) do
-    # Ensure keys are consistent (strings vs atoms)
-    # Most tools expect string keys from JSON decode
-    args_with_context =
-      args
-      |> Map.merge(context)
-      |> Map.put("tool_name", name)
+    # In native tools, we often inject the tool_name into args for convenience
+    args_with_meta = Map.put(args, "tool_name", name)
 
-    module.execute(args_with_context)
+    # Some older or simpler tools might only accept 1 argument (arity 1).
+    # New ones should accept 2 (args, context).
+    if function_exported?(module, :execute, 2) do
+      module.execute(args_with_meta, context)
+    else
+      # Fallback: merge context into args for arity-1 functions
+      module.execute(Map.merge(args_with_meta, context))
+    end
   end
 
   defp list_mcp_tools do
