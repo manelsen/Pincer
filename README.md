@@ -23,7 +23,7 @@ Pincer is a sophisticated AI agent framework built on Elixir/OTP, emphasizing fa
 Pincer now targets `PostgreSQL + pgvector` directly.
 
 - Default local credentials are `postgres/postgres`
-- Default local database names are `pincer_dev`, `pincer_test`, and `pincer_mvp`
+- Default local database names are `pincer_dev`, `pincer_test`, and `pincer`
 - Runtime overrides are supported via:
   - `PINCER_DB_HOST`
   - `PINCER_DB_PORT`

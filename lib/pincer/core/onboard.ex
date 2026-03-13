@@ -84,7 +84,7 @@ defmodule Pincer.Core.Onboard do
         "port" => 5432,
         "username" => "postgres",
         "password" => "postgres",
-        "database" => "pincer_mvp",
+        "database" => "pincer",
         "pool_size" => 10
       },
       "channels" => %{
@@ -606,7 +606,7 @@ defmodule Pincer.Core.Onboard do
   end
 
   defp build_remote_onboard_command(config, capabilities) do
-    db_name = get_in(config, ["database", "database"]) |> normalize_string() || "pincer_mvp"
+    db_name = get_in(config, ["database", "database"]) |> normalize_string() || "pincer"
     provider = get_in(config, ["llm", "provider"]) |> normalize_string() || "z_ai"
     model = get_in(config, ["llm", provider, "default_model"]) |> normalize_string() || "glm-4.7"
 
@@ -696,7 +696,7 @@ defmodule Pincer.Core.Onboard do
           %{
             id: :invalid_db_name,
             message: "database.database is empty or invalid",
-            hint: "Use a PostgreSQL database name like pincer_mvp"
+            hint: "Use a PostgreSQL database name like pincer"
           }
           | issues
         ]
@@ -707,7 +707,7 @@ defmodule Pincer.Core.Onboard do
             id: :invalid_db_name,
             message:
               "database.database must be a PostgreSQL database name, not a filesystem path",
-            hint: "Use a database name like pincer_mvp"
+            hint: "Use a database name like pincer"
           }
           | issues
         ]
@@ -718,7 +718,7 @@ defmodule Pincer.Core.Onboard do
           %{
             id: :invalid_db_name,
             message: "database.database contains unsupported characters",
-            hint: "Use letters, numbers, underscore or hyphen, e.g. pincer_mvp"
+            hint: "Use letters, numbers, underscore or hyphen, e.g. pincer"
           }
           | issues
         ]
