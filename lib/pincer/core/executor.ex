@@ -12,7 +12,7 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.MemoryRecall
   alias Pincer.Utils.Text
 
-  @max_recursion_depth 15
+  @max_recursion_depth 25
   @approval_timeout_ms 60_000
   @tool_result_max_chars Application.compile_env(:pincer, :tool_result_max_chars, 32_000)
 
@@ -777,7 +777,12 @@ defmodule Pincer.Core.Executor do
     args = parse_tool_arguments(raw_arguments)
 
     workspace_path = Process.get(:workspace_path)
-    context = %{"session_id" => session_id, "workspace_path" => workspace_path}
+    context = %{
+      "session_id" => session_id,
+      "workspace_path" => workspace_path,
+      session_id: session_id,
+      workspace_path: workspace_path
+    }
 
     result =
       case registry.execute_tool(name, args, context) do
