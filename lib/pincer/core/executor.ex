@@ -336,7 +336,8 @@ defmodule Pincer.Core.Executor do
        ) do
     # State: {full_content, tool_calls_map, stream_buffer, is_filtering?}
     {full_content, full_tool_calls, _, _} =
-      Enum.reduce(stream, {"", %{}, "", false}, fn chunk, {acc_text, acc_tools, buffer, filtering?} ->
+      Enum.reduce(stream, {"", %{}, "", false}, fn chunk,
+                                                   {acc_text, acc_tools, buffer, filtering?} ->
         process_chunk(chunk, acc_text, acc_tools, buffer, filtering?, session_pid)
       end)
 
@@ -516,10 +517,51 @@ defmodule Pincer.Core.Executor do
         final_content =
           if (is_nil(content) or String.trim(content) == "") and depth > 0 do
             # Try to infer what was done from the last tool result in history
-            last_tool_msg = Enum.find(Enum.reverse(logical_history), &(&1["role"] == "tool"))
+            tool_messages = Enum.filter(Enum.reverse(logical_history), &(&1["role"] == "tool"))
 
-            if last_tool_msg do
-              "✅ Tarefa `#{last_tool_msg["name"]}` concluída com sucesso."
+            if tool_messages != [] do
+              # Build a summary of what was done
+              tool_summary =
+                tool_messages
+                |> Enum.take(5)
+                |> Enum.map(fn msg ->
+                  tool_name = msg["name"] || "tool"
+
+                  result_preview =
+                    case msg["content"] do
+                      nil ->
+                        ""
+
+                      content when is_binary(content) ->
+                        content
+                        |> String.split("\n")
+                        |> Enum.take(3)
+                        |> Enum.join(" ")
+                        |> String.slice(0, 100)
+
+                      _ ->
+                        ""
+                    end
+
+                  "- #{tool_name}: #{result_preview}"
+                end)
+                |> Enum.join("\n")
+
+              used_tools =
+                tool_messages
+                |> Enum.map(&(&1["name"] || "tool"))
+                |> Enum.uniq()
+                |> Enum.join(", ")
+
+              """
+              ✅ Concluído. Ferramentas utilizadas: #{used_tools}
+
+              Resumo das ações:
+              #{tool_summary}
+
+              (O assistente não forneceu uma resposta detalhada. Use /verbose on para mais informações.)
+              """
+              |> String.trim()
             else
               "✅ Concluído."
             end
@@ -789,6 +831,7 @@ defmodule Pincer.Core.Executor do
     args = parse_tool_arguments(raw_arguments)
 
     workspace_path = Process.get(:workspace_path)
+
     context = %{
       "session_id" => session_id,
       "workspace_path" => workspace_path,
@@ -876,9 +919,13 @@ defmodule Pincer.Core.Executor do
       {:tool_approval_result, ^call_id, :approved} ->
         Logger.info("[EXECUTOR] Command approved: #{command}")
 
-        case registry.execute_tool("safe_shell", %{"command" => command, "skip_approval" => true}, %{
-               "session_id" => session_id
-             }) do
+        case registry.execute_tool(
+               "safe_shell",
+               %{"command" => command, "skip_approval" => true},
+               %{
+                 "session_id" => session_id
+               }
+             ) do
           {:ok, result} -> result
           {:error, reason} -> "Error: #{inspect(reason)}"
         end
@@ -1138,7 +1185,10 @@ defmodule Pincer.Core.Executor do
 
   defp normalize_binary(nil), do: nil
   defp normalize_binary(bin) when is_binary(bin), do: bin
-  defp normalize_binary(atom) when is_atom(atom), do: atom |> Atom.to_string() |> normalize_binary()
+
+  defp normalize_binary(atom) when is_atom(atom),
+    do: atom |> Atom.to_string() |> normalize_binary()
+
   defp normalize_binary(other), do: other |> Kernel.inspect() |> normalize_binary()
 
   defp is_nil_or_blank(nil), do: true
