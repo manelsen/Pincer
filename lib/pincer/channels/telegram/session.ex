@@ -6,6 +6,7 @@ defmodule Pincer.Channels.Telegram.Session do
   use Pincer.Ports.Channel
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.SubAgentProgress
+  alias Pincer.Core.StatusMessagePolicy
   alias Pincer.Core.StreamingPolicy
   alias Pincer.Core.Session.Server
 
@@ -106,37 +107,34 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def handle_info({:agent_partial, token}, state) do
-    if suppress_preview?(state, token) do
-      {:noreply,
-       state
-       |> Map.put(:preview_suppressed, true)
-       |> put_streaming_state(accumulate_partial(streaming_state(state), token))}
-    else
-      now = System.system_time(:millisecond)
-      {stream_state, action} = StreamingPolicy.on_partial(streaming_state(state), token, now)
+    now = System.system_time(:millisecond)
 
-      state =
-        case action do
-          {:render_preview, preview_text} ->
-            message_id =
-              render_preview(
-                state.chat_id,
-                state.session_id,
-                stream_state.message_id,
-                preview_text
-              )
+    {stream_state, action} =
+      StreamingPolicy.on_partial(StreamingPolicy.extract(state), token, now,
+        suppress_preview?: &suppress_preview?/2
+      )
 
-            put_streaming_state(
-              state,
-              StreamingPolicy.mark_rendered(stream_state, message_id, now)
+    state =
+      case action do
+        {:render_preview, preview_text} ->
+          message_id =
+            render_preview(
+              state.chat_id,
+              state.session_id,
+              stream_state.message_id,
+              preview_text
             )
 
-          :noop ->
-            put_streaming_state(state, stream_state)
-        end
+          StreamingPolicy.assign(
+            state,
+            StreamingPolicy.mark_rendered(stream_state, message_id, now)
+          )
 
-      {:noreply, state}
-    end
+        :noop ->
+          StreamingPolicy.assign(state, stream_state)
+      end
+
+    {:noreply, state}
   end
 
   @impl true
@@ -156,10 +154,12 @@ defmodule Pincer.Channels.Telegram.Session do
     text_with_usage = safe_text <> usage_line
 
     if text_with_usage != "" do
-      {stream_state, action} = StreamingPolicy.on_final(streaming_state(state), text_with_usage)
+      {stream_state, action} =
+        StreamingPolicy.on_final(StreamingPolicy.extract(state), text_with_usage)
+
       deliver_final(state.chat_id, state.session_id, action)
       maybe_advance_project_flow(state)
-      {:noreply, state |> Map.put(:preview_suppressed, false) |> put_streaming_state(stream_state)}
+      {:noreply, StreamingPolicy.assign(state, stream_state)}
     else
       {:noreply, state}
     end
@@ -287,30 +287,27 @@ defmodule Pincer.Channels.Telegram.Session do
 
   defp deliver_subagent_dashboard(state, nil), do: state
 
-  defp deliver_subagent_dashboard(%{status_message_text: text} = state, text), do: state
-
-  defp deliver_subagent_dashboard(%{status_message_id: nil} = state, text) do
-    case Pincer.Channels.Telegram.send_message(state.chat_id, text) do
-      {:ok, message_id} ->
-        %{state | status_message_id: message_id, status_message_text: text}
-
-      _ ->
+  defp deliver_subagent_dashboard(state, text) do
+    case StatusMessagePolicy.next_action(state, text) do
+      :noop ->
         state
-    end
-  end
 
-  defp deliver_subagent_dashboard(%{status_message_id: message_id} = state, text) do
-    case Pincer.Channels.Telegram.update_message(state.chat_id, message_id, text) do
-      :ok ->
-        %{state | status_message_text: text}
-
-      {:error, _reason} ->
+      {:send, text} ->
         case Pincer.Channels.Telegram.send_message(state.chat_id, text) do
-          {:ok, new_message_id} ->
-            %{state | status_message_id: new_message_id, status_message_text: text}
+          {:ok, message_id} -> StatusMessagePolicy.mark_sent(state, message_id, text)
+          _ -> state
+        end
 
-          _ ->
-            state
+      {:edit, message_id, text} ->
+        case Pincer.Channels.Telegram.update_message(state.chat_id, message_id, text) do
+          :ok ->
+            StatusMessagePolicy.mark_edited(state, text)
+
+          {:error, _reason} ->
+            case Pincer.Channels.Telegram.send_message(state.chat_id, text) do
+              {:ok, new_message_id} -> StatusMessagePolicy.mark_sent(state, new_message_id, text)
+              _ -> state
+            end
         end
     end
   end
@@ -363,23 +360,6 @@ defmodule Pincer.Channels.Telegram.Session do
     end
   end
 
-  defp streaming_state(state) do
-    %{
-      message_id: state.message_id,
-      buffer: state.buffer,
-      last_update: state.last_update
-    }
-  end
-
-  defp put_streaming_state(state, stream_state) do
-    %{
-      state
-      | message_id: stream_state.message_id,
-        buffer: stream_state.buffer,
-        last_update: stream_state.last_update
-    }
-  end
-
   defp subagent_status?(text) when is_binary(text) do
     String.contains?(text, "Sub-Agent")
   end
@@ -400,14 +380,15 @@ defmodule Pincer.Channels.Telegram.Session do
 
   defp state(chat_id, session_id) do
     Map.merge(
-      %{
-        chat_id: chat_id,
-        session_id: session_id,
-        status_message_id: nil,
-        status_message_text: nil,
-        preview_suppressed: false,
-        subagent_progress_tracker: %{}
-      },
+      Map.merge(
+        %{
+          chat_id: chat_id,
+          session_id: session_id,
+          preview_suppressed: false,
+          subagent_progress_tracker: %{}
+        },
+        StatusMessagePolicy.initial_state()
+      ),
       StreamingPolicy.initial_state()
     )
   end
@@ -415,7 +396,7 @@ defmodule Pincer.Channels.Telegram.Session do
   defp suppress_preview?(%{preview_suppressed: true}, _token), do: true
 
   defp suppress_preview?(state, token) do
-    stream_state = streaming_state(state)
+    stream_state = StreamingPolicy.extract(state)
 
     is_nil(stream_state.message_id) and stream_state.buffer == "" and synthetic_partial?(token)
   end
@@ -425,9 +406,5 @@ defmodule Pincer.Channels.Telegram.Session do
 
     String.length(text) > @preview_suppress_threshold or
       Regex.match?(~r/<(thinking|thought)>.*?<\/(thinking|thought)>/is, text)
-  end
-
-  defp accumulate_partial(stream_state, token) do
-    %{stream_state | buffer: stream_state.buffer <> to_string(token)}
   end
 end

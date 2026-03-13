@@ -3040,3 +3040,33 @@ config = ~y"""
 3. Teste prova que `send_message` com `target_session_id` resolve o recipient a partir do prefixo da sessao.
 4. Teste prova que `channel_actions` aparece no registry nativo.
 5. Teste prova que a tool retorna erro claro quando nao consegue resolver destino.
+
+## Incremento 2026-03-13 (Status Message Policy v1)
+
+### Objetivo
+- puxar a semantica de upsert de mensagens de status para `Core`;
+- reduzir duplicacao entre sessoes de Telegram e Discord;
+- deixar os canais responsaveis apenas por `send/edit` e fallback de transporte.
+
+### Interfaces/Public API
+- `Pincer.Core.StatusMessagePolicy.initial_state/0`
+- `Pincer.Core.StatusMessagePolicy.next_action/2`
+- `Pincer.Core.StatusMessagePolicy.mark_sent/3`
+- `Pincer.Core.StatusMessagePolicy.mark_edited/2`
+- `Pincer.Channels.Telegram.Session`
+- `Pincer.Channels.Discord.Session`
+
+### Regras
+- `StatusMessagePolicy` deve operar sobre um mapa com `status_message_id` e `status_message_text`.
+- `next_action/2` deve:
+  - retornar `:noop` quando o texto novo for `nil`, vazio ou igual ao ultimo texto entregue;
+  - retornar `{:send, text}` quando ainda nao existir `status_message_id`;
+  - retornar `{:edit, message_id, text}` quando a mensagem de status ja existir e o texto mudar.
+- `mark_sent/3` deve persistir `status_message_id` e `status_message_text`.
+- `mark_edited/2` deve atualizar apenas `status_message_text`, preservando `status_message_id`.
+- `Telegram.Session` e `Discord.Session` devem usar essa politica para mensagens de status agregadas, mantendo o fallback de transporte atual quando `edit` falhar.
+
+### Critérios de aceite
+1. Teste de core prova `send`, `edit` e `noop` da politica.
+2. Teste de core prova que `mark_sent/3` e `mark_edited/2` atualizam o estado corretamente.
+3. Testes existentes de Telegram e Discord continuam verdes, sem regressao de upsert de status.

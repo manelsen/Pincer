@@ -5,6 +5,7 @@ defmodule Pincer.Channels.Discord.Session do
   """
   use Pincer.Ports.Channel
   alias Pincer.Core.ProjectRouter
+  alias Pincer.Core.StatusMessagePolicy
   alias Pincer.Core.StreamingPolicy
   alias Pincer.Core.Session.Server
 
@@ -105,17 +106,22 @@ defmodule Pincer.Channels.Discord.Session do
   @impl true
   def handle_info({:agent_partial, token}, state) do
     now = System.system_time(:millisecond)
-    {stream_state, action} = StreamingPolicy.on_partial(streaming_state(state), token, now)
+
+    {stream_state, action} =
+      StreamingPolicy.on_partial(StreamingPolicy.extract(state), token, now)
 
     state =
       case action do
         {:render_preview, preview_text} ->
           message_id = render_preview(state.channel_id, stream_state.message_id, preview_text)
 
-          put_streaming_state(state, StreamingPolicy.mark_rendered(stream_state, message_id, now))
+          StreamingPolicy.assign(
+            state,
+            StreamingPolicy.mark_rendered(stream_state, message_id, now)
+          )
 
         :noop ->
-          put_streaming_state(state, stream_state)
+          StreamingPolicy.assign(state, stream_state)
       end
 
     {:noreply, state}
@@ -123,10 +129,10 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def handle_info({:agent_response, text, _usage}, state) do
-    {stream_state, action} = StreamingPolicy.on_final(streaming_state(state), text)
+    {stream_state, action} = StreamingPolicy.on_final(StreamingPolicy.extract(state), text)
     deliver_final(state.channel_id, action)
     maybe_advance_project_flow(state)
-    {:noreply, put_streaming_state(state, stream_state)}
+    {:noreply, StreamingPolicy.assign(state, stream_state)}
   end
 
   @impl true
@@ -198,35 +204,27 @@ defmodule Pincer.Channels.Discord.Session do
     end
   end
 
-  defp deliver_subagent_status(%{status_message_id: nil} = state, text) do
-    case Pincer.Channels.Discord.send_message("#{state.channel_id}", text) do
-      {:ok, message_id} ->
-        %{state | status_message_id: message_id, status_message_text: text}
-
-      _ ->
+  defp deliver_subagent_status(state, text) do
+    case StatusMessagePolicy.next_action(state, text) do
+      :noop ->
         state
-    end
-  end
 
-  defp deliver_subagent_status(
-         %{status_message_id: _message_id, status_message_text: text} = state,
-         text
-       ) do
-    state
-  end
-
-  defp deliver_subagent_status(%{status_message_id: message_id} = state, text) do
-    case Pincer.Channels.Discord.update_message("#{state.channel_id}", message_id, text) do
-      :ok ->
-        %{state | status_message_text: text}
-
-      {:error, _reason} ->
+      {:send, text} ->
         case Pincer.Channels.Discord.send_message("#{state.channel_id}", text) do
-          {:ok, new_message_id} ->
-            %{state | status_message_id: new_message_id, status_message_text: text}
+          {:ok, message_id} -> StatusMessagePolicy.mark_sent(state, message_id, text)
+          _ -> state
+        end
 
-          _ ->
-            state
+      {:edit, message_id, text} ->
+        case Pincer.Channels.Discord.update_message("#{state.channel_id}", message_id, text) do
+          :ok ->
+            StatusMessagePolicy.mark_edited(state, text)
+
+          {:error, _reason} ->
+            case Pincer.Channels.Discord.send_message("#{state.channel_id}", text) do
+              {:ok, new_message_id} -> StatusMessagePolicy.mark_sent(state, new_message_id, text)
+              _ -> state
+            end
         end
     end
   end
@@ -279,23 +277,6 @@ defmodule Pincer.Channels.Discord.Session do
     end
   end
 
-  defp streaming_state(state) do
-    %{
-      message_id: state.message_id,
-      buffer: state.buffer,
-      last_update: state.last_update
-    }
-  end
-
-  defp put_streaming_state(state, stream_state) do
-    %{
-      state
-      | message_id: stream_state.message_id,
-        buffer: stream_state.buffer,
-        last_update: stream_state.last_update
-    }
-  end
-
   defp subagent_status?(text) when is_binary(text) do
     String.contains?(text, "Sub-Agent")
   end
@@ -317,12 +298,13 @@ defmodule Pincer.Channels.Discord.Session do
 
   defp state(channel_id, session_id) do
     Map.merge(
-      %{
-        channel_id: channel_id,
-        session_id: session_id,
-        status_message_id: nil,
-        status_message_text: nil
-      },
+      Map.merge(
+        %{
+          channel_id: channel_id,
+          session_id: session_id
+        },
+        StatusMessagePolicy.initial_state()
+      ),
       StreamingPolicy.initial_state()
     )
   end
