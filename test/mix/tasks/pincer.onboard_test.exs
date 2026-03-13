@@ -36,7 +36,7 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     assert File.exists?("#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/HISTORY.md")
 
     {:ok, config} = YamlElixir.read_from_file("config.yaml")
-    assert config["database"]["database"] == "pincer_mvp"
+    assert config["database"]["database"] == "pincer"
     assert config["database"]["hostname"] == "localhost"
     assert output =~ "npm install --prefix infrastructure/whatsapp"
     assert output =~ "channels.whatsapp.enabled=true"
