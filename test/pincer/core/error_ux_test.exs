@@ -26,6 +26,17 @@ defmodule Pincer.Core.ErrorUXTest do
       assert msg =~ "contexto"
     end
 
+    test "maps unsupported tool calling 400 with actionable guidance" do
+      msg =
+        ErrorUX.friendly(
+          {:http_error, 400,
+           ~s({"error":{"message":"`tool calling` is not supported with this model"}})}
+        )
+
+      assert msg =~ "nao suporta"
+      assert msg =~ "ferramentas"
+    end
+
     test "maps transport errors" do
       assert ErrorUX.friendly(%Req.TransportError{reason: :timeout}) =~ "Timeout"
       assert ErrorUX.friendly(%Req.TransportError{reason: :econnrefused}) =~ "Conexao recusada"

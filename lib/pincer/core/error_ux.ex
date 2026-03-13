@@ -34,10 +34,15 @@ defmodule Pincer.Core.ErrorUX do
     do: "Endpoint ou modelo nao encontrado (404). Revise provider/modelo em configuracao."
 
   defp friendly_normalized({:http_error, 400, msg}, _scope) when is_binary(msg) do
-    if context_overflow_message?(msg) do
+    cond do
+      tool_calling_unsupported_message?(msg) ->
+        "O modelo atual nao suporta uso de ferramentas. Troque para um modelo com tool calling ou siga sem tools nesta conversa."
+
+      context_overflow_message?(msg) ->
       "A conversa ficou grande demais para o contexto do modelo atual. Use /reset para limpar o historico ou troque para um modelo com janela maior."
-    else
-      "Requisicao invalida para o provedor (400). Revise parametros/modelo e tente novamente."
+
+      true ->
+        "Requisicao invalida para o provedor (400). Revise parametros/modelo e tente novamente."
     end
   end
 
@@ -131,6 +136,13 @@ defmodule Pincer.Core.ErrorUX do
       String.contains?(down, "input tokens") or
       String.contains?(down, "max_tokens") or
       String.contains?(down, "max_completion_tokens")
+  end
+
+  defp tool_calling_unsupported_message?(msg) do
+    down = String.downcase(msg)
+
+    String.contains?(down, "tool calling") and
+      (String.contains?(down, "not supported") or String.contains?(down, "unsupported"))
   end
 
   defp db_schema_message?(msg) when is_binary(msg) do

@@ -186,6 +186,24 @@ defmodule Pincer.Core.Session.ServerTest do
            ]
   end
 
+  test "publishes friendly executor errors instead of raw provider payloads" do
+    session_id = "session_server_error_#{System.unique_integer([:positive])}"
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+
+    pid = start_supervised!({Server, [session_id: session_id]})
+
+    send(
+      pid,
+      {:executor_failed,
+       {:http_error, 400, ~s({"error":{"message":"`tool calling` is not supported with this model"}})}}
+    )
+
+    assert_receive {:agent_response, message}, 1000
+    assert message =~ "nao suporta"
+    assert message =~ "ferramentas"
+    refute message =~ "`tool calling`"
+  end
+
   test "recovery only ingests blackboard updates from the same scope" do
     tmp =
       Path.join(
