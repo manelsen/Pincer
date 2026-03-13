@@ -444,6 +444,7 @@ Completed slices:
 - project flow delivery moved into [Pincer.Core.ProjectFlowDelivery](/opt/pincer_home/git/Pincer/lib/pincer/core/project_flow_delivery.ex)
 - turn outcome classification moved into [Pincer.Core.TurnOutcomePolicy](/opt/pincer_home/git/Pincer/lib/pincer/core/turn_outcome_policy.ex)
 - tool-only degraded-response formatting moved into [Pincer.Core.ToolOnlyOutcomeFormatter](/opt/pincer_home/git/Pincer/lib/pincer/core/tool_only_outcome_formatter.ex)
+- lightweight web capability split into explicit `web_search` and `web_fetch` tool interfaces in [Pincer.Adapters.Tools.Web](/opt/pincer_home/git/Pincer/lib/pincer/tools/web.ex)
 
 Still open inside Phase 1:
 

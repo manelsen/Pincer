@@ -118,4 +118,25 @@ defmodule Pincer.Adapters.NativeToolRegistryTest do
 
     assert "channel_actions" in names
   end
+
+  test "registry exposes split web tools instead of legacy web name" do
+    Application.put_env(:pincer, :mcp_manager, MCPManagerTimeoutStub)
+
+    names =
+      NativeToolRegistry.list_tools()
+      |> Enum.filter(&Map.has_key?(&1, "_module"))
+      |> Enum.map(fn tool ->
+        spec =
+          case tool["function"] do
+            %{"function" => inner} -> inner
+            other -> other
+          end
+
+        spec[:name] || spec["name"]
+      end)
+
+    assert "web_search" in names
+    assert "web_fetch" in names
+    refute "web" in names
+  end
 end

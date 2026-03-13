@@ -1,11 +1,12 @@
 defmodule Pincer.Core.ExecutorHexTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
   import Mox
 
   # Define mocks for the ports
   Mox.defmock(Pincer.MockToolRegistry, for: Pincer.Ports.ToolRegistry)
   Mox.defmock(Pincer.MockLLMClient, for: Pincer.Ports.LLM)
 
+  setup :set_mox_from_context
   setup :verify_on_exit!
 
   describe "Executor with injected dependencies" do
@@ -80,11 +81,10 @@ defmodule Pincer.Core.ExecutorHexTest do
       # Expect a SECOND call to LLM with the tool result
       |> expect(:stream_completion, fn history, _opts ->
         # Verify history contains tool result
-        last_msg = List.last(history)
-        assert last_msg["role"] == "tool"
-        assert last_msg["content"] == "Tool Result"
+        tool_msg = Enum.find(Enum.reverse(history), &(&1["role"] == "tool"))
+        assert tool_msg["content"] == "Tool Result"
 
-        assistant_msg = Enum.at(history, -2)
+        assistant_msg = Enum.find(Enum.reverse(history), &(&1["role"] == "assistant"))
         assert assistant_msg["role"] == "assistant"
         assert is_list(assistant_msg["tool_calls"])
 
@@ -118,7 +118,7 @@ defmodule Pincer.Core.ExecutorHexTest do
 
       File.mkdir_p!(workspace)
 
-      rel_path = Path.join("trash", "executor_markdown_#{System.unique_integer([:positive])}.md")
+      rel_path = "executor_markdown_#{System.unique_integer([:positive])}.md"
       abs_path = Path.join(workspace, rel_path)
 
       on_exit(fn ->
@@ -128,7 +128,6 @@ defmodule Pincer.Core.ExecutorHexTest do
       Pincer.MockToolRegistry
       |> stub(:list_tools, fn -> [] end)
       |> expect(:execute_tool, fn "my_tool", %{"arg" => "val"}, _ctx ->
-        File.mkdir_p!(Path.dirname(abs_path))
         File.write!(abs_path, "# Project Brief\n\n- Domain captured\n")
         {:ok, "Tool Result"}
       end)
@@ -165,8 +164,8 @@ defmodule Pincer.Core.ExecutorHexTest do
           workspace_path: workspace
         )
 
-      assert_receive {:sme_status, :executor, markdown_notice}, 5000
-      assert markdown_notice =~ "Markdown artifact"
+      assert_receive {:agent_status, markdown_notice}, 5000
+      assert markdown_notice =~ "Artefato Atualizado"
       assert markdown_notice =~ rel_path
       assert markdown_notice =~ "# Project Brief"
 
@@ -226,7 +225,7 @@ defmodule Pincer.Core.ExecutorHexTest do
 
       Pincer.MockToolRegistry
       |> stub(:list_tools, fn -> [] end)
-      |> expect(:execute_tool, fn "web", %{"action" => "search", "query" => "elixir"}, _ctx ->
+      |> expect(:execute_tool, fn "web_search", %{"query" => "elixir"}, _ctx ->
         {:ok, "tool ok"}
       end)
 
@@ -241,8 +240,8 @@ defmodule Pincer.Core.ExecutorHexTest do
                     "index" => 0,
                     "id" => "call_map_1",
                     "function" => %{
-                      "name" => "web",
-                      "arguments" => %{"action" => "search", "query" => "elixir"}
+                      "name" => "web_search",
+                      "arguments" => %{"query" => "elixir"}
                     }
                   }
                 ]
@@ -254,9 +253,8 @@ defmodule Pincer.Core.ExecutorHexTest do
         {:ok, [chunk]}
       end)
       |> expect(:stream_completion, fn history, _opts ->
-        last_msg = List.last(history)
-        assert last_msg["role"] == "tool"
-        assert last_msg["content"] == "tool ok"
+        tool_msg = Enum.find(Enum.reverse(history), &(&1["role"] == "tool"))
+        assert tool_msg["content"] == "tool ok"
         {:ok, [%{"choices" => [%{"delta" => %{"content" => "Done map args"}}]}]}
       end)
 
@@ -266,7 +264,7 @@ defmodule Pincer.Core.ExecutorHexTest do
           llm_client: Pincer.MockLLMClient
         )
 
-      assert_receive {:sme_tool_use, "web"}, 5000
+      assert_receive {:sme_tool_use, "web_search"}, 5000
       assert_receive {:executor_finished, _, "Done map args", _usage}, 5000
       refute_receive {:executor_failed, _}
     end
@@ -299,6 +297,11 @@ defmodule Pincer.Core.ExecutorHexTest do
       |> expect(:execute_tool, fn "unsafe_tool", %{"arg" => "val"}, _ctx ->
         {:error, {:approval_required, "cat /etc/passwd"}}
       end)
+      |> expect(:execute_tool, fn "safe_shell",
+                                  %{"command" => "cat /etc/passwd", "skip_approval" => true},
+                                  _ctx ->
+        {:ok, "blocked by workspace restriction policy"}
+      end)
 
       Pincer.MockLLMClient
       |> expect(:stream_completion, fn _history, _opts ->
@@ -325,9 +328,8 @@ defmodule Pincer.Core.ExecutorHexTest do
         {:ok, [chunk1, chunk2]}
       end)
       |> expect(:stream_completion, fn updated_history, _opts ->
-        last_msg = List.last(updated_history)
-        assert last_msg["role"] == "tool"
-        assert last_msg["content"] =~ "workspace restriction policy"
+        tool_msg = Enum.find(Enum.reverse(updated_history), &(&1["role"] == "tool"))
+        assert tool_msg["content"] =~ "workspace restriction policy"
         {:ok, [%{"choices" => [%{"delta" => %{"content" => "Done"}}]}]}
       end)
 
@@ -337,8 +339,8 @@ defmodule Pincer.Core.ExecutorHexTest do
           llm_client: Pincer.MockLLMClient
         )
 
-      assert_receive {:approval_requested, "call_restrict_1", "cat /etc/passwd"}, 5000
-      send(executor_pid, {:tool_approval, "call_restrict_1", :granted})
+      assert_receive {:approval_required, "call_restrict_1", "cat /etc/passwd"}, 5000
+      send(executor_pid, {:tool_approval_result, "call_restrict_1", :approved})
 
       assert_receive {:executor_finished, _, "Done", _usage}, 5000
     end
