@@ -264,6 +264,27 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Teste prova que `ContextOverflowRecovery.plan/2` gera retry plan so para `context_overflow`.
 2. Teste prova que o `Executor` refaz o fallback com prompt menor e sem `tools`.
 3. `mix test` dos arquivos novos/alterados passa.
+
+---
+
+## Incremento 2026-03-13 (Resposta Final Vazia nao e Sucesso)
+
+### Objetivo
+- Impedir que o `Executor` finalize com sucesso quando o provider encerra sem texto final e sem `tool_calls`.
+- Evitar silencio no canal e historico poluido por respostas nulas.
+
+### Interfaces/Public API
+- `Pincer.Core.Executor`
+
+### Regras
+- Se a mensagem final do assistente chegar sem conteudo util e sem `tool_calls`, o `Executor` deve retornar `{:error, :empty_response}`.
+- O resumo sintetico por tool usage continua permitido apenas quando houve uso real de ferramentas e existe material para resumir.
+- Nao deve existir `{:executor_finished, ..., nil, ...}` para esse caso.
+
+### Criterios de aceite
+1. Teste prova que stream encerrado sem texto final vira `{:executor_failed, :empty_response}`.
+2. Nao ha `executor_finished` nesse caso.
+3. `mix test` dos arquivos alterados passa.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.

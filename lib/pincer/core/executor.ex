@@ -694,16 +694,20 @@ defmodule Pincer.Core.Executor do
               """
               |> String.trim()
             else
-              "✅ Concluído."
+              nil
             end
           else
             content
           end
 
-        assistant_msg = Map.put(assistant_msg, "content", final_content)
+        if is_nil(final_content) or String.trim(final_content) == "" do
+          {:error, :empty_response}
+        else
+          assistant_msg = Map.put(assistant_msg, "content", final_content)
 
-        # IMPORTANT: Return clean logical history to session
-        {:ok, logical_history ++ [assistant_msg], final_content, usage}
+          # IMPORTANT: Return clean logical history to session
+          {:ok, logical_history ++ [assistant_msg], final_content, usage}
+        end
 
       _ ->
         {:error, {:invalid_assistant_message, assistant_msg}}
