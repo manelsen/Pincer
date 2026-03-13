@@ -27,6 +27,7 @@ defmodule Pincer.Core do
       MemoryObservability,
       ChannelInteractionPolicy,
       StreamingPolicy,
+      StreamDelivery,
       StatusMessagePolicy,
       RetryPolicy,
       Telemetry,
