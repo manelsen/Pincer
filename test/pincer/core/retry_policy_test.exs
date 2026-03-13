@@ -34,6 +34,22 @@ defmodule Pincer.Core.RetryPolicyTest do
     end
   end
 
+  describe "fail_fast?/1" do
+    test "returns true for terminal classes that should not trigger failover noise" do
+      assert RetryPolicy.fail_fast?({:missing_credentials, "OPENAI_API_KEY"})
+      assert RetryPolicy.fail_fast?(:all_profiles_cooling_down)
+      assert RetryPolicy.fail_fast?({:provider_error, 400, "Provider returned error"})
+      assert RetryPolicy.fail_fast?(:non_json_response)
+      assert RetryPolicy.fail_fast?(:empty_response)
+      assert RetryPolicy.fail_fast?({:http_error, 404, "missing"})
+    end
+
+    test "returns false for transient classes" do
+      refute RetryPolicy.fail_fast?({:http_error, 503, "upstream"})
+      refute RetryPolicy.fail_fast?(%Req.TransportError{reason: :timeout})
+    end
+  end
+
   describe "retry_after_ms/3" do
     test "reads retry_after metadata and clamps to remaining deadline" do
       reason = {:http_error, 429, "rate", %{retry_after_ms: 5_000}}

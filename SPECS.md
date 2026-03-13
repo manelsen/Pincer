@@ -3254,3 +3254,36 @@ config = ~y"""
 1. Teste de provider prova que `%{"error" => ...}` vira `{:provider_error, code, message}`.
 2. Teste de core prova classificacao individual das classes novas.
 3. Teste de UX prova mensagens distintas para credenciais, cooldown, quota e payload de provider.
+
+## Incremento 2026-03-13 (Error Actions By Class v1)
+
+### Objetivo
+- transformar parte da classificacao de erro em decisao operacional;
+- evitar ruido de failover para erros claramente terminais;
+- manter retry/failover apenas para classes transientes.
+
+### Interfaces/Public API
+- `Pincer.Core.RetryPolicy.fail_fast?/1`
+- `Pincer.LLM.Client`
+
+### Regras
+- `fail_fast?/1` deve retornar `true` para classes terminais sem beneficio de retry/failover:
+  - `:missing_credentials`
+  - `:auth_cooling_down`
+  - `:tool_calling_unsupported`
+  - `:context_overflow`
+  - `:provider_payload`
+  - `:provider_non_json`
+  - `:provider_empty`
+  - `:http_401`
+  - `:http_403`
+  - `:http_404`
+- `LLM.Client` deve:
+  - interromper o fluxo terminal imediatamente quando `fail_fast?/1` for `true`;
+  - nao emitir status de failover nesses casos;
+  - manter retries/backoff para classes transientes.
+
+### Critérios de aceite
+1. Teste de core prova `fail_fast?/1` para classes terminais e negativas para classes transientes.
+2. Teste de client prova que `provider_error` nao gera retry adicional.
+3. Teste de client prova que `provider_error` nao emite status de failover.
