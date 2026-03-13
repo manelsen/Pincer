@@ -31,6 +31,7 @@ bot.log
 bot_debug.log
 server.log
 sessions/
+memory/blackboard.journal
 infrastructure/mcp/venv/
 infrastructure/whatsapp/node_modules/
 infrastructure/whatsapp/package-lock.json
@@ -51,7 +52,14 @@ venv/
 mcp_sidecar/node_modules/
 analysis/
 docs/
-# workspaces/
+.opencode/
+test_exe
+workspaces/*
+!workspaces/.template/
+!workspaces/.template/.pincer/
+!workspaces/.template/.pincer/BOOTSTRAP.md
+!workspaces/.template/.pincer/MEMORY.md
+!workspaces/.template/.pincer/HISTORY.md
 .elixir_ls/
 .vscode/
 .idea/
