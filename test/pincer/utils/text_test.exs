@@ -14,4 +14,10 @@ defmodule Pincer.Utils.TextTest do
 
     assert Text.strip_internal_scaffolding(input) == input
   end
+
+  test "strip_reasoning removes orphan open reasoning tag through end of content" do
+    input = "<thinking>\nsegredo interno"
+
+    assert Text.strip_reasoning(input) == ""
+  end
 end

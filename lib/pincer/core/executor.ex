@@ -369,19 +369,13 @@ defmodule Pincer.Core.Executor do
   end
 
   defp reasoning_only_message?(text) when is_binary(text) do
-    trimmed = String.trim(text)
-    Regex.match?(~r/\A<(thinking|thought)\b[^>]*>[\s\S]*?<\/(thinking|thought)>\z/i, trimmed)
+    text
+    |> Text.strip_reasoning()
+    |> to_string()
+    |> String.trim() == ""
   end
 
   defp reasoning_only_message?(_text), do: false
-
-  defp strip_reasoning_blocks(text) when is_binary(text) do
-    text
-    |> String.replace(~r/<(?:thinking|thought)\b[^>]*>[\s\S]*?<\/(?:thinking|thought)>/i, "")
-    |> String.trim()
-  end
-
-  defp strip_reasoning_blocks(text), do: text
 
   defp post_tool_grounding_message do
     %{
@@ -547,7 +541,7 @@ defmodule Pincer.Core.Executor do
         nil
       else
         clean_content
-        |> strip_reasoning_blocks()
+        |> Text.strip_reasoning()
         |> Text.strip_internal_scaffolding()
       end
 
