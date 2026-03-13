@@ -223,7 +223,9 @@ defmodule Pincer.Core.Executor do
         client_opts
       end
 
-    tools_spec = deps.tool_registry.list_tools()
+    tools_spec =
+      deps.tool_registry.list_tools()
+      |> clean_tools_spec()
 
     Logger.info(
       "[EXECUTOR] Sending prompt to LLM (STREAMING). History size: #{length(prompt_history)}"
@@ -1032,6 +1034,25 @@ defmodule Pincer.Core.Executor do
       Pincer.Infra.Config.get(:llm)["provider"] || "openrouter"
     end
   end
+
+  defp clean_tools_spec(tools) when is_list(tools) do
+    Enum.map(tools, &clean_tool_map/1)
+  end
+
+  defp clean_tools_spec(other), do: other
+
+  defp clean_tool_map(tool) when is_map(tool) do
+    tool
+    |> Enum.reject(fn {k, _v} -> is_binary(k) and String.starts_with?(k, "_") end)
+    |> Enum.map(fn {k, v} -> {k, clean_tool_value(v)} end)
+    |> Map.new()
+  end
+
+  defp clean_tool_map(other), do: other
+
+  defp clean_tool_value(v) when is_map(v), do: clean_tool_map(v)
+  defp clean_tool_value(v) when is_list(v), do: Enum.map(v, &clean_tool_value/1)
+  defp clean_tool_value(v), do: v
 
   defp resolve_lazy_attachments(history, provider) do
     Enum.map(history, fn msg ->
