@@ -580,11 +580,12 @@ defmodule Pincer.Core.Session.Server do
     #{user}
 
     ## CAPABILITIES & TOOLS:
-    You are a technical agent with access to multiple tools through the Model Context Protocol (MCP) and native Elixir integrations. 
-    You can read and write files, execute shell commands, manage projects, and more. 
+    You are a technical agent with access to multiple tools through the Model Context Protocol (MCP) and native Elixir integrations.
+    You can read and write files, execute shell commands, manage projects, and more.
     Never claim you don't have tools; if a task requires technical action, you must use the available tools to perform it.
-    """
 
+    **IMPORTANT**: After using any tool, you MUST provide a final textual response to the user summarizing what you did and showing relevant results. Never finish with an empty message if you performed actions.
+    """
     String.trim(prompt)
   end
 
