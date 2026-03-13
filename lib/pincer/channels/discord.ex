@@ -14,6 +14,7 @@ defmodule Pincer.Channels.Discord do
   alias Pincer.Core.Session.Server
   alias Pincer.Core.UX
   alias Pincer.Core.UX.MenuPolicy
+  alias Pincer.Utils.Text
 
   @doc """
   Starts the Discord channel.
@@ -220,17 +221,8 @@ defmodule Pincer.Channels.Discord do
   """
   def markdown_to_discord(text) do
     text
-    |> strip_reasoning()
+    |> Text.strip_reasoning()
     |> String.trim()
-  end
-
-  defp strip_reasoning(text) do
-    text
-    # XML-style blocks
-    |> String.replace(~r/<thought>.*?<\/thought>/is, "")
-    |> String.replace(~r/<thinking>.*?<\/thinking>/is, "")
-    # Prefix style: "think> ... \n\n" or just at the start
-    |> String.replace(~r/^think>.*?(\n\n|\r\n\r\n|$)/is, "")
   end
 
   defmodule Consumer do

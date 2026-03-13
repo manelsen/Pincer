@@ -26,9 +26,9 @@ defmodule Pincer.Utils.Text do
     # 1. Strip reasoning/thinking tags
     cleaned =
       Enum.reduce(@internal_tags, text, fn tag, acc ->
-        # Matches <tag>...</tag> or orphaned tags like <tag> or </tag>
-        # We process matches one by one to check for code region isolation
-        strip_tag_outside_code(acc, tag, code_regions)
+        acc
+        |> strip_tag_block_outside_code(tag, code_regions)
+        |> strip_tag_outside_code(tag, code_regions)
       end)
 
     # 2. Strip downgraded tool call markers (Gemini style)
@@ -38,6 +38,45 @@ defmodule Pincer.Utils.Text do
     |> String.replace(~r/\[Historical context:[^\]]*\]/i, "")
     |> String.trim()
   end
+
+  @doc """
+  Removes user-invisible reasoning blocks from a response while preserving
+  the externally visible answer text.
+  """
+  def strip_reasoning(nil), do: nil
+
+  def strip_reasoning(text) when is_binary(text) do
+    text
+    |> String.replace(~r/<(?:thought|thinking)\b[^>]*>[\s\S]*?<\/(?:thought|thinking)>/i, "")
+    |> String.replace(~r/^think>.*?(?:\n\n|\r\n\r\n|$)/is, "")
+    |> String.trim()
+  end
+
+  def strip_reasoning(other), do: other
+
+  @doc """
+  Formats reasoning blocks for HTML-capable channels while preserving the final answer.
+  """
+  def format_reasoning_html(nil), do: nil
+
+  def format_reasoning_html(text) when is_binary(text) do
+    text
+    |> then(fn current ->
+      Regex.replace(~r/<thought>([\s\S]*?)<\/thought>/i, current, &reasoning_block_html/1,
+        global: true
+      )
+    end)
+    |> then(fn current ->
+      Regex.replace(~r/<thinking>([\s\S]*?)<\/thinking>/i, current, &reasoning_block_html/1,
+        global: true
+      )
+    end)
+    |> then(fn current ->
+      Regex.replace(~r/^.*?think>\s*([\s\S]*)$/i, current, &reasoning_block_html/1)
+    end)
+  end
+
+  def format_reasoning_html(other), do: other
 
   @doc """
   Identifies indices of fenced code blocks (``` ... ```) to avoid stripping content inside them.
@@ -67,6 +106,38 @@ defmodule Pincer.Utils.Text do
     Enum.reduce(matches, text, fn {start, len}, acc ->
       String.slice(acc, 0, start) <> String.slice(acc, start + len..-1//1)
     end)
+  end
+
+  defp strip_tag_block_outside_code(text, tag, regions) do
+    regex = Regex.compile!("<\\s*#{tag}\\b[^>]*>[\\s\\S]*?<\\s*/\\s*#{tag}\\s*>", "i")
+
+    matches =
+      Regex.scan(regex, text, return: :index)
+      |> Enum.map(fn [{start, len}] -> {start, len} end)
+      |> Enum.reject(fn {start, _len} -> inside_code?(start, regions) end)
+      |> Enum.reverse()
+
+    Enum.reduce(matches, text, fn {start, len}, acc ->
+      String.slice(acc, 0, start) <> String.slice(acc, start + len..-1//1)
+    end)
+  end
+
+  defp reasoning_block_html([_full, body]), do: reasoning_block_html(body)
+
+  defp reasoning_block_html(body) when is_binary(body) do
+    escaped =
+      body
+      |> String.trim()
+      |> html_escape()
+
+    "<b>💭 Reasoning</b>\n<pre>#{escaped}</pre>"
+  end
+
+  defp html_escape(text) do
+    text
+    |> String.replace("&", "&amp;")
+    |> String.replace("<", "&lt;")
+    |> String.replace(">", "&gt;")
   end
 
   @doc """
