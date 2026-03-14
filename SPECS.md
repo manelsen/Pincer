@@ -514,6 +514,27 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Existe teste puro cobrindo frases permitidas e negadas.
 2. Greeting curto continua podendo recuperar.
 3. Pergunta factual com stream vazio falha com `:empty_response` sem chamar `chat_completion/2`.
+
+---
+
+## Incremento 2026-03-13 (Classificar Erros de `web_fetch`)
+
+### Objetivo
+- impedir que `web_fetch` despeje dumps brutos de TLS/transporte no contexto do agente
+- devolver mensagens curtas e acionaveis para falhas comuns de fetch
+- separar classificacao pura de erro do caminho com efeito do tool
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.WebFetchError.format/1`
+
+### Regras
+- erro de TLS com `hostname_check_failed` deve virar mensagem curta sobre mismatch de certificado/host.
+- timeout de transporte deve virar mensagem curta de timeout.
+- erros nao classificados continuam com fallback generico.
+
+### Criterios de aceite
+1. Existe teste puro cobrindo hostname mismatch, timeout e fallback generico.
+2. `web_fetch` passa a usar `WebFetchError.format/1`.
 3. Testes relevantes do executor continuam verdes.
   - `access_count`
   - `inserted_at` como desempate

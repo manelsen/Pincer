@@ -35,6 +35,7 @@ defmodule Pincer.Adapters.Tools.Web do
   """
 
   @behaviour Pincer.Ports.Tool
+  alias Pincer.Adapters.Tools.WebFetchError
   alias Pincer.Adapters.Tools.WebVisibility
   require Logger
   import Bitwise
@@ -337,7 +338,7 @@ defmodule Pincer.Adapters.Tools.Web do
         {:error, "Error downloading URL (Status #{status})"}
 
       {:error, reason} ->
-        {:error, "Fetch failed: #{inspect(reason)}"}
+        {:error, WebFetchError.format(reason)}
     end
   end
 
