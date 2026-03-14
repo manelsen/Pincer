@@ -253,6 +253,27 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 
 ---
 
+## Incremento 2026-03-14 (Synthetic Stream Reasoning Flush)
+
+### Objetivo
+- Corrigir perda de resposta visivel quando um provider OpenAI-compatible devolve um stream sintetico em chunk unico contendo `<thinking>...</thinking>` seguido de texto final.
+
+### Escopo
+- `lib/pincer/core/executor.ex`
+- `test/pincer/core/executor_streaming_test.exs`
+
+### Regras
+- Se o filtro de streaming terminar com `buffer` residual no fim do stream, o `Executor` deve descarregar o texto visivel desse buffer antes de resolver o outcome final.
+- O descarte deve preservar a resposta visivel e continuar ocultando reasoning.
+- O fix nao pode reemitir reasoning bruto em `agent_stream_token`.
+
+### Criterios de aceite
+1. Teste end-to-end prova que um chunk unico com `<thinking>...</thinking>\n\nResposta` termina em `executor_finished` com apenas `Resposta`.
+2. O stream parcial nao vaza reasoning bruto nesse caso.
+3. Testes relevantes do executor continuam verdes.
+
+---
+
 ## Incremento 2026-03-09 (Memoria P2: tipos, ranking, forget e busca cruzada)
 
 ### Objetivo

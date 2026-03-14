@@ -82,6 +82,42 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     def provider_config(_provider_id), do: nil
   end
 
+  defmodule SingleChunkThinkingAndAnswerLLM do
+    @behaviour Pincer.Ports.LLM
+
+    @impl true
+    def chat_completion(_messages, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def stream_completion(_messages, _opts) do
+      {:ok,
+       [
+         %{
+           "choices" => [
+             %{
+               "delta" => %{
+                 "content" =>
+                   "<thinking>\nsegredo interno\n</thinking>\n\nOi! Tudo bem? Como posso ajudar hoje?"
+               }
+             }
+           ]
+         }
+       ]}
+    end
+
+    @impl true
+    def list_providers, do: []
+
+    @impl true
+    def list_models(_provider_id), do: []
+
+    @impl true
+    def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def provider_config(_provider_id), do: nil
+  end
+
   defmodule ToolRegistryStub do
     @behaviour Pincer.Ports.ToolRegistry
 
@@ -543,6 +579,20 @@ defmodule Pincer.Core.ExecutorStreamingTest do
 
     assert_receive {:agent_stream_token, "Texto em stream"}, 2_000
     assert_receive {:executor_finished, _history, "Texto em stream", _usage}, 2_000
+  end
+
+  test "executor flushes visible answer from a single chunk that starts with thinking" do
+    history = [%{"role" => "user", "content" => "Ei linda"}]
+
+    Executor.run(self(), "test_single_chunk_thinking_and_answer_session", history,
+      llm_client: SingleChunkThinkingAndAnswerLLM
+    )
+
+    assert_receive {:executor_finished, _history, "Oi! Tudo bem? Como posso ajudar hoje?",
+                    _usage},
+                   2_000
+
+    refute_receive {:agent_stream_token, "segredo interno"}, 200
   end
 
   test "executor synthesizes tool-only response when post-tool turn is fully empty" do

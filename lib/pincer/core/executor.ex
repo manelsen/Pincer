@@ -500,7 +500,7 @@ defmodule Pincer.Core.Executor do
          deps
        ) do
     # State: {full_content, full_reasoning, tool_calls_map, stream_buffer, is_filtering?}
-    {full_content, full_reasoning, full_tool_calls, _, _} =
+    {full_content, full_reasoning, full_tool_calls, buffer, filtering?} =
       Enum.reduce(stream, {"", "", %{}, "", false}, fn chunk,
                                                        {acc_text, acc_reasoning, acc_tools,
                                                         buffer, filtering?} ->
@@ -514,6 +514,9 @@ defmodule Pincer.Core.Executor do
           session_pid
         )
       end)
+
+    full_content =
+      flush_stream_buffer(full_content, buffer, filtering?)
 
     tool_calls_list = format_tool_calls(full_tool_calls)
     content = merge_reasoning_and_content(full_content, full_reasoning)
@@ -620,6 +623,22 @@ defmodule Pincer.Core.Executor do
         {acc_text <> token, "", false}
     end
   end
+
+  defp flush_stream_buffer(acc_text, "", _filtering?), do: acc_text
+
+  defp flush_stream_buffer(acc_text, buffer, true) when is_binary(buffer) do
+    visible_tail =
+      buffer
+      |> Text.strip_reasoning()
+      |> Text.strip_internal_scaffolding()
+
+    case String.trim(visible_tail) do
+      "" -> acc_text
+      _ -> acc_text <> visible_tail
+    end
+  end
+
+  defp flush_stream_buffer(acc_text, _buffer, false), do: acc_text
 
   defp finalize_assistant_message(
          assistant_msg,
