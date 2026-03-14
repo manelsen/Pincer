@@ -398,6 +398,27 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Teste prova que `Browser.spec/0` retorna lista vazia quando `:enable_browser` esta falso.
 2. Teste prova que o registry nativo nao expõe `browser` quando desabilitado.
 3. Teste prova que `browser` volta a aparecer quando habilitado.
+
+---
+
+## Incremento 2026-03-13 (Recuperar `empty_response` no Primeiro Turno)
+
+### Objetivo
+- Evitar erro imediato ao usuario quando o provider encerra o stream vazio em perguntas simples.
+- Tentar um fechamento leve antes de desistir com `:empty_response`.
+
+### Interfaces/Public API
+- `Pincer.Core.Executor`
+
+### Regras
+- Se o stream terminar sem texto final util, sem tools e sem texto visivel em `depth == 0`, o executor deve tentar uma unica recuperacao via `chat_completion`.
+- Essa recuperacao deve usar um caminho leve, sem depender de tools.
+- Se a recuperacao tambem falhar ou continuar vazia, o erro final continua sendo `:empty_response`.
+
+### Criterios de aceite
+1. Teste prova que `stream_completion` vazio seguido de `chat_completion` valido gera `executor_finished`.
+2. Teste prova que, sem recuperacao util, o erro continua `:empty_response`.
+3. `mix test test/pincer/core/executor_empty_response_test.exs` passa.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.
