@@ -41,4 +41,31 @@ defmodule Pincer.Core.ToolResultSummaryTest do
            }) ==
              "Commits:\n- abc1234 Fix bug (alice, 2026-03-11T00:00:00Z)"
   end
+
+  test "summarizes pull request collections from JSON arrays" do
+    assert ToolResultSummary.summarize(%{
+             "name" => "list_prs",
+             "content" =>
+               ~s([{"number":42,"title":"Add feature X","state":"open","html_url":"https://github.com/user/pincer/pull/42"}])
+           }) ==
+             "Pull requests:\n- PR #42 Add feature X (open) https://github.com/user/pincer/pull/42"
+  end
+
+  test "summarizes code search results from JSON objects" do
+    assert ToolResultSummary.summarize(%{
+             "name" => "search_code",
+             "content" =>
+               ~s({"total_count":1,"items":[{"path":"lib/foo.ex","html_url":"https://github.com/user/pincer/blob/main/lib/foo.ex","repository":{"full_name":"user/pincer"}}]})
+           }) ==
+             "Code search (1 matches):\n- user/pincer: lib/foo.ex https://github.com/user/pincer/blob/main/lib/foo.ex"
+  end
+
+  test "summarizes repository collections from JSON arrays" do
+    assert ToolResultSummary.summarize(%{
+             "name" => "list_repos",
+             "content" =>
+               ~s([{"full_name":"user/pincer","description":"AI framework","html_url":"https://github.com/user/pincer"}])
+           }) ==
+             "Repositories:\n- user/pincer - AI framework https://github.com/user/pincer"
+  end
 end

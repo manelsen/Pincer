@@ -687,6 +687,24 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Existe teste puro cobrindo `list_issues` com array JSON.
 2. Existe teste puro cobrindo `list_commits` ou `search_code`.
 3. Existe teste end-to-end do executor provando fallback util apos tool de colecao GitHub/MCP seguido de final vazio.
+
+## Incremento 2026-03-14 (Cobertura de Resumo para PRs, Busca de Codigo e Repos)
+
+### Objetivo
+- travar em teste as outras colecoes GitHub/MCP que ainda faltavam no fallback util
+- garantir que `list_prs`, `search_code` e `list_repos` tambem gerem resposta curta e semantica quando o modelo falhar apos o tool
+
+### Interfaces/Public API
+- `Pincer.Core.ToolResultSummary.summarize/1`
+
+### Regras
+- `list_prs` deve resumir `#numero`, `titulo`, `state` e `url`.
+- `search_code` deve resumir total e os primeiros matches com `repo`, `path` e `url`.
+- `list_repos` deve resumir `full_name`, descricao curta e `html_url`.
+
+### Criterios de aceite
+1. Existem testes puros cobrindo `list_prs`, `search_code` e `list_repos`.
+2. Existe teste end-to-end do executor cobrindo pelo menos um desses casos alem de `list_issues`.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.

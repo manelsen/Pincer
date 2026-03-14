@@ -495,6 +495,7 @@ Status:
 - degraded `tool_only` turns now produce a more useful fallback for successful Git/GitHub tools, instead of collapsing everything into raw previews when the model fails after tool execution
 - that summarization logic now lives in a dedicated pure helper, keeping `ToolOnlyOutcomeFormatter` focused on degraded-response UX rather than per-tool parsing rules
 - the same degraded path now summarizes GitHub/MCP collection results (`list_issues`, `list_prs`, `list_commits`, `search_code`, `list_repos`) into compact semantic lines, which makes empty-final failures far less destructive for real work
+- executor coverage now locks that behavior for both issue-list and code-search GitHub/MCP flows, reducing the risk of regressions back to raw JSON previews
 
 Exit criteria:
 
