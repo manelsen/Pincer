@@ -61,6 +61,15 @@ defmodule Pincer.Adapters.Tools.FileSystemTest do
     assert is_binary(message)
   end
 
+  test "spec tells models to use workspace-relative paths" do
+    spec = FileSystem.spec()
+
+    assert spec.description =~ "workspace-relative paths"
+    assert spec.description =~ "/app/workspaces/..."
+    assert spec.parameters.properties.path.description =~ "Examples: '.', '.pincer'"
+    assert spec.parameters.properties.path.description =~ "Do not use absolute container paths"
+  end
+
   test "search scans directories recursively and returns relative path citations", %{
     context: context
   } do
