@@ -59,7 +59,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     %{
       name: "file_system",
       description:
-        "Manages files and directories safely within the workspace. Prefer read with hashline + anchored_edit for code edits. Use patch only for exact literal replacements.",
+        "Manages files and directories safely within the workspace. Always use workspace-relative paths such as '.', '.pincer', or 'lib/app.ex' instead of absolute container paths like '/app/workspaces/...'. Prefer read with hashline + anchored_edit for code edits. Use patch only for exact literal replacements.",
       parameters: %{
         type: "object",
         properties: %{
@@ -85,7 +85,8 @@ defmodule Pincer.Adapters.Tools.FileSystem do
           },
           path: %{
             type: "string",
-            description: "File or directory path (relative to workspace root)."
+            description:
+              "File or directory path relative to workspace root. Examples: '.', '.pincer', 'lib/app.ex'. Do not use absolute container paths like '/app' or '/app/workspaces/...'."
           },
           content: %{
             type: "string",
