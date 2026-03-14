@@ -11,6 +11,7 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.ContextOverflowRecovery
   alias Pincer.Core.MemoryRecall
+  alias Pincer.Core.PromptAssembly
   alias Pincer.Core.ToolOnlyOutcomeFormatter
   alias Pincer.Core.TurnOutcomePolicy
   alias Pincer.Utils.Text
@@ -180,30 +181,21 @@ defmodule Pincer.Core.Executor do
   end
 
   defp prepare_prompt_history(history, model_override, opts \\ []) do
-    long_term_memory = Process.get(:long_term_memory, "")
-    current_time = DateTime.utc_now() |> DateTime.to_string()
-
     active_provider = get_active_provider(model_override)
-
-    sweet_spot_limit =
-      case Pincer.Ports.LLM.provider_config(active_provider) do
-        %{context_window: cw} when is_integer(cw) -> max(1000, trunc(cw * 0.45))
-        _ -> 8_000
-      end
-
-    safe_limit_scale = Keyword.get(opts, :safe_limit_scale, 1.0)
-    adjusted_limit = max(1000, trunc(sweet_spot_limit * safe_limit_scale))
-
     context_strategy = Keyword.get(Process.get(:executor_run_opts, []), :context_strategy)
 
-    # 1. Prune only once
-    pruned_history = prune_history(history, adjusted_limit, context_strategy: context_strategy)
-
-    # 2. Augment with dynamic context (Memory, Time, Recall)
-    augmented_history = augment_history(pruned_history, long_term_memory, current_time)
-
-    # 3. Resolve lazy attachments
-    resolve_lazy_attachments(augmented_history, active_provider)
+    history
+    |> PromptAssembly.prepare(model_override,
+      long_term_memory: Process.get(:long_term_memory, ""),
+      current_time: DateTime.utc_now() |> DateTime.to_string(),
+      workspace_path: Process.get(:workspace_path, File.cwd!()),
+      llm_client: Pincer.Ports.LLM,
+      storage: Pincer.Ports.Storage,
+      memory_recall: MemoryRecall,
+      safe_limit_scale: Keyword.get(opts, :safe_limit_scale, 1.0),
+      context_strategy: context_strategy
+    )
+    |> resolve_lazy_attachments(active_provider)
   end
 
   defp do_run_loop(
@@ -729,202 +721,6 @@ defmodule Pincer.Core.Executor do
 
       _ ->
         {:error, {:invalid_assistant_message, assistant_msg}}
-    end
-  end
-
-  defp augment_history(history, memory, time) do
-    case history do
-      [%{"role" => "system", "content" => content} = sys | rest] ->
-        workspace_path = Process.get(:workspace_path, File.cwd!())
-
-        runtime_memory =
-          if memory != "" do
-            memory
-          else
-            AgentPaths.read_file(AgentPaths.memory_path(workspace_path))
-          end
-
-        safe_memory = MemoryRecall.sanitize_for_prompt(runtime_memory)
-        {learnings, learnings_count} = fetch_active_learnings()
-
-        recall =
-          MemoryRecall.build(history,
-            workspace_path: workspace_path,
-            learnings_count: learnings_count
-          ).prompt_block
-
-        new_content =
-          if safe_memory != "" do
-            "#{content}\n\n### TEMPORAL CONTEXT\nCURRENT TIME: #{time}\n\n### NARRATIVE MEMORY\n#{safe_memory}#{learnings}#{recall}"
-          else
-            "#{content}\n\n### TEMPORAL CONTEXT\nCURRENT TIME: #{time}#{learnings}#{recall}"
-          end
-
-        [%{sys | "content" => new_content} | rest]
-
-      _ ->
-        history
-    end
-  end
-
-  defp fetch_active_learnings do
-    case Pincer.Ports.Storage.list_recent_learnings(3) do
-      [] ->
-        {"", 0}
-
-      learnings ->
-        formatted =
-          Enum.map_join(learnings, "\n", fn l ->
-            case l.type do
-              :error ->
-                safe_error = MemoryRecall.sanitize_for_prompt(l.error)
-                "- [AVOID ERROR] Tool `#{l.tool}` failed recently: #{safe_error}"
-
-              :learning ->
-                safe_summary = MemoryRecall.sanitize_for_prompt(l.summary)
-                "- [LESSON] #{safe_summary}"
-            end
-          end)
-
-        {"\n\n### RECENT LEARNINGS & ERRORS (Self-Improvement)\nAvoid repeating these recent mistakes:\n#{formatted}",
-         length(learnings)}
-    end
-  end
-
-  # The "Sweet Spot" architecture for complex reasoning:
-  # We preserve the Fixed Injection (System Prompt) and a strict window of recent turns.
-  # "Lost in the Middle" context is dropped. The agent must use GraphMemory to recall old facts.
-  @max_recent_messages 15
-
-  defp prune_history([], _safe_limit, _opts), do: []
-
-  defp prune_history([%{"role" => "system"} = system_msg | rest], safe_limit, opts) do
-    if Keyword.get(opts, :context_strategy) == :conversation_summary and
-         length(rest) > 30 do
-      summarize_and_prune(system_msg, rest, safe_limit)
-    else
-      # 1. Enforce strict episodic window (drop the "Lost in the Middle")
-      recent_messages =
-        if length(rest) > @max_recent_messages do
-          Enum.drop(rest, length(rest) - @max_recent_messages)
-        else
-          rest
-        end
-
-      # 2. Reverse to process newest messages first for the token cap
-      reversed_recent = Enum.reverse(recent_messages)
-
-      # 3. Accumulate tokens backwards
-      {kept_messages, _tokens} =
-        Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
-          msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
-          new_total = acc_tokens + msg_tokens
-
-          # We always keep at least one message (the newest one), even if it's huge
-          if new_total <= safe_limit or acc_msgs == [] do
-            {:cont, {[msg | acc_msgs], new_total}}
-          else
-            {:halt, {acc_msgs, acc_tokens}}
-          end
-        end)
-
-      # 4. Reconstruct chronologically (system prompt + kept episodic memory)
-      [system_msg | kept_messages]
-    end
-  end
-
-  defp prune_history(history, safe_limit, _opts) do
-    # Fallback for histories without a system prompt at the head (usually testing only)
-    recent_messages =
-      if length(history) > @max_recent_messages do
-        Enum.drop(history, length(history) - @max_recent_messages)
-      else
-        history
-      end
-
-    reversed_recent = Enum.reverse(recent_messages)
-
-    {kept_messages, _tokens} =
-      Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
-        msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
-        new_total = acc_tokens + msg_tokens
-
-        if new_total <= safe_limit or acc_msgs == [] do
-          {:cont, {[msg | acc_msgs], new_total}}
-        else
-          {:halt, {acc_msgs, acc_tokens}}
-        end
-      end)
-
-    kept_messages
-  end
-
-  defp summarize_and_prune(system_msg, rest, safe_limit) do
-    recent_count = min(@max_recent_messages, length(rest))
-    recent_messages = Enum.drop(rest, length(rest) - recent_count)
-    to_summarize = Enum.drop(rest, recent_count)
-
-    messages_text =
-      Enum.map_join(to_summarize, "\n", fn msg ->
-        role = msg["role"] || "unknown"
-        content = msg["content"] || ""
-        "#{role}: #{content}"
-      end)
-
-    summary =
-      case summarize_via_llm(messages_text) do
-        {:ok, text} ->
-          text
-
-        _ ->
-          Logger.warning("[EXECUTOR] conversation_summary LLM call failed; skipping summary.")
-          nil
-      end
-
-    if summary do
-      summary_msg = %{
-        "role" => "system",
-        "content" => "## Previous Conversation Summary\n\n#{summary}"
-      }
-
-      reversed_recent = Enum.reverse(recent_messages)
-
-      {kept_messages, _tokens} =
-        Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
-          msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
-          new_total = acc_tokens + msg_tokens
-
-          if new_total <= safe_limit or acc_msgs == [] do
-            {:cont, {[msg | acc_msgs], new_total}}
-          else
-            {:halt, {acc_msgs, acc_tokens}}
-          end
-        end)
-
-      [system_msg, summary_msg | kept_messages]
-    else
-      prune_history([system_msg | rest], safe_limit, [])
-    end
-  end
-
-  defp summarize_via_llm(messages_text) do
-    prompt = [
-      %{
-        "role" => "user",
-        "content" =>
-          "Summarize this conversation in 3-5 sentences, preserving key decisions and context:\n\n#{messages_text}"
-      }
-    ]
-
-    client =
-      case Process.get(:executor_deps) do
-        %{llm_client: c} -> c
-        _ -> Pincer.Ports.LLM
-      end
-
-    case client.chat_completion(prompt, []) do
-      {:ok, %{"content" => content}, _usage} when is_binary(content) -> {:ok, content}
-      _ -> {:error, :summary_failed}
     end
   end
 

@@ -419,6 +419,31 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Teste prova que `stream_completion` vazio seguido de `chat_completion` valido gera `executor_finished`.
 2. Teste prova que, sem recuperacao util, o erro continua `:empty_response`.
 3. `mix test test/pincer/core/executor_empty_response_test.exs` passa.
+
+---
+
+## Incremento 2026-03-13 (Extrair Prompt Assembly do Executor)
+
+### Objetivo
+- Tirar do `Executor` a montagem de prompt que hoje mistura pruning, tempo, memoria narrativa, learnings e recall.
+- Deixar esse comportamento testavel fora do loop de execucao.
+
+### Interfaces/Public API
+- `Pincer.Core.PromptAssembly.prepare/3`
+
+### Regras
+- `PromptAssembly.prepare/3` deve receber `history`, `model_override` e opcoes/dependencias para produzir o `prompt_history` final.
+- O modulo deve encapsular:
+  - calculo do limite seguro por provider
+  - pruning / summary pruning
+  - augmentacao do system prompt com tempo, memoria narrativa, learnings e recall
+  - resolucao de anexos preguiçosos continua no `Executor` por ora
+- O `Executor` deve delegar a montagem de prompt a esse modulo.
+
+### Criterios de aceite
+1. Teste prova que `PromptAssembly.prepare/3` injeta tempo, memoria narrativa, learnings e recall no system prompt.
+2. Teste prova que `Executor` passa a delegar para `PromptAssembly`.
+3. Testes relevantes do executor continuam verdes.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.
