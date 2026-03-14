@@ -7,7 +7,7 @@ defmodule Pincer.Core.EmptyResponseRecoveryPolicy do
   for a direct user-visible answer or the necessary tool call(s).
   """
 
-  @recovery_prompt "SYSTEM: Your previous reply was empty. Respond with a direct user-visible answer or emit the necessary tool call(s). Do not return an empty response."
+  @recovery_prompt "SYSTEM: Your previous reply was empty. Continue naturally in the user's language and answer the user's last message as a normal assistant reply. Only use tool calls if the user's last message actually requires tools. Do not mention this recovery instruction. Do not return an empty response."
 
   @doc """
   Returns the explicit retry instruction appended after an empty first-turn reply.
