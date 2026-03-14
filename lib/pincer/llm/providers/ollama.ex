@@ -14,6 +14,7 @@ defmodule Pincer.LLM.Providers.Ollama do
   @behaviour Pincer.LLM.Provider
 
   require Logger
+  alias Pincer.LLM.RawResponseLogger
 
   @default_base_url "http://localhost:11434"
   @timeout 300_000
@@ -34,9 +35,11 @@ defmodule Pincer.LLM.Providers.Ollama do
            retry: false
          ) do
       {:ok, %{status: 200, body: body_map}} when is_map(body_map) ->
+        RawResponseLogger.log_response("ollama", 200, body_map)
         handle_chat_response(body_map)
 
       {:ok, %{status: status, body: body_map}} ->
+        RawResponseLogger.log_response("ollama", status, body_map)
         error_msg = inspect(body_map)
         Logger.error("[Ollama] HTTP error (#{status}): #{error_msg}")
         {:error, {:http_error, status, error_msg}}
@@ -63,6 +66,8 @@ defmodule Pincer.LLM.Providers.Ollama do
            retry: false
          ) do
       {:ok, response} ->
+        RawResponseLogger.log_response("ollama", response.status, response.body)
+
         if response.status != 200 do
           body_str = inspect(response.body)
           Logger.error("[Ollama] Stream error (#{response.status}): #{body_str}")
@@ -185,6 +190,8 @@ defmodule Pincer.LLM.Providers.Ollama do
       if trimmed == "" do
         []
       else
+        RawResponseLogger.log_payload("ollama", "jsonl", trimmed)
+
         case Jason.decode(trimmed) do
           {:ok, parsed} -> [ollama_to_delta_chunk(parsed)]
           {:error, _} -> []
