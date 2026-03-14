@@ -7,8 +7,9 @@ defmodule Pincer.Core.EmptyResponseRecoveryPolicyTest do
     prompt = EmptyResponseRecoveryPolicy.recovery_prompt()
 
     assert prompt =~ "previous reply was empty"
-    assert prompt =~ "direct user-visible answer"
-    assert prompt =~ "tool call"
+    assert prompt =~ "Continue naturally"
+    assert prompt =~ "user's language"
+    assert prompt =~ "Do not mention this recovery instruction"
   end
 
   test "appends recovery prompt as a user message to retry history" do

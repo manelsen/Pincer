@@ -498,6 +498,7 @@ Status:
 - executor coverage now locks that behavior for both issue-list and code-search GitHub/MCP flows, reducing the risk of regressions back to raw JSON previews
 - empty-response recovery now follows a Nullclaw-style explicit retry contract instead of a regex-gated smalltalk heuristic, which makes the behavior more structural and less language-fragile
 - a follow-up regression fixed the interaction between XML-tool extraction and reasoning sanitization, so explicit empty-response recovery no longer drops visible answers that arrive after a closed `<thinking>` block
+- the explicit retry prompt was then softened into a natural-language continuation contract, reducing the risk of stiff meta-replies that merely acknowledge the recovery instruction
 
 Exit criteria:
 
