@@ -13,6 +13,7 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.EmptyResponseRecoveryPolicy
   alias Pincer.Core.MemoryRecall
   alias Pincer.Core.PromptAssembly
+  alias Pincer.Core.ToolAnswerPatternPolicy
   alias Pincer.Core.ToolOnlyOutcomeFormatter
   alias Pincer.Core.TurnOutcomePolicy
   alias Pincer.Utils.Text
@@ -470,11 +471,19 @@ defmodule Pincer.Core.Executor do
 
   defp reasoning_only_message?(_text), do: false
 
-  defp post_tool_grounding_message do
+  defp post_tool_grounding_message(tool_results) do
+    extra = ToolAnswerPatternPolicy.build(tool_results)
+
     %{
       "role" => "system",
       "content" =>
-        "Ground yourself strictly in the tool outputs above. Do not invent files, results, success, or side effects. If a tool failed, found nothing, or returned limited data, say that plainly."
+        if(
+          extra == "",
+          do:
+            "Ground yourself strictly in the tool outputs above. Do not invent files, results, success, or side effects. If a tool failed, found nothing, or returned limited data, say that plainly.",
+          else:
+            "Ground yourself strictly in the tool outputs above. Do not invent files, results, success, or side effects. If a tool failed, found nothing, or returned limited data, say that plainly.\n\n#{extra}"
+        )
     }
   end
 
@@ -680,7 +689,8 @@ defmodule Pincer.Core.Executor do
         new_logical_history = logical_history ++ [assistant_msg] ++ tool_results
 
         new_prompt_history =
-          prompt_history ++ [assistant_msg] ++ tool_results ++ [post_tool_grounding_message()]
+          prompt_history ++
+            [assistant_msg] ++ tool_results ++ [post_tool_grounding_message(tool_results)]
 
         run_loop_recursive(
           new_logical_history,
