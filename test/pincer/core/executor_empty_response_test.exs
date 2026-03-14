@@ -54,6 +54,36 @@ defmodule Pincer.Core.ExecutorEmptyResponseTest do
     def provider_config(_provider_id), do: nil
   end
 
+  defmodule EmptyFinalRecoveredWithThinkingAndAnswerLLM do
+    @behaviour Pincer.Ports.LLM
+
+    @impl true
+    def chat_completion(_messages, _opts) do
+      {:ok,
+       %{
+         "role" => "assistant",
+         "content" => "<thinking>\nsegredo interno\n</thinking>\n\nOla! Como posso ajudar hoje?"
+       }, nil}
+    end
+
+    @impl true
+    def stream_completion(_messages, _opts) do
+      {:ok, [%{"choices" => [%{"delta" => %{}}]}]}
+    end
+
+    @impl true
+    def list_providers, do: []
+
+    @impl true
+    def list_models(_provider_id), do: []
+
+    @impl true
+    def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def provider_config(_provider_id), do: nil
+  end
+
   defmodule EmptyFinalMustNotRetryLLM do
     @behaviour Pincer.Ports.LLM
 
@@ -115,5 +145,16 @@ defmodule Pincer.Core.ExecutorEmptyResponseTest do
     )
 
     assert_receive :unexpected_chat_retry, 1_000
+  end
+
+  test "executor keeps visible answer when empty-response recovery returns thinking plus answer" do
+    history = [%{"role" => "user", "content" => "Ei linda"}]
+
+    Executor.run(self(), "empty_final_recovered_with_answer_session", history,
+      llm_client: EmptyFinalRecoveredWithThinkingAndAnswerLLM
+    )
+
+    assert_receive {:executor_finished, _history, "Ola! Como posso ajudar hoje?", _usage}, 1_000
+    refute_receive {:executor_failed, _}, 200
   end
 end

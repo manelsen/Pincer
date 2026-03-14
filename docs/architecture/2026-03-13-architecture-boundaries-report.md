@@ -497,6 +497,7 @@ Status:
 - the same degraded path now summarizes GitHub/MCP collection results (`list_issues`, `list_prs`, `list_commits`, `search_code`, `list_repos`) into compact semantic lines, which makes empty-final failures far less destructive for real work
 - executor coverage now locks that behavior for both issue-list and code-search GitHub/MCP flows, reducing the risk of regressions back to raw JSON previews
 - empty-response recovery now follows a Nullclaw-style explicit retry contract instead of a regex-gated smalltalk heuristic, which makes the behavior more structural and less language-fragile
+- a follow-up regression fixed the interaction between XML-tool extraction and reasoning sanitization, so explicit empty-response recovery no longer drops visible answers that arrive after a closed `<thinking>` block
 
 Exit criteria:
 
