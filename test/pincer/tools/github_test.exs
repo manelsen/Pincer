@@ -216,6 +216,16 @@ defmodule Pincer.Adapters.Tools.GitHubTest do
     def token, do: nil
   end
 
+  defmodule UnauthorizedHTTPClient do
+    def get(_url, _opts), do: {:ok, %{status: 401, body: %{"message" => "Bad credentials"}}}
+    def post(_url, _opts), do: {:ok, %{status: 401, body: %{"message" => "Bad credentials"}}}
+  end
+
+  defmodule TimeoutHTTPClient do
+    def get(_url, _opts), do: {:error, %Req.TransportError{reason: :timeout}}
+    def post(_url, _opts), do: {:error, %Req.TransportError{reason: :timeout}}
+  end
+
   # ---------------------------------------------------------------------------
   # Missing-parameter error paths (no HTTP needed)
   # ---------------------------------------------------------------------------
@@ -268,5 +278,35 @@ defmodule Pincer.Adapters.Tools.GitHubTest do
   test "unknown action returns descriptive error" do
     assert {:error, msg} = GitHub.execute(%{"action" => "deploy_everything"})
     assert msg =~ "deploy_everything"
+  end
+
+  test "formats unauthorized GitHub API errors tersely" do
+    prev = Application.get_env(:pincer, :github_http_client)
+    Application.put_env(:pincer, :github_http_client, UnauthorizedHTTPClient)
+
+    on_exit(fn ->
+      case prev do
+        nil -> Application.delete_env(:pincer, :github_http_client)
+        value -> Application.put_env(:pincer, :github_http_client, value)
+      end
+    end)
+
+    assert {:error, msg} = GitHub.execute(%{"action" => "list_repos"})
+    assert msg == "GitHub authentication failed. Check token or scopes."
+  end
+
+  test "formats GitHub transport timeouts tersely" do
+    prev = Application.get_env(:pincer, :github_http_client)
+    Application.put_env(:pincer, :github_http_client, TimeoutHTTPClient)
+
+    on_exit(fn ->
+      case prev do
+        nil -> Application.delete_env(:pincer, :github_http_client)
+        value -> Application.put_env(:pincer, :github_http_client, value)
+      end
+    end)
+
+    assert {:error, msg} = GitHub.execute(%{"action" => "list_repos"})
+    assert msg == "GitHub request timed out."
   end
 end
