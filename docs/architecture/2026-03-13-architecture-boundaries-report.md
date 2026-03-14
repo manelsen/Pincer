@@ -445,6 +445,7 @@ Completed slices:
 - turn outcome classification moved into [Pincer.Core.TurnOutcomePolicy](/home/micelio/git/Pincer/lib/pincer/core/turn_outcome_policy.ex)
 - tool-only degraded-response formatting moved into [Pincer.Core.ToolOnlyOutcomeFormatter](/home/micelio/git/Pincer/lib/pincer/core/tool_only_outcome_formatter.ex)
 - lightweight web capability split into explicit `web_search` and `web_fetch` tool interfaces in [Pincer.Adapters.Tools.Web](/home/micelio/git/Pincer/lib/pincer/tools/web.ex)
+- browser capability is now hidden from the registry when browser infra is disabled, keeping simple URL reads on lightweight web tools
 
 Still open inside Phase 1:
 
