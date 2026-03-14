@@ -226,6 +226,33 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 
 ---
 
+## Incremento 2026-03-14 (Raw Provider Logging)
+
+### Objetivo
+- Registrar o payload bruto devolvido pelos providers antes da normalizacao do adapter.
+- Facilitar diagnostico de respostas vazias, formatos inesperados e diferencas entre providers sem depender do log do `Executor`.
+
+### Escopo
+- `lib/pincer/llm/raw_response_logger.ex`
+- `lib/pincer/llm/providers/openai_compat.ex`
+- `lib/pincer/llm/providers/google.ex`
+- `lib/pincer/llm/providers/anthropic.ex`
+- `lib/pincer/llm/providers/ollama.ex`
+- testes associados
+
+### Regras
+- Adapters que recebem resposta HTTP final devem registrar `status` e `body` bruto no nivel `debug` antes de normalizar ou classificar erro.
+- O caminho JSONL do Ollama deve registrar cada linha bruta nao-vazia antes do decode.
+- O formato do log deve ser consistente e identificavel por provider.
+
+### Criterios de aceite
+1. Existe helper unico para raw logging de providers.
+2. `OpenAICompat.handle_response/1` registra payload bruto antes da normalizacao.
+3. Google, Anthropic e Ollama usam o mesmo helper para logging bruto.
+4. Testes cobrem o helper e uma regressao de wiring em `OpenAICompat`.
+
+---
+
 ## Incremento 2026-03-09 (Memoria P2: tipos, ranking, forget e busca cruzada)
 
 ### Objetivo

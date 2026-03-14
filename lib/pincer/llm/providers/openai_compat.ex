@@ -6,6 +6,7 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
   @behaviour Pincer.LLM.Provider
 
   require Logger
+  alias Pincer.LLM.RawResponseLogger
 
   @timeout 300_000
   @default_context_window 131_072
@@ -189,6 +190,8 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
 
   @doc false
   def handle_response(%Req.Response{status: 200, body: body}) do
+    RawResponseLogger.log_response("openai_compat", 200, body)
+
     case body do
       %{"choices" => [%{"message" => message} | _]} ->
         usage = body["usage"]
@@ -239,6 +242,8 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
 
   @doc false
   def handle_response(%Req.Response{status: status, body: body} = response) do
+    RawResponseLogger.log_response("openai_compat", status, body)
+
     error_msg =
       if is_binary(body) and String.starts_with?(body, "<!") do
         "HTML Error Page (Start: #{String.slice(body, 0, 50)}...)"

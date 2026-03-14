@@ -11,6 +11,7 @@ defmodule Pincer.LLM.Providers.Anthropic do
   @behaviour Pincer.LLM.Provider
 
   require Logger
+  alias Pincer.LLM.RawResponseLogger
 
   @timeout 300_000
 
@@ -95,6 +96,7 @@ defmodule Pincer.LLM.Providers.Anthropic do
              retry: :safe_transient
            ) do
         {:ok, response} ->
+          RawResponseLogger.log_response("anthropic", response.status, response.body)
           handle_response(response)
 
         {:error, reason} ->
