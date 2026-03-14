@@ -359,15 +359,17 @@ defmodule Pincer.Core.Executor do
          deps,
          client_opts
        ) do
-    if depth == 0 and EmptyResponseRecoveryPolicy.allow_chat_retry?(logical_history) do
+    if depth == 0 do
       Logger.warning("[EXECUTOR] Empty streaming response. Retrying lightweight chat completion.")
 
-      case deps.llm_client.chat_completion(prompt_history, client_opts) do
+      retry_history = EmptyResponseRecoveryPolicy.retry_history(prompt_history)
+
+      case deps.llm_client.chat_completion(retry_history, client_opts) do
         {:ok, assistant_msg, usage} ->
           case finalize_assistant_message(
                  assistant_msg,
                  logical_history,
-                 prompt_history,
+                 retry_history,
                  session_id,
                  session_pid,
                  depth,

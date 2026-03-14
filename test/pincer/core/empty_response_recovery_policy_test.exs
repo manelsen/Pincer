@@ -3,23 +3,20 @@ defmodule Pincer.Core.EmptyResponseRecoveryPolicyTest do
 
   alias Pincer.Core.EmptyResponseRecoveryPolicy
 
-  test "allows lightweight retry for greetings and smalltalk" do
-    assert EmptyResponseRecoveryPolicy.allow_chat_retry?([
-             %{"role" => "user", "content" => "Oi"}
-           ])
+  test "returns an explicit recovery prompt" do
+    prompt = EmptyResponseRecoveryPolicy.recovery_prompt()
 
-    assert EmptyResponseRecoveryPolicy.allow_chat_retry?([
-             %{"role" => "user", "content" => "Tudo bom contigo?"}
-           ])
+    assert prompt =~ "previous reply was empty"
+    assert prompt =~ "direct user-visible answer"
+    assert prompt =~ "tool call"
   end
 
-  test "denies lightweight retry for factual or workspace questions" do
-    refute EmptyResponseRecoveryPolicy.allow_chat_retry?([
-             %{"role" => "user", "content" => "O que tem na pasta atual?"}
-           ])
+  test "appends recovery prompt as a user message to retry history" do
+    history = [%{"role" => "user", "content" => "O que tem na pasta atual?"}]
 
-    refute EmptyResponseRecoveryPolicy.allow_chat_retry?([
-             %{"role" => "user", "content" => "O que tem em https://www.cade.com.br?"}
-           ])
+    assert retry_history = EmptyResponseRecoveryPolicy.retry_history(history)
+    assert List.first(retry_history) == hd(history)
+    assert List.last(retry_history)["role"] == "user"
+    assert List.last(retry_history)["content"] =~ "previous reply was empty"
   end
 end

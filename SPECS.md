@@ -495,26 +495,27 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 
 ---
 
-## Incremento 2026-03-13 (Restringir Recuperacao de `empty_response`)
+## Incremento 2026-03-13 (Recuperacao Explicita de `empty_response`)
 
 ### Objetivo
-- impedir que o fallback leve de `empty_response` invente fatos em perguntas factuais
-- manter a recuperacao apenas para smalltalk/greetings de baixo risco
-- tirar essa heuristica do `Executor` e coloca-la em politica pura
+- alinhar a recuperacao de `empty_response` ao padrao do Nullclaw
+- remover a heuristica regex de smalltalk
+- fazer uma unica segunda tentativa com uma instrucao explicita exigindo resposta visivel ou tool call
 
 ### Interfaces/Public API
-- `Pincer.Core.EmptyResponseRecoveryPolicy.allow_chat_retry?/1`
+- `Pincer.Core.EmptyResponseRecoveryPolicy.recovery_prompt/0`
+- `Pincer.Core.EmptyResponseRecoveryPolicy.retry_history/1`
 
 ### Regras
-- a recuperacao leve por `chat_completion` so deve ser tentada no primeiro turno e quando a ultima fala do usuario for smalltalk/greeting.
-- perguntas factuais, requests sobre arquivos/sites/workspace e afins nao devem usar esse retry leve.
-- se a politica negar o retry, o `Executor` deve manter `:empty_response`.
+- a recuperacao leve por `chat_completion` pode ser tentada uma unica vez no primeiro turno quando a resposta final vier vazia.
+- a segunda tentativa deve incluir uma instrucao explicita informando que a resposta anterior foi vazia e exigindo uma resposta visivel ao usuario ou a tool call necessaria.
+- se a segunda tentativa ainda vier vazia, o `Executor` deve manter `:empty_response`.
 
 ### Criterios de aceite
-1. Existe teste puro cobrindo frases permitidas e negadas.
-2. Greeting curto continua podendo recuperar.
-3. Pergunta factual com stream vazio falha com `:empty_response` sem chamar `chat_completion/2`.
-4. O modulo continua compilando em Elixir 1.18, sem depender de regex em atributo de modulo injetado em `Enum.any?/2`.
+1. Existe teste puro cobrindo a instrucao de recuperacao e a montagem do historico de retry.
+2. Pergunta factual tambem pode usar essa unica recuperacao explicita no primeiro turno.
+3. Se a segunda tentativa continuar vazia, o resultado permanece `:empty_response`.
+4. O modulo continua compilando em Elixir 1.18 sem depender de regex em atributo de modulo.
 
 ---
 
