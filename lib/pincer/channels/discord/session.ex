@@ -4,6 +4,7 @@ defmodule Pincer.Channels.Discord.Session do
   One process per active Discord channel that listens to PubSub and sends messages via Nostrum.
   """
   use Pincer.Ports.Channel
+  alias Pincer.Core.ChannelEventPolicy
   alias Pincer.Core.ProjectFlowDelivery
   alias Pincer.Core.StatusDelivery
   alias Pincer.Core.StatusMessagePolicy
@@ -129,7 +130,11 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def handle_info({:agent_error, text}, state) do
-    Pincer.Channels.Discord.send_message("#{state.channel_id}", "❌ **Agent Error**: #{text}")
+    Pincer.Channels.Discord.send_message(
+      "#{state.channel_id}",
+      ChannelEventPolicy.error_message(:discord, text)
+    )
+
     maybe_recover_project_flow(state)
     {:noreply, state}
   end
@@ -163,7 +168,7 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   defp deliver_status(state, text) do
-    if subagent_status?(text) do
+    if ChannelEventPolicy.status_kind(text) == :subagent do
       deliver_subagent_status(state, text)
     else
       Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
@@ -201,12 +206,6 @@ defmodule Pincer.Channels.Discord.Session do
       end
     )
   end
-
-  defp subagent_status?(text) when is_binary(text) do
-    String.contains?(text, "Sub-Agent")
-  end
-
-  defp subagent_status?(_), do: false
 
   defp default_session_id(channel_id), do: "discord_#{channel_id}"
 

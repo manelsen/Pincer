@@ -27,6 +27,7 @@ defmodule Pincer.Core do
       MemoryDiagnostics,
       MemoryObservability,
       ChannelInteractionPolicy,
+      ChannelEventPolicy,
       StreamingPolicy,
       StreamDelivery,
       PromptAssembly,
