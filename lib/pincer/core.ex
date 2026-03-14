@@ -33,6 +33,7 @@ defmodule Pincer.Core do
       PromptAssembly,
       ContextOverflowRecovery,
       TurnOutcomePolicy,
+      ToolResultSummary,
       ToolOnlyOutcomeFormatter,
       ToolAnswerPatternPolicy,
       ResponseEnvelope,

@@ -644,6 +644,27 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 2. Existe teste do tool `github` cobrindo pelo menos um erro HTTP e um de transporte via client injetado.
 3. `github.ex` usa o formatter novo.
 4. O tool obtem o cliente HTTP via configuracao para manter os testes de erro puros e sem monkeypatch global.
+
+## Incremento 2026-03-13 (Resumo Util para `tool_only` de Git/GitHub)
+
+### Objetivo
+- impedir que um turno com tool bem-sucedida de Git/GitHub degrade para um resumo quase inutil quando o modelo falhar no fechamento final
+- entregar um resumo minimo e estruturado ao usuario a partir do proprio resultado da tool
+
+### Interfaces/Public API
+- `Pincer.Core.ToolResultSummary.summarize/1`
+- `Pincer.Core.ToolOnlyOutcomeFormatter.format/1`
+
+### Regras
+- quando houver `tool_only` com sucesso de `git_inspect`, `github`, `get_issue` ou `get_pr`, o formatter deve preferir um resumo util em vez de apenas preview bruto.
+- resultados JSON de `get_issue` e `get_pr` devem ser reduzidos a campos semanticos principais (`number`, `title`, `state`, `url`).
+- `git_inspect` deve priorizar as primeiras linhas nao vazias do resultado, sem despejar diff/log inteiro.
+- a mensagem continua explicitando que o modelo nao fechou a resposta final.
+
+### Criterios de aceite
+1. Existe teste puro cobrindo resumo estruturado para `get_issue` com payload JSON.
+2. Existe teste puro cobrindo resumo util para `git_inspect`.
+3. `ToolOnlyOutcomeFormatter` continua destacando erros de tool quando houver falhas.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.
