@@ -1,6 +1,8 @@
 defmodule Pincer.LLM.Providers.OpenAICompatTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Pincer.LLM.Providers.OpenAICompat
   alias Req.Response
 
@@ -126,6 +128,21 @@ defmodule Pincer.LLM.Providers.OpenAICompatTest do
 
       assert get_in(chunks, [Access.at(0), "choices", Access.at(0), "delta", "content"]) ==
                "<thinking>\nVou responder em portugues.\n</thinking>\n\n"
+    end
+
+    test "logs raw provider payload before normalization" do
+      response = %Response{
+        status: 200,
+        body: %{"choices" => [%{"message" => %{"content" => "oi"}}]}
+      }
+
+      log =
+        capture_log(fn ->
+          assert {:ok, %{"content" => "oi"}, nil} = OpenAICompat.handle_response(response)
+        end)
+
+      assert log =~ "[LLM RAW][openai_compat] status=200 body="
+      assert log =~ "\"content\" => \"oi\""
     end
   end
 end

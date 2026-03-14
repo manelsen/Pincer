@@ -10,6 +10,7 @@ defmodule Pincer.LLM.Providers.Google do
   @behaviour Pincer.LLM.Provider
 
   require Logger
+  alias Pincer.LLM.RawResponseLogger
 
   @timeout 300_000
 
@@ -61,6 +62,7 @@ defmodule Pincer.LLM.Providers.Google do
              retry: :safe_transient
            ) do
         {:ok, response} ->
+          RawResponseLogger.log_response("google", response.status, response.body)
           handle_response(response)
 
         {:error, reason} ->
