@@ -9,6 +9,7 @@ defmodule Pincer.Adapters.Tools.GitInspect do
 
   @behaviour Pincer.Ports.Tool
 
+  alias Pincer.Adapters.Tools.GitInspectError
   alias Pincer.Core.WorkspaceGuard
 
   @max_log_limit 50
@@ -134,11 +135,6 @@ defmodule Pincer.Adapters.Tools.GitInspect do
   defp normalize_limit(_limit), do: 10
 
   defp sanitize_git_error(output) when is_binary(output) do
-    output
-    |> String.trim()
-    |> case do
-      "" -> "Git command failed."
-      message -> message
-    end
+    GitInspectError.format(output)
   end
 end
