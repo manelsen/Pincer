@@ -121,7 +121,7 @@ defmodule Pincer.Adapters.Tools.Web do
 
   defp execute_fetch(%{"url" => url}) do
     case validate_url(url) do
-      {:ok, validated_url} -> do_fetch(validated_url, @max_redirects)
+      {:ok, validated_url} -> do_fetch(validated_url, @max_redirects, http_client: http_client())
       {:error, reason} -> {:error, reason}
     end
   end
@@ -294,11 +294,12 @@ defmodule Pincer.Adapters.Tools.Web do
     end
   end
 
-  defp do_fetch(url, redirects_remaining) do
+  defp do_fetch(url, redirects_remaining, opts) do
     Logger.info("[WEB] Fetching URL: #{url}")
+    http_client = Keyword.fetch!(opts, :http_client)
 
     # Use redirect: false to manually handle redirects for validation
-    case Req.get(url,
+    case http_client.get(url,
            headers: [{"User-Agent", @user_agent}],
            redirect: false,
            receive_timeout: 30_000
@@ -318,7 +319,7 @@ defmodule Pincer.Adapters.Tools.Web do
             target = URI.merge(URI.parse(url), URI.parse(location)) |> URI.to_string()
 
             case validate_url(target) do
-              {:ok, valid_target} -> do_fetch(valid_target, redirects_remaining - 1)
+              {:ok, valid_target} -> do_fetch(valid_target, redirects_remaining - 1, opts)
               {:error, reason} -> {:error, "Redirect to unsafe URL blocked: #{reason}"}
             end
         end
@@ -337,8 +338,45 @@ defmodule Pincer.Adapters.Tools.Web do
       {:ok, %{status: status}} ->
         {:error, "Error downloading URL (Status #{status})"}
 
+      {:error, reason} when redirects_remaining > 0 ->
+        case fallback_url_for(reason, url) do
+          {:ok, fallback_url} ->
+            Logger.warning("[WEB] Retrying fetch with fallback URL: #{fallback_url}")
+            do_fetch(fallback_url, redirects_remaining - 1, opts)
+
+          :error ->
+            {:error, WebFetchError.format(reason)}
+        end
+
       {:error, reason} ->
         {:error, WebFetchError.format(reason)}
+    end
+  end
+
+  defp http_client do
+    Application.get_env(:pincer, :web_http_client, Req)
+  end
+
+  defp fallback_url_for(reason, url) do
+    if WebFetchError.hostname_mismatch?(reason) do
+      case URI.parse(url) do
+        %URI{scheme: "https"} = uri ->
+          fallback_url =
+            uri
+            |> Map.put(:scheme, "http")
+            |> Map.put(:port, if(uri.port == 443, do: nil, else: uri.port))
+            |> URI.to_string()
+
+          case validate_url(fallback_url) do
+            {:ok, valid_url} -> {:ok, valid_url}
+            {:error, _} -> :error
+          end
+
+        _ ->
+          :error
+      end
+    else
+      :error
     end
   end
 

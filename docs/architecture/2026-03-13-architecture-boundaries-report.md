@@ -487,6 +487,7 @@ Status:
 - empty-response lightweight recovery is now explicitly gated to low-risk smalltalk, preventing factual/workspace questions from receiving invented fallback answers
 - `web_fetch` transport failures now pass through a pure formatter, so TLS hostname mismatch and timeout errors stop polluting the tool result with giant transport dumps
 - executor coverage now locks in the degraded `tool_only` path for post-tool empty finals, matching the intended behavior seen in `TurnOutcomePolicy`
+- `web_fetch` now attempts a safe `http://host` fallback after `https://host` fails with TLS hostname mismatch, while preserving URL validation and redirect checks
 
 Exit criteria:
 
