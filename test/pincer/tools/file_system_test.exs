@@ -51,6 +51,16 @@ defmodule Pincer.Adapters.Tools.FileSystemTest do
     assert File.read!(Path.join(root, "drafts/quick.txt")) == "legacy write"
   end
 
+  test "malformed tool payload returns an error instead of crashing", %{context: context} do
+    assert {:error, message} =
+             FileSystem.execute(
+               %{"path" => "docs/file.txt", "new_text" => "replacement only"},
+               context
+             )
+
+    assert is_binary(message)
+  end
+
   test "search scans directories recursively and returns relative path citations", %{
     context: context
   } do
