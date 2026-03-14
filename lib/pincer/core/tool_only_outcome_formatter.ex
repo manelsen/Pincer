@@ -6,6 +6,8 @@ defmodule Pincer.Core.ToolOnlyOutcomeFormatter do
   `TurnOutcomePolicy` and the executor control flow.
   """
 
+  alias Pincer.Core.ToolResultSummary
+
   @max_tools 5
   @max_preview_chars 140
 
@@ -14,6 +16,8 @@ defmodule Pincer.Core.ToolOnlyOutcomeFormatter do
   """
   @spec format([map()]) :: String.t()
   def format(tool_messages) when is_list(tool_messages) do
+    useful_summaries? = Enum.any?(tool_messages, &(ToolResultSummary.summarize(&1) != nil))
+
     used_tools =
       tool_messages
       |> Enum.map(&(&1["name"] || "tool"))
@@ -23,7 +27,7 @@ defmodule Pincer.Core.ToolOnlyOutcomeFormatter do
     tool_summary =
       tool_messages
       |> Enum.take(@max_tools)
-      |> Enum.map(&format_tool_preview/1)
+      |> Enum.map(&format_tool_summary/1)
       |> Enum.join("\n")
 
     failure_notice =
@@ -33,12 +37,26 @@ defmodule Pincer.Core.ToolOnlyOutcomeFormatter do
         "As ferramentas rodaram, mas o assistente nao fechou a resposta final."
       end
 
+    intro =
+      if useful_summaries? do
+        "Consegui obter dados pelas ferramentas, mas o assistente nao transformou isso numa resposta final."
+      else
+        "Nao consegui fechar uma resposta final para esta pergunta."
+      end
+
+    summary_label =
+      if useful_summaries? do
+        "Resumo util obtido das ferramentas:"
+      else
+        "Resumo parcial:"
+      end
+
     """
-    Nao consegui fechar uma resposta final para esta pergunta.
+    #{intro}
     #{failure_notice}
     Ferramentas utilizadas: #{used_tools}
 
-    Resumo parcial:
+    #{summary_label}
     #{tool_summary}
 
     Se quiser, tente reenviar a pergunta ou use /verbose on para mais contexto.
@@ -46,9 +64,9 @@ defmodule Pincer.Core.ToolOnlyOutcomeFormatter do
     |> String.trim()
   end
 
-  defp format_tool_preview(msg) do
+  defp format_tool_summary(msg) do
     tool_name = msg["name"] || "tool"
-    result_preview = preview(msg["content"])
+    result_preview = ToolResultSummary.summarize(msg) || preview(msg["content"])
     "- #{tool_name}: #{result_preview}"
   end
 

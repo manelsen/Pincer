@@ -492,6 +492,8 @@ Status:
 - `git_inspect` stderr now flows through a pure formatter, turning common repository/path/reference failures into short actionable messages
 - the `github` tool now routes common API and transport failures through a pure formatter, replacing raw GitHub/Req error payloads with short actionable messages
 - the `github` tool now reads its HTTP client from configuration, which creates a clean seam for deterministic error-path tests without global HTTP patching
+- degraded `tool_only` turns now produce a more useful fallback for successful Git/GitHub tools, instead of collapsing everything into raw previews when the model fails after tool execution
+- that summarization logic now lives in a dedicated pure helper, keeping `ToolOnlyOutcomeFormatter` focused on degraded-response UX rather than per-tool parsing rules
 
 Exit criteria:
 

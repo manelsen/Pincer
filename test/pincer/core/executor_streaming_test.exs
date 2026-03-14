@@ -274,6 +274,55 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     end
   end
 
+  defmodule MockEmptyAfterGitToolLLM do
+    @behaviour Pincer.Ports.LLM
+
+    @impl true
+    def list_providers, do: []
+
+    @impl true
+    def list_models(_provider_id), do: []
+
+    @impl true
+    def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def provider_config(_provider_id), do: nil
+
+    @impl true
+    def chat_completion(_messages, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def stream_completion(history, _opts) do
+      if Enum.any?(history, &(&1["role"] == "tool")) do
+        {:ok, [%{"choices" => [%{"delta" => %{}}]}]}
+      else
+        {:ok,
+         [
+           %{
+             "choices" => [
+               %{
+                 "delta" => %{
+                   "tool_calls" => [
+                     %{
+                       "index" => 0,
+                       "id" => "call_1",
+                       "function" => %{
+                         "name" => "git_inspect",
+                         "arguments" => "{\"action\": \"status\"}"
+                       }
+                     }
+                   ]
+                 }
+               }
+             ]
+           },
+           %{"choices" => [%{"delta" => %{}}]}
+         ]}
+      end
+    end
+  end
+
   defmodule GitToolRegistryStub do
     @behaviour Pincer.Ports.ToolRegistry
 
@@ -393,6 +442,21 @@ defmodule Pincer.Core.ExecutorStreamingTest do
 
     assert_receive {:sme_tool_use, "git_inspect"}, 2_000
     assert_receive {:executor_finished, _history, "Resumo do git", _usage}, 2_000
+  end
+
+  test "executor returns useful git summary when post-tool final is empty" do
+    history = [%{"role" => "user", "content" => "Check git status"}]
+
+    Executor.run(self(), "test_git_tool_only_summary_session", history,
+      llm_client: MockEmptyAfterGitToolLLM,
+      tool_registry: GitToolRegistryStub
+    )
+
+    assert_receive {:sme_tool_use, "git_inspect"}, 2_000
+    assert_receive {:executor_finished, _history, response, _usage}, 2_000
+    assert response =~ "Consegui obter dados pelas ferramentas"
+    assert response =~ "## main"
+    assert response =~ "M lib/foo.ex"
   end
 
   test "executor keeps roughly 45 percent of provider context for recent history" do

@@ -33,4 +33,35 @@ defmodule Pincer.Core.ToolOnlyOutcomeFormatterTest do
     assert text =~ "Algumas ferramentas falharam"
     assert text =~ "Fetch failed"
   end
+
+  test "extracts useful summary from GitHub issue JSON when final answer is missing" do
+    text =
+      ToolOnlyOutcomeFormatter.format([
+        %{
+          "name" => "get_issue",
+          "content" =>
+            ~s({"number":168,"title":"OpenClaw ecosystem daily report","state":"open","html_url":"https://github.com/duanyytop/agents-radar/issues/168"})
+        }
+      ])
+
+    assert text =~ "Consegui obter dados pelas ferramentas"
+    assert text =~ "Issue #168: OpenClaw ecosystem daily report"
+    assert text =~ "State: open"
+    assert text =~ "github.com/duanyytop/agents-radar/issues/168"
+  end
+
+  test "extracts concise git summary from git_inspect output" do
+    text =
+      ToolOnlyOutcomeFormatter.format([
+        %{
+          "name" => "git_inspect",
+          "content" => "## feature/demo\n M notes.txt\n?? scratch.txt\n"
+        }
+      ])
+
+    assert text =~ "Consegui obter dados pelas ferramentas"
+    assert text =~ "## feature/demo"
+    assert text =~ "M notes.txt"
+    refute text =~ "Ferramentas utilizadas: git_inspect\n\nResumo parcial:"
+  end
 end
