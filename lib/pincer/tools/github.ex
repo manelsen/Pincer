@@ -30,6 +30,7 @@ defmodule Pincer.Adapters.Tools.GitHub do
 
   @behaviour Pincer.Ports.Tool
 
+  alias Pincer.Adapters.Tools.GitHubError
   require Logger
 
   @github_api "https://api.github.com"
@@ -93,7 +94,8 @@ defmodule Pincer.Adapters.Tools.GitHub do
             },
             query: %{
               type: "string",
-              description: "Search query for 'search_code' (e.g. 'authenticate user repo:owner/name')"
+              description:
+                "Search query for 'search_code' (e.g. 'authenticate user repo:owner/name')"
             },
             branch: %{
               type: "string",
@@ -115,7 +117,8 @@ defmodule Pincer.Adapters.Tools.GitHub do
       # Legacy spec kept for backward compatibility
       %{
         name: "get_my_github_repos",
-        description: "Lists repositories of the authenticated GitHub user (legacy — prefer 'github' tool with action='list_repos').",
+        description:
+          "Lists repositories of the authenticated GitHub user (legacy — prefer 'github' tool with action='list_repos').",
         parameters: %{
           type: "object",
           properties: %{
@@ -232,7 +235,14 @@ defmodule Pincer.Adapters.Tools.GitHub do
 
   defp dispatch("create_issue", %{"repo" => repo, "title" => title} = args, token) do
     body_text = Map.get(args, "body", "")
-    labels = args |> Map.get("labels", "") |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+
+    labels =
+      args
+      |> Map.get("labels", "")
+      |> String.split(",")
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
     payload = %{"title" => title, "body" => body_text} |> maybe_put("labels", labels)
 
     case gh_post("/repos/#{repo}/issues", token, payload) do
@@ -319,7 +329,7 @@ defmodule Pincer.Adapters.Tools.GitHub do
   defp gh_get(path, token, params) do
     url = @github_api <> path
 
-    case Req.get(url,
+    case gh_http_client().get(url,
            auth: {:bearer, token},
            params: params,
            headers: [{"Accept", @gh_accept}],
@@ -329,19 +339,19 @@ defmodule Pincer.Adapters.Tools.GitHub do
         {:ok, body}
 
       {:ok, %{status: status, body: body}} ->
-        message = extract_gh_error(body, status)
+        message = GitHubError.format_http(status, body)
         Logger.warning("[GITHUB] GET #{path} → #{status}: #{message}")
         {:error, message}
 
       {:error, reason} ->
-        {:error, "GitHub request failed: #{inspect(reason)}"}
+        {:error, GitHubError.format_transport(reason)}
     end
   end
 
   defp gh_post(path, token, payload) do
     url = @github_api <> path
 
-    case Req.post(url,
+    case gh_http_client().post(url,
            auth: {:bearer, token},
            json: payload,
            headers: [{"Accept", @gh_accept}],
@@ -351,12 +361,12 @@ defmodule Pincer.Adapters.Tools.GitHub do
         {:ok, body}
 
       {:ok, %{status: status, body: body}} ->
-        message = extract_gh_error(body, status)
+        message = GitHubError.format_http(status, body)
         Logger.warning("[GITHUB] POST #{path} → #{status}: #{message}")
         {:error, message}
 
       {:error, reason} ->
-        {:error, "GitHub request failed: #{inspect(reason)}"}
+        {:error, GitHubError.format_transport(reason)}
     end
   end
 
@@ -410,9 +420,6 @@ defmodule Pincer.Adapters.Tools.GitHub do
     """
   end
 
-  defp extract_gh_error(%{"message" => msg}, _status), do: msg
-  defp extract_gh_error(_, status), do: "GitHub API error #{status}"
-
   defp first_line(nil), do: ""
   defp first_line(text), do: text |> String.split("\n") |> List.first() |> String.slice(0, 80)
 
@@ -427,6 +434,7 @@ defmodule Pincer.Adapters.Tools.GitHub do
   # ---------------------------------------------------------------------------
 
   defp gh_client, do: Application.get_env(:pincer, :github_client, __MODULE__.DefaultClient)
+  defp gh_http_client, do: Application.get_env(:pincer, :github_http_client, Req)
 
   defmodule DefaultClient do
     def token, do: System.get_env("GITHUB_PERSONAL_ACCESS_TOKEN")

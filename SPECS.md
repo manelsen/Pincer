@@ -620,7 +620,30 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Existe teste puro cobrindo os erros acima.
 2. `git_inspect` usa `GitInspectError.format/1`.
 3. Regressao funcional cobre `diff` com `target_path` inexistente.
-3. Testes relevantes do executor continuam verdes.
+
+---
+
+## Incremento 2026-03-13 (Classificar Erros do Tool `github`)
+
+### Objetivo
+- trocar erros crus de API/transporte do tool `github` por mensagens curtas e acionaveis
+- tornar o client HTTP do tool injetavel para testes reais de erro
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.GitHubError.format_http/2`
+- `Pincer.Adapters.Tools.GitHubError.format_transport/1`
+
+### Regras
+- `401` deve virar erro curto de autenticacao/token.
+- `403` com rate limit deve virar erro curto de rate limit.
+- `404` deve virar erro curto de recurso nao encontrado/sem acesso.
+- transport timeout deve virar erro curto de timeout.
+
+### Criterios de aceite
+1. Existe teste puro cobrindo `401`, `403 rate limit`, `404` e timeout.
+2. Existe teste do tool `github` cobrindo pelo menos um erro HTTP e um de transporte via client injetado.
+3. `github.ex` usa o formatter novo.
+4. O tool obtem o cliente HTTP via configuracao para manter os testes de erro puros e sem monkeypatch global.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.

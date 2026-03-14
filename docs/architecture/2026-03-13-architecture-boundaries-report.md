@@ -490,6 +490,8 @@ Status:
 - `web_fetch` now attempts a safe `http://host` fallback after `https://host` fails with TLS hostname mismatch, while preserving URL validation and redirect checks
 - post-tool grounding now carries tool-family-specific answer patterns for Git/GitHub flows, teaching the model how to summarize successful `git_inspect` and GitHub results instead of stalling on raw output
 - `git_inspect` stderr now flows through a pure formatter, turning common repository/path/reference failures into short actionable messages
+- the `github` tool now routes common API and transport failures through a pure formatter, replacing raw GitHub/Req error payloads with short actionable messages
+- the `github` tool now reads its HTTP client from configuration, which creates a clean seam for deterministic error-path tests without global HTTP patching
 
 Exit criteria:
 
