@@ -447,6 +447,7 @@ Completed slices:
 - lightweight web capability split into explicit `web_search` and `web_fetch` tool interfaces in [Pincer.Adapters.Tools.Web](/home/micelio/git/Pincer/lib/pincer/tools/web.ex)
 - browser capability is now hidden from the registry when browser infra is disabled, keeping simple URL reads on lightweight web tools
 - first-turn `empty_response` now attempts a lightweight chat recovery before surfacing provider-empty UX
+- prompt pruning and system-context assembly moved out of the executor loop into a dedicated core prompt-assembly seam
 
 Operational impact observed after these slices:
 
@@ -456,7 +457,6 @@ Operational impact observed after these slices:
 
 Still open inside Phase 1:
 
-- isolate memory recall augmentation and prompt assembly behind smaller pure/core seams
 - reduce remaining imperative logic in channel session glue, especially around edge-case delivery/error paths
 - keep removing direct operational assumptions from `Executor`
 
