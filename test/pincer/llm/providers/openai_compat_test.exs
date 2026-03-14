@@ -98,4 +98,34 @@ defmodule Pincer.LLM.Providers.OpenAICompatTest do
                OpenAICompat.handle_response(response)
     end
   end
+
+  describe "handle_response reasoning preservation" do
+    test "preserves reasoning_content in synthetic stream responses" do
+      response = %Response{
+        status: 200,
+        body: %{
+          "choices" => [
+            %{
+              "message" => %{
+                "role" => "assistant",
+                "content" => nil,
+                "reasoning_content" => "Vou responder em portugues."
+              }
+            }
+          ],
+          "usage" => %{"total_tokens" => 42}
+        }
+      }
+
+      assert {:ok, message, %{"total_tokens" => 42}} = OpenAICompat.handle_response(response)
+
+      assert message["content"] ==
+               "<thinking>\nVou responder em portugues.\n</thinking>\n\n"
+
+      chunks = OpenAICompat.message_to_stream_chunks(message)
+
+      assert get_in(chunks, [Access.at(0), "choices", Access.at(0), "delta", "content"]) ==
+               "<thinking>\nVou responder em portugues.\n</thinking>\n\n"
+    end
+  end
 end

@@ -204,6 +204,28 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 
 ---
 
+## Incremento 2026-03-14 (Diagnostico de Empty First Response em OpenAI-Compat)
+
+### Objetivo
+- Eliminar uma causa concreta de `Text length: 0` no primeiro passe de providers OpenAI-compatible usados via stream sintetico.
+- Preservar campos de reasoning single-shot que alguns providers devolvem como `reasoning_content` em vez de `reasoning`.
+
+### Escopo
+- `lib/pincer/llm/providers/openai_compat.ex`
+- `test/pincer/llm/providers/openai_compat_test.exs`
+
+### Regras
+- `handle_response/1` deve tratar `message["reasoning_content"]` como reasoning valido, da mesma forma que `message["reasoning"]` e `message["thought"]`.
+- Quando houver `reasoning_content` e `content` vazio, o adapter deve preencher `content` com bloco `<thinking>...</thinking>` para que o stream sintetico nao vire delta vazio por perda de campo.
+- A mudanca deve ser coberta por teste unitario focado no adapter, sem depender de chamada real ao provider.
+
+### Criterios de aceite
+1. Teste prova que resposta `200` com `message.reasoning_content` e sem `message.content` vira `{:ok, message, usage}` com `content` preenchido por bloco `<thinking>`.
+2. `message_to_stream_chunks/1` continua gerando chunk nao-vazio para esse caso.
+3. Testes relevantes do adapter passam.
+
+---
+
 ## Incremento 2026-03-09 (Memoria P2: tipos, ranking, forget e busca cruzada)
 
 ### Objetivo
