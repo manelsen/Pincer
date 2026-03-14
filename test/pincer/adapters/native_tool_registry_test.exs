@@ -23,12 +23,19 @@ defmodule Pincer.Adapters.NativeToolRegistryTest do
 
   setup do
     original = Application.get_env(:pincer, :mcp_manager)
+    original_enable_browser = Application.get_env(:pincer, :enable_browser)
 
     on_exit(fn ->
       if is_nil(original) do
         Application.delete_env(:pincer, :mcp_manager)
       else
         Application.put_env(:pincer, :mcp_manager, original)
+      end
+
+      if is_nil(original_enable_browser) do
+        Application.delete_env(:pincer, :enable_browser)
+      else
+        Application.put_env(:pincer, :enable_browser, original_enable_browser)
       end
     end)
 
@@ -138,5 +145,45 @@ defmodule Pincer.Adapters.NativeToolRegistryTest do
     assert "web_search" in names
     assert "web_fetch" in names
     refute "web" in names
+  end
+
+  test "registry hides browser tool when browser is disabled" do
+    Application.put_env(:pincer, :mcp_manager, MCPManagerTimeoutStub)
+    Application.put_env(:pincer, :enable_browser, false)
+
+    names =
+      NativeToolRegistry.list_tools()
+      |> Enum.filter(&Map.has_key?(&1, "_module"))
+      |> Enum.map(fn tool ->
+        spec =
+          case tool["function"] do
+            %{"function" => inner} -> inner
+            other -> other
+          end
+
+        spec[:name] || spec["name"]
+      end)
+
+    refute "browser" in names
+  end
+
+  test "registry exposes browser tool when browser is enabled" do
+    Application.put_env(:pincer, :mcp_manager, MCPManagerTimeoutStub)
+    Application.put_env(:pincer, :enable_browser, true)
+
+    names =
+      NativeToolRegistry.list_tools()
+      |> Enum.filter(&Map.has_key?(&1, "_module"))
+      |> Enum.map(fn tool ->
+        spec =
+          case tool["function"] do
+            %{"function" => inner} -> inner
+            other -> other
+          end
+
+        spec[:name] || spec["name"]
+      end)
+
+    assert "browser" in names
   end
 end

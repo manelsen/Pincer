@@ -77,7 +77,8 @@ defmodule Pincer.Adapters.Tools.Web do
       },
       %{
         name: "web_fetch",
-        description: "Download a URL and extract readable text content.",
+        description:
+          "Read a URL and extract readable text content. Prefer this for summarizing or inspecting a page when no interactive browser actions are needed.",
         parameters: %{
           type: "object",
           properties: %{

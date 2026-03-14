@@ -49,7 +49,9 @@ defmodule Pincer.Adapters.Tools.BrowserTest do
   setup do
     StubPool.register(self())
     prev = Application.get_env(:pincer, :browser_pool)
+    prev_enabled = Application.get_env(:pincer, :enable_browser)
     Application.put_env(:pincer, :browser_pool, StubPool)
+    Application.put_env(:pincer, :enable_browser, true)
 
     on_exit(fn ->
       StubPool.unregister()
@@ -57,6 +59,11 @@ defmodule Pincer.Adapters.Tools.BrowserTest do
       case prev do
         nil -> Application.delete_env(:pincer, :browser_pool)
         v -> Application.put_env(:pincer, :browser_pool, v)
+      end
+
+      case prev_enabled do
+        nil -> Application.delete_env(:pincer, :enable_browser)
+        v -> Application.put_env(:pincer, :enable_browser, v)
       end
     end)
 
@@ -88,6 +95,11 @@ defmodule Pincer.Adapters.Tools.BrowserTest do
 
   test "spec/0 marks 'action' as required" do
     assert "action" in get_in(Browser.spec(), [:parameters, :required])
+  end
+
+  test "spec/0 returns no exposed tool when browser is disabled" do
+    Application.put_env(:pincer, :enable_browser, false)
+    assert Browser.spec() == []
   end
 
   # ---------------------------------------------------------------------------
