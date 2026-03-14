@@ -6,11 +6,20 @@ defmodule Pincer.Adapters.Tools.WebFetchError do
   @doc """
   Formats a low-level fetch error into a short, user-facing message.
   """
+  @spec hostname_mismatch?(term()) :: boolean()
+  def hostname_mismatch?(%Req.TransportError{reason: {:tls_alert, {:handshake_failure, details}}}) do
+    details
+    |> IO.iodata_to_binary()
+    |> String.contains?("hostname_check_failed")
+  end
+
+  def hostname_mismatch?(_reason), do: false
+
   @spec format(term()) :: String.t()
   def format(%Req.TransportError{reason: {:tls_alert, {:handshake_failure, details}}}) do
-    details_text = IO.iodata_to_binary(details)
-
-    if String.contains?(details_text, "hostname_check_failed") do
+    if hostname_mismatch?(%Req.TransportError{
+         reason: {:tls_alert, {:handshake_failure, details}}
+       }) do
       "Fetch failed: TLS certificate does not match the requested host."
     else
       "Fetch failed: TLS handshake failed."
