@@ -375,6 +375,29 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Teste prova que `NativeToolRegistry.list_tools/0` expõe `web_search` e `web_fetch`, e nao `web`.
 2. Teste prova que o executor aceita deltas com `tool_call.name == "web_search"`.
 3. Teste prova que `Web.execute/1` despacha corretamente por `tool_name` para `web_search` e `web_fetch`.
+
+---
+
+## Incremento 2026-03-13 (Nao Expor Browser Quando Indisponivel)
+
+### Objetivo
+- Impedir que o modelo escolha `browser` quando a infraestrutura do browser nao esta habilitada.
+- Empurrar leitura simples de URL para `web_fetch`, nao para navegacao interativa.
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.Browser.spec/0`
+- `Pincer.Adapters.NativeToolRegistry.list_tools/0`
+
+### Regras
+- Se `:enable_browser` estiver falso, `Browser.spec/0` nao deve expor nenhum tool.
+- O registry nativo nao deve listar `browser` quando ele estiver indisponivel.
+- A descricao de `browser` deve enfatizar uso interativo.
+- A descricao de `web_fetch` deve enfatizar leitura textual de URL.
+
+### Criterios de aceite
+1. Teste prova que `Browser.spec/0` retorna lista vazia quando `:enable_browser` esta falso.
+2. Teste prova que o registry nativo nao expõe `browser` quando desabilitado.
+3. Teste prova que `browser` volta a aparecer quando habilitado.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.

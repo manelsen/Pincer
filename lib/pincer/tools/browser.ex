@@ -39,66 +39,70 @@ defmodule Pincer.Adapters.Tools.Browser do
 
   @impl true
   def spec do
-    %{
-      name: "browser",
-      description:
-        "Controls a web browser. Navigate pages, click elements, fill forms, extract text, and take screenshots. The browser session persists across calls within the same Pincer session.",
-      parameters: %{
-        type: "object",
-        properties: %{
-          action: %{
-            type: "string",
-            description:
-              "Action to perform: 'navigate', 'click', 'fill', 'press', 'select', 'screenshot', 'extract_text', 'get_attribute', 'evaluate', 'content', or 'close_session'",
-            enum: [
-              "navigate",
-              "click",
-              "fill",
-              "press",
-              "select",
-              "screenshot",
-              "screenshot_inline",
-              "extract_text",
-              "get_attribute",
-              "evaluate",
-              "content",
-              "close_session"
-            ]
+    if Application.get_env(:pincer, :enable_browser, false) do
+      %{
+        name: "browser",
+        description:
+          "Controls an interactive browser session for sites that require navigation, clicks, form filling, screenshots, or dynamic page interaction. Prefer lighter web tools for simple search/fetch tasks.",
+        parameters: %{
+          type: "object",
+          properties: %{
+            action: %{
+              type: "string",
+              description:
+                "Action to perform: 'navigate', 'click', 'fill', 'press', 'select', 'screenshot', 'extract_text', 'get_attribute', 'evaluate', 'content', or 'close_session'",
+              enum: [
+                "navigate",
+                "click",
+                "fill",
+                "press",
+                "select",
+                "screenshot",
+                "screenshot_inline",
+                "extract_text",
+                "get_attribute",
+                "evaluate",
+                "content",
+                "close_session"
+              ]
+            },
+            url: %{
+              type: "string",
+              description: "URL to navigate to (required for 'navigate')"
+            },
+            selector: %{
+              type: "string",
+              description:
+                "CSS or XPath selector (required for 'click', 'fill', 'press', 'select', 'get_attribute'; optional for 'extract_text')"
+            },
+            value: %{
+              type: "string",
+              description: "Value to fill or option to select (required for 'fill', 'select')"
+            },
+            key: %{
+              type: "string",
+              description: "Key to press, e.g. 'Enter', 'Tab', 'Escape' (required for 'press')"
+            },
+            attribute: %{
+              type: "string",
+              description: "HTML attribute name to retrieve (required for 'get_attribute')"
+            },
+            expression: %{
+              type: "string",
+              description: "JavaScript expression to evaluate (required for 'evaluate')"
+            },
+            screenshot_path: %{
+              type: "string",
+              description:
+                "Relative file path within workspace for the screenshot (default: 'screenshots/screenshot.png'). Only used by 'screenshot', not 'screenshot_inline'."
+            }
           },
-          url: %{
-            type: "string",
-            description: "URL to navigate to (required for 'navigate')"
-          },
-          selector: %{
-            type: "string",
-            description:
-              "CSS or XPath selector (required for 'click', 'fill', 'press', 'select', 'get_attribute'; optional for 'extract_text')"
-          },
-          value: %{
-            type: "string",
-            description: "Value to fill or option to select (required for 'fill', 'select')"
-          },
-          key: %{
-            type: "string",
-            description: "Key to press, e.g. 'Enter', 'Tab', 'Escape' (required for 'press')"
-          },
-          attribute: %{
-            type: "string",
-            description: "HTML attribute name to retrieve (required for 'get_attribute')"
-          },
-          expression: %{
-            type: "string",
-            description: "JavaScript expression to evaluate (required for 'evaluate')"
-          },
-          screenshot_path: %{
-            type: "string",
-            description:
-              "Relative file path within workspace for the screenshot (default: 'screenshots/screenshot.png'). Only used by 'screenshot', not 'screenshot_inline'."
-          }
-        },
-        required: ["action"]
+          required: ["action"]
+        }
       }
-    }
+    else
+      []
+    end
   end
 
   @impl true
