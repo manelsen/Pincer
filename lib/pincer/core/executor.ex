@@ -240,16 +240,31 @@ defmodule Pincer.Core.Executor do
     case deps.llm_client.stream_completion(prompt_history, [tools: tools_spec] ++ client_opts) do
       {:ok, stream} ->
         try do
-          handle_stream(
-            stream,
-            logical_history,
-            prompt_history,
-            session_id,
-            session_pid,
-            depth,
-            model_override,
-            deps
-          )
+          case handle_stream(
+                 stream,
+                 logical_history,
+                 prompt_history,
+                 session_id,
+                 session_pid,
+                 depth,
+                 model_override,
+                 deps
+               ) do
+            {:error, :empty_response} ->
+              recover_empty_response(
+                logical_history,
+                prompt_history,
+                session_id,
+                session_pid,
+                depth,
+                model_override,
+                deps,
+                client_opts
+              )
+
+            other ->
+              other
+          end
         rescue
           error in Protocol.UndefinedError ->
             Logger.warning(
@@ -337,6 +352,45 @@ defmodule Pincer.Core.Executor do
         Logger.error("[EXECUTOR] Fallback chat completion failed: #{inspect(reason)}")
         send(session_pid, {:executor_failed, reason})
         {:error, reason}
+    end
+  end
+
+  defp recover_empty_response(
+         logical_history,
+         prompt_history,
+         session_id,
+         session_pid,
+         depth,
+         model_override,
+         deps,
+         client_opts
+       ) do
+    if depth == 0 do
+      Logger.warning("[EXECUTOR] Empty streaming response. Retrying lightweight chat completion.")
+
+      case deps.llm_client.chat_completion(prompt_history, client_opts) do
+        {:ok, assistant_msg, usage} ->
+          case finalize_assistant_message(
+                 assistant_msg,
+                 logical_history,
+                 prompt_history,
+                 session_id,
+                 session_pid,
+                 depth,
+                 model_override,
+                 deps,
+                 usage
+               ) do
+            {:error, :empty_response} -> {:error, :empty_response}
+            other -> other
+          end
+
+        {:error, reason} ->
+          Logger.error("[EXECUTOR] Empty-response recovery failed: #{inspect(reason)}")
+          {:error, :empty_response}
+      end
+    else
+      {:error, :empty_response}
     end
   end
 
