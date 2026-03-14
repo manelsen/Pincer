@@ -179,7 +179,9 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     action = infer_action(args)
     raw_path = get_arg(args, "path") || default_path(action)
 
-    workspace_root = Map.get(context, "workspace_path") || Map.get(context, :workspace_path) || get_workspace_root()
+    workspace_root =
+      Map.get(context, "workspace_path") || Map.get(context, :workspace_path) ||
+        get_workspace_root()
 
     with {:ok, safe_path} <- validate_action_path(action, raw_path, workspace_root),
          {:ok, normalized_args} <- normalize_args_for_action(action, args, workspace_root) do
@@ -195,7 +197,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     cond do
       a = get_arg(args, "action") -> a
       get_arg(args, "content") -> "write"
-      get_arg(args, "old_text") and get_arg(args, "new_text") -> "patch"
+      get_arg(args, "old_text") && get_arg(args, "new_text") -> "patch"
       get_arg(args, "query") -> "search"
       get_arg(args, "path") -> "read"
       true -> nil
@@ -971,7 +973,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp invalid_read_range?(args) do
-    (get_arg(args, "tail_lines") != nil) and
+    get_arg(args, "tail_lines") != nil and
       (get_arg(args, "from_line") != nil or get_arg(args, "line_count") != nil)
   end
 
