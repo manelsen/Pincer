@@ -492,6 +492,28 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Existe teste de boundary cobrindo `lib/pincer/core/ux.ex`.
 2. `mix compile` e os testes de UX/boundary passam.
 3. O comportamento funcional de menus/keyboard permanece inalterado.
+
+---
+
+## Incremento 2026-03-13 (Restringir Recuperacao de `empty_response`)
+
+### Objetivo
+- impedir que o fallback leve de `empty_response` invente fatos em perguntas factuais
+- manter a recuperacao apenas para smalltalk/greetings de baixo risco
+- tirar essa heuristica do `Executor` e coloca-la em politica pura
+
+### Interfaces/Public API
+- `Pincer.Core.EmptyResponseRecoveryPolicy.allow_chat_retry?/1`
+
+### Regras
+- a recuperacao leve por `chat_completion` so deve ser tentada no primeiro turno e quando a ultima fala do usuario for smalltalk/greeting.
+- perguntas factuais, requests sobre arquivos/sites/workspace e afins nao devem usar esse retry leve.
+- se a politica negar o retry, o `Executor` deve manter `:empty_response`.
+
+### Criterios de aceite
+1. Existe teste puro cobrindo frases permitidas e negadas.
+2. Greeting curto continua podendo recuperar.
+3. Pergunta factual com stream vazio falha com `:empty_response` sem chamar `chat_completion/2`.
 3. Testes relevantes do executor continuam verdes.
   - `access_count`
   - `inserted_at` como desempate
