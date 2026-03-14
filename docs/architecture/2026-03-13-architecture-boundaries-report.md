@@ -448,17 +448,18 @@ Completed slices:
 - browser capability is now hidden from the registry when browser infra is disabled, keeping simple URL reads on lightweight web tools
 - first-turn `empty_response` now attempts a lightweight chat recovery before surfacing provider-empty UX
 - prompt pruning and system-context assembly moved out of the executor loop into a dedicated core prompt-assembly seam
+- channel status/error classification moved into [Pincer.Core.ChannelEventPolicy](/home/micelio/git/Pincer/lib/pincer/core/channel_event_policy.ex)
+- WhatsApp session flow now reuses [Pincer.Core.ProjectFlowDelivery](/home/micelio/git/Pincer/lib/pincer/core/project_flow_delivery.ex) instead of owning `ProjectRouter` replay logic directly
 
 Operational impact observed after these slices:
 
 - simple URL-reading requests should no longer select `browser` when browser infra is off; the intended path is the lightweight `web_fetch` tool
 - first-turn/provider-empty greetings now have a recovery attempt before the channel receives provider-empty UX
-- remaining failures in this area are now concentrated around explicit tool/infra classification rather than silent or misleading channel behavior
+- session workers are now materially closer to transport glue, with remaining failures concentrated around explicit tool/infra classification rather than silent or misleading channel behavior
 
 Still open inside Phase 1:
 
-- reduce remaining imperative logic in channel session glue, especially around edge-case delivery/error paths
-- keep removing direct operational assumptions from `Executor`
+- no major blockers remain for the original Phase 1 scope; remaining cleanup now fits better as Phase 2 boundary sharpening
 
 Exit criteria:
 

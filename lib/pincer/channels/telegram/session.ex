@@ -4,6 +4,7 @@ defmodule Pincer.Channels.Telegram.Session do
   One process per active chat that listens to PubSub and sends to the Telegram API.
   """
   use Pincer.Ports.Channel
+  alias Pincer.Core.ChannelEventPolicy
   alias Pincer.Core.ProjectFlowDelivery
   alias Pincer.Core.ResponseEnvelope
   alias Pincer.Core.StatusDelivery
@@ -148,14 +149,22 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def handle_info({:agent_error, text}, state) do
-    Pincer.Channels.Telegram.send_message(state.chat_id, "❌ <b>Agent Error</b>: #{text}")
+    Pincer.Channels.Telegram.send_message(
+      state.chat_id,
+      ChannelEventPolicy.error_message(:telegram, text)
+    )
+
     maybe_recover_project_flow(state)
     {:noreply, state}
   end
 
   @impl true
   def handle_info({:agent_status, text}, state) do
-    {:noreply, if(subagent_status?(text), do: state, else: deliver_status(state, text))}
+    {:noreply,
+     if(ChannelEventPolicy.status_kind(text) == :subagent,
+       do: state,
+       else: deliver_status(state, text)
+     )}
   end
 
   @impl true
@@ -236,12 +245,6 @@ defmodule Pincer.Channels.Telegram.Session do
       send_message: fn text -> Pincer.Channels.Telegram.send_message(state.chat_id, text) end
     )
   end
-
-  defp subagent_status?(text) when is_binary(text) do
-    String.contains?(text, "Sub-Agent")
-  end
-
-  defp subagent_status?(_), do: false
 
   defp default_session_id(chat_id), do: "telegram_#{chat_id}"
 
