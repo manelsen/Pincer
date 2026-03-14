@@ -665,6 +665,28 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Existe teste puro cobrindo resumo estruturado para `get_issue` com payload JSON.
 2. Existe teste puro cobrindo resumo util para `git_inspect`.
 3. `ToolOnlyOutcomeFormatter` continua destacando erros de tool quando houver falhas.
+
+## Incremento 2026-03-14 (Resumo Util para Colecoes GitHub/MCP em `tool_only`)
+
+### Objetivo
+- impedir que respostas degradadas de GitHub/MCP com arrays ou objetos grandes caiam em preview cru quase inutil
+- resumir colecoes de issues, PRs, commits, repos e resultados de busca de codigo em poucas linhas semanticas
+
+### Interfaces/Public API
+- `Pincer.Core.ToolResultSummary.summarize/1`
+- `Pincer.Core.ToolOnlyOutcomeFormatter.format/1`
+
+### Regras
+- `list_issues` e `list_prs` com JSON array devem virar lista curta com `#numero`, `titulo`, `state` e `url`.
+- `list_commits` deve resumir `sha`, primeira linha da mensagem e data/autor quando presentes.
+- `search_code` deve resumir `total_count` e os primeiros itens com `repo`, `path` e `url`.
+- `list_repos` deve resumir `full_name`, descricao curta e `html_url`.
+- o resumo deve limitar quantidade de itens para nao virar dump.
+
+### Criterios de aceite
+1. Existe teste puro cobrindo `list_issues` com array JSON.
+2. Existe teste puro cobrindo `list_commits` ou `search_code`.
+3. Existe teste end-to-end do executor provando fallback util apos tool de colecao GitHub/MCP seguido de final vazio.
   - `access_count`
   - `inserted_at` como desempate
 - Ao retornar memoria semantica, o adapter deve atualizar `access_count` e `last_accessed_at`.
