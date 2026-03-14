@@ -107,15 +107,13 @@ defmodule Pincer.Core.ExecutorEmptyResponseTest do
     refute_receive {:executor_failed, _}, 200
   end
 
-  test "executor does not use lightweight recovery for factual questions" do
+  test "executor also uses explicit recovery for factual first-turn questions" do
     history = [%{"role" => "user", "content" => "O que tem na pasta atual?"}]
 
     Executor.run(self(), "empty_final_no_retry_session", history,
       llm_client: EmptyFinalMustNotRetryLLM
     )
 
-    assert_receive {:executor_failed, :empty_response}, 1_000
-    refute_receive :unexpected_chat_retry, 200
-    refute_receive {:executor_finished, _, _, _}, 200
+    assert_receive :unexpected_chat_retry, 1_000
   end
 end
