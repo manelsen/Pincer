@@ -233,9 +233,9 @@ defmodule Pincer.Utils.Text do
   end
 
   defp strip_stray_xml_closers(text, regions) do
-    # Regex for </function> or </parameter> or </think> etc
-    regex =
-      ~r/<\s*\/\s*(?:function|tool_call|parameter|think|thinking|thought|antthinking|final)\b[^<>]*>/i
+    # Only strip stray closers related to XML tool-call syntax. Reasoning/final
+    # tags are handled by dedicated sanitizers and must remain balanced here.
+    regex = ~r/<\s*\/\s*(?:function|tool_call|parameter)\b[^<>]*>/i
 
     matches =
       Regex.scan(regex, text, return: :index)
