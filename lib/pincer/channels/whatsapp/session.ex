@@ -4,8 +4,8 @@ defmodule Pincer.Channels.WhatsApp.Session do
   """
 
   use Pincer.Ports.Channel
-  alias Pincer.Core.ProjectRouter
-  alias Pincer.Core.Session.Server
+  alias Pincer.Core.ChannelEventPolicy
+  alias Pincer.Core.ProjectFlowDelivery
 
   @impl Pincer.Ports.Channel
   def start_link(%{chat_id: chat_id} = args) do
@@ -113,7 +113,11 @@ defmodule Pincer.Channels.WhatsApp.Session do
 
   @impl true
   def handle_info({:agent_error, text}, state) do
-    Pincer.Channels.WhatsApp.send_message(state.chat_id, "Agent error: #{text}")
+    Pincer.Channels.WhatsApp.send_message(
+      state.chat_id,
+      ChannelEventPolicy.error_message(:whatsapp, text)
+    )
+
     maybe_recover_project_flow(state)
     {:noreply, state}
   end
@@ -147,50 +151,16 @@ defmodule Pincer.Channels.WhatsApp.Session do
     do: Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
 
   defp maybe_advance_project_flow(state) do
-    case ProjectRouter.on_agent_response(state.session_id) do
-      {:next, progress} ->
-        Pincer.Channels.WhatsApp.send_message(
-          state.chat_id,
-          "Project Runner: #{progress.status_message}"
-        )
-
-        _ = Server.process_input(state.session_id, progress.prompt)
-        :ok
-
-      {:completed, progress} ->
-        Pincer.Channels.WhatsApp.send_message(
-          state.chat_id,
-          "Project Runner: #{progress.status_message}"
-        )
-
-        :ok
-
-      :noop ->
-        :ok
-    end
+    ProjectFlowDelivery.on_response(
+      state.session_id,
+      send_message: fn text -> Pincer.Channels.WhatsApp.send_message(state.chat_id, text) end
+    )
   end
 
   defp maybe_recover_project_flow(state) do
-    case ProjectRouter.on_agent_error(state.session_id) do
-      {:retry, progress} ->
-        Pincer.Channels.WhatsApp.send_message(
-          state.chat_id,
-          "Project Runner: #{progress.status_message}"
-        )
-
-        _ = Server.process_input(state.session_id, progress.prompt)
-        :ok
-
-      {:paused, progress} ->
-        Pincer.Channels.WhatsApp.send_message(
-          state.chat_id,
-          "Project Runner: #{progress.status_message}"
-        )
-
-        :ok
-
-      :noop ->
-        :ok
-    end
+    ProjectFlowDelivery.on_error(
+      state.session_id,
+      send_message: fn text -> Pincer.Channels.WhatsApp.send_message(state.chat_id, text) end
+    )
   end
 end

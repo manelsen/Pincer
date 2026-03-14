@@ -443,6 +443,31 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 ### Criterios de aceite
 1. Teste prova que `PromptAssembly.prepare/3` injeta tempo, memoria narrativa, learnings e recall no system prompt.
 2. Teste prova que `Executor` passa a delegar para `PromptAssembly`.
+
+---
+
+## Incremento 2026-03-13 (Centralizar Policy de Eventos de Canal)
+
+### Objetivo
+- reduzir logica imperativa residual nas sessoes de canal
+- centralizar em `Core` a classificacao de status textual e o envelope de erro visivel
+- remover acoplamento direto do worker de WhatsApp com `ProjectRouter` e `Session.Server`
+
+### Interfaces/Public API
+- `Pincer.Core.ChannelEventPolicy.error_message/2`
+- `Pincer.Core.ChannelEventPolicy.status_kind/1`
+
+### Regras
+- `status_kind/1` deve classificar textos de sub-agente sem depender do canal.
+- `error_message/2` deve produzir o envelope user-visible por transporte.
+- Telegram e Discord devem usar `ChannelEventPolicy` no roteamento de `agent_error` e `agent_status`.
+- WhatsApp deve usar `ProjectFlowDelivery` para avancar/recuperar fluxo de projeto.
+
+### Criterios de aceite
+1. Existe teste puro cobrindo `status_kind/1` e `error_message/2`.
+2. Telegram e Discord deixam de manter heuristica local duplicada para status textual e erro.
+3. WhatsApp deixa de depender diretamente de `ProjectRouter` e `Session.Server`.
+4. Testes de sessao relevantes continuam verdes.
 3. Testes relevantes do executor continuam verdes.
   - `access_count`
   - `inserted_at` como desempate
