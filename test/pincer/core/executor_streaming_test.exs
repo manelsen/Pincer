@@ -372,6 +372,55 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     end
   end
 
+  defmodule MockEmptyAfterCodeSearchToolLLM do
+    @behaviour Pincer.Ports.LLM
+
+    @impl true
+    def list_providers, do: []
+
+    @impl true
+    def list_models(_provider_id), do: []
+
+    @impl true
+    def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def provider_config(_provider_id), do: nil
+
+    @impl true
+    def chat_completion(_messages, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def stream_completion(history, _opts) do
+      if Enum.any?(history, &(&1["role"] == "tool")) do
+        {:ok, [%{"choices" => [%{"delta" => %{}}]}]}
+      else
+        {:ok,
+         [
+           %{
+             "choices" => [
+               %{
+                 "delta" => %{
+                   "tool_calls" => [
+                     %{
+                       "index" => 0,
+                       "id" => "call_1",
+                       "function" => %{
+                         "name" => "search_code",
+                         "arguments" => "{\"query\": \"foo repo:user/pincer\"}"
+                       }
+                     }
+                   ]
+                 }
+               }
+             ]
+           },
+           %{"choices" => [%{"delta" => %{}}]}
+         ]}
+      end
+    end
+  end
+
   defmodule GitToolRegistryStub do
     @behaviour Pincer.Ports.ToolRegistry
 
@@ -398,6 +447,21 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     def execute_tool("list_issues", %{"repo" => "user/pincer"}, _context) do
       {:ok,
        ~s([{"number":7,"title":"Bug in scheduler","state":"open","html_url":"https://github.com/user/pincer/issues/7"},{"number":8,"title":"Crash on startup","state":"closed","html_url":"https://github.com/user/pincer/issues/8"}])}
+    end
+  end
+
+  defmodule CodeSearchToolRegistryStub do
+    @behaviour Pincer.Ports.ToolRegistry
+
+    @impl true
+    def list_tools do
+      [%{"name" => "search_code", "description" => "Search GitHub code"}]
+    end
+
+    @impl true
+    def execute_tool("search_code", %{"query" => "foo repo:user/pincer"}, _context) do
+      {:ok,
+       ~s({"total_count":1,"items":[{"path":"lib/foo.ex","html_url":"https://github.com/user/pincer/blob/main/lib/foo.ex","repository":{"full_name":"user/pincer"}}]})}
     end
   end
 
@@ -536,6 +600,21 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     assert response =~ "Consegui obter dados pelas ferramentas"
     assert response =~ "#7 Bug in scheduler"
     assert response =~ "#8 Crash on startup"
+  end
+
+  test "executor returns useful code search summary when post-tool final is empty" do
+    history = [%{"role" => "user", "content" => "Search code"}]
+
+    Executor.run(self(), "test_code_search_tool_only_summary_session", history,
+      llm_client: MockEmptyAfterCodeSearchToolLLM,
+      tool_registry: CodeSearchToolRegistryStub
+    )
+
+    assert_receive {:sme_tool_use, "search_code"}, 2_000
+    assert_receive {:executor_finished, _history, response, _usage}, 2_000
+    assert response =~ "Consegui obter dados pelas ferramentas"
+    assert response =~ "Code search (1 matches)"
+    assert response =~ "user/pincer: lib/foo.ex"
   end
 
   test "executor keeps roughly 45 percent of provider context for recent history" do
