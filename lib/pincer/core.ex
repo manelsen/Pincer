@@ -34,6 +34,7 @@ defmodule Pincer.Core do
       ContextOverflowRecovery,
       TurnOutcomePolicy,
       ToolOnlyOutcomeFormatter,
+      ToolAnswerPatternPolicy,
       ResponseEnvelope,
       StatusMessagePolicy,
       StatusDelivery,

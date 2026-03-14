@@ -575,6 +575,29 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 ### Criterios de aceite
 1. Existe teste cobrindo `https` com hostname mismatch seguido de sucesso por `http`.
 2. O tool retorna o conteudo final em vez de erro bruto nesse caso.
+
+---
+
+## Incremento 2026-03-13 (Ensinar Padroes de Resposta para `git` e `gh`)
+
+### Objetivo
+- ensinar o agente a fechar respostas uteis apos tools de Git/GitHub
+- reduzir casos em que a tool funciona mas o modelo nao produz sintese util
+- colocar esse conhecimento em politica pura de grounding, nao em strings soltas no `Executor`
+
+### Interfaces/Public API
+- `Pincer.Core.ToolAnswerPatternPolicy.build/1`
+
+### Regras
+- quando houver tools de Git/GitHub, o grounding pos-tool deve incluir exemplos de resposta factual.
+- exemplos devem cobrir pelo menos:
+  - `git_inspect status/log/diff/branches`
+  - `github` / `get_issue` / `get_pr` / `list_issues` / `list_prs`
+- o grounding deve instruir a resumir sucesso util em vez de responder com erro generico.
+
+### Criterios de aceite
+1. Existe teste puro cobrindo deteccao de tools de Git/GitHub e o grounding gerado.
+2. O `Executor` passa a anexar essa orientacao ao grounding pos-tool.
 3. Testes relevantes do executor continuam verdes.
   - `access_count`
   - `inserted_at` como desempate

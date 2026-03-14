@@ -119,6 +119,7 @@ defmodule Pincer.Core.ExecutorStreamingTest do
       if Enum.any?(history, &(&1["role"] == "tool")) do
         assert List.last(history)["role"] == "system"
         assert List.last(history)["content"] =~ "Ground yourself strictly"
+        refute List.last(history)["content"] =~ "For Git inspection tools"
 
         {:ok,
          [%{"choices" => [%{"delta" => %{"reasoning_content" => "private reasoning only"}}]}]}
@@ -222,6 +223,71 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     end
   end
 
+  defmodule MockGitToolGroundingLLM do
+    @behaviour Pincer.Ports.LLM
+
+    @impl true
+    def list_providers, do: []
+
+    @impl true
+    def list_models(_provider_id), do: []
+
+    @impl true
+    def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def provider_config(_provider_id), do: nil
+
+    @impl true
+    def chat_completion(_messages, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def stream_completion(history, _opts) do
+      if Enum.any?(history, &(&1["role"] == "tool")) do
+        assert List.last(history)["role"] == "system"
+        assert List.last(history)["content"] =~ "For Git inspection tools"
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "Resumo do git"}}]}]}
+      else
+        {:ok,
+         [
+           %{
+             "choices" => [
+               %{
+                 "delta" => %{
+                   "tool_calls" => [
+                     %{
+                       "index" => 0,
+                       "id" => "call_1",
+                       "function" => %{
+                         "name" => "git_inspect",
+                         "arguments" => "{\"action\": \"status\"}"
+                       }
+                     }
+                   ]
+                 }
+               }
+             ]
+           },
+           %{"choices" => [%{"delta" => %{}}]}
+         ]}
+      end
+    end
+  end
+
+  defmodule GitToolRegistryStub do
+    @behaviour Pincer.Ports.ToolRegistry
+
+    @impl true
+    def list_tools do
+      [%{"name" => "git_inspect", "description" => "Read-only git inspection"}]
+    end
+
+    @impl true
+    def execute_tool("git_inspect", %{"action" => "status"}, _context) do
+      {:ok, "## main\n M lib/foo.ex"}
+    end
+  end
+
   setup do
     Application.ensure_all_started(:pincer)
     old_stream_api_key = System.get_env("STREAM_API_KEY")
@@ -315,6 +381,18 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     assert response =~ "Nao consegui fechar uma resposta final"
     assert response =~ "Ferramentas utilizadas: my_tool"
     assert response =~ "Tool Result"
+  end
+
+  test "executor adds git-specific grounding after git inspection tools" do
+    history = [%{"role" => "user", "content" => "Check git status"}]
+
+    Executor.run(self(), "test_git_grounding_session", history,
+      llm_client: MockGitToolGroundingLLM,
+      tool_registry: GitToolRegistryStub
+    )
+
+    assert_receive {:sme_tool_use, "git_inspect"}, 2_000
+    assert_receive {:executor_finished, _history, "Resumo do git", _usage}, 2_000
   end
 
   test "executor keeps roughly 45 percent of provider context for recent history" do
