@@ -7,12 +7,6 @@ defmodule Pincer.Core.EmptyResponseRecoveryPolicy do
   get an invented answer from a second-pass model completion.
   """
 
-  @smalltalk_patterns [
-    ~r/^\s*(oi|ola|olá|e ai|e aí|hey|hi|hello)\s*[!.?]*\s*$/iu,
-    ~r/^\s*(bom dia|boa tarde|boa noite)\s*[!.?]*\s*$/iu,
-    ~r/^\s*(tudo bom|tudo bem|como vai|como voce esta|como você está|td bem)(\s+contigo)?\s*[?.!]*\s*$/iu
-  ]
-
   @doc """
   Returns true when a lightweight chat retry is safe enough after an empty
   streaming response.
@@ -21,7 +15,7 @@ defmodule Pincer.Core.EmptyResponseRecoveryPolicy do
   def allow_chat_retry?(history) when is_list(history) do
     case last_user_text(history) do
       nil -> false
-      text -> Enum.any?(@smalltalk_patterns, &Regex.match?(&1, text))
+      text -> Enum.any?(smalltalk_patterns(), &Regex.match?(&1, text))
     end
   end
 
@@ -32,5 +26,13 @@ defmodule Pincer.Core.EmptyResponseRecoveryPolicy do
       %{"role" => "user", "content" => text} when is_binary(text) -> String.trim(text)
       _ -> nil
     end)
+  end
+
+  defp smalltalk_patterns do
+    [
+      ~r/^\s*(oi|ola|olá|e ai|e aí|hey|hi|hello)\s*[!.?]*\s*$/iu,
+      ~r/^\s*(bom dia|boa tarde|boa noite)\s*[!.?]*\s*$/iu,
+      ~r/^\s*(tudo bom|tudo bem|como vai|como voce esta|como você está|td bem)(\s+contigo)?\s*[?.!]*\s*$/iu
+    ]
   end
 end

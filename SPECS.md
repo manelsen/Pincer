@@ -514,6 +514,7 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 1. Existe teste puro cobrindo frases permitidas e negadas.
 2. Greeting curto continua podendo recuperar.
 3. Pergunta factual com stream vazio falha com `:empty_response` sem chamar `chat_completion/2`.
+4. O modulo continua compilando em Elixir 1.18, sem depender de regex em atributo de modulo injetado em `Enum.any?/2`.
 
 ---
 
