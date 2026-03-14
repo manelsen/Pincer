@@ -509,6 +509,7 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 ### Regras
 - a recuperacao leve por `chat_completion` pode ser tentada uma unica vez no primeiro turno quando a resposta final vier vazia.
 - a segunda tentativa deve incluir uma instrucao explicita informando que a resposta anterior foi vazia e exigindo uma resposta visivel ao usuario ou a tool call necessaria.
+- a instrucao de recuperacao deve orientar o modelo a continuar naturalmente no idioma do usuario, sem mencionar o proprio mecanismo de recovery.
 - se a segunda tentativa ainda vier vazia, o `Executor` deve manter `:empty_response`.
 
 ### Criterios de aceite
