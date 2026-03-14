@@ -598,6 +598,28 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 ### Criterios de aceite
 1. Existe teste puro cobrindo deteccao de tools de Git/GitHub e o grounding gerado.
 2. O `Executor` passa a anexar essa orientacao ao grounding pos-tool.
+
+---
+
+## Incremento 2026-03-13 (Classificar Erros de `git_inspect`)
+
+### Objetivo
+- trocar stderr cru do Git por mensagens curtas e acionaveis
+- cobrir os erros de leitura de repo mais comuns antes de endurecer `gh`
+
+### Interfaces/Public API
+- `Pincer.Adapters.Tools.GitInspectError.format/1`
+
+### Regras
+- `not a git repository` deve virar mensagem estavel e curta.
+- `pathspec did not match any files` deve virar erro curto de arquivo ausente.
+- `ambiguous argument` / `unknown revision or path` deve virar erro curto de referencia/caminho invalido.
+- fallback generico continua existindo para stderr nao classificado.
+
+### Criterios de aceite
+1. Existe teste puro cobrindo os erros acima.
+2. `git_inspect` usa `GitInspectError.format/1`.
+3. Regressao funcional cobre `diff` com `target_path` inexistente.
 3. Testes relevantes do executor continuam verdes.
   - `access_count`
   - `inserted_at` como desempate

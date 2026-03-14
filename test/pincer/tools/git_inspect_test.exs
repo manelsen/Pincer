@@ -11,8 +11,10 @@ defmodule Pincer.Adapters.Tools.GitInspectTest do
         Path.join(System.tmp_dir!(), "pincer_git_inspect_#{System.unique_integer([:positive])}")
 
       repo = Path.join(root, "repo")
+      plain = Path.join(root, "plain")
 
       File.mkdir_p!(repo)
+      File.mkdir_p!(plain)
 
       System.cmd("git", ["init"], cd: repo, stderr_to_stdout: true)
 
@@ -39,7 +41,7 @@ defmodule Pincer.Adapters.Tools.GitInspectTest do
         File.rm_rf!(root)
       end)
 
-      {:ok, %{root: root, repo: repo, context: %{"workspace_path" => root}}}
+      {:ok, %{root: root, repo: repo, plain: plain, context: %{"workspace_path" => root}}}
     end
   end
 
@@ -90,5 +92,15 @@ defmodule Pincer.Adapters.Tools.GitInspectTest do
              )
 
     assert message =~ "Access denied" or message =~ "traversal"
+  end
+
+  test "status on non-repository path returns short actionable error", %{context: context} do
+    assert {:error, message} =
+             GitInspect.execute(
+               %{"action" => "status", "repo_path" => "plain"},
+               context
+             )
+
+    assert message == "Path is not a Git repository."
   end
 end
