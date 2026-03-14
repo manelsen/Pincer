@@ -194,7 +194,8 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
         usage = body["usage"]
 
         # OpenRouter and some providers send reasoning in separate fields
-        reasoning = message["reasoning"] || message["thought"]
+        reasoning =
+          message["reasoning"] || message["reasoning_content"] || message["thought"]
 
         message =
           if is_binary(reasoning) and reasoning != "" do
