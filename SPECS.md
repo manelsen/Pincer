@@ -554,6 +554,27 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 ### Criterios de aceite
 1. Existe regressao cobrindo tool bem-sucedida seguido de stream vazio.
 2. O `Executor` retorna resposta `tool_only` util em vez de `:empty_response`.
+
+---
+
+## Incremento 2026-03-13 (Recuperar `web_fetch` de Hostname Mismatch)
+
+### Objetivo
+- fazer `web_fetch` resolver casos em que `https://host` falha por mismatch de certificado, mas o site ainda funciona via browser
+- manter a navegacao segura, com validacao de URL e redirects
+
+### Interfaces/Public API
+- sem nova API publica externa
+- seam interno de HTTP client para teste de `web_fetch`
+
+### Regras
+- se `https://host` falhar com `hostname_check_failed`, `web_fetch` pode tentar uma vez `http://host`.
+- redirects continuam sendo validados por `validate_url/1`.
+- o fallback nao pode pular as protecoes SSRF existentes.
+
+### Criterios de aceite
+1. Existe teste cobrindo `https` com hostname mismatch seguido de sucesso por `http`.
+2. O tool retorna o conteudo final em vez de erro bruto nesse caso.
 3. Testes relevantes do executor continuam verdes.
   - `access_count`
   - `inserted_at` como desempate
