@@ -176,6 +176,52 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     def provider_config(_provider_id), do: nil
   end
 
+  defmodule MockEmptyAfterToolLLM do
+    @behaviour Pincer.Ports.LLM
+
+    @impl true
+    def list_providers, do: []
+
+    @impl true
+    def list_models(_provider_id), do: []
+
+    @impl true
+    def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def provider_config(_provider_id), do: nil
+
+    @impl true
+    def chat_completion(_messages, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def stream_completion(history, _opts) do
+      if Enum.any?(history, &(&1["role"] == "tool")) do
+        {:ok, [%{"choices" => [%{"delta" => %{}}]}]}
+      else
+        {:ok,
+         [
+           %{
+             "choices" => [
+               %{
+                 "delta" => %{
+                   "tool_calls" => [
+                     %{
+                       "index" => 0,
+                       "id" => "call_1",
+                       "function" => %{"name" => "my_tool", "arguments" => "{\"arg\": \"val\"}"}
+                     }
+                   ]
+                 }
+               }
+             ]
+           },
+           %{"choices" => [%{"delta" => %{}}]}
+         ]}
+      end
+    end
+  end
+
   setup do
     Application.ensure_all_started(:pincer)
     old_stream_api_key = System.get_env("STREAM_API_KEY")
@@ -254,6 +300,21 @@ defmodule Pincer.Core.ExecutorStreamingTest do
 
     assert_receive {:agent_stream_token, "Texto em stream"}, 2_000
     assert_receive {:executor_finished, _history, "Texto em stream", _usage}, 2_000
+  end
+
+  test "executor synthesizes tool-only response when post-tool turn is fully empty" do
+    history = [%{"role" => "user", "content" => "Run tool"}]
+
+    Executor.run(self(), "test_empty_after_tool_session", history,
+      llm_client: MockEmptyAfterToolLLM,
+      tool_registry: ToolRegistryStub
+    )
+
+    assert_receive {:sme_tool_use, "my_tool"}, 2_000
+    assert_receive {:executor_finished, _history, response, _usage}, 2_000
+    assert response =~ "Nao consegui fechar uma resposta final"
+    assert response =~ "Ferramentas utilizadas: my_tool"
+    assert response =~ "Tool Result"
   end
 
   test "executor keeps roughly 45 percent of provider context for recent history" do

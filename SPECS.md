@@ -535,6 +535,25 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 ### Criterios de aceite
 1. Existe teste puro cobrindo hostname mismatch, timeout e fallback generico.
 2. `web_fetch` passa a usar `WebFetchError.format/1`.
+
+---
+
+## Incremento 2026-03-13 (Forcar `tool_only` apos Turno Final Vazio)
+
+### Objetivo
+- impedir que um turno pos-tool com resposta final vazia escape como `:empty_response`
+- garantir degradacao consistente para `tool_only` quando ja existem resultados de ferramenta
+
+### Interfaces/Public API
+- sem nova API publica; ajuste no fechamento do `Pincer.Core.Executor`
+
+### Regras
+- se `depth > 0` e ja houver mensagens `tool` no historico logico, resposta final vazia deve resultar em `tool_only`.
+- isso vale mesmo quando nao houve `streamed_text` user-visible.
+
+### Criterios de aceite
+1. Existe regressao cobrindo tool bem-sucedida seguido de stream vazio.
+2. O `Executor` retorna resposta `tool_only` util em vez de `:empty_response`.
 3. Testes relevantes do executor continuam verdes.
   - `access_count`
   - `inserted_at` como desempate
