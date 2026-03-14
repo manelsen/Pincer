@@ -485,6 +485,7 @@ Status:
 - started on `2026-03-13`, with `Pincer.Core.UX` promoted to an explicit sub-boundary
 - `Pincer.Core` still re-exports `UX.MenuPolicy` and `UX.ModelKeyboard` as a temporary bridge while `Channels` continues to consume them through the parent core boundary
 - empty-response lightweight recovery is now explicitly gated to low-risk smalltalk, preventing factual/workspace questions from receiving invented fallback answers
+- `web_fetch` transport failures now pass through a pure formatter, so TLS hostname mismatch and timeout errors stop polluting the tool result with giant transport dumps
 
 Exit criteria:
 
