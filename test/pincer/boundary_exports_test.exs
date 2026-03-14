@@ -3,6 +3,7 @@ defmodule Pincer.BoundaryExportsTest do
 
   @boundary_files [
     {"lib/pincer/core.ex", [:Pincer, :Core]},
+    {"lib/pincer/core/ux.ex", [:Pincer, :Core, :UX]},
     {"lib/pincer/infra.ex", [:Pincer, :Infra]},
     {"lib/pincer/ports.ex", [:Pincer, :Ports]}
   ]

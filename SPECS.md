@@ -468,6 +468,30 @@ Este relatório consolida as especificações técnicas das bibliotecas essencia
 2. Telegram e Discord deixam de manter heuristica local duplicada para status textual e erro.
 3. WhatsApp deixa de depender diretamente de `ProjectRouter` e `Session.Server`.
 4. Testes de sessao relevantes continuam verdes.
+
+---
+
+## Incremento 2026-03-13 (Introduzir Sub-boundary `Pincer.Core.UX`)
+
+### Objetivo
+- iniciar a Phase 2 com um fence semantico pequeno e de baixo risco
+- tirar `UX.MenuPolicy` e `UX.ModelKeyboard` do exportao do boundary `Pincer.Core`
+- transformar `Pincer.Core.UX` em sub-boundary responsavel por seus modulos de UX
+
+### Interfaces/Public API
+- `Pincer.Core.UX`
+- `Pincer.Core.UX.MenuPolicy`
+- `Pincer.Core.UX.ModelKeyboard`
+
+### Regras
+- `Pincer.Core.UX` deve declarar `use Boundary` e exportar `MenuPolicy` e `ModelKeyboard`.
+- `Pincer.Core` deve continuar exportando `UX` e pode manter re-export temporario de `MenuPolicy` e `ModelKeyboard` enquanto `Channels` ainda depende desses modulos via `Core`.
+- O teste de regressao de exports deve cobrir o novo boundary.
+
+### Criterios de aceite
+1. Existe teste de boundary cobrindo `lib/pincer/core/ux.ex`.
+2. `mix compile` e os testes de UX/boundary passam.
+3. O comportamento funcional de menus/keyboard permanece inalterado.
 3. Testes relevantes do executor continuam verdes.
   - `access_count`
   - `inserted_at` como desempate

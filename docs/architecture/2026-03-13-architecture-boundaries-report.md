@@ -480,6 +480,11 @@ Actions:
 - split `Pincer.Adapters` into sharper sub-boundaries with explicit deps
 - classify more leaf modules instead of relying only on umbrellas
 
+Status:
+
+- started on `2026-03-13`, with `Pincer.Core.UX` promoted to an explicit sub-boundary
+- `Pincer.Core` still re-exports `UX.MenuPolicy` and `UX.ModelKeyboard` as a temporary bridge while `Channels` continues to consume them through the parent core boundary
+
 Exit criteria:
 
 - the majority of important modules belong to a semantically precise boundary

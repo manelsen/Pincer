@@ -5,6 +5,9 @@ defmodule Pincer.Core.UX do
   This module keeps user-facing command ergonomics in the core so adapters can
   render the same interaction model without becoming the source of truth.
   """
+  use Boundary,
+    deps: [Pincer.Core, Pincer.Ports],
+    exports: [MenuPolicy, ModelKeyboard]
 
   @behaviour Pincer.Ports.UserMenu
 
