@@ -448,6 +448,12 @@ Completed slices:
 - browser capability is now hidden from the registry when browser infra is disabled, keeping simple URL reads on lightweight web tools
 - first-turn `empty_response` now attempts a lightweight chat recovery before surfacing provider-empty UX
 
+Operational impact observed after these slices:
+
+- simple URL-reading requests should no longer select `browser` when browser infra is off; the intended path is the lightweight `web_fetch` tool
+- first-turn/provider-empty greetings now have a recovery attempt before the channel receives provider-empty UX
+- remaining failures in this area are now concentrated around explicit tool/infra classification rather than silent or misleading channel behavior
+
 Still open inside Phase 1:
 
 - isolate memory recall augmentation and prompt assembly behind smaller pure/core seams
