@@ -180,7 +180,9 @@ defmodule Pincer.Utils.Text do
             {n_start, n_len} = name_idx
             String.slice(content, n_start, n_len)
           else
-            infer_tool_name(args)
+            # Try to extract tool name embedded as text before first tag in body
+            # e.g. <tool_call>safe_shell<arg_key>command</arg_key>...
+            extract_embedded_name(body) || infer_tool_name(args)
           end
 
         call = %{
@@ -209,10 +211,35 @@ defmodule Pincer.Utils.Text do
     # Support both <parameter=NAME> and <parameter name="NAME"> formats
     param_regex = ~r/<parameter(?:=|\s+name="?)([a-zA-Z0-9_-]+)"?>(.*?)<\/parameter>/is
 
-    Regex.scan(param_regex, body)
-    |> Enum.reduce(%{}, fn [_, key, val], acc ->
-      Map.put(acc, key, String.trim(val))
-    end)
+    results =
+      Regex.scan(param_regex, body)
+      |> Enum.reduce(%{}, fn [_, key, val], acc ->
+        Map.put(acc, key, String.trim(val))
+      end)
+
+    if Enum.empty?(results) do
+      # Fall back to <arg_key>KEY</arg_key><arg_value>VALUE</arg_value> format
+      keys =
+        Regex.scan(~r/<arg_key>(.*?)<\/arg_key>/is, body)
+        |> Enum.map(fn [_, k] -> String.trim(k) end)
+
+      values =
+        Regex.scan(~r/<arg_value>(.*?)<\/arg_value>/is, body)
+        |> Enum.map(fn [_, v] -> String.trim(v) end)
+
+      Enum.zip(keys, values) |> Map.new()
+    else
+      results
+    end
+  end
+
+  # Tries to extract a tool name embedded as plain text at the start of a body,
+  # before any XML tags. Handles formats like <tool_call>safe_shell<arg_key>...
+  defp extract_embedded_name(body) do
+    case Regex.run(~r/\A\s*([a-zA-Z][a-zA-Z0-9_-]*)\s*(?:<|\z)/, body) do
+      [_, name] when name != "" -> name
+      _ -> nil
+    end
   end
 
   # Infers what Pincer tool best matches the provided parameter payload
