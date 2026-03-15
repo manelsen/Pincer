@@ -51,7 +51,7 @@ llm:
     default_model: "kimi-k2.5-free"
   openrouter:
     base_url: "https://openrouter.ai/api/v1/chat/completions"
-    default_model: "openrouter/free"
+    default_model: "google/gemini-2.0-flash-exp:free"
   provider: "z_ai"
   z_ai:
     base_url: "https://api.z.ai/api/coding/paas/v4/chat/completions"
