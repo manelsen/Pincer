@@ -301,7 +301,7 @@ defmodule Pincer.Core.Orchestration.Blackboard do
     do: if(p = Process.whereis(:blackboard_journaler), do: send(p, {:journal, msg}))
 
   defp journal_loop do
-    File.mkdir_p!("memory")
+    :ok = File.mkdir_p("memory")
     {:ok, file} = File.open(@journal_file, [:append, :raw, :binary, :delayed_write])
     receive_loop(file)
   end
