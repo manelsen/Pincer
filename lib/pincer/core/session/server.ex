@@ -306,6 +306,13 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
+  def handle_info({:sme_tool_use, tools}, state) when is_list(tools) do
+    joined = Enum.join(tools, "\n")
+    publish(state.session_id, {:agent_status, "🛠️ Usando ferramentas:\n#{joined}"})
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info({:sme_tool_use, tools}, state) do
     publish(state.session_id, {:agent_status, "🛠️ Usando ferramentas: #{tools}"})
     {:noreply, state}
@@ -315,11 +322,7 @@ defmodule Pincer.Core.Session.Server do
   def handle_info({:approval_required, call_id, command}, state) do
     Logger.info("[SESSION] #{state.session_id} Approval required for #{call_id}: #{command}")
 
-    publish(
-      state.session_id,
-      {:agent_status,
-       "⚠️ **Aprovação necessária**\n\nO agente quer executar:\n```\n#{command}\n```\n\nResponda **Aprovo** ou **Rejeito**."}
-    )
+    publish(state.session_id, {:approval_ui, call_id, command})
 
     {:noreply, %{state | pending_approval: {call_id, command}}}
   end

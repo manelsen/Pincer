@@ -188,6 +188,26 @@ defmodule Pincer.Channels.Telegram.Session do
   end
 
   @impl true
+  def handle_info({:approval_ui, _call_id, command}, state) do
+    text = "<b>⚠️ Aprovação necessária</b>\n\nO agente quer executar:\n<pre>#{command}</pre>"
+
+    buttons = [
+      [
+        %Telegex.Type.InlineKeyboardButton{text: "✅ Aprovo", callback_data: "appr:y"},
+        %Telegex.Type.InlineKeyboardButton{text: "❌ Rejeito", callback_data: "appr:n"}
+      ]
+    ]
+
+    Pincer.Channels.Telegram.send_message(
+      state.chat_id,
+      text,
+      reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: buttons}
+    )
+
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info(_msg, state), do: {:noreply, state}
 
   defp session_status(session_id) do
@@ -242,7 +262,7 @@ defmodule Pincer.Channels.Telegram.Session do
   defp extract_tool_names(@tool_prefix <> rest) do
     rest
     |> String.trim()
-    |> String.split(~r/\s*,\s*/)
+    |> String.split(~r/[\n,]\s*/)
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
   end
