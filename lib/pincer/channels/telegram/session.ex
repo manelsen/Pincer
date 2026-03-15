@@ -5,6 +5,7 @@ defmodule Pincer.Channels.Telegram.Session do
   """
   use Pincer.Ports.Channel
   alias Pincer.Core.ChannelEventPolicy
+  alias Pincer.Core.ChannelInteractionPolicy
   alias Pincer.Core.ProjectFlowDelivery
   alias Pincer.Core.ResponseEnvelope
   alias Pincer.Core.StatusDelivery
@@ -189,19 +190,18 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def handle_info({:approval_ui, _call_id, command}, state) do
-    text = "<b>⚠️ Aprovação necessária</b>\n\nO agente quer executar:\n<pre>#{command}</pre>"
+    text = ChannelEventPolicy.approval_message(:telegram, command)
 
-    buttons = [
-      [
-        %Telegex.Type.InlineKeyboardButton{text: "✅ Aprovo", callback_data: "appr:y"},
-        %Telegex.Type.InlineKeyboardButton{text: "❌ Rejeito", callback_data: "appr:n"}
-      ]
-    ]
+    buttons =
+      ChannelInteractionPolicy.approval_button_spec()
+      |> Enum.map(fn {label, payload} ->
+        %Telegex.Type.InlineKeyboardButton{text: label, callback_data: payload}
+      end)
 
     Pincer.Channels.Telegram.send_message(
       state.chat_id,
       text,
-      reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: buttons}
+      reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: [buttons]}
     )
 
     {:noreply, state}

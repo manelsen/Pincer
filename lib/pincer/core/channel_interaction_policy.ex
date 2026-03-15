@@ -57,6 +57,21 @@ defmodule Pincer.Core.ChannelInteractionPolicy do
   def menu_id(channel), do: build(channel, "show_menu")
 
   @doc """
+  Returns the channel-agnostic button spec for a tool approval request.
+
+  Each element is a `{label, payload}` tuple. The payload strings are the
+  canonical ones recognised by `parse/2` (`"appr:y"` / `"appr:n"`).
+
+  Channel adapters map this list to their native button types, e.g.:
+  - Telegram: `%Telegex.Type.InlineKeyboardButton{text: label, callback_data: payload}`
+  - Discord: `%{type: 2, label: label, custom_id: payload, style: 1}`
+  """
+  @spec approval_button_spec() :: [{label :: String.t(), payload :: String.t()}]
+  def approval_button_spec do
+    [{"✅ Aprovo", "appr:y"}, {"❌ Rejeito", "appr:n"}]
+  end
+
+  @doc """
   Parses and validates a callback/custom ID payload for a given channel.
   """
   @spec parse(channel(), any()) :: parse_result()
