@@ -501,12 +501,14 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   @doc false
   def persist_offset(path, offset) when is_binary(path) and is_integer(offset) and offset >= 0 do
-    path
-    |> Path.dirname()
-    |> File.mkdir_p!()
-
-    File.write!(path, "#{offset}\n")
-    :ok
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         :ok <- File.write(path, "#{offset}\n") do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.warning("[TELEGRAM] Failed to persist offset to #{path}: #{inspect(reason)}")
+        :ok
+    end
   end
 
   @impl GenServer
@@ -875,24 +877,31 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         %{status: 200, body: body} when is_binary(body) ->
           # Save temp file with correct extension
           temp_file = "/tmp/pincer_media_#{file_id}#{ext}"
-          File.write!(temp_file, body)
-          file_size = byte_size(body)
 
-          result =
-            if file_size > @groq_max_audio_bytes do
-              Logger.info(
-                "[TELEGRAM] Media file too large for Groq (#{file_size} bytes). Splitting..."
-              )
+          case File.write(temp_file, body) do
+            {:error, reason} ->
+              Logger.error("[TELEGRAM] Failed to write temp audio file: #{inspect(reason)}")
+              {:error, :write_failed}
 
-              process_large_audio(temp_file, file_id)
-            else
-              # Call LLM Port for transcription
-              Pincer.Ports.LLM.transcribe_audio(temp_file, provider: "groq_whisper")
-            end
+            :ok ->
+              file_size = byte_size(body)
 
-          # Clean up
-          File.rm(temp_file)
-          result
+              result =
+                if file_size > @groq_max_audio_bytes do
+                  Logger.info(
+                    "[TELEGRAM] Media file too large for Groq (#{file_size} bytes). Splitting..."
+                  )
+
+                  process_large_audio(temp_file, file_id)
+                else
+                  # Call LLM Port for transcription
+                  Pincer.Ports.LLM.transcribe_audio(temp_file, provider: "groq_whisper")
+                end
+
+              # Clean up
+              File.rm(temp_file)
+              result
+          end
 
         _ ->
           {:error, :download_failed}
@@ -1447,8 +1456,11 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         )
 
       code ->
+        old_session_id = session_context_for_chat(chat_id, "private").session_id
+
         case Pairing.approve_code(:telegram, chat_id, code) do
           :ok ->
+            Pincer.Core.Session.Supervisor.stop_session(old_session_id)
             Pincer.Channels.Telegram.send_message(chat_id, pairing_success_message(chat_id))
 
           {:error, :not_pending} ->
