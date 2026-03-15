@@ -726,7 +726,11 @@ defmodule Pincer.Core.Executor do
 
         tool_names = if tool_names == "", do: "unknown_tool", else: tool_names
         Logger.info("[EXECUTOR] LLM decided to use tools: #{tool_names}")
-        send(session_pid, {:sme_tool_use, tool_names})
+
+        tool_descriptions =
+          Enum.map(normalized_tool_calls, &tool_call_description/1)
+
+        send(session_pid, {:sme_tool_use, tool_descriptions})
 
         tool_results =
           Enum.map(normalized_tool_calls, fn call ->
@@ -1076,23 +1080,27 @@ defmodule Pincer.Core.Executor do
     end
   end
 
-  # Check 2: any single tool name appearing 10+ times in the last 15 assistant turns.
+  # Check 2: any single (name+args) pair appearing 10+ times in the last 15 assistant turns.
+  # Using the pair instead of name alone avoids false positives when the same tool is legitimately
+  # called with different arguments (e.g., debugging by trying different commands).
   defp high_frequency_loop?(history) do
-    recent_names =
+    recent_pairs =
       history
       |> Enum.take(-15)
       |> Enum.flat_map(fn
         %{"tool_calls" => calls} when not is_nil(calls) ->
-          Enum.map(calls, fn tc -> get_in(tc, ["function", "name"]) end)
+          Enum.map(calls, fn tc ->
+            {get_in(tc, ["function", "name"]), get_in(tc, ["function", "arguments"])}
+          end)
 
         _ ->
           []
       end)
-      |> Enum.reject(&is_nil/1)
+      |> Enum.reject(fn {name, _} -> is_nil(name) end)
 
     Enum.any?(
-      Enum.frequencies(recent_names),
-      fn {_tool, count} -> count >= 10 end
+      Enum.frequencies(recent_pairs),
+      fn {_pair, count} -> count >= 10 end
     )
   end
 
@@ -1101,6 +1109,59 @@ defmodule Pincer.Core.Executor do
   end
 
   defp tool_call_name(_), do: nil
+
+  defp tool_call_description(tool_call) when is_map(tool_call) do
+    name = tool_call_name(tool_call) || "unknown"
+
+    raw_args = get_in(tool_call, ["function", "arguments"]) || %{}
+
+    args =
+      cond do
+        is_map(raw_args) -> raw_args
+        is_binary(raw_args) -> Jason.decode!(raw_args)
+        true -> %{}
+      end
+
+    summarize_tool_call(name, args)
+  rescue
+    _ -> tool_call_name(tool_call) || "unknown"
+  end
+
+  defp tool_call_description(_), do: "unknown"
+
+  defp summarize_tool_call("run_command", %{"command" => cmd}),
+    do: "run_command: #{truncate_desc(cmd, 70)}"
+
+  defp summarize_tool_call("file_system", %{"action" => action, "path" => path}),
+    do: "file_system #{action}: #{truncate_desc(path, 60)}"
+
+  defp summarize_tool_call("file_system", %{"action" => action}),
+    do: "file_system: #{action}"
+
+  defp summarize_tool_call("read_file", %{"path" => path}),
+    do: "read_file: #{truncate_desc(path, 70)}"
+
+  defp summarize_tool_call("write_file", %{"path" => path}),
+    do: "write_file: #{truncate_desc(path, 70)}"
+
+  defp summarize_tool_call(name, args) when map_size(args) == 0, do: name
+
+  defp summarize_tool_call(name, args) do
+    first_val =
+      args
+      |> Map.values()
+      |> List.first()
+      |> to_string()
+      |> truncate_desc(60)
+
+    "#{name}: #{first_val}"
+  end
+
+  defp truncate_desc(str, max) when is_binary(str) do
+    if String.length(str) > max, do: String.slice(str, 0, max) <> "…", else: str
+  end
+
+  defp truncate_desc(val, max), do: val |> to_string() |> truncate_desc(max)
 
   defp get_active_provider(model_override) do
     if model_override do
