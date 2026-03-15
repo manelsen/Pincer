@@ -64,7 +64,8 @@ defmodule Pincer.Core.Session.Server do
       input_buffer: [],
       debounce_timer: nil,
       llm_client: llm_client,
-      watcher_pid: nil
+      watcher_pid: nil,
+      pending_approval: nil
     }
 
     # 4. Start Graph Watcher for this workspace
@@ -311,6 +312,19 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
+  def handle_info({:approval_required, call_id, command}, state) do
+    Logger.info("[SESSION] #{state.session_id} Approval required for #{call_id}: #{command}")
+
+    publish(
+      state.session_id,
+      {:agent_status,
+       "⚠️ **Aprovação necessária**\n\nO agente quer executar:\n```\n#{command}\n```\n\nResponda **Aprovo** ou **Rejeito**."}
+    )
+
+    {:noreply, %{state | pending_approval: {call_id, command}}}
+  end
+
+  @impl true
   def handle_info(msg, state) do
     Logger.debug("[SESSION] #{state.session_id} received unexpected message: #{inspect(msg)}")
     {:noreply, state}
@@ -452,15 +466,44 @@ defmodule Pincer.Core.Session.Server do
 
   @impl true
   def handle_call({:process_input, %IncomingMessage{} = input}, _from, state) do
-    # Cancel previous timer if exists
-    if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
+    case state.pending_approval do
+      {call_id, _command} ->
+        text = content_to_text(input)
+        normalized = text |> String.downcase() |> String.trim()
 
-    # For buffering, we collect the text from the incoming message
-    new_buffer = state.input_buffer ++ [input.text]
-    # Wait 1200ms for more chunks before flushing (safer for high latency)
-    new_timer = Process.send_after(self(), :flush_input, 1200)
+        decision =
+          cond do
+            normalized in ["aprovo", "sim", "yes", "approve", "ok", "s", "y"] -> :approved
+            normalized in ["rejeito", "não", "nao", "no", "reject", "n"] -> :rejected
+            true -> nil
+          end
 
-    {:reply, {:ok, :buffered}, %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
+        if decision do
+          if is_pid(state.worker_pid) and Process.alive?(state.worker_pid) do
+            send(state.worker_pid, {:tool_approval_result, call_id, decision})
+          end
+
+          {:reply, {:ok, :approval_sent}, %{state | pending_approval: nil}}
+        else
+          publish(
+            state.session_id,
+            {:agent_status, "⚠️ Aprovação pendente. Responda **Aprovo** ou **Rejeito**."}
+          )
+
+          {:reply, {:ok, :buffered}, state}
+        end
+
+      nil ->
+        # Cancel previous timer if exists
+        if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
+
+        # For buffering, we collect the text from the incoming message
+        new_buffer = state.input_buffer ++ [input.text]
+        # Wait 1200ms for more chunks before flushing (safer for high latency)
+        new_timer = Process.send_after(self(), :flush_input, 1200)
+
+        {:reply, {:ok, :buffered}, %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
+    end
   end
 
   def handle_call({:process_input, input}, from, state) when is_binary(input) do
