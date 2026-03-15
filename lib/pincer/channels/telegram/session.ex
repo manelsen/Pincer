@@ -261,7 +261,7 @@ defmodule Pincer.Channels.Telegram.Session do
       [name | _] = group -> "#{name} ×#{length(group)}"
     end)
     |> Enum.join(" → ")
-    |> then(&"⚙️ #{&1}")
+    |> then(&"<blockquote>⚙️ #{&1}</blockquote>")
   end
 
   defp reset_tool_state(state) do
