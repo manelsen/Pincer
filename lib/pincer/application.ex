@@ -109,6 +109,9 @@ defmodule Pincer.Application do
   @spec start(Application.start_type(), term()) :: Supervisor.on_start()
   def start(_type, _args) do
     File.mkdir_p!("logs")
+    # Logger starts early (before project config is applied) so its handler may still
+    # use the default OTP template. Reconfigure it now that config is fully loaded.
+    :logger.update_handler_config(:default, :formatter, Logger.default_formatter())
     Pincer.Infra.Config.load()
 
     repo_config = Pincer.Infra.Config.get(:repo)

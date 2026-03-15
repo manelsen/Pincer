@@ -69,23 +69,9 @@ config :logger,
   level: :debug,
   colors: [enabled: true, info: :cyan, warn: :yellow, error: :red, debug: :magenta]
 
-config :logger, :console,
+config :logger, :default_formatter,
   format: {Pincer.Utils.LoggerFormatter, :format},
   metadata: [:session_id, :project_id, :module]
-
-# Handlers de log (Console e Arquivo)
-config :logger, :handlers, [
-  %{
-    id: :file_log,
-    module: :logger_std_h,
-    config: %{
-      type: {:file, ~c"logs/server.log"},
-      max_no_bytes: 10_000_000,
-      max_no_files: 5,
-      compress_on_rotate: true
-    }
-  }
-]
 
 config :pincer, Pincer.Infra.Repo,
   adapter: Ecto.Adapters.Postgres,
