@@ -11,48 +11,42 @@ defmodule Pincer.Adapters.Tools.ExternalKnowledge do
   def spec do
     [
       %{
-        "type" => "function",
-        "function" => %{
-          "name" => "ingest_external_knowledge",
-          "description" =>
-            "Ingests a piece of external knowledge (like documentation, release notes, or code examples) into the long-term vector memory. Use this after researching new technologies (like Gleam or Go 1.26) via GitHub or Web.",
-          "parameters" => %{
-            "type" => "object",
-            "properties" => %{
-              "source" => %{
-                "type" => "string",
-                "description" =>
-                  "The source of the information (e.g., 'GitHub: odin-lang/Odin', 'Gleam Docs')."
-              },
-              "content" => %{
-                "type" => "string",
-                "description" => "The actual text content to memorize."
-              }
+        name: "ingest_external_knowledge",
+        description:
+          "Ingests a piece of external knowledge (like documentation, release notes, or code examples) into the long-term vector memory. Use this after researching new technologies (like Gleam or Go 1.26) via GitHub or Web.",
+        parameters: %{
+          type: "object",
+          properties: %{
+            source: %{
+              type: "string",
+              description:
+                "The source of the information (e.g., 'GitHub: odin-lang/Odin', 'Gleam Docs')."
             },
-            "required" => ["source", "content"]
-          }
+            content: %{
+              type: "string",
+              description: "The actual text content to memorize."
+            }
+          },
+          required: ["source", "content"]
         }
       },
       %{
-        "type" => "function",
-        "function" => %{
-          "name" => "search_external_knowledge",
-          "description" =>
-            "Searches the external knowledge base for information about APIs, languages, or documentation previously ingested.",
-          "parameters" => %{
-            "type" => "object",
-            "properties" => %{
-              "query" => %{
-                "type" => "string",
-                "description" => "The semantic search query."
-              },
-              "limit" => %{
-                "type" => "integer",
-                "default" => 5
-              }
+        name: "search_external_knowledge",
+        description:
+          "Searches the external knowledge base for information about APIs, languages, or documentation previously ingested.",
+        parameters: %{
+          type: "object",
+          properties: %{
+            query: %{
+              type: "string",
+              description: "The semantic search query."
             },
-            "required" => ["query"]
-          }
+            limit: %{
+              type: "integer",
+              default: 5
+            }
+          },
+          required: ["query"]
         }
       }
     ]
@@ -98,5 +92,27 @@ defmodule Pincer.Adapters.Tools.ExternalKnowledge do
       {:error, reason} ->
         {:error, "Embedding generation failed: #{inspect(reason)}"}
     end
+  end
+
+  def execute(%{"tool_name" => tool_name} = args) do
+    required =
+      case tool_name do
+        "ingest_external_knowledge" -> ["source", "content"]
+        "search_external_knowledge" -> ["query"]
+        _ -> []
+      end
+
+    missing = Enum.reject(required, &Map.has_key?(args, &1))
+
+    if missing != [] do
+      {:error, "#{tool_name} is missing required parameters: #{Enum.join(missing, ", ")}"}
+    else
+      {:error, "Unknown external knowledge tool: #{tool_name}"}
+    end
+  end
+
+  def execute(args) do
+    {:error,
+     "external_knowledge called without 'tool_name'. Got keys: #{inspect(Map.keys(args))}"}
   end
 end
