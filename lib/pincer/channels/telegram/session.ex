@@ -127,6 +127,8 @@ defmodule Pincer.Channels.Telegram.Session do
     text_with_usage =
       ResponseEnvelope.build(:telegram, text, usage, Map.get(session_status, :usage_display))
 
+    state = reset_tool_state(state)
+
     if text_with_usage != "" do
       state =
         StreamDelivery.handle_final(
@@ -214,9 +216,58 @@ defmodule Pincer.Channels.Telegram.Session do
     ]
   end
 
+  @tool_prefix "🛠️ Usando ferramentas:"
+  @tool_window_size 8
+
+  defp deliver_status(state, @tool_prefix <> _ = text) do
+    new_names = extract_tool_names(text)
+    updated_calls = append_tool_calls(state.tool_calls, new_names, @tool_window_size)
+    rendered = render_tool_window(updated_calls)
+
+    %{state | tool_calls: updated_calls}
+    |> StatusDelivery.deliver(
+      rendered,
+      send: fn content -> Pincer.Channels.Telegram.send_message(state.chat_id, content) end,
+      edit: fn message_id, content ->
+        Pincer.Channels.Telegram.update_message(state.chat_id, message_id, content)
+      end
+    )
+  end
+
   defp deliver_status(state, text) do
     Pincer.Channels.Telegram.send_message(state.chat_id, text)
     state
+  end
+
+  defp extract_tool_names(@tool_prefix <> rest) do
+    rest
+    |> String.trim()
+    |> String.split(~r/\s*,\s*/)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  defp append_tool_calls(calls, new_names, window_size) do
+    (calls ++ new_names) |> Enum.take(-window_size)
+  end
+
+  defp render_tool_window([]), do: ""
+
+  defp render_tool_window(calls) do
+    calls
+    |> Enum.chunk_by(& &1)
+    |> Enum.map(fn
+      [name] -> name
+      [name | _] = group -> "#{name} ×#{length(group)}"
+    end)
+    |> Enum.join(" → ")
+    |> then(&"⚙️ #{&1}")
+  end
+
+  defp reset_tool_state(state) do
+    state
+    |> Map.put(:tool_calls, [])
+    |> Map.merge(StatusMessagePolicy.initial_state())
   end
 
   defp deliver_subagent_dashboard(state, nil), do: state
@@ -265,7 +316,8 @@ defmodule Pincer.Channels.Telegram.Session do
           chat_id: chat_id,
           session_id: session_id,
           preview_suppressed: false,
-          subagent_progress_tracker: %{}
+          subagent_progress_tracker: %{},
+          tool_calls: []
         },
         StatusMessagePolicy.initial_state()
       ),
