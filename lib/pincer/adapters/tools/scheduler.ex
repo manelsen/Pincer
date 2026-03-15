@@ -6,6 +6,7 @@ defmodule Pincer.Adapters.Tools.Scheduler do
   @behaviour Pincer.Ports.Tool
   alias Pincer.Ports.Cron
 
+  @impl true
   def spec do
     [
       %{
@@ -56,6 +57,7 @@ defmodule Pincer.Adapters.Tools.Scheduler do
     ]
   end
 
+  @impl true
   def execute(%{
         "tool_name" => "schedule_reminder",
         "message" => message,
@@ -110,5 +112,29 @@ defmodule Pincer.Adapters.Tools.Scheduler do
       {:ok, _} -> {:ok, "Job #{id} removed successfully."}
       {:error, _} -> {:error, "Could not find or remove job #{id}."}
     end
+  end
+
+  def execute(%{"tool_name" => tool_name} = args) do
+    required =
+      case tool_name do
+        "schedule_reminder" -> ["message", "seconds", "session_id"]
+        "schedule_cron_job" -> ["name", "cron_expression", "prompt", "session_id"]
+        "delete_cron_job" -> ["id"]
+        _ -> []
+      end
+
+    missing = Enum.reject(required, &Map.has_key?(args, &1))
+
+    if missing != [] do
+      {:error,
+       "#{tool_name} is missing required parameters: #{Enum.join(missing, ", ")}"}
+    else
+      {:error, "Unknown scheduler tool: #{tool_name}"}
+    end
+  end
+
+  def execute(args) do
+    {:error,
+     "schedule tool called without 'tool_name'. Got keys: #{inspect(Map.keys(args))}"}
   end
 end
