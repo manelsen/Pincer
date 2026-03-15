@@ -17,7 +17,7 @@ defmodule Pincer.Utils.LoggerFormatter do
     msg_str = message |> IO.iodata_to_binary() |> String.trim_trailing()
 
     # Example Output: 22:15:01 [INFO] [session:123] Hello world
-    "#{gray}#{time}#{reset} #{level_tag} #{meta}#{msg_str}"
+    "#{gray}#{time}#{reset} #{level_tag} #{meta}#{msg_str}\n"
   end
 
   defp format_level(level) do
