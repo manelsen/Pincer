@@ -699,8 +699,9 @@ defmodule Pincer.Core.Session.Server do
         send(pid, {:assistant_reply_finished, resp})
         PubSub.broadcast("session:#{sid}", {:agent_response, resp, usage})
 
-      _ ->
-        :ok
+      {:error, reason} ->
+        Logger.error("[SESSION] #{sid} quick_assistant_reply failed: #{inspect(reason)}")
+        PubSub.broadcast("session:#{sid}", {:agent_response, "❌ #{ErrorUX.friendly(reason, scope: :executor)}"})
     end
   end
 
@@ -713,8 +714,8 @@ defmodule Pincer.Core.Session.Server do
           PubSub.broadcast("session:#{sid}", {:agent_response, resp, usage})
         end
 
-      _ ->
-        :ok
+      {:error, reason} ->
+        Logger.error("[SESSION] #{sid} evaluate_blackboard_update failed: #{inspect(reason)}")
     end
   end
 
