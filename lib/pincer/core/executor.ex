@@ -913,14 +913,8 @@ defmodule Pincer.Core.Executor do
     }
   end
 
-  defp handle_approval(call_id, command, session_pid, session_id, registry) do
+  defp handle_approval(call_id, command, _session_pid, session_id, registry) do
     Logger.warning("[EXECUTOR] Waiting for approval for: #{command}")
-
-    send(
-      session_pid,
-      {:sme_status, :executor,
-       "⚠️ **APPROVAL REQUIRED** (id: #{call_id}): The command `#{command}` is potentially dangerous. Approve or Reject."}
-    )
 
     Pincer.Infra.PubSub.broadcast(
       "session:#{session_id}",
