@@ -47,7 +47,7 @@ defmodule Pincer.BoundaryExportsTest do
   end
 
   test "web decoder module is namespaced inside adapters boundary" do
-    source = File.read!("lib/pincer/tools/web.ex")
+    source = File.read!("lib/pincer/adapters/tools/web.ex")
 
     assert source =~ "defmodule Pincer.Adapters.Tools.Web.HtmlEntities do"
     refute source =~ "defmodule HtmlEntities do"

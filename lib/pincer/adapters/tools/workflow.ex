@@ -349,8 +349,16 @@ defmodule Pincer.Adapters.Tools.Workflow do
 
   defp save_tasks(workspace, tasks) do
     path = tasks_path(workspace)
-    File.mkdir_p!(Path.dirname(path))
-    File.write!(path, Jason.encode!(tasks, pretty: true))
+
+    with :ok <- File.mkdir_p(Path.dirname(path)),
+         {:ok, json} <- Jason.encode(tasks, pretty: true),
+         :ok <- File.write(path, json) do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.warning("[WORKFLOW] Failed to persist tasks: #{inspect(reason)}")
+        :ok
+    end
   end
 
   defp next_task_id([]), do: "T1"

@@ -4,6 +4,7 @@ defmodule Pincer.Adapters.Tools.Timer do
   """
   @behaviour Pincer.Ports.Tool
 
+  @impl true
   def spec do
     %{
       name: "schedule_timer_delay",
@@ -26,6 +27,7 @@ defmodule Pincer.Adapters.Tools.Timer do
     }
   end
 
+  @impl true
   def execute(%{"prompt" => msg, "seconds" => sec, "session_id" => sid}) do
     # Spawns a lightweight OTP background process that sleeps and triggers the Session
     Task.start(fn ->
@@ -45,5 +47,10 @@ defmodule Pincer.Adapters.Tools.Timer do
     end)
 
     {:ok, "Timer activated! Will run in exactly #{sec} seconds independently."}
+  end
+
+  def execute(args) do
+    missing = ["prompt", "seconds"] |> Enum.reject(&Map.has_key?(args, &1))
+    {:error, "schedule_timer_delay is missing required parameters: #{Enum.join(missing, ", ")}. Please provide 'prompt' (string) and 'seconds' (integer)."}
   end
 end

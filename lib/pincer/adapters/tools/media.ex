@@ -182,30 +182,26 @@ defmodule Pincer.Adapters.Tools.Media do
   defp run_action("tts", %{"text" => text} = args, workspace, _client) do
     rel_out = Map.get(args, "output_path", "media/speech.mp3")
     abs_out = resolve_path(rel_out, workspace)
-    File.mkdir_p!(Path.dirname(abs_out))
-
     voice = Map.get(args, "voice", @tts_default_voice)
     provider_key = Map.get(args, "provider") || tts_provider()
 
-    case resolve_tts_config(provider_key) do
-      {:ok, api_key, base_url, model} ->
-        body = %{"model" => model, "input" => text, "voice" => voice}
-        url = tts_endpoint(base_url)
-
-        case Req.post(url, json: body, auth: {:bearer, api_key}, receive_timeout: 60_000) do
-          {:ok, %{status: 200, body: audio}} when is_binary(audio) ->
-            File.write!(abs_out, audio)
-            {:ok, "Audio saved to #{rel_out} (#{byte_size(audio)} bytes)"}
-
-          {:ok, %{status: status, body: body}} ->
-            {:error, "TTS request failed: #{status} — #{inspect(body)}"}
-
-          {:error, reason} ->
-            {:error, "TTS request error: #{inspect(reason)}"}
-        end
+    with :ok <- File.mkdir_p(Path.dirname(abs_out)),
+         {:ok, api_key, base_url, model} <- resolve_tts_config(provider_key),
+         body = %{"model" => model, "input" => text, "voice" => voice},
+         {:ok, %{status: 200, body: audio}} when is_binary(audio) <-
+           Req.post(tts_endpoint(base_url),
+             json: body,
+             auth: {:bearer, api_key},
+             receive_timeout: 60_000
+           ),
+         :ok <- File.write(abs_out, audio) do
+      {:ok, "Audio saved to #{rel_out} (#{byte_size(audio)} bytes)"}
+    else
+      {:ok, %{status: status, body: body}} ->
+        {:error, "TTS request failed: #{status} — #{inspect(body)}"}
 
       {:error, reason} ->
-        {:error, reason}
+        {:error, "TTS error: #{inspect(reason)}"}
     end
   end
 
@@ -249,8 +245,11 @@ defmodule Pincer.Adapters.Tools.Media do
 
       true ->
         mime = mime_from_extension(Path.extname(rel_path))
-        base64 = abs_path |> File.read!() |> Base.encode64()
-        {:ok, base64, mime}
+
+        case File.read(abs_path) do
+          {:ok, data} -> {:ok, Base.encode64(data), mime}
+          {:error, reason} -> {:error, "Failed to read file #{rel_path}: #{reason}"}
+        end
     end
   end
 

@@ -143,6 +143,11 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
         {:error, "Failed to dispatch agent: #{inspect(reason)}"}
     end
   end
+
+  def execute(args) do
+    {:error,
+     "dispatch_agent requires a 'goal' parameter. Got keys: #{inspect(Map.keys(args))}"}
+  end
 end
 
 defmodule Pincer.Adapters.Tools.BlackboardReader do
