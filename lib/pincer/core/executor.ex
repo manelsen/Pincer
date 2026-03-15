@@ -1022,8 +1022,15 @@ defmodule Pincer.Core.Executor do
 
   defp parse_tool_arguments(json) when is_binary(json) do
     case Jason.decode(json) do
-      {:ok, args} -> args
-      _ -> %{}
+      {:ok, args} ->
+        args
+
+      {:error, reason} ->
+        Logger.warning(
+          "[EXECUTOR] Malformed tool arguments JSON (falling back to empty args): #{inspect(reason)} — raw: #{inspect(json)}"
+        )
+
+        %{}
     end
   end
 
