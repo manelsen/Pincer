@@ -13,6 +13,8 @@ defmodule Pincer.Core.ChannelInteractionPolicy do
           | {:ok, {:page, String.t(), pos_integer()}}
           | {:ok, :back_to_providers}
           | {:ok, :show_menu}
+          | {:ok, {:approval, :approved}}
+          | {:ok, {:approval, :rejected}}
           | {:error, :invalid_payload | :payload_too_large | :invalid_channel}
 
   @telegram_payload_max_bytes 64
@@ -69,6 +71,8 @@ defmodule Pincer.Core.ChannelInteractionPolicy do
 
   defp do_parse("back_to_providers"), do: {:ok, :back_to_providers}
   defp do_parse("show_menu"), do: {:ok, :show_menu}
+  defp do_parse("appr:y"), do: {:ok, {:approval, :approved}}
+  defp do_parse("appr:n"), do: {:ok, {:approval, :rejected}}
 
   defp do_parse("select_provider:" <> provider_id) do
     if provider_id == "" do

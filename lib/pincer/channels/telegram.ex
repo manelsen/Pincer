@@ -1407,6 +1407,15 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       {:ok, :show_menu} ->
         handle_command(chat_id, "/menu", "", chat_type)
 
+      {:ok, {:approval, decision}} ->
+        context = session_context_for_chat(chat_id, chat_type)
+        session_id = context.session_id
+        ensure_session_started(context)
+        answer = if decision == :approved, do: "aprovo", else: "rejeito"
+        Server.process_input(session_id, answer)
+        label = if decision == :approved, do: "✅ Aprovado", else: "❌ Rejeitado"
+        edit_callback_message(chat_id, message_id, label, parse_mode: "HTML")
+
       {:error, reason} ->
         Logger.warning("[TELEGRAM] Invalid callback payload: #{inspect(reason)}")
         callback_invalid(chat_id)
