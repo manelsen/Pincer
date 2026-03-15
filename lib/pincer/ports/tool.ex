@@ -77,17 +77,23 @@ defmodule Pincer.Ports.Tool do
 
   ## Context Injection
 
-  The Executor automatically injects context into tool arguments:
+  The Executor passes a second `context` map to tools that export `execute/2`.
+  Tools that only export `execute/1` receive context merged into `args` instead.
 
-  - `session_id` - The current session identifier
-  - `tool_name` - The name of the tool being called
+  Prefer the two-argument form for clarity:
 
-  Your tool can access these for logging, permissions, or state management:
-
-      def execute(%{"action" => action, "session_id" => session_id}) do
-        Logger.info("[\#{session_id}] Executing: \#{action}")
+      @impl true
+      def execute(args, context) do
+        session_id = Map.get(context, :session_id)
+        workspace  = Map.get(context, :workspace_path)
         # ...
       end
+
+  Context keys are atoms:
+
+  - `:session_id` — The current session identifier
+  - `:workspace_path` — Absolute path to the agent workspace
+  - `"tool_name"` — The name of the tool being called (injected into `args`)
 
   ## Approval Workflow
 
@@ -190,4 +196,30 @@ defmodule Pincer.Ports.Tool do
 
   """
   @callback execute(args :: map()) :: {:ok, String.t()} | {:error, any()}
+
+  @doc """
+  Preferred form: executes the tool with arguments and a separate context map.
+
+  The registry calls this form when the tool exports `execute/2`.
+  Context contains runtime values injected by the Executor:
+
+  - `:session_id` — current session
+  - `:workspace_path` — agent workspace directory
+
+  ## Example
+
+      @impl true
+      def execute(args, context) do
+        workspace = Map.get(context, :workspace_path, File.cwd!())
+        path = Path.join(workspace, args["path"])
+        case File.read(path) do
+          {:ok, content} -> {:ok, content}
+          {:error, :enoent} -> {:error, "File not found: \#{args["path"]}"}
+        end
+      end
+
+  """
+  @callback execute(args :: map(), context :: map()) :: {:ok, String.t()} | {:error, any()}
+
+  @optional_callbacks execute: 1, execute: 2
 end
