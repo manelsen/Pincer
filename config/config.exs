@@ -20,7 +20,7 @@ config :pincer, :llm_providers, %{
   "openrouter" => %{
     adapter: Pincer.LLM.Providers.OpenRouter,
     env_key: "OPENROUTER_API_KEY",
-    default_model: "openrouter/free"
+    default_model: "google/gemini-2.0-flash-exp:free"
   },
   "opencode_zen" => %{
     adapter: Pincer.LLM.Providers.OpencodeZen,
@@ -60,6 +60,7 @@ config :pincer, :llm_providers, %{
   }
 }
 
+# Runtime default is overridden by config.yaml's llm.provider at startup (see Pincer.Infra.Config.load/0)
 config :pincer, :default_llm_provider, "openrouter"
 
 config :pincer, :tool_adapters, [Pincer.Adapters.NativeToolRegistry]

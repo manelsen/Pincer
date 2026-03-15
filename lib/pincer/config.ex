@@ -186,6 +186,7 @@ defmodule Pincer.Infra.Config do
           Application.put_env(:pincer, :llm, merged_llm)
 
           provider = merged_llm["provider"] || merged_llm[:provider] || "openrouter"
+          Application.put_env(:pincer, :default_llm_provider, provider)
           Logger.info("LLM Provider: #{provider}")
         end
 
