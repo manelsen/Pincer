@@ -88,6 +88,12 @@ defmodule Pincer.Core.Executor do
   # --- Multi-modal support helpers ---
 
   @doc false
+  def resolve_attachment_url("telegram://file/" <> _path, token) when token in [nil, ""],
+    do: {:error, :telegram_token_missing}
+
+  def resolve_attachment_url("telegram://file/" <> path, token) when is_binary(token),
+    do: {:ok, "https://api.telegram.org/file/bot#{token}/#{path}"}
+
   def resolve_attachment_url(url, _token) when is_binary(url), do: {:ok, url}
   def resolve_attachment_url(_url, _token), do: {:error, :invalid_attachment_url}
 
@@ -183,7 +189,12 @@ defmodule Pincer.Core.Executor do
   end
 
   defp prepare_prompt_history(history, model_override, opts \\ []) do
-    active_provider = get_active_provider(model_override)
+    provider_name = get_active_provider(model_override)
+
+    provider_config =
+      (Application.get_env(:pincer, :llm_providers, %{}) || %{})
+      |> Map.get(provider_name, %{})
+
     context_strategy = Keyword.get(Process.get(:executor_run_opts, []), :context_strategy)
 
     history
@@ -197,7 +208,7 @@ defmodule Pincer.Core.Executor do
       safe_limit_scale: Keyword.get(opts, :safe_limit_scale, 1.0),
       context_strategy: context_strategy
     )
-    |> resolve_lazy_attachments(active_provider)
+    |> resolve_lazy_attachments(provider_config)
   end
 
   defp do_run_loop(
@@ -598,6 +609,21 @@ defmodule Pincer.Core.Executor do
 
     should_start_filtering = not filtering? and Enum.any?(tags, &String.contains?(new_buffer, &1))
 
+    # Closing tags that definitively end a tool-call or thinking block.
+    # We only stop filtering when we see one of these — NOT on every ">", which
+    # would prematurely resume emission mid-tag (e.g. on <arg_key>, <parameter>, etc.)
+    closing_tags = [
+      "</function>",
+      "</tool_call>",
+      "</think>",
+      "</thought>",
+      "</thinking>",
+      "</antthinking>",
+      "</final>",
+      "</relevant-memories>",
+      "</relevant_memories>"
+    ]
+
     cond do
       # 1. Start filtering if we see the beginning of any suspicious tag
       should_start_filtering ->
@@ -607,10 +633,11 @@ defmodule Pincer.Core.Executor do
         if text_before != "", do: send(session_pid, {:agent_stream_token, text_before})
         {acc_text <> text_before, new_buffer, true}
 
-      # 2. Stop filtering if we see the end of a tag or a closing tag
-      filtering? and (String.contains?(new_buffer, ">") or String.contains?(new_buffer, "</")) ->
-        # Stop filtering when tag seems complete.
-        # CRITICAL: Clear the buffer so the tag doesn't trigger case 1 again on the next token!
+      # 2. Stop filtering only when we see a proper closing tag.
+      # Using specific closers avoids prematurely stopping on ">" inside nested
+      # tags like <arg_key>, <parameter name="...">, etc.
+      filtering? and Enum.any?(closing_tags, &String.contains?(new_buffer, &1)) ->
+        # Clear the buffer so the closing tag doesn't trigger case 1 on the next token.
         {acc_text <> token, "", false}
 
       # 3. Currently filtering: keep buffering, send nothing to user
@@ -821,29 +848,35 @@ defmodule Pincer.Core.Executor do
     }
 
     result =
-      case registry.execute_tool(name, args, context) do
-        {:ok, c} ->
-          Process.put(:consecutive_errors, 0)
-          c
+      try do
+        case registry.execute_tool(name, args, context) do
+          {:ok, c} ->
+            Process.put(:consecutive_errors, 0)
+            c
 
-        {:error, {:approval_required, cmd}} ->
-          Process.put(:consecutive_errors, 0)
-          handle_approval(call_id, cmd, session_pid, session_id, registry)
+          {:error, {:approval_required, cmd}} ->
+            Process.put(:consecutive_errors, 0)
+            handle_approval(call_id, cmd, session_pid, session_id, registry)
 
-        {:error, r} ->
-          errors = Process.get(:consecutive_errors, 0) + 1
-          Process.put(:consecutive_errors, errors)
+          {:error, r} ->
+            errors = Process.get(:consecutive_errors, 0) + 1
+            Process.put(:consecutive_errors, errors)
 
-          # Auto-capture error if it repeats
-          if errors >= 3 do
-            Logger.warning(
-              "[SELF-IMPROVEMENT] Consecutive tool error detected. Capturing to Graph."
-            )
+            # Auto-capture error if it repeats
+            if errors >= 3 do
+              Logger.warning(
+                "[SELF-IMPROVEMENT] Consecutive tool error detected. Capturing to Graph."
+              )
 
-            Pincer.Ports.Storage.save_tool_error(name, args, inspect(r))
-          end
+              Pincer.Ports.Storage.save_tool_error(name, args, inspect(r))
+            end
 
-          "Error: #{inspect(r)}"
+            "Error: #{inspect(r)}"
+        end
+      rescue
+        e ->
+          Logger.error("[TOOL] #{name} raised an exception: #{Exception.message(e)}")
+          "Error: tool '#{name}' raised an unexpected exception — #{Exception.message(e)}"
       end
 
     maybe_send_markdown_artifacts(session_pid)
@@ -1072,7 +1105,9 @@ defmodule Pincer.Core.Executor do
     if model_override do
       model_override.provider
     else
-      Pincer.Infra.Config.get(:llm)["provider"] || "openrouter"
+      Application.get_env(:pincer, :default_llm_provider) ||
+        Pincer.Infra.Config.get(:llm)["provider"] ||
+        "openrouter"
     end
   end
 
@@ -1101,49 +1136,54 @@ defmodule Pincer.Core.Executor do
   defp resolve_lazy_attachments(history, provider) do
     Enum.map(history, fn msg ->
       if is_list(msg["content"]) do
-        resolved_content =
-          Enum.map(msg["content"], fn
-            %{"type" => "attachment", "attachment" => att} = part ->
-              case resolve_attachment_part(att, provider) do
-                {:ok, resolved} -> resolved
-                {:error, _} -> part
-              end
-
-            part ->
-              part
-          end)
-
-        Map.put(msg, "content", resolved_content)
+        Map.put(msg, "content", Enum.map(msg["content"], &resolve_attachment_ref(&1, provider)))
       else
         msg
       end
     end)
   end
 
-  defp resolve_attachment_part(att, provider) do
-    resolve_attachment_fallback(att, provider)
-  end
+  defp resolve_attachment_ref(%{"type" => "attachment_ref"} = ref, provider) do
+    url = ref["url"] || ""
+    mime = ref["mime_type"] || "application/octet-stream"
+    filename = ref["filename"] || "attachment"
+    size = ref["size"] || 0
 
-  defp resolve_attachment_fallback(att, _provider) do
-    # Generic fallback: download and encode as base64 inlineData if it is an image or PDF
-    case att.mime_type do
-      mime when mime in ["image/png", "image/jpeg", "image/webp", "application/pdf"] ->
-        case download_as_base64(att.url) do
+    cond do
+      size > @max_inline_bytes ->
+        %{
+          "type" => "text",
+          "text" => "[#{filename} exceeds inline limit (#{div(size, 1_048_576)} MB) — not loaded]"
+        }
+
+      String.starts_with?(mime, "text/") ->
+        case download_as_base64(url) do
           {:ok, b64} ->
-            {:ok,
-             %{
-               "type" => "image_url",
-               "image_url" => %{"url" => "data:#{mime};base64,#{b64}"}
-             }}
+            text = b64 |> Base.decode64!() |> String.slice(0, 32_768)
+            %{"type" => "text", "text" => "Content of #{filename}:\n#{text}"}
 
-          error ->
-            error
+          {:error, reason} ->
+            %{"type" => "text", "text" => "[Failed to download #{filename}: #{inspect(reason)}]"}
         end
 
-      _ ->
-        {:error, :unsupported_fallback}
+      provider[:supports_files] ->
+        case download_as_base64(url) do
+          {:ok, b64} ->
+            %{"type" => "inline_data", "mime_type" => mime, "data" => b64}
+
+          {:error, reason} ->
+            %{"type" => "text", "text" => "[Failed to download #{filename}: #{inspect(reason)}]"}
+        end
+
+      true ->
+        %{
+          "type" => "text",
+          "text" => "[Provider does not support attachments: #{filename} (#{mime})]"
+        }
     end
   end
+
+  defp resolve_attachment_ref(part, _provider), do: part
 
   defp download_as_base64(url) do
     fetcher =

@@ -17,6 +17,8 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
   Mox.defmock(Pincer.MultimodalMockLLMClient, for: Pincer.Ports.LLM)
   Mox.defmock(Pincer.MultimodalMockToolRegistry, for: Pincer.Ports.ToolRegistry)
 
+  # Executor.start uses spawn_link — global mode lets the spawned process see stubs.
+  setup :set_mox_global
   setup :verify_on_exit!
 
   setup do
