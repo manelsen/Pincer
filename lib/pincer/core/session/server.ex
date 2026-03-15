@@ -530,37 +530,23 @@ defmodule Pincer.Core.Session.Server do
     user_msg = map_input_to_history(input)
     new_history = state.history ++ [user_msg]
 
-    if is_just_chat?(text_for_storage) do
-      Task.start(fn ->
-        quick_assistant_reply(
-          self(),
-          state.session_id,
-          new_history,
-          text_for_storage,
-          state.model_override
-        )
+    model_override_with_thinking =
+      if state.thinking_level != nil and is_map(state.model_override) do
+        Map.put(state.model_override, :thinking_level, state.thinking_level)
+      else
+        state.model_override
+      end
+
+    executor_opts =
+      [model_override: model_override_with_thinking, workspace_path: state.workspace_path]
+      |> then(fn opts ->
+        if state.llm_client, do: Keyword.put(opts, :llm_client, state.llm_client), else: opts
       end)
 
-      {:reply, {:ok, :butler_notified}, %{state | history: new_history}}
-    else
-      model_override_with_thinking =
-        if state.thinking_level != nil and is_map(state.model_override) do
-          Map.put(state.model_override, :thinking_level, state.thinking_level)
-        else
-          state.model_override
-        end
+    {:ok, pid} = Executor.start(self(), state.session_id, new_history, executor_opts)
 
-      executor_opts =
-        [model_override: model_override_with_thinking, workspace_path: state.workspace_path]
-        |> then(fn opts ->
-          if state.llm_client, do: Keyword.put(opts, :llm_client, state.llm_client), else: opts
-        end)
-
-      {:ok, pid} = Executor.start(self(), state.session_id, new_history, executor_opts)
-
-      {:reply, {:ok, :started},
-       %{state | history: new_history, worker_pid: pid, status: :working}}
-    end
+    {:reply, {:ok, :started},
+     %{state | history: new_history, worker_pid: pid, status: :working}}
   end
 
   defp map_input_to_history(%IncomingMessage{text: text, attachments: []}),
@@ -582,7 +568,7 @@ defmodule Pincer.Core.Session.Server do
   end
 
   # (Remaining helper functions kept for compatibility...)
-  # get_system_prompt, content_to_text, is_just_chat?, quick_assistant_reply, evaluate_blackboard_update, etc.
+  # get_system_prompt, content_to_text, evaluate_blackboard_update, etc.
 
   defp get_system_prompt(state) do
     workspace = state.workspace_path
@@ -672,38 +658,6 @@ defmodule Pincer.Core.Session.Server do
         %{"text" => t} -> t
         _ -> ""
       end)
-
-  defp is_just_chat?(input) when is_list(input), do: false
-
-  defp is_just_chat?(input) do
-    normalized = String.downcase(String.trim(input))
-
-    # Action verbs or technical commands should not be treated as "just chat"
-    technical_intent? =
-      String.match?(
-        normalized,
-        ~r/^(ls|cat|read|write|git|mix|python|node|npx|sh|bash|exec|run|make|grep|find|mkdir|rm|cp|mv|project|plan|create|edit|save)\b/
-      )
-
-    cond do
-      technical_intent? -> false
-      String.length(input) < 8 -> true
-      normalized in ["oi", "ola", "ping", "hello", "hi", "hey"] -> true
-      true -> false
-    end
-  end
-
-  defp quick_assistant_reply(pid, sid, hist, _in, mo) do
-    case LLM.chat_completion(hist, if(mo, do: [provider: mo.provider, model: mo.model], else: [])) do
-      {:ok, %{"content" => resp}, usage} ->
-        send(pid, {:assistant_reply_finished, resp})
-        PubSub.broadcast("session:#{sid}", {:agent_response, resp, usage})
-
-      {:error, reason} ->
-        Logger.error("[SESSION] #{sid} quick_assistant_reply failed: #{inspect(reason)}")
-        PubSub.broadcast("session:#{sid}", {:agent_response, "❌ #{ErrorUX.friendly(reason, scope: :executor)}"})
-    end
-  end
 
   defp evaluate_blackboard_update(pid, sid, hist, mo) do
     # Evaluate whether the user should be interrupted with new information
