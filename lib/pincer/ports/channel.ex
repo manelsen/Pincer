@@ -15,129 +15,86 @@ defmodule Pincer.Ports.Channel do
   `Pincer.Channels.Factory`. The factory reads channel configurations from
   `config.yaml` and instantiates only enabled channels.
 
-  ## Implementing a New Channel
+  ## Implementing a New Channel Session
 
-  To implement a new channel, use the `__using__` macro which provides default
-  GenServer scaffolding:
+  Use the `__using__` macro, which injects GenServer scaffolding **and**
+  dispatches all session PubSub events to typed callbacks. Override only the
+  callbacks you care about — the rest default to no-ops:
 
-      defmodule Pincer.Channels.MyChannel do
+      defmodule Pincer.Channels.MyChannel.Session do
         use Pincer.Ports.Channel
 
-        @impl true
-        def init(config) do
-          # Initialize your channel with config from config.yaml
-          {:ok, %{config: config}}
+        # Required: send text to the external API
+        @impl Pincer.Ports.Channel
+        def send_message(recipient_id, text) do
+          MyAPI.send(recipient_id, text)
         end
 
-        @impl Pincer.Ports.Channel
-        def send_message(recipient_id, content) do
-          # Send message to the external system
-          :ok
+        # Override only what you need
+        @impl true
+        def on_agent_response(text, _usage, state) do
+          MyAPI.send(state.chat_id, text)
+          state
         end
       end
 
-  Then register it in `config.yaml`:
+  ## Session Callbacks
 
-      channels:
-        my_channel:
-          enabled: true
-          adapter: "Pincer.Channels.MyChannel"
-          # ... channel-specific config
+  All session callbacks receive the current GenServer state and **must return
+  the (possibly updated) state**. The macro wraps the return value in
+  `{:noreply, state}` automatically.
 
-  ## Callbacks
+  | Callback | Triggered by |
+  |---|---|
+  | `on_agent_partial/2` | Streaming token chunk |
+  | `on_agent_response/3` | Final LLM response |
+  | `on_agent_error/2` | Executor error |
+  | `on_agent_status/2` | Status / tool-use notification |
+  | `on_agent_thinking/2` | LLM reasoning phase |
+  | `on_subagent_progress/2` | Sub-agent progress event |
+  | `on_approval_ui/3` | Tool approval request |
+
+  All callbacks are optional — the default implementation is a no-op that
+  returns the state unchanged.
+
+  ## Transport Callbacks
 
   - `start_link/1` - Starts the channel process (required)
   - `send_message/2` - Sends a message to a recipient (optional)
-
-  The `send_message/2` callback is optional because some channels may be
-  receive-only (webhooks without outbound capability).
-
-  ## Session Integration
-
-  Channels should route incoming messages to `Pincer.Core.Session.Server.process_input/2`:
-
-      session_id = "telegram_\#{chat_id}"
-      Server.process_input(session_id, text)
-
-  The session ID format is typically `"\#{channel_name}_\#{external_user_id}"`.
+  - `update_message/3` - Edits an existing message (optional)
+  - `handles_session?/1` - Routes outbound messages (optional)
+  - `resolve_recipient/1` - Maps session ID → external ID (optional)
 
   ## See Also
 
-  - `Pincer.Channels.Telegram` - Telegram bot implementation
-  - `Pincer.Channels.CLI` - Terminal-based channel
+  - `Pincer.Channels.Telegram.Session` - Telegram implementation
+  - `Pincer.Channels.Discord.Session` - Discord implementation
   - `Pincer.Channels.Factory` - Channel instantiation logic
-  - `Pincer.Channels.Supervisor` - Channel lifecycle management
   """
+
+  # ---------------------------------------------------------------------------
+  # Transport callbacks
+  # ---------------------------------------------------------------------------
 
   @doc """
   Starts the channel process with the given configuration.
-
-  The configuration is a map read from `config.yaml` under the channel's section.
-  Channels should extract their settings (tokens, API keys, etc.) from this map.
-
-  ## Parameters
-
-    - `config` - Map containing channel-specific configuration from config.yaml
-
-  ## Returns
-
-    - `{:ok, pid}` - Channel started successfully
-    - `{:ignore}` - Channel should not be started (e.g., missing credentials)
-    - `{:error, reason}` - Channel failed to start
-
-  ## Examples
-
-      # In config.yaml:
-      # channels:
-      #   telegram:
-      #     enabled: true
-      #     token_env: "TELEGRAM_BOT_TOKEN"
-
-      def start_link(config) do
-        token = System.get_env(config["token_env"])
-        if token, do: GenServer.start_link(__MODULE__, config), else: :ignore
-      end
   """
   @callback start_link(config :: map()) :: GenServer.on_start()
 
   @doc """
   Sends a message to a recipient through this channel.
-
-  ## Parameters
-
-    - `recipient_id` - Unique identifier for the recipient in this channel
-                      (e.g., Telegram chat_id, Discord channel_id)
-    - `content` - Text content to send
-
-  ## Returns
-
-    - `{:ok, message_id}` - Message sent successfully, with an internal ID for updates
-    - `:ok` - Message sent successfully (no ID returned)
-    - `{:error, reason}` - Failed to send message
   """
   @callback send_message(recipient_id :: String.t(), content :: String.t()) ::
               :ok | {:ok, any()} | {:error, any()}
 
   @doc """
   Updates an existing message sent via this channel. Useful for streaming.
-
-  ## Parameters
-
-    - `recipient_id` - Unique identifier for the recipient
-    - `message_id` - The ID returned by a previous `send_message` call
-    - `content` - The new content for the message
-
-  ## Returns
-
-    - `:ok` - Message updated successfully
-    - `{:error, reason}` - Failed to update message
   """
   @callback update_message(recipient_id :: String.t(), message_id :: any(), content :: String.t()) ::
               :ok | {:error, any()}
 
   @doc """
   Checks if a given session ID belongs to this channel adapter.
-  Used for routing outbound messages.
   """
   @callback handles_session?(session_id :: String.t()) :: boolean()
 
@@ -146,10 +103,61 @@ defmodule Pincer.Ports.Channel do
   """
   @callback resolve_recipient(session_id :: String.t()) :: String.t()
 
+  # ---------------------------------------------------------------------------
+  # Session PubSub callbacks
+  # ---------------------------------------------------------------------------
+
+  @doc """
+  Called when a streaming token chunk arrives. Return the updated state.
+  """
+  @callback on_agent_partial(token :: any(), state :: map()) :: map()
+
+  @doc """
+  Called when the executor emits a final response. Return the updated state.
+  `usage` is `nil` when no token accounting is available.
+  """
+  @callback on_agent_response(text :: String.t(), usage :: map() | nil, state :: map()) :: map()
+
+  @doc """
+  Called when the executor reports an error. Return the updated state.
+  """
+  @callback on_agent_error(text :: String.t(), state :: map()) :: map()
+
+  @doc """
+  Called for status / tool-use notifications. Return the updated state.
+  """
+  @callback on_agent_status(text :: String.t(), state :: map()) :: map()
+
+  @doc """
+  Called during the LLM reasoning / thinking phase. Return the updated state.
+  """
+  @callback on_agent_thinking(text :: any(), state :: map()) :: map()
+
+  @doc """
+  Called when a sub-agent emits a progress event. Return the updated state.
+  """
+  @callback on_subagent_progress(event :: any(), state :: map()) :: map()
+
+  @doc """
+  Called when a tool requires user approval. Return the updated state.
+  """
+  @callback on_approval_ui(call_id :: any(), command :: String.t(), state :: map()) :: map()
+
   @optional_callbacks send_message: 2,
                       update_message: 3,
                       handles_session?: 1,
-                      resolve_recipient: 1
+                      resolve_recipient: 1,
+                      on_agent_partial: 2,
+                      on_agent_response: 3,
+                      on_agent_error: 2,
+                      on_agent_status: 2,
+                      on_agent_thinking: 2,
+                      on_subagent_progress: 2,
+                      on_approval_ui: 3
+
+  # ---------------------------------------------------------------------------
+  # __using__ macro
+  # ---------------------------------------------------------------------------
 
   @doc false
   defmacro __using__(_opts) do
@@ -159,29 +167,20 @@ defmodule Pincer.Ports.Channel do
       require Logger
       alias Pincer.Infra.PubSub
 
-      @doc """
-      Default implementation that starts the GenServer with the module name.
-      """
       def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-      @doc """
-      Default implementation that accepts initial state and subscribes to system:delivery.
-      """
       def init(state) do
         PubSub.subscribe("system:delivery")
         {:ok, state}
       end
 
-      # Default handler for outbound messages via PubSub
+      # --- Outbound delivery via system:delivery PubSub ---
+
       @impl GenServer
       def handle_info({:deliver_message, session_id, message}, state) do
-        # Check if this adapter handles this session_id.
-        # Most adapters use a prefix like "telegram_", "slack_", "cli_".
         if handles_session?(session_id) do
-          # Resolve recipient from session_id if needed, or use session_id directly
           recipient_id = resolve_recipient(session_id)
 
-          # Optional callback: not all channels support outbound (e.g. some webhooks)
           if function_exported?(__MODULE__, :send_message, 2) do
             apply(__MODULE__, :send_message, [recipient_id, message])
           end
@@ -190,12 +189,56 @@ defmodule Pincer.Ports.Channel do
         {:noreply, state}
       end
 
+      # --- Session PubSub event dispatch → typed callbacks ---
+
+      @impl GenServer
+      def handle_info({:agent_partial, token}, state),
+        do: {:noreply, on_agent_partial(token, state)}
+
+      @impl GenServer
+      def handle_info({:agent_response, text, usage}, state),
+        do: {:noreply, on_agent_response(text, usage, state)}
+
+      @impl GenServer
+      def handle_info({:agent_response, text}, state),
+        do: {:noreply, on_agent_response(text, nil, state)}
+
+      @impl GenServer
+      def handle_info({:agent_error, text}, state),
+        do: {:noreply, on_agent_error(text, state)}
+
+      @impl GenServer
+      def handle_info({:agent_status, text}, state),
+        do: {:noreply, on_agent_status(text, state)}
+
+      @impl GenServer
+      def handle_info({:agent_thinking, text}, state),
+        do: {:noreply, on_agent_thinking(text, state)}
+
+      @impl GenServer
+      def handle_info({:subagent_progress, event}, state),
+        do: {:noreply, on_subagent_progress(event, state)}
+
+      @impl GenServer
+      def handle_info({:approval_ui, call_id, command}, state),
+        do: {:noreply, on_approval_ui(call_id, command, state)}
+
+      @impl GenServer
       def handle_info(_other, state), do: {:noreply, state}
 
-      # Helper to check if session belongs to this adapter
+      # --- Default no-op callback implementations ---
+
+      def on_agent_partial(_token, state), do: state
+      def on_agent_response(_text, _usage, state), do: state
+      def on_agent_error(_text, state), do: state
+      def on_agent_status(_text, state), do: state
+      def on_agent_thinking(_text, state), do: state
+      def on_subagent_progress(_event, state), do: state
+      def on_approval_ui(_call_id, _command, state), do: state
+
+      # --- Default routing helpers ---
+
       def handles_session?(session_id) do
-        # Default behavior: try to find the adapter name in the session_id
-        # Example: Pincer.Channels.Telegram -> "telegram"
         prefix =
           __MODULE__
           |> Module.split()
@@ -205,9 +248,7 @@ defmodule Pincer.Ports.Channel do
         String.starts_with?(session_id, prefix <> "_")
       end
 
-      # Helper to extract recipient from session_id
       def resolve_recipient(session_id) do
-        # Default: "telegram_123" -> "123"
         case String.split(session_id, "_", parts: 2) do
           [_prefix, recipient] -> recipient
           _ -> session_id
@@ -218,7 +259,14 @@ defmodule Pincer.Ports.Channel do
                      init: 1,
                      handle_info: 2,
                      handles_session?: 1,
-                     resolve_recipient: 1
+                     resolve_recipient: 1,
+                     on_agent_partial: 2,
+                     on_agent_response: 3,
+                     on_agent_error: 2,
+                     on_agent_status: 2,
+                     on_agent_thinking: 2,
+                     on_subagent_progress: 2,
+                     on_approval_ui: 3
     end
   end
 end
