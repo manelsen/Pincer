@@ -945,6 +945,20 @@ defmodule Pincer.Channels.Discord do
 
           send_interaction_response(interaction, response)
 
+        {:ok, {:approval, decision}} ->
+          session_context = resolve_session_context(interaction)
+          ensure_brain_session_started(session_context)
+          answer = if decision == :approved, do: "aprovo", else: "rejeito"
+          Server.process_input(session_context.session_id, answer)
+          label = if decision == :approved, do: "✅ Aprovado", else: "❌ Rejeitado"
+
+          response = %{
+            type: 7,
+            data: %{content: label, components: []}
+          }
+
+          send_interaction_response(interaction, response)
+
         {:error, _reason} ->
           send_interaction_response(interaction, unknown_interaction_response())
       end
