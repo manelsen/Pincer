@@ -22,19 +22,15 @@ defmodule Pincer.Channels.Slack.Session do
   @impl true
   def init(channel_id) do
     session_id = "slack_#{channel_id}"
-    # 1. Macro init handles system:delivery
     super(channel_id)
-
-    # 2. Session-specific subscription
     Pincer.Infra.PubSub.subscribe("session:#{session_id}")
     {:ok, %{channel_id: channel_id, session_id: session_id}}
   end
 
-  # Hexagonal enforcement: override handles_session?
-  @impl true
+  @impl Pincer.Ports.Channel
   def handles_session?(id), do: String.starts_with?(id, "slack_")
 
-  @impl true
+  @impl Pincer.Ports.Channel
   def resolve_recipient(id) do
     case String.split(id, "_", parts: 2) do
       ["slack", channel_id] -> channel_id
@@ -42,26 +38,19 @@ defmodule Pincer.Channels.Slack.Session do
     end
   end
 
-  # We need to implement send_message/2 because the macro calls it
   @impl Pincer.Ports.Channel
   def send_message(channel_id, text) do
     Pincer.Channels.Slack.send_message(channel_id, text)
   end
 
+  # --- Session PubSub callbacks ---
+
   @impl true
-  def handle_info({:agent_response, response, _usage}, state) do
+  def on_agent_response(text, _usage, state) do
     Logger.info("[SLACK SESSION] Sending response to channel: #{state.channel_id}")
-    Pincer.Channels.Slack.send_message(state.channel_id, response)
-    {:noreply, state}
+    Pincer.Channels.Slack.send_message(state.channel_id, text)
+    state
   end
 
-  @impl true
-  def handle_info({:agent_response, response}, state) do
-    handle_info({:agent_response, response, nil}, state)
-  end
-
-  @impl true
-  def handle_info(_msg, state) do
-    {:noreply, state}
-  end
+  # All other events (partial, error, status, thinking, subagent, approval) → macro no-ops
 end

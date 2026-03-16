@@ -56,10 +56,7 @@ defmodule Pincer.Channels.Telegram.Session do
   @impl true
   def init(%{chat_id: chat_id, session_id: session_id} = args)
       when is_binary(session_id) and session_id != "" do
-    # 1. Macro init handles system:delivery
     super(args)
-
-    # 2. Session-specific subscription
     subscribe_session(session_id)
     {:ok, state(chat_id, session_id)}
   end
@@ -67,21 +64,16 @@ defmodule Pincer.Channels.Telegram.Session do
   @impl true
   def init(chat_id) do
     session_id = default_session_id(chat_id)
-
-    # 1. Macro init handles system:delivery
     super(chat_id)
-
-    # 2. Session-specific subscription
     subscribe_session(session_id)
     {:ok, state(chat_id, session_id)}
   end
 
-  # Hexagonal enforcement: override handles_session?
-  @impl true
+  @impl Pincer.Ports.Channel
   def handles_session?(id),
     do: id == "telegram_" <> to_string(id) or String.starts_with?(id, "telegram_")
 
-  @impl true
+  @impl Pincer.Ports.Channel
   def resolve_recipient(id) do
     case String.split(id, "_", parts: 2) do
       ["telegram", chat_id] -> chat_id
@@ -89,11 +81,12 @@ defmodule Pincer.Channels.Telegram.Session do
     end
   end
 
-  # We need to implement send_message/2 because the macro calls it
   @impl Pincer.Ports.Channel
   def send_message(chat_id, text) do
     Pincer.Channels.Telegram.send_message(chat_id, text)
   end
+
+  # --- Session bind ---
 
   @impl true
   def handle_cast({:bind_session, session_id}, state) when is_binary(session_id) do
@@ -109,24 +102,25 @@ defmodule Pincer.Channels.Telegram.Session do
   @impl true
   def handle_cast({:bind_session, _invalid_session_id}, state), do: {:noreply, state}
 
+  # --- Session PubSub callbacks ---
+
   @impl true
-  def handle_info({:agent_partial, token}, state) do
-    {:noreply,
-     StreamDelivery.handle_partial(
-       state,
-       token,
-       System.system_time(:millisecond),
-       stream_transport(state, session_status(state.session_id)),
-       suppress_preview?: &suppress_preview?/2
-     )}
+  def on_agent_partial(token, state) do
+    StreamDelivery.handle_partial(
+      state,
+      token,
+      System.system_time(:millisecond),
+      stream_transport(state, session_status(state.session_id)),
+      suppress_preview?: &suppress_preview?/2
+    )
   end
 
   @impl true
-  def handle_info({:agent_response, text, usage}, state) do
+  def on_agent_response(text, usage, state) do
     session_status = session_status(state.session_id)
 
     text_with_usage =
-      ResponseEnvelope.build(:telegram, text, usage, Map.get(session_status, :usage_display))
+      ResponseEnvelope.build(:telegram, text, usage || %{}, Map.get(session_status, :usage_display))
 
     state = reset_tool_state(state)
 
@@ -139,57 +133,47 @@ defmodule Pincer.Channels.Telegram.Session do
         )
 
       maybe_advance_project_flow(state)
-      {:noreply, state}
+      state
     else
-      {:noreply, state}
+      state
     end
   end
 
   @impl true
-  def handle_info({:agent_response, text}, state) do
-    handle_info({:agent_response, text, nil}, state)
-  end
-
-  @impl true
-  def handle_info({:agent_error, text}, state) do
+  def on_agent_error(text, state) do
     Pincer.Channels.Telegram.send_message(
       state.chat_id,
       ChannelEventPolicy.error_message(:telegram, text)
     )
 
     maybe_recover_project_flow(state)
-    {:noreply, state}
+    state
   end
 
   @impl true
-  def handle_info({:agent_status, text}, state) do
-    {:noreply,
-     if(ChannelEventPolicy.status_kind(text) == :subagent,
-       do: state,
-       else: deliver_status(state, text)
-     )}
+  def on_agent_status(text, state) do
+    if ChannelEventPolicy.status_kind(text) == :subagent,
+      do: state,
+      else: deliver_status(state, text)
   end
 
   @impl true
-  def handle_info({:agent_thinking, _text}, state) do
+  def on_agent_thinking(_text, state) do
     Telegex.send_chat_action(state.chat_id, "typing")
-    {:noreply, state}
+    state
   end
 
   @impl true
-  def handle_info({:subagent_progress, event}, state) do
+  def on_subagent_progress(event, state) do
     tracker = SubAgentProgress.apply_event(state.subagent_progress_tracker, event)
     dashboard = SubAgentProgress.render_dashboard(tracker)
 
-    state =
-      %{state | subagent_progress_tracker: tracker}
-      |> deliver_subagent_dashboard(dashboard)
-
-    {:noreply, state}
+    %{state | subagent_progress_tracker: tracker}
+    |> deliver_subagent_dashboard(dashboard)
   end
 
   @impl true
-  def handle_info({:approval_ui, _call_id, command}, state) do
+  def on_approval_ui(_call_id, command, state) do
     text = ChannelEventPolicy.approval_message(:telegram, command)
 
     buttons =
@@ -204,11 +188,10 @@ defmodule Pincer.Channels.Telegram.Session do
       reply_markup: %Telegex.Type.InlineKeyboardMarkup{inline_keyboard: [buttons]}
     )
 
-    {:noreply, state}
+    state
   end
 
-  @impl true
-  def handle_info(_msg, state), do: {:noreply, state}
+  # --- Private helpers ---
 
   defp session_status(session_id) do
     try do
