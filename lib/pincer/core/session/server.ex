@@ -338,6 +338,16 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
+  def handle_info({:scheduler_trigger, prompt}, state) when is_binary(prompt) do
+    Logger.info("[SESSION] #{state.session_id} scheduler trigger: #{String.slice(prompt, 0, 80)}")
+
+    case process_standard_input(prompt, state) do
+      {:reply, _, new_state} -> {:noreply, new_state}
+      _ -> {:noreply, state}
+    end
+  end
+
+  @impl true
   def handle_info(msg, state) do
     Logger.debug("[SESSION] #{state.session_id} received unexpected message: #{inspect(msg)}")
     {:noreply, state}
