@@ -51,10 +51,7 @@ defmodule Pincer.Channels.Discord.Session do
   @impl true
   def init(%{channel_id: channel_id, session_id: session_id} = args)
       when is_binary(session_id) and session_id != "" do
-    # 1. Macro init handles system:delivery
     super(args)
-
-    # 2. Session-specific subscription
     subscribe_session(session_id)
     Logger.info("[DISCORD SESSION] Worker started for channel: #{channel_id}")
     {:ok, state(channel_id, session_id)}
@@ -63,21 +60,16 @@ defmodule Pincer.Channels.Discord.Session do
   @impl true
   def init(channel_id) do
     session_id = default_session_id(channel_id)
-
-    # 1. Macro init handles system:delivery
     super(channel_id)
-
-    # 2. Session-specific subscription
     subscribe_session(session_id)
     Logger.info("[DISCORD SESSION] Worker started for channel: #{channel_id}")
     {:ok, state(channel_id, session_id)}
   end
 
-  # Hexagonal enforcement: override handles_session?
-  @impl true
+  @impl Pincer.Ports.Channel
   def handles_session?(id), do: String.starts_with?(id, "discord_")
 
-  @impl true
+  @impl Pincer.Ports.Channel
   def resolve_recipient(id) do
     case String.split(id, "_", parts: 2) do
       ["discord", channel_id] -> channel_id
@@ -85,11 +77,12 @@ defmodule Pincer.Channels.Discord.Session do
     end
   end
 
-  # We need to implement send_message/2 because the macro calls it
   @impl Pincer.Ports.Channel
   def send_message(channel_id, text) do
     Pincer.Channels.Discord.send_message(channel_id, text)
   end
+
+  # --- Session bind ---
 
   @impl true
   def handle_cast({:bind_session, session_id}, state) when is_binary(session_id) do
@@ -105,54 +98,56 @@ defmodule Pincer.Channels.Discord.Session do
   @impl true
   def handle_cast({:bind_session, _invalid_session_id}, state), do: {:noreply, state}
 
+  # --- Session PubSub callbacks ---
+
   @impl true
-  def handle_info({:agent_partial, token}, state) do
-    {:noreply,
-     StreamDelivery.handle_partial(
-       state,
-       token,
-       System.system_time(:millisecond),
-       stream_transport(state)
-     )}
+  def on_agent_partial(token, state) do
+    StreamDelivery.handle_partial(
+      state,
+      token,
+      System.system_time(:millisecond),
+      stream_transport(state)
+    )
   end
 
   @impl true
-  def handle_info({:agent_response, text, _usage}, state) do
+  def on_agent_response(text, _usage, state) do
     state = StreamDelivery.handle_final(state, text, stream_transport(state))
     maybe_advance_project_flow(state)
-    {:noreply, state}
+    state
   end
 
   @impl true
-  def handle_info({:agent_response, text}, state) do
-    handle_info({:agent_response, text, nil}, state)
-  end
-
-  @impl true
-  def handle_info({:agent_error, text}, state) do
+  def on_agent_error(text, state) do
     Pincer.Channels.Discord.send_message(
       "#{state.channel_id}",
       ChannelEventPolicy.error_message(:discord, text)
     )
 
     maybe_recover_project_flow(state)
-    {:noreply, state}
+    state
   end
 
   @impl true
-  def handle_info({:agent_status, text}, state) do
-    {:noreply, deliver_status(state, text)}
+  def on_agent_status(text, state) do
+    if ChannelEventPolicy.status_kind(text) == :subagent do
+      deliver_subagent_status(state, text)
+    else
+      Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
+      state
+    end
   end
 
   @impl true
-  def handle_info({:agent_thinking, text}, state) do
-    # For now, we just log it to avoid spamming the channel with "thinking" messages
+  def on_agent_thinking(text, state) do
     Logger.debug("[DISCORD SESSION] Agent thinking: #{text}")
-    {:noreply, state}
+    state
   end
 
-  @impl true
-  def handle_info(_msg, state), do: {:noreply, state}
+  # on_subagent_progress → no-op (macro default)
+  # on_approval_ui → no-op (macro default)
+
+  # --- Private helpers ---
 
   defp stream_transport(state) do
     channel_id = "#{state.channel_id}"
@@ -165,15 +160,6 @@ defmodule Pincer.Channels.Discord.Session do
         Pincer.Channels.Discord.update_message(channel_id, message_id, text)
       end
     ]
-  end
-
-  defp deliver_status(state, text) do
-    if ChannelEventPolicy.status_kind(text) == :subagent do
-      deliver_subagent_status(state, text)
-    else
-      Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
-      state
-    end
   end
 
   defp deliver_subagent_status(state, text) do
@@ -223,10 +209,7 @@ defmodule Pincer.Channels.Discord.Session do
   defp state(channel_id, session_id) do
     Map.merge(
       Map.merge(
-        %{
-          channel_id: channel_id,
-          session_id: session_id
-        },
+        %{channel_id: channel_id, session_id: session_id},
         StatusMessagePolicy.initial_state()
       ),
       StreamingPolicy.initial_state()
