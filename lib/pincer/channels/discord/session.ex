@@ -5,11 +5,13 @@ defmodule Pincer.Channels.Discord.Session do
   """
   use Pincer.Ports.Channel
   alias Pincer.Core.ChannelEventPolicy
+  alias Pincer.Core.ChannelInteractionPolicy
   alias Pincer.Core.ProjectFlowDelivery
   alias Pincer.Core.StatusDelivery
   alias Pincer.Core.StatusMessagePolicy
   alias Pincer.Core.StreamDelivery
   alias Pincer.Core.StreamingPolicy
+  alias Pincer.Core.SubAgentProgress
 
   @impl Pincer.Ports.Channel
   def start_link(%{channel_id: channel_id} = args) do
@@ -144,8 +146,22 @@ defmodule Pincer.Channels.Discord.Session do
     state
   end
 
-  # on_subagent_progress → no-op (macro default)
-  # on_approval_ui → no-op (macro default)
+  @impl true
+  def on_subagent_progress(event, state) do
+    tracker = SubAgentProgress.apply_event(state.subagent_progress_tracker, event)
+    dashboard = SubAgentProgress.render_dashboard(tracker)
+
+    %{state | subagent_progress_tracker: tracker}
+    |> deliver_subagent_dashboard(dashboard)
+  end
+
+  @impl true
+  def on_approval_ui(_call_id, command, state) do
+    text = ChannelEventPolicy.approval_message(:discord, command)
+    components = build_approval_components()
+    Pincer.Channels.Discord.send_message("#{state.channel_id}", text, components: components)
+    state
+  end
 
   # --- Private helpers ---
 
@@ -160,6 +176,33 @@ defmodule Pincer.Channels.Discord.Session do
         Pincer.Channels.Discord.update_message(channel_id, message_id, text)
       end
     ]
+  end
+
+  defp deliver_subagent_dashboard(state, nil), do: state
+
+  defp deliver_subagent_dashboard(state, text) do
+    channel_id = "#{state.channel_id}"
+
+    StatusDelivery.deliver(
+      state,
+      text,
+      send: fn content -> Pincer.Channels.Discord.send_message(channel_id, content) end,
+      edit: fn message_id, content ->
+        Pincer.Channels.Discord.update_message(channel_id, message_id, content)
+      end
+    )
+  end
+
+  defp build_approval_components do
+    buttons =
+      ChannelInteractionPolicy.approval_button_spec()
+      |> Enum.with_index()
+      |> Enum.map(fn {{label, payload}, idx} ->
+        style = if idx == 0, do: 3, else: 4
+        %{type: 2, style: style, label: label, custom_id: payload}
+      end)
+
+    [%{type: 1, components: buttons}]
   end
 
   defp deliver_subagent_status(state, text) do
@@ -209,7 +252,11 @@ defmodule Pincer.Channels.Discord.Session do
   defp state(channel_id, session_id) do
     Map.merge(
       Map.merge(
-        %{channel_id: channel_id, session_id: session_id},
+        %{
+          channel_id: channel_id,
+          session_id: session_id,
+          subagent_progress_tracker: %{}
+        },
         StatusMessagePolicy.initial_state()
       ),
       StreamingPolicy.initial_state()
