@@ -9,6 +9,7 @@ defmodule Pincer.Core.AuthProfiles do
   """
 
   alias Pincer.Core.ErrorClass
+  alias Pincer.Utils.ETSHelper
 
   @table :pincer_auth_profile_cooldown
   @default_profile "default"
@@ -290,18 +291,8 @@ defmodule Pincer.Core.AuthProfiles do
   defp now_ms, do: System.monotonic_time(:millisecond)
 
   defp ensure_table do
-    case :ets.whereis(@table) do
-      :undefined ->
-        try do
-          :ets.new(@table, [:named_table, :set, :public, read_concurrency: true])
-          :ok
-        rescue
-          ArgumentError -> :ok
-        end
-
-      _tid ->
-        :ok
-    end
+    _ = ETSHelper.ensure_named_table(@table)
+    :ok
   end
 
   defp read_field(map, key) when is_map(map) and is_atom(key) do
