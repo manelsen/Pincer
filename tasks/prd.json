@@ -52,8 +52,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 3,
-      "passes": false,
-      "notes": "",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-003-implement-trace-schema-storage-r2. Added Pincer.Core.Trace with typed step kinds and checkpoint metadata serialization. Exported Trace in Core boundary. Added trace_test coverage for envelope creation, step appending, and serialization.",
       "dependsOn": []
     },
     {
