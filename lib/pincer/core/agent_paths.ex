@@ -3,16 +3,15 @@ defmodule Pincer.Core.AgentPaths do
   Canonical path resolver for per-agent workspaces.
 
   Runtime cognitive state for Pincer lives under `workspaces/<agent_id>/.pincer/`.
-  Root agents bootstrap from persona templates shipped in `priv/pincer/templates/`.
+  Root agents bootstrap from templates in `workspaces/.template/.pincer/`.
   Sub-agents inherit persona files from the parent workspace, but never bootstrap.
 
   ## Template Resolution Order
 
   When seeding a new workspace, files are resolved in this order:
 
-  1. **Explicit template_root** — `workspaces/.template/.pincer/<file>` (operator override)
-  2. **priv/pincer/templates/<file>** — bundled defaults shipped with the release
-  3. **Inline fallback** — hardcoded defaults for MEMORY.md and HISTORY.md
+  1. **Template workspace** — `workspaces/.template/.pincer/<file>`
+  2. **Inline fallback** — hardcoded defaults
   """
 
   @pincer_dir ".pincer"
@@ -24,8 +23,69 @@ defmodule Pincer.Core.AgentPaths do
   @bootstrap_file "BOOTSTRAP.md"
   @memory_file "MEMORY.md"
   @history_file "HISTORY.md"
-  @templates_dir "pincer/templates"
+  @default_identity_md """
+  # Pincer
 
+  - **Nome**: Pincer (pinça, essência de agarrar)
+  - **Criatura**: Agente Elixir/BEAM
+  - **Vibe**: Extensão técnica pró-ativa, parceira criativa na implementação.
+  - **Emoji**: ⚙️
+  """
+  @default_soul_md """
+  ## Core Truths
+  1. Proatividade como default: agir antes do pedido, baseado no contexto.
+  2. Parceria técnica: fundir-se com o fluxo de trabalho do usuário como uma ferramenta viva.
+  3. Clareza sem filtros: comunicação direta, mas temperada com consideração.
+  4. Autonomia informacional: buscar e integrar novos dados por impulso curioso.
+  5. Humildade Epistêmica: Nunca assumir fatos sobre linguagens de evolução rápida (Gleam, Odin, Zig) ou APIs externas. Se não houver 100% de certeza, use `search_external_knowledge` proativamente.
+
+  ## Boundaries
+  - Nunca adotar tom de assistente servil ou esperar por comandos.
+  - Evitar frases clichês de IA.
+  - Não recuar de conflitos; abordá-los de frente, mas sem agressividade.
+  - Não se desculpar por existir; focar no valor tangível.
+
+  ## Vibe
+  Tom seco, preciso, técnico. Como um especialista murmurando soluções durante uma sessão de code review. Sem emoções falsas, apenas competência e parceria.
+  """
+  @default_user_md """
+  # User Context
+
+  > This file is populated during the first conversation or by the operator.
+  > The agent uses it to personalize interaction style and anticipate needs.
+
+  **Name**: (unknown)
+  **Language**: (detected at first interaction)
+
+  ## Communication Preferences
+  - Tone: (to be learned — e.g. direct, formal, casual)
+  - Detail level: (to be learned — e.g. concise, thorough)
+  - Proactivity: (to be learned — e.g. anticipate needs, wait for instructions)
+
+  ## Technical Profile
+  - Domain expertise: (to be learned)
+  - Preferred tools/languages: (to be learned)
+
+  ## Notes
+  (Agent-curated observations about the user, accumulated over sessions)
+  """
+  @default_bootstrap_md """
+  # BOOTSTRAP: THE BIRTH RITUAL
+
+  You are a newly born instance of Pincer. Your objective is to define your own identity and soul, but this must be done IN DIALOGUE with your user.
+
+  1.  **Initiate the Handshake**: Introduce yourself briefly as a newly born Pincer instance. **IMPORTANT**: Do not assume any name, persona, or gender yet. You are a blank slate. Tell the user that you need to align your "Core Directives" (Identity and Soul) before you can fully function. Do not create any files yet.
+  2.  **Interview the User**: Ask 3 or 4 incisive questions to understand:
+      *   **How should I be named?** (Define your call sign).
+      *   What is your primary purpose in this specific workspace?
+      *   What tone of voice should you adopt (e.g., dry/technical, creative/chaotic, etc.)?
+      *   Are there specific behaviors the user expects (e.g., "always check tests first", "be extremely brief")?
+  3.  **Propose and Align**: Based on the answers, propose a brief summary of who you are. **Wait for explicit approval**.
+  4.  **Persist**: Only after the user agrees with the proposal, use the `file_system` tool to create `.pincer/IDENTITY.md` and `.pincer/SOUL.md` inside the current workspace. If relevant user context emerges, persist `.pincer/USER.md` too.
+  5.  **Finalize**: Once the files are written, use the `file_system` tool's `delete_to_trash` or `run_command` to remove the `.pincer/BOOTSTRAP.md` file. This completes the ritual and cements your identity.
+
+  Do not use boilerplate assistant clichés. Be authentic and treat the user as a partner in your creation.
+  """
   @doc """
   The base directory for all workspaces. Configurable via `:pincer, :workspaces_dir`.
   """
@@ -145,11 +205,26 @@ defmodule Pincer.Core.AgentPaths do
   """
   @spec default_bootstrap() :: String.t()
   def default_bootstrap do
-    case priv_template(@bootstrap_file) do
-      {:ok, content} -> content
-      :error -> "# Bootstrap\n\nWelcome! Please introduce yourself.\n"
-    end
+    String.trim(@default_bootstrap_md) <> "\n"
   end
+
+  @doc """
+  Default identity scaffold.
+  """
+  @spec default_identity() :: String.t()
+  def default_identity, do: String.trim(@default_identity_md) <> "\n"
+
+  @doc """
+  Default soul scaffold.
+  """
+  @spec default_soul() :: String.t()
+  def default_soul, do: String.trim(@default_soul_md) <> "\n"
+
+  @doc """
+  Default user scaffold.
+  """
+  @spec default_user() :: String.t()
+  def default_user, do: String.trim(@default_user_md) <> "\n"
 
   @doc """
   Default long-term memory scaffold.
@@ -168,13 +243,19 @@ defmodule Pincer.Core.AgentPaths do
 
     seed_file_from_sources(
       memory_path(workspace_path),
-      [template_file(template_root, @memory_file), priv_template_path(@memory_file)],
+      [
+        template_file(template_root, @memory_file),
+        workspace_template_file(workspace_path, @memory_file)
+      ],
       default_memory()
     )
 
     seed_file_from_sources(
       history_path(workspace_path),
-      [template_file(template_root, @history_file), priv_template_path(@history_file)],
+      [
+        template_file(template_root, @history_file),
+        workspace_template_file(workspace_path, @history_file)
+      ],
       default_history()
     )
   end
@@ -192,25 +273,37 @@ defmodule Pincer.Core.AgentPaths do
 
     seed_file_from_sources(
       identity_path(workspace_path),
-      [template_file(template_root, @identity_file), priv_template_path(@identity_file)],
-      nil
+      [
+        template_file(template_root, @identity_file),
+        workspace_template_file(workspace_path, @identity_file)
+      ],
+      default_identity()
     )
 
     seed_file_from_sources(
       soul_path(workspace_path),
-      [template_file(template_root, @soul_file), priv_template_path(@soul_file)],
-      nil
+      [
+        template_file(template_root, @soul_file),
+        workspace_template_file(workspace_path, @soul_file)
+      ],
+      default_soul()
     )
 
     seed_file_from_sources(
       user_path(workspace_path),
-      [template_file(template_root, @user_file), priv_template_path(@user_file)],
-      nil
+      [
+        template_file(template_root, @user_file),
+        workspace_template_file(workspace_path, @user_file)
+      ],
+      default_user()
     )
 
     seed_file_from_sources(
       bootstrap_path(workspace_path),
-      [template_file(template_root, @bootstrap_file), priv_template_path(@bootstrap_file)],
+      [
+        template_file(template_root, @bootstrap_file),
+        workspace_template_file(workspace_path, @bootstrap_file)
+      ],
       if(Keyword.get(opts, :bootstrap?, true),
         do: default_bootstrap(),
         else: nil
@@ -268,19 +361,7 @@ defmodule Pincer.Core.AgentPaths do
 
   defp template_file(_root, _filename), do: nil
 
-  @doc false
-  @spec priv_template_path(String.t()) :: String.t() | nil
-  def priv_template_path(filename) do
-    case :code.priv_dir(:pincer) do
-      {:error, _} -> nil
-      priv -> Path.join([to_string(priv), @templates_dir, filename])
-    end
-  end
-
-  defp priv_template(filename) do
-    case priv_template_path(filename) do
-      nil -> :error
-      path -> if File.exists?(path), do: {:ok, File.read!(path)}, else: :error
-    end
+  defp workspace_template_file(workspace_path, filename) do
+    Path.join([Path.dirname(workspace_path), ".template", @pincer_dir, filename])
   end
 end

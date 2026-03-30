@@ -89,6 +89,21 @@ defmodule Pincer.Core.OnboardTest do
              )
 
       assert File.exists?(
+               Path.join(
+                 tmp,
+                 "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/IDENTITY.md"
+               )
+             )
+
+      assert File.exists?(
+               Path.join(tmp, "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/SOUL.md")
+             )
+
+      assert File.exists?(
+               Path.join(tmp, "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/USER.md")
+             )
+
+      assert File.exists?(
                Path.join(tmp, "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/MEMORY.md")
              )
 

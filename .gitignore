@@ -60,6 +60,9 @@ workspaces/*
 !workspaces/.template/.pincer/BOOTSTRAP.md
 !workspaces/.template/.pincer/MEMORY.md
 !workspaces/.template/.pincer/HISTORY.md
+!workspaces/.template/.pincer/IDENTITY.md
+!workspaces/.template/.pincer/SOUL.md
+!workspaces/.template/.pincer/USER.md
 .elixir_ls/
 .vscode/
 .idea/

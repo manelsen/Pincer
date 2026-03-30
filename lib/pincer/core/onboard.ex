@@ -157,6 +157,9 @@ defmodule Pincer.Core.Onboard do
       "sessions",
       "memory",
       "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/BOOTSTRAP.md",
+      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/IDENTITY.md",
+      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/SOUL.md",
+      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/USER.md",
       "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/MEMORY.md",
       "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/HISTORY.md"
     ]
@@ -402,6 +405,12 @@ defmodule Pincer.Core.Onboard do
     [
       {:mkdir_p, Path.join(tpl, ".pincer")},
       {:write_if_missing, Path.join([tpl, ".pincer", "BOOTSTRAP.md"]), default_bootstrap_md()},
+      {:write_if_missing, Path.join([tpl, ".pincer", "IDENTITY.md"]),
+       Pincer.Core.AgentPaths.default_identity()},
+      {:write_if_missing, Path.join([tpl, ".pincer", "SOUL.md"]),
+       Pincer.Core.AgentPaths.default_soul()},
+      {:write_if_missing, Path.join([tpl, ".pincer", "USER.md"]),
+       Pincer.Core.AgentPaths.default_user()},
       {:write_if_missing, Path.join([tpl, ".pincer", "MEMORY.md"]), default_memory_md()},
       {:write_if_missing, Path.join([tpl, ".pincer", "HISTORY.md"]), default_history_md()}
     ]
