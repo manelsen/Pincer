@@ -890,7 +890,14 @@ defmodule Pincer.Core.Executor do
        when is_map(tool_call) do
     {call_id, name, raw_arguments} = normalize_tool_call(tool_call)
     Logger.info("[TOOL] Executing #{name}")
-    emit_trace_step(:tool, "tool_invoked", %{tool: name, tool_call_id: call_id})
+
+    tool_class =
+      case ToolRuntime.classify(name) do
+        {:ok, class} -> class
+        _ -> :privileged
+      end
+
+    emit_trace_step(:tool, "tool_invoked", %{tool: name, tool_call_id: call_id, class: tool_class})
 
     args = parse_tool_arguments(raw_arguments)
 
@@ -905,18 +912,57 @@ defmodule Pincer.Core.Executor do
 
     result =
       try do
-        case ToolRuntime.execute(name, args, context, registry) do
+        case ToolRuntime.execute(name, args, context, registry, approval_granted: false) do
           {:ok, c, _meta} ->
             Process.put(:consecutive_errors, 0)
+
+            audit =
+              Policy.guard!(:tool_audit_event, %{tool: name, class: tool_class, status: :ok})
+
+            emit_trace_step(:tool, "tool_audit", audit)
             c
+
+          {:error, {:approval_required, approval_data}, _meta} when is_map(approval_data) ->
+            Process.put(:consecutive_errors, 0)
+
+            audit =
+              Policy.guard!(:tool_audit_event, %{
+                tool: name,
+                class: tool_class,
+                status: :approval_required
+              })
+
+            emit_trace_step(:tool, "tool_audit", audit)
+            handle_approval(call_id, approval_data, session_pid, session_id, registry)
 
           {:error, {:approval_required, cmd}, _meta} ->
             Process.put(:consecutive_errors, 0)
-            handle_approval(call_id, cmd, session_pid, session_id, registry)
+
+            audit =
+              Policy.guard!(:tool_audit_event, %{
+                tool: name,
+                class: tool_class,
+                status: :approval_required
+              })
+
+            emit_trace_step(:tool, "tool_audit", audit)
+
+            handle_approval(
+              call_id,
+              %{tool: name, command: cmd, class: tool_class},
+              session_pid,
+              session_id,
+              registry
+            )
 
           {:error, :timeout, _meta} ->
             errors = Process.get(:consecutive_errors, 0) + 1
             Process.put(:consecutive_errors, errors)
+
+            audit =
+              Policy.guard!(:tool_audit_event, %{tool: name, class: tool_class, status: :timeout})
+
+            emit_trace_step(:tool, "tool_audit", audit)
             "Error: tool '#{name}' timed out and was cancelled."
 
           {:error, r, _meta} ->
@@ -932,6 +978,10 @@ defmodule Pincer.Core.Executor do
               Pincer.Ports.Storage.save_tool_error(name, args, inspect(r))
             end
 
+            audit =
+              Policy.guard!(:tool_audit_event, %{tool: name, class: tool_class, status: :error})
+
+            emit_trace_step(:tool, "tool_audit", audit)
             "Error: #{inspect(r)}"
         end
       rescue
@@ -981,12 +1031,27 @@ defmodule Pincer.Core.Executor do
     }
   end
 
-  defp handle_approval(call_id, command, _session_pid, session_id, registry) do
-    Logger.warning("[EXECUTOR] Waiting for approval for: #{command}")
+  defp handle_approval(call_id, approval_data, _session_pid, session_id, registry) do
+    command = Map.get(approval_data, :command) || Map.get(approval_data, "command") || ""
+    tool_name = Map.get(approval_data, :tool) || Map.get(approval_data, "tool") || "safe_shell"
+
+    tool_args =
+      Map.get(approval_data, :args) || Map.get(approval_data, "args") || %{"command" => command}
+
+    tool_class = Map.get(approval_data, :class) || Map.get(approval_data, "class") || :privileged
+
+    approval_prompt =
+      if is_binary(command) and String.trim(command) != "" do
+        command
+      else
+        "#{tool_name} (privileged tool requires approval)"
+      end
+
+    Logger.warning("[EXECUTOR] Waiting for approval for: #{approval_prompt}")
 
     Pincer.Infra.PubSub.broadcast(
       "session:#{session_id}",
-      {:approval_required, call_id, command}
+      {:approval_required, call_id, approval_prompt}
     )
 
     # We wait synchronously here but the session GenServer remains responsive
@@ -995,20 +1060,42 @@ defmodule Pincer.Core.Executor do
       {:tool_approval_result, ^call_id, :approved} ->
         Logger.info("[EXECUTOR] Command approved: #{command}")
 
-        case registry.execute_tool(
-               "safe_shell",
-               %{"command" => command, "skip_approval" => true},
-               %{
-                 "session_id" => session_id
-               }
+        audit =
+          Policy.guard!(:tool_audit_event, %{
+            tool: tool_name,
+            class: tool_class,
+            status: :approved
+          })
+
+        emit_trace_step(:tool, "tool_audit", audit)
+
+        case ToolRuntime.execute(tool_name, tool_args, %{"session_id" => session_id}, registry,
+               approval_granted: true,
+               class: tool_class
              ) do
-          {:ok, result} -> result
-          {:error, reason} -> "Error: #{inspect(reason)}"
+          {:ok, result, _meta} ->
+            result
+
+          {:error, reason, _meta} ->
+            "Error: #{inspect(reason)}"
         end
 
       {:tool_approval_result, ^call_id, :rejected} ->
         Logger.info("[EXECUTOR] Command rejected: #{command}")
-        "Error: Command rejected by user."
+
+        audit =
+          Policy.guard!(:tool_audit_event, %{tool: tool_name, class: tool_class, status: :denied})
+
+        emit_trace_step(:tool, "tool_audit", audit)
+
+        recovery =
+          Policy.recover(:tool_approval_denied, %{
+            tool: tool_name,
+            class: tool_class,
+            reason: :user_denied
+          })
+
+        "Approval denied for #{tool_name}. Recovery: #{inspect(recovery)}"
     after
       @approval_timeout_ms ->
         Logger.warning("[EXECUTOR] Approval timeout for: #{command}")

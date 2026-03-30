@@ -344,5 +344,70 @@ defmodule Pincer.Core.ExecutorHexTest do
 
       assert_receive {:executor_finished, _, "Done", _usage}, 5000
     end
+
+    test "privileged tool denial returns structured recovery and emits audit/trace signals" do
+      session_pid = self()
+      session_id = "tool_exec_privileged_denied_session"
+      history = [%{"role" => "user", "content" => "Run privileged tool"}]
+
+      Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+
+      on_exit(fn ->
+        Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
+      end)
+
+      Pincer.MockToolRegistry
+      |> stub(:list_tools, fn -> [] end)
+      |> expect(:execute_tool, 0, fn _name, _args, _ctx -> {:ok, "never called"} end)
+
+      Pincer.MockLLMClient
+      |> expect(:stream_completion, fn _history, _opts ->
+        chunk1 = %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [
+                  %{
+                    "index" => 0,
+                    "id" => "call_priv_deny_1",
+                    "function" => %{
+                      "name" => "safe_shell",
+                      "arguments" => "{\"command\": \"ls\"}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+
+        chunk2 = %{"choices" => [%{"delta" => %{}}]}
+        {:ok, [chunk1, chunk2]}
+      end)
+      |> expect(:stream_completion, fn updated_history, _opts ->
+        tool_msg = Enum.find(Enum.reverse(updated_history), &(&1["role"] == "tool"))
+        assert tool_msg["content"] =~ "Approval denied"
+        assert tool_msg["content"] =~ "safe_shell"
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "Handled denial"}}]}]}
+      end)
+
+      {:ok, executor_pid} =
+        Pincer.Core.Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MockToolRegistry,
+          llm_client: Pincer.MockLLMClient,
+          trace_events?: true
+        )
+
+      assert_receive {:approval_required, "call_priv_deny_1", command}, 5_000
+      assert command =~ "safe_shell"
+      send(executor_pid, {:tool_approval_result, "call_priv_deny_1", :rejected})
+
+      assert_receive {:executor_trace_step, :tool, "tool_audit", audit}, 5_000
+      assert audit.tool == "safe_shell"
+      assert audit.class == :privileged
+      assert audit.status in [:approval_required, :denied]
+
+      assert_receive {:executor_finished, _, "Handled denial", _usage}, 5_000
+    end
   end
 end

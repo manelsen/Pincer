@@ -87,6 +87,8 @@ defmodule Pincer.Core.Policy do
     StreamingPolicy.on_final(state, final_text)
   end
 
+  def guard!(:tool_audit_event, %{tool: _tool, class: _class, status: _status} = attrs), do: attrs
+
   def guard!(_kind, _attrs), do: raise(ArgumentError, "unsupported guard policy")
 
   @doc """
@@ -100,5 +102,17 @@ defmodule Pincer.Core.Policy do
   end
 
   def recover(:turn_outcome, %{attrs: attrs}), do: TurnOutcomePolicy.resolve(attrs)
+
+  def recover(:tool_approval_denied, %{tool: tool, class: class, reason: reason}) do
+    %{
+      code: "TOOL_APPROVAL_DENIED",
+      tool: tool,
+      class: class,
+      reason: reason,
+      retryable: true,
+      suggested_action: "request_approval_and_retry"
+    }
+  end
+
   def recover(_kind, _attrs), do: {:error, :unsupported_recovery_policy}
 end
