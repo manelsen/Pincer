@@ -332,8 +332,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 18,
-      "passes": false,
-      "notes": "Backlog item from performance sweep: avoid O(N) lookup and memory pressure.",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-018-optimize-pairing-bound-lookup. Optimized Pairing.bound_agent_session?/2 by replacing full-table :ets.tab2list scan with channel-scoped :ets.select match-spec lookup. Added regression coverage to ensure malformed rows are ignored and channel-specific binding semantics remain correct. Validated with focused Pairing/SessionScopePolicy suites and MIX_ENV=test mix qa (green: 2 doctests, 1008 tests, 0 failures).",
       "dependsOn": [
         "US-017"
       ]
