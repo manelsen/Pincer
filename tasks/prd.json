@@ -144,8 +144,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 8,
-      "passes": false,
-      "notes": "",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-008-introduce-tool-runtime-risk-classes. Added Pincer.Core.ToolRuntime with 4 risk classes (pure/read/guarded_write/privileged), explicit tool classification map, class-based timeout/cancellation execution wrapper, and class-based sanitized summaries. Integrated Executor tool execution path to route through ToolRuntime (including timeout handling) and emit sanitized trace summaries. Added tool_runtime_test coverage for classification, timeout cancellation metadata, successful execution metadata, and sanitization behavior. Validated with mix format, mix test --warnings-as-errors test/pincer/core/tool_runtime_test.exs, mix test --warnings-as-errors test/pincer/core/executor_trace_test.exs, and mix compile --warnings-as-errors.",
       "dependsOn": [
         "US-007"
       ]

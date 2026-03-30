@@ -43,6 +43,7 @@ defmodule Pincer.Core do
       RetryPolicy,
       Trace,
       Capabilities,
+      ToolRuntime,
       Telemetry,
       AuthProfiles,
       Models.Registry,
