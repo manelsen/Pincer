@@ -8,7 +8,7 @@ defmodule Pincer.Core.SessionResolver do
 
   alias Pincer.Core.Bindings
   alias Pincer.Core.Session.Context
-  alias Pincer.Core.SessionScopePolicy
+  alias Pincer.Core.Policy
 
   @type channel :: :telegram | :discord | :whatsapp
 
@@ -21,7 +21,10 @@ defmodule Pincer.Core.SessionResolver do
   def resolve(:telegram, context, channel_config) do
     chat_id = read_field(context, :chat_id)
     chat_type = normalize_chat_type(read_field(context, :chat_type))
-    session_id = SessionScopePolicy.resolve(:telegram, context, channel_config)
+
+    session_id =
+      Policy.route(:session_scope, %{channel: :telegram, context: context, config: channel_config})
+
     conversation_ref = conversation_ref(:telegram, chat_type, chat_id)
 
     {principal_ref, root_agent_id, root_agent_source} =
@@ -46,7 +49,10 @@ defmodule Pincer.Core.SessionResolver do
     channel_id = read_field(context, :channel_id)
     guild_id = read_field(context, :guild_id)
     sender_id = read_field(context, :sender_id)
-    session_id = SessionScopePolicy.resolve(:discord, context, channel_config)
+
+    session_id =
+      Policy.route(:session_scope, %{channel: :discord, context: context, config: channel_config})
+
     conversation_ref = conversation_ref(:discord, guild_id, channel_id)
 
     {principal_ref, root_agent_id, root_agent_source} =
@@ -71,7 +77,10 @@ defmodule Pincer.Core.SessionResolver do
     chat_id = read_field(context, :chat_id)
     is_group = truthy?(read_field(context, :is_group))
     sender_id = read_field(context, :sender_id) || chat_id
-    session_id = SessionScopePolicy.resolve(:whatsapp, context, channel_config)
+
+    session_id =
+      Policy.route(:session_scope, %{channel: :whatsapp, context: context, config: channel_config})
+
     conversation_ref = conversation_ref(:whatsapp, if(is_group, do: :group, else: :dm), chat_id)
 
     {principal_ref, root_agent_id, root_agent_source} =
@@ -93,7 +102,7 @@ defmodule Pincer.Core.SessionResolver do
   end
 
   def resolve(_channel, context, _config) do
-    session_id = SessionScopePolicy.resolve(:unknown, context, %{})
+    session_id = Policy.route(:session_scope, %{channel: :unknown, context: context, config: %{}})
 
     Context.new(
       session_id: session_id,
