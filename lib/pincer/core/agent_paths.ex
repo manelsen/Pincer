@@ -102,6 +102,23 @@ defmodule Pincer.Core.AgentPaths do
     Path.join(base_dir(), ".template")
   end
 
+  @doc """
+  Canonical template source paths used to seed new workspaces.
+  """
+  @spec template_seed_paths() :: [String.t()]
+  def template_seed_paths do
+    template_pincer_dir = Path.join(template_workspace(), @pincer_dir)
+
+    [
+      Path.join(template_pincer_dir, @identity_file),
+      Path.join(template_pincer_dir, @soul_file),
+      Path.join(template_pincer_dir, @user_file),
+      Path.join(template_pincer_dir, @bootstrap_file),
+      Path.join(template_pincer_dir, @memory_file),
+      Path.join(template_pincer_dir, @history_file)
+    ]
+  end
+
   @default_memory_md """
   # Long-term Memory
 
