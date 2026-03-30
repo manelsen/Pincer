@@ -127,14 +127,14 @@ The **Archivist** runs after each session turn and extracts structured knowledge
 
 Each channel implements the `Pincer.Ports.Channel` behaviour and uses the injected `__using__` macro for PubSub-driven session callbacks. To add a new channel, implement the behaviour and override the callbacks you need (`on_agent_response`, `on_agent_partial`, `on_agent_error`, etc.) — the rest default to no-ops.
 
-| Channel | Module | Status |
+| Channel | Module | Notes |
 |---|---|---|
-| CLI | `Pincer.Channels.CLI` | Active |
-| Telegram | `Pincer.Channels.Telegram` | Active |
-| Discord | `Pincer.Channels.Discord` | Available |
-| Slack | `Pincer.Channels.Slack` | Available |
-| WhatsApp | `Pincer.Channels.WhatsApp` | Available (Go bridge) |
-| Webhook | `Pincer.Channels.Webhook` | Available |
+| CLI | `Pincer.Channels.CLI` | Enabled by default in config |
+| Telegram | `Pincer.Channels.Telegram` | Requires `TELEGRAM_BOT_TOKEN` |
+| Discord | `Pincer.Channels.Discord` | Requires `DISCORD_BOT_TOKEN` |
+| Slack | `Pincer.Channels.Slack` | Requires Slack app credentials |
+| WhatsApp | `Pincer.Channels.WhatsApp` | Requires Go bridge binary |
+| Webhook | `Pincer.Channels.Webhook` | Generic HTTP endpoint |
 
 ### Multi-agent routing (Telegram)
 
