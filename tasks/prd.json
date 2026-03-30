@@ -1,206 +1,170 @@
 {
-  "name": "New Channel Integrations",
-  "branchName": "ralph/new-channels-feishu-line-dingtalk",
-  "description": "Add Feishu/Lark, LINE, and DingTalk channel adapters to Pincer with full send/receive/streaming support. Three new channels covering East/Southeast Asia and Chinese enterprise markets.",
+  "name": "Operational Cohesion Release 0.2.0",
+  "branchName": "ralph/operational-cohesion-release-0-2-0",
+  "description": "Consolidate policy, traceability, typed capabilities, tool isolation, and project/memory runtime predictability.",
   "userStories": [
     {
       "id": "US-001",
-      "title": "Shared token cache GenServer",
-      "description": "Extract a reusable TokenCache GenServer that manages OAuth2 client-credentials tokens with automatic refresh before expiry. Feishu and DingTalk both need this; LINE uses a static token but should still go through the cache for consistency.",
+      "title": "Create Policy Kernel facade",
+      "description": "Create Pincer.Core.Policy facade with unified API.",
       "acceptanceCriteria": [
-        "Create lib/pincer/channels/shared/token_cache.ex implementing a GenServer that stores {token, expires_at}",
-        "TokenCache.get_token/1 returns cached token if not expired, otherwise refreshes via callback",
-        "TokenCache handles concurrent requests without stampede (refresh once, serve all waiters)",
-        "Token expires_at defaults to response value minus 60s safety margin",
-        "Create test/pincer/channels/shared/token_cache_test.exs covering: fresh token, expired refresh, concurrent access",
+        "Create Pincer.Core.Policy with allow?/2, route/2, budget/2, guard!/2, recover/2",
+        "Delegate to existing policy modules preserving behavior",
+        "Document Tool/LLM/Session/Memory/Channel/Project policy groups",
         "mix format --check-formatted passes",
         "mix compile --warnings-as-errors passes",
-        "TokenCache tests pass with mix test test/pincer/channels/shared/token_cache_test.exs"
+        "mix test --warnings-as-errors passes"
       ],
       "priority": 1,
       "passes": true,
-      "notes": "Complete. Branch: us/001-shared-token-cache. Files: lib/pincer/channels/shared/token_cache.ex, test/pincer/channels/shared/token_cache_test.exs. 6 tests pass.",
+      "notes": "Complete. Branch: us/us-001-create-policy-kernel-facade-r2. Files: lib/pincer/core/policy.ex, lib/pincer/core.ex, test/pincer/core/policy_test.exs. Facade API implemented (allow?/2, route/2, budget/2, guard!/2, recover/2) delegating to existing policies. Validated with mix test test/pincer/core/policy_test.exs, mix format --check-formatted, mix compile --warnings-as-errors.",
       "dependsOn": []
     },
     {
       "id": "US-002",
-      "title": "Shared webhook signature verifier",
-      "description": "Create a WebhookVerifier utility that validates incoming webhook signatures for each platform. Feishu uses X-Lark-Signature with SHA256, LINE uses X-Line-Signature with HMAC-SHA256, DingTalk uses URL param signature.",
+      "title": "Route sensitive decisions through Policy Kernel",
+      "description": "Migrate sensitive decision points to facade.",
       "acceptanceCriteria": [
-        "Create lib/pincer/channels/shared/webhook_verifier.ex with three verification functions: verify_feishu/3, verify_line/3, verify_dingtalk/3",
-        "verify_feishu/3 computes SHA256(timestamp + nonce + body) and compares against X-Lark-Signature header",
-        "verify_line/3 computes HMAC-SHA256(body, channel_secret) base64-encoded and compares against X-Line-Signature header",
-        "verify_dingtalk/3 computes HMAC-SHA256(timestamp + \"\\n\" + secret) base64-encoded and compares against sign URL param",
-        "All functions return :ok or {:error, :invalid_signature}",
-        "Create test/pincer/channels/shared/webhook_verifier_test.exs with known test vectors for each platform",
+        "Executor/session/channel call sites use Pincer.Core.Policy",
+        "Legacy modules remain implementation units",
+        "Decision outputs include reason codes for trace",
         "mix format --check-formatted passes",
         "mix compile --warnings-as-errors passes",
-        "WebhookVerifier tests pass"
+        "mix test --warnings-as-errors passes"
       ],
       "priority": 2,
-      "passes": true,
-      "notes": "Foundation for all three channel webhook handlers. Uses :crypto.hash/2 and Base.encode64/1 from Erlang stdlib.",
-      "dependsOn": []
-    },
-    {
-      "id": "US-003",
-      "title": "Feishu API client (token + send + reply + card update)",
-      "description": "Create the Feishu HTTP API client that handles tenant_access_token acquisition, sending messages, replying to messages, and updating interactive cards for streaming. Serves both Feishu (open.feishu.cn) and Lark (open.larksuite.com) via configurable base URL.",
-      "acceptanceCriteria": [
-        "Create lib/pincer/channels/feishu/api.ex with functions: get_tenant_token/0, send_message/3, reply_message/3, update_card/2",
-        "get_tenant_token/0 uses TokenCache (US-001) with app_id/app_secret from env vars FEISHU_APP_ID / FEISHU_APP_SECRET",
-        "send_message/3 accepts (receive_id, content, msg_type) and POSTs to /im/v1/messages with receive_id_type parameter",
-        "reply_message/3 accepts (message_id, content, msg_type) and POSTs to /im/v1/messages/{message_id}/reply",
-        "update_card/2 accepts (card_token, new_content) and PATCHes /interactive/v1/card/update",
-        "All API calls include Authorization: Bearer <token> header from TokenCache",
-        "API client reads base URL from config (open.feishu.cn or open.larksuite.com)",
-        "Create test/pincer/channels/feishu/api_test.exs with mocked HTTP responses",
-        "mix format --check-formatted passes",
-        "mix compile --warnings-as-errors passes",
-        "Feishu API tests pass"
-      ],
-      "priority": 3,
-      "passes": true,
-      "notes": "Depends on US-001 (TokenCache). Uses Req for HTTP (already in deps). Base URL: open.feishu.cn (CN) or open.larksuite.com (international).",
+      "passes": false,
+      "notes": "",
       "dependsOn": [
         "US-001"
       ]
     },
     {
-      "id": "US-004",
-      "title": "Feishu card builder for streaming",
-      "description": "Create a card builder module that constructs Feishu Interactive Card JSON payloads for progressive agent output. Cards support markdown content blocks that can be updated in-place during streaming.",
+      "id": "US-003",
+      "title": "Implement trace schema and storage",
+      "description": "Create structured turn trace schema and persistence hooks.",
       "acceptanceCriteria": [
-        "Create lib/pincer/channels/feishu/cards.ex with functions: create_card/1, update_card_content/2, build_markdown_element/1",
-        "create_card/1 returns a Feishu card JSON structure with a configurable markdown content element",
-        "update_card_content/2 takes an existing card config and replaces the markdown element body with new content",
-        "build_markdown_element/1 wraps text in the Feishu card markdown element format: {tag: \"div\", text: {tag: \"lark_md\", content: ...}}",
-        "Card JSON validates against Feishu card schema (correct tag names, required fields)",
-        "Create test/pincer/channels/feishu/cards_test.exs covering: card creation, content update, markdown escaping",
+        "Create Pincer.Core.Trace with trace_id/session_id/turn_id/steps",
+        "Persist typed steps: policy,llm,tool,memory,checkpoint,error",
+        "Trace stores summarized tool and provider/model metadata",
         "mix format --check-formatted passes",
         "mix compile --warnings-as-errors passes",
-        "Card builder tests pass"
+        "mix test --warnings-as-errors passes"
       ],
-      "priority": 4,
-      "passes": true,
-      "notes": "Independent of API client. Pure data transformation module. Cards use Feishu CardKit v2 format.",
+      "priority": 3,
+      "passes": false,
+      "notes": "",
       "dependsOn": []
     },
     {
-      "id": "US-005",
-      "title": "Feishu channel adapter (Channel behaviour + webhook receive)",
-      "description": "Implement the Feishu channel supervisor and Channel behaviour. Handles incoming webhook events (im.message.receive_v1), validates signatures via WebhookVerifier, parses text/image/file messages, and routes to session server. Implements send_message and update_message for agent output.",
+      "id": "US-004",
+      "title": "Emit trace events from executor loop",
+      "description": "Emit trace events for relevant turn lifecycle steps.",
       "acceptanceCriteria": [
-        "Create lib/pincer/channels/feishu.ex implementing Supervisor + Pincer.Ports.Channel behaviour",
-        "start_link/1 reads config from config.yaml feishu section, ignores if token env vars missing",
-        "handle_webhook/2 validates signature via WebhookVerifier.verify_feishu/3, returns 401 on failure",
-        "Parses im.message.receive_v1 event: extracts sender open_id, message content (text/post/image/file), chat_id",
-        "Routes parsed messages to Pincer.Core.Session.Server.process_input/2 with session_id = \"feishu_#{open_id}\"",
-        "send_message/2 calls Feishu.API.send_message/3 with markdown-converted content",
-        "update_message/2 calls Feishu.API.update_card/2 for streaming updates",
-        "start_link starts Feishu.API and a webhook handler child process",
-        "Channel gracefully ignores (:ignore) if FEISHU_APP_ID or FEISHU_APP_SECRET env vars are missing",
-        "Create test/pincer/channels/feishu_test.exs with webhook event fixtures and mocked session routing",
+        "Emit events for prompt, policy, llm, tool, memory",
+        "Retry/failover emits explicit cause steps",
+        "Emission is non-blocking",
         "mix format --check-formatted passes",
         "mix compile --warnings-as-errors passes",
-        "Feishu channel tests pass"
+        "mix test --warnings-as-errors passes"
       ],
-      "priority": 5,
-      "passes": true,
-      "notes": "Depends on US-002 (WebhookVerifier), US-003 (API client). Follow the same pattern as lib/pincer/channels/telegram.ex (Supervisor with child modules).",
+      "priority": 4,
+      "passes": false,
+      "notes": "",
       "dependsOn": [
         "US-002",
         "US-003"
       ]
     },
     {
-      "id": "US-006",
-      "title": "Feishu session callbacks (streaming + final response)",
-      "description": "Implement the Feishu session module with on_agent_partial, on_agent_response, and on_agent_error callbacks. on_agent_partial updates the Feishu card in-place via update_card. on_agent_response sends the final complete message.",
+      "id": "US-005",
+      "title": "Add replay mode without side effects",
+      "description": "Add safe replay from stored trace.",
       "acceptanceCriteria": [
-        "Create lib/pincer/channels/feishu/session.ex using Pincer.Ports.Channel __using__ macro",
-        "on_agent_partial/2 creates a Feishu card on first token, then updates card content on subsequent tokens via Feishu.API.update_card/2",
-        "on_agent_response/2 sends the final message via Feishu.API.send_message/3 with full markdown content",
-        "on_agent_error/2 sends error text to the user via Feishu.API.send_message/3",
-        "Session tracks card_token in state for streaming updates (create once, update many)",
-        "Delegates to StreamDelivery module following the same pattern as Telegram.Session",
-        "Create test/pincer/channels/feishu_session_test.exs covering: partial streaming, final response, error handling",
+        "Replay without external side effects",
+        "Support stop at tool boundary",
+        "Report divergences against original trace",
         "mix format --check-formatted passes",
         "mix compile --warnings-as-errors passes",
-        "Feishu session tests pass"
+        "mix test --warnings-as-errors passes"
       ],
-      "priority": 6,
-      "passes": true,
-      "notes": "Depends on US-003 (API client), US-004 (cards), US-005 (channel adapter). Follow pattern from lib/pincer/channels/telegram/session.ex.",
+      "priority": 5,
+      "passes": false,
+      "notes": "",
       "dependsOn": [
-        "US-003",
-        "US-004",
-        "US-005"
+        "US-004"
       ]
     },
     {
-      "id": "US-007",
-      "title": "Feishu config.yaml integration and README update",
-      "description": "Add feishu/lark configuration section to config.yaml schema, update the Channels factory to recognize the feishu adapter, and update README.md with Feishu/Lark setup instructions.",
+      "id": "US-006",
+      "title": "Define formal capability schema",
+      "description": "Create Pincer.Core.Capabilities schema.",
       "acceptanceCriteria": [
-        "Add feishu section to config.yaml with: enabled (bool), adapter (Pincer.Channels.Feishu), base_url (open.feishu.cn or open.larksuite.com), app_id_env (FEISHU_APP_ID), app_secret_env (FEISHU_APP_SECRET)",
-        "Pincer.Channels.Factory.create_channel_specs/0 recognizes feishu adapter and starts it when enabled: true",
-        "README.md Channels table includes Feishu/Lark row with module and notes (Requires FEISHU_APP_ID + FEISHU_APP_SECRET)",
-        "README.md Configuration section includes Feishu/Lark YAML example showing both CN and international base_url",
+        "Schema covers providers/tools/channels capabilities",
+        "Versioned schema with validation errors",
+        "Query API by adapter type and feature",
         "mix format --check-formatted passes",
-        "mix compile --warnings-as-errors passes"
+        "mix compile --warnings-as-errors passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 6,
+      "passes": false,
+      "notes": "",
+      "dependsOn": []
+    },
+    {
+      "id": "US-007",
+      "title": "Implement capability declarations for adapters",
+      "description": "Adapters publish explicit capabilities.",
+      "acceptanceCriteria": [
+        "Providers declare capabilities",
+        "Tools declare capability + risk metadata",
+        "Channels declare UX/streaming capabilities",
+        "mix format --check-formatted passes",
+        "mix compile --warnings-as-errors passes",
+        "mix test --warnings-as-errors passes"
       ],
       "priority": 7,
-      "passes": true,
-      "notes": "Depends on US-005 (channel adapter must exist). Verify factory integration works by checking channel starts with config.",
+      "passes": false,
+      "notes": "",
       "dependsOn": [
-        "US-005"
+        "US-006"
       ]
     },
     {
       "id": "US-008",
-      "title": "LINE API client (send reply + push + profile)",
-      "description": "Create the LINE Messaging API HTTP client that handles sending reply messages (within 30s window), push messages (anytime), and user profile lookup. Uses static channel_access_token (no OAuth flow needed).",
+      "title": "Introduce tool runtime risk classes",
+      "description": "Add Pure/Read/GuardedWrite/Privileged classes.",
       "acceptanceCriteria": [
-        "Create lib/pincer/channels/line/api.ex with functions: reply_message/2, push_message/2, get_profile/1",
-        "reply_message/2 accepts (reply_token, messages) and POSTs to https://api.line.me/v2/bot/message/reply",
-        "push_message/2 accepts (to, messages) and POSTs to https://api.line.me/v2/bot/message/push",
-        "get_profile/1 accepts (user_id) and GETs https://api.line.me/v2/bot/profile/{userId}",
-        "All API calls include Authorization: Bearer <channel_access_token> header from env var LINE_CHANNEL_ACCESS_TOKEN",
-        "Messages formatted as LINE message objects: [{type: \"text\", text: \"...\"}]",
-        "Create test/pincer/channels/line/api_test.exs with mocked HTTP responses",
+        "Define four risk classes in runtime",
+        "Classify all tools",
+        "Enforce timeout/cancel/sanitized summary by class",
         "mix format --check-formatted passes",
         "mix compile --warnings-as-errors passes",
-        "LINE API tests pass"
+        "mix test --warnings-as-errors passes"
       ],
       "priority": 8,
-      "passes": true,
-      "notes": "No dependency on US-001 (TokenCache) since LINE uses a static token. Uses Req for HTTP.",
-      "dependsOn": []
+      "passes": false,
+      "notes": "",
+      "dependsOn": [
+        "US-007"
+      ]
     },
     {
       "id": "US-009",
-      "title": "LINE channel adapter (webhook receive + send + streaming)",
-      "description": "Implement the LINE channel with Channel behaviour, webhook signature verification, message parsing, session routing, send_message, and chunked streaming (LINE has no message edit API, so streaming sends multiple follow-up messages).",
+      "title": "Enforce approval and policy hooks for privileged tools",
+      "description": "Add approvals and strong auditing for risky tools.",
       "acceptanceCriteria": [
-        "Create lib/pincer/channels/line.ex implementing Supervisor + Pincer.Ports.Channel behaviour",
-        "start_link/1 reads config from config.yaml line section, ignores if LINE_CHANNEL_ACCESS_TOKEN env var missing",
-        "handle_webhook/2 validates signature via WebhookVerifier.verify_line/3, returns 401 on failure",
-        "Parses LINE webhook events: extracts sender userId, message text, replyToken from events array",
-        "Routes parsed messages to Session.Server.process_input/2 with session_id = \"line_#{userId}\"",
-        "send_message/2 calls LINE.API.push_message/2 (for agent responses outside 30s window)",
-        "update_message/2 sends a new follow-up message via LINE.API.push_message/2 (LINE has no edit API)",
-        "Create lib/pincer/channels/line/session.ex with on_agent_partial (sends chunks), on_agent_response (sends final), on_agent_error callbacks",
-        "on_agent_partial accumulates tokens and sends a push_message every N characters or on sentence boundary to avoid spam",
-        "Channel gracefully ignores if env vars missing",
-        "Create test/pincer/channels/line_test.exs and test/pincer/channels/line_session_test.exs",
+        "Privileged tools require approval",
+        "GuardedWrite/Privileged emit mandatory audit+trace",
+        "Denied approval returns structured recovery info",
         "mix format --check-formatted passes",
         "mix compile --warnings-as-errors passes",
-        "LINE channel tests pass"
+        "mix test --warnings-as-errors passes"
       ],
       "priority": 9,
-      "passes": true,
-      "notes": "Depends on US-002 (WebhookVerifier), US-008 (LINE API). Streaming strategy: send initial message, then push follow-up chunks. Consider 500-char chunks.",
+      "passes": false,
+      "notes": "",
       "dependsOn": [
         "US-002",
         "US-008"
@@ -208,116 +172,98 @@
     },
     {
       "id": "US-010",
-      "title": "LINE config.yaml integration and README update",
-      "description": "Add LINE configuration section to config.yaml, update factory to recognize LINE adapter, and update README with LINE setup instructions.",
+      "title": "Implement explicit project FSM",
+      "description": "Create explicit project lifecycle FSM.",
       "acceptanceCriteria": [
-        "Add line section to config.yaml with: enabled (bool), adapter (Pincer.Channels.Line), channel_access_token_env (LINE_CHANNEL_ACCESS_TOKEN), channel_secret_env (LINE_CHANNEL_SECRET)",
-        "Pincer.Channels.Factory recognizes line adapter and starts it when enabled: true",
-        "README.md Channels table includes LINE row with module and notes (Requires LINE_CHANNEL_ACCESS_TOKEN + LINE_CHANNEL_SECRET)",
-        "README.md Configuration section includes LINE YAML example",
+        "Create ProjectFSM states objective/scope/plan/execution/review/delivery",
+        "Reject invalid transitions with reasons",
+        "Persist checkpoint on transitions",
         "mix format --check-formatted passes",
-        "mix compile --warnings-as-errors passes"
+        "mix compile --warnings-as-errors passes",
+        "mix test --warnings-as-errors passes"
       ],
       "priority": 10,
-      "passes": true,
-      "notes": "Depends on US-009 (LINE channel adapter must exist).",
-      "dependsOn": [
-        "US-009"
-      ]
+      "passes": false,
+      "notes": "",
+      "dependsOn": []
     },
     {
       "id": "US-011",
-      "title": "DingTalk API client (token + send DM + send group + card update)",
-      "description": "Create the DingTalk HTTP API client that handles access token acquisition, sending DMs via robot API, sending group messages, and creating/updating interactive cards for streaming.",
+      "title": "Integrate project FSM with orchestrator and sub-agents",
+      "description": "Use FSM as project runtime source of truth.",
       "acceptanceCriteria": [
-        "Create lib/pincer/channels/dingtalk/api.ex with functions: get_access_token/0, send_dm/3, send_group/3, create_card/2, update_card/2",
-        "get_access_token/0 uses TokenCache (US-001) with client_id/client_secret from env vars DINGTALK_CLIENT_ID / DINGTALK_CLIENT_SECRET",
-        "send_dm/3 accepts (user_ids, message, msg_key) and POSTs to /v1.0/robot/oToMessages/batchSend",
-        "send_group/3 accepts (conversation_id, message, msg_key) and POSTs to /v1.0/robot/groupMessages/send",
-        "create_card/2 accepts (content, config) and POSTs to /v1.0/card/instances returning card_instance_id",
-        "update_card/2 accepts (card_instance_id, new_content) and PUTs /v1.0/card/instances/{card_instance_id}",
-        "All API calls include x-acs-dingtalk-access-token header from TokenCache",
-        "API client uses base URL oapi.dingtalk.com",
-        "Create test/pincer/channels/dingtalk/api_test.exs with mocked HTTP responses",
+        "Project orchestrator uses FSM transitions",
+        "Sub-agent tasks link to phases/checkpoints",
+        "Workspace/branch policy integrates by project",
         "mix format --check-formatted passes",
         "mix compile --warnings-as-errors passes",
-        "DingTalk API tests pass"
+        "mix test --warnings-as-errors passes"
       ],
       "priority": 11,
-      "passes": true,
-      "notes": "Depends on US-001 (TokenCache). DingTalk API base: oapi.dingtalk.com. Uses Req for HTTP.",
+      "passes": false,
+      "notes": "",
       "dependsOn": [
-        "US-001"
+        "US-002",
+        "US-010"
       ]
     },
     {
       "id": "US-012",
-      "title": "DingTalk channel adapter (webhook receive + send + streaming)",
-      "description": "Implement the DingTalk channel with Channel behaviour, webhook signature verification, message parsing, session routing, send_message, and streaming via interactive card updates.",
+      "title": "Create unified memory pipeline",
+      "description": "Add memory lifecycle pipeline with scoring.",
       "acceptanceCriteria": [
-        "Create lib/pincer/channels/dingtalk.ex implementing Supervisor + Pincer.Ports.Channel behaviour",
-        "start_link/1 reads config from config.yaml dingtalk section, ignores if env vars missing",
-        "handle_webhook/2 validates signature via WebhookVerifier.verify_dingtalk/3, returns 401 on failure",
-        "Parses DingTalk robot event: extracts sender staffId, conversation_id, text content, msg_type",
-        "Routes parsed messages to Session.Server.process_input/2 with session_id = \"dingtalk_#{staffId}\"",
-        "send_message/2 calls DingTalk.API.send_dm/3 for DMs or send_group/3 for group chats",
-        "update_message/2 calls DingTalk.API.update_card/2 for streaming (in-place card content update)",
-        "Create lib/pincer/channels/dingtalk/session.ex with on_agent_partial, on_agent_response, on_agent_error callbacks",
-        "on_agent_partial creates card on first token, updates on subsequent tokens (same pattern as Feishu)",
-        "Channel gracefully ignores if env vars missing",
-        "Create test/pincer/channels/dingtalk_test.exs and test/pincer/channels/dingtalk_session_test.exs",
+        "Create MemoryPipeline: capture/classify/store/recall/compact/explain",
+        "Add confidence/relevance + recall reason",
+        "Enforce memory budget per session/project",
         "mix format --check-formatted passes",
         "mix compile --warnings-as-errors passes",
-        "DingTalk channel tests pass"
+        "mix test --warnings-as-errors passes"
       ],
       "priority": 12,
-      "passes": true,
-      "notes": "Depends on US-002 (WebhookVerifier), US-011 (DingTalk API). Follow Feishu card streaming pattern from US-006.",
+      "passes": false,
+      "notes": "",
       "dependsOn": [
-        "US-002",
-        "US-011"
+        "US-004"
       ]
     },
     {
       "id": "US-013",
-      "title": "DingTalk config.yaml integration and README update",
-      "description": "Add DingTalk configuration section to config.yaml, update factory to recognize DingTalk adapter, and update README with DingTalk setup instructions.",
+      "title": "Unify observability, doctor, and audit outputs",
+      "description": "Unify operational diagnostics across subsystems.",
       "acceptanceCriteria": [
-        "Add dingtalk section to config.yaml with: enabled (bool), adapter (Pincer.Channels.DingTalk), client_id_env (DINGTALK_CLIENT_ID), client_secret_env (DINGTALK_CLIENT_SECRET)",
-        "Pincer.Channels.Factory recognizes dingtalk adapter and starts it when enabled: true",
-        "README.md Channels table includes DingTalk row with module and notes (Requires DINGTALK_CLIENT_ID + DINGTALK_CLIENT_SECRET)",
-        "README.md Configuration section includes DingTalk YAML example",
+        "Doctor/audit report policy+trace+tool risk+memory health",
+        "Events linked by IDs across subsystems",
+        "Failure reports explain selection/failure/recovery",
         "mix format --check-formatted passes",
-        "mix compile --warnings-as-errors passes"
+        "mix compile --warnings-as-errors passes",
+        "mix test --warnings-as-errors passes"
       ],
       "priority": 13,
-      "passes": true,
-      "notes": "Depends on US-012 (DingTalk channel adapter must exist).",
+      "passes": false,
+      "notes": "",
       "dependsOn": [
+        "US-004",
+        "US-009",
         "US-012"
       ]
     },
     {
       "id": "US-014",
-      "title": "All channels pass channel adapter contract tests",
-      "description": "Ensure Feishu, LINE, and DingTalk all pass the shared channel adapter contract test suite (test/pincer/contracts/channel_adapter_contract_test.exs), and that mix qa passes with all three channels configured.",
+      "title": "Validate release-ready operational cohesion",
+      "description": "Run end-to-end validation for release criteria.",
       "acceptanceCriteria": [
-        "Feishu channel passes channel_adapter_contract_test (if it exists) or equivalent integration test",
-        "LINE channel passes channel_adapter_contract_test or equivalent integration test",
-        "DingTalk channel passes channel_adapter_contract_test or equivalent integration test",
-        "mix qa (format + compile + test) passes with feishu, line, dingtalk sections in config.yaml (enabled: false to avoid requiring real tokens)",
-        "All three channel modules have @moduledoc and @doc on public functions",
-        "No compiler warnings from any of the new channel modules",
-        "mix format --check-formatted passes",
-        "mix compile --warnings-as-errors passes",
-        "mix test --warnings-as-errors --max-failures 1 passes"
+        "E2E verifies trace + central policy coverage",
+        "Project resume from checkpoint is reproducible",
+        "Release validation report confirms predictability/recovery",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
       ],
       "priority": 14,
-      "passes": true,
-      "notes": "Final validation gate. All previous stories must pass. This is the definition of done for the feature.",
+      "passes": false,
+      "notes": "",
       "dependsOn": [
-        "US-007",
-        "US-010",
+        "US-005",
+        "US-011",
         "US-013"
       ]
     }

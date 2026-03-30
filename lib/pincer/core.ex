@@ -20,6 +20,7 @@ defmodule Pincer.Core do
       Bindings,
       AgentRegistry,
       AccessPolicy,
+      Policy,
       SessionScopePolicy,
       SessionResolver,
       Session.Context,
