@@ -90,6 +90,22 @@ defmodule Pincer.Core.Session.ServerTest do
     @impl true
     def load_checkpoint(_session_id, _opts), do: {:ok, nil}
 
+    @impl true
+    def ingest_decision(_topic, _rationale, _file \\ nil), do: :ok
+
+    @impl true
+    def ingest_pattern(_name, _description), do: :ok
+
+    @impl true
+    def ingest_person(_name, _attrs \\ %{}), do: :ok
+
+    @impl true
+    def ingest_animal(_name, _species \\ nil, _notes \\ nil), do: :ok
+
+    @impl true
+    def ingest_entity_relation(_from_name, _from_type, _relation, _to_name, _to_type),
+      do: :ok
+
     defp agent do
       Application.fetch_env!(:pincer, :session_server_test_agent)
     end
