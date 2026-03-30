@@ -66,4 +66,27 @@ defmodule Pincer.Core.MemoryPipelineTest do
     assert second.store.status == :skipped_budget
     assert second.store.reason == :session_budget_exceeded
   end
+
+  test "compact window is based on monotonic milliseconds" do
+    input = %{session_id: "s-window", project_id: "p-window", content: "A", query: "memory"}
+
+    assert {:ok, first} =
+             MemoryPipeline.run(input,
+               storage: StorageStub,
+               embedding_fun: fn _ -> {:ok, [0.1]} end,
+               budget: %{session: 10, project: 10}
+             )
+
+    assert first.compact.status == :compacted
+
+    assert {:ok, second} =
+             MemoryPipeline.run(%{input | content: "B"},
+               storage: StorageStub,
+               embedding_fun: fn _ -> {:ok, [0.1]} end,
+               budget: %{session: 10, project: 10}
+             )
+
+    assert second.compact.status == :noop
+    assert second.compact.reason == :recently_compacted
+  end
 end

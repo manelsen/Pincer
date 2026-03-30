@@ -10,6 +10,7 @@ defmodule Pincer.Core.AuthProfiles do
 
   alias Pincer.Core.ErrorClass
   alias Pincer.Utils.ETSHelper
+  alias Pincer.Utils.Time
 
   @table :pincer_auth_profile_cooldown
   @default_profile "default"
@@ -288,7 +289,7 @@ defmodule Pincer.Core.AuthProfiles do
 
   defp cooldown_key(provider_id, profile_name), do: {provider_id, profile_name}
 
-  defp now_ms, do: System.monotonic_time(:millisecond)
+  defp now_ms, do: Time.monotonic_ms()
 
   defp ensure_table do
     _ = ETSHelper.ensure_named_table(@table)

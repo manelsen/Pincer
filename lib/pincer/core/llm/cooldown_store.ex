@@ -7,6 +7,7 @@ defmodule Pincer.Core.LLM.CooldownStore do
 
   alias Pincer.Core.ErrorClass
   alias Pincer.Utils.ETSHelper
+  alias Pincer.Utils.Time
 
   @table :pincer_llm_cooldown_store
 
@@ -156,7 +157,7 @@ defmodule Pincer.Core.LLM.CooldownStore do
 
   defp fetch_key(_other, _key, default), do: default
 
-  defp now_ms, do: System.monotonic_time(:millisecond)
+  defp now_ms, do: Time.monotonic_ms()
 
   defp ensure_table do
     _ = ETSHelper.ensure_named_table(@table)
