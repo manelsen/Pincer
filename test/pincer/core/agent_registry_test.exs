@@ -12,8 +12,11 @@ defmodule Pincer.Core.AgentRegistryTest do
     cwd = File.cwd!()
     File.cd!(tmp)
 
-    File.mkdir_p!("workspaces/.template/.pincer")
-    File.write!("workspaces/.template/.pincer/BOOTSTRAP.md", "# Template Bootstrap\n")
+    File.mkdir_p!("tmp/test_workspaces/.template/.pincer")
+    File.write!("tmp/test_workspaces/.template/.pincer/BOOTSTRAP.md", "# Template Bootstrap\n")
+    File.write!("tmp/test_workspaces/.template/.pincer/IDENTITY.md", "# Template Identity\n")
+    File.write!("tmp/test_workspaces/.template/.pincer/SOUL.md", "# Template Soul\n")
+    File.write!("tmp/test_workspaces/.template/.pincer/USER.md", "# Template User\n")
     File.write!("IDENTITY.md", "# Legacy Identity\n")
     File.write!("SOUL.md", "# Legacy Soul\n")
 
@@ -31,9 +34,9 @@ defmodule Pincer.Core.AgentRegistryTest do
 
     assert agent_id =~ ~r/^[0-9a-f]{6}$/
     assert workspace_path == AgentPaths.workspace_root(agent_id)
-    assert File.read!(AgentPaths.bootstrap_path(workspace_path)) =~ "BOOTSTRAP"
-    assert File.read!(AgentPaths.identity_path(workspace_path)) =~ "Pincer"
-    assert File.read!(AgentPaths.soul_path(workspace_path)) =~ "Core Truths"
+    assert File.read!(AgentPaths.bootstrap_path(workspace_path)) =~ "Template Bootstrap"
+    assert File.read!(AgentPaths.identity_path(workspace_path)) =~ "Template Identity"
+    assert File.read!(AgentPaths.soul_path(workspace_path)) =~ "Template Soul"
   end
 
   test "create_root_agent!/1 accepts explicit ids" do
@@ -41,7 +44,7 @@ defmodule Pincer.Core.AgentRegistryTest do
       AgentRegistry.create_root_agent!(agent_id: "annie")
 
     assert workspace_path == AgentPaths.workspace_root("annie")
-    assert File.read!(AgentPaths.identity_path(workspace_path)) =~ "Pincer"
-    assert File.read!(AgentPaths.soul_path(workspace_path)) =~ "Core Truths"
+    assert File.read!(AgentPaths.identity_path(workspace_path)) =~ "Template Identity"
+    assert File.read!(AgentPaths.soul_path(workspace_path)) =~ "Template Soul"
   end
 end
