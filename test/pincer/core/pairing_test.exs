@@ -118,6 +118,30 @@ defmodule Pincer.Core.PairingTest do
       assert Pairing.bound_agent_session?(:telegram, "annie")
     end
 
+    test "bound_agent_session?/2 ignores malformed pair rows and matches valid channel bindings" do
+      assert {:ok, %{code: "ANNIE42"}} =
+               Pairing.issue_invite(:telegram,
+                 agent_id: "annie",
+                 now_ms: 1_000,
+                 ttl_ms: 60_000,
+                 code_generator: fn -> "ANNIE42" end
+               )
+
+      assert :ok =
+               Pairing.approve_code(:telegram, "123", "ANNIE42",
+                 now_ms: 1_001,
+                 default_agent_id: "telegram_123"
+               )
+
+      # Explicitly insert malformed/non-map rows to lock behavior while optimizing lookup internals.
+      :ets.insert(:pincer_pairing_pairs, {{"telegram", "bad"}, "malformed"})
+      :ets.insert(:pincer_pairing_pairs, {{"discord", "321"}, %{agent_id: "annie"}})
+
+      assert Pairing.bound_agent_session?(:telegram, "annie")
+      refute Pairing.bound_agent_session?(:telegram, "lucie")
+      refute Pairing.bound_agent_session?(:discord, "a1b2c3")
+    end
+
     test "approve_code binds generic invite codes to a dedicated telegram agent" do
       assert {:ok, %{code: "GENERIC42", expires_at_ms: 61_000, agent_id: nil}} =
                Pairing.issue_invite(:telegram,

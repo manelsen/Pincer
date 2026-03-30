@@ -251,10 +251,10 @@ defmodule Pincer.Core.Pairing do
     if is_nil(normalized_agent_id) do
       false
     else
-      @table_pairs
-      |> :ets.tab2list()
+      normalized_channel
+      |> select_pair_data_for_channel()
       |> Enum.any?(fn
-        {{^normalized_channel, _sender}, pair_data} when is_map(pair_data) ->
+        pair_data when is_map(pair_data) ->
           normalize_agent_id(Map.get(pair_data, :agent_id) || Map.get(pair_data, "agent_id")) ==
             normalized_agent_id
 
@@ -438,6 +438,12 @@ defmodule Pincer.Core.Pairing do
       |> String.slice(0, 8)
 
     normalize_code("PAIR_#{token}")
+  end
+
+  defp select_pair_data_for_channel(channel) when is_binary(channel) do
+    :ets.select(@table_pairs, [
+      {{{channel, :_}, :"$1"}, [], [:"$1"]}
+    ])
   end
 
   defp ensure_tables do
