@@ -314,8 +314,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 17,
-      "passes": false,
-      "notes": "Backlog item from codebase quality sweep: duplicated ETS init logic across modules.",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-017-extract-shared-ets-helper. Added shared utility Pincer.Utils.ETSHelper.ensure_named_table/2 and unit coverage in test/pincer/utils/ets_helper_test.exs. Migrated duplicated ETS table init logic from AuthProfiles, LLM.CooldownStore, MemoryPipeline, ProjectOrchestrator, and Pairing to the shared helper while preserving module behavior contracts. Validated with focused ETS-related suites and MIX_ENV=test mix qa (green: 2 doctests, 1007 tests, 0 failures).",
       "dependsOn": [
         "US-016"
       ]

@@ -7,6 +7,7 @@ defmodule Pincer.Core.MemoryPipeline do
   alias Pincer.Core.Memory
   alias Pincer.Core.MemoryRecall
   alias Pincer.Core.MemoryTypes
+  alias Pincer.Utils.ETSHelper
 
   @table __MODULE__
 
@@ -139,14 +140,8 @@ defmodule Pincer.Core.MemoryPipeline do
   end
 
   defp ensure_table do
-    case :ets.whereis(@table) do
-      :undefined ->
-        :ets.new(@table, [:set, :named_table, :public])
-        :ok
-
-      _ ->
-        :ok
-    end
+    _ = ETSHelper.ensure_named_table(@table, options: [:set, :named_table, :public])
+    :ok
   end
 
   defp increment_session(session_id) do

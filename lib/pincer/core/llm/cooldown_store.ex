@@ -6,6 +6,7 @@ defmodule Pincer.Core.LLM.CooldownStore do
   """
 
   alias Pincer.Core.ErrorClass
+  alias Pincer.Utils.ETSHelper
 
   @table :pincer_llm_cooldown_store
 
@@ -158,17 +159,7 @@ defmodule Pincer.Core.LLM.CooldownStore do
   defp now_ms, do: System.monotonic_time(:millisecond)
 
   defp ensure_table do
-    case :ets.whereis(@table) do
-      :undefined ->
-        try do
-          :ets.new(@table, [:named_table, :set, :public, read_concurrency: true])
-          :ok
-        rescue
-          ArgumentError -> :ok
-        end
-
-      _tid ->
-        :ok
-    end
+    _ = ETSHelper.ensure_named_table(@table)
+    :ok
   end
 end

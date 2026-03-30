@@ -7,6 +7,7 @@ defmodule Pincer.Core.ProjectOrchestrator do
   """
   require Logger
   alias Pincer.Core.ProjectFSM
+  alias Pincer.Utils.ETSHelper
 
   @table __MODULE__
   @default_max_items 6
@@ -867,16 +868,11 @@ defmodule Pincer.Core.ProjectOrchestrator do
   defp normalize_max_items(_), do: @default_max_items
 
   defp ensure_table do
-    case :ets.whereis(@table) do
-      :undefined ->
-        :ets.new(@table, [:set, :named_table, :public, read_concurrency: true])
-        :ok
+    _ =
+      ETSHelper.ensure_named_table(@table,
+        options: [:set, :named_table, :public, read_concurrency: true]
+      )
 
-      _ ->
-        :ok
-    end
-  rescue
-    ArgumentError ->
-      :ok
+    :ok
   end
 end

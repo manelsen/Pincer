@@ -12,6 +12,7 @@ defmodule Pincer.Core.Pairing do
 
   alias Pincer.Core.AgentRegistry
   alias Pincer.Infra.PubSub
+  alias Pincer.Utils.ETSHelper
 
   @table_pending :pincer_pairing_pending
   @table_invites :pincer_pairing_invites
@@ -453,18 +454,7 @@ defmodule Pincer.Core.Pairing do
   end
 
   defp ensure_table(table) do
-    case :ets.whereis(table) do
-      :undefined ->
-        try do
-          :ets.new(table, [:named_table, :set, :public, read_concurrency: true])
-          :created
-        rescue
-          ArgumentError -> :existing
-        end
-
-      _tid ->
-        :existing
-    end
+    ETSHelper.ensure_named_table(table)
   end
 
   defp bootstrap_from_store do
