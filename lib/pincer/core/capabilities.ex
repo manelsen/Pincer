@@ -18,6 +18,97 @@ defmodule Pincer.Core.Capabilities do
 
   @type adapter_type :: :provider | :tool | :channel
   @type validation_error :: %{code: :missing_required_field, field: atom(), message: String.t()}
+  @type declaration :: %{adapter: atom(), type: adapter_type(), capabilities: map()}
+
+  @declarations [
+    %{
+      adapter: :openrouter,
+      type: :provider,
+      capabilities: %{
+        streaming: true,
+        tool_calling: :native,
+        multimodal: [:image],
+        max_context: 128_000,
+        structured_output: true,
+        retry_profile: :aggressive
+      }
+    },
+    %{
+      adapter: :google,
+      type: :provider,
+      capabilities: %{
+        streaming: true,
+        tool_calling: :native,
+        multimodal: [:image, :audio],
+        max_context: 1_000_000,
+        structured_output: true,
+        retry_profile: :balanced
+      }
+    },
+    %{
+      adapter: :safe_shell,
+      type: :tool,
+      capabilities: %{
+        filesystem: true,
+        network: false,
+        writes_state: true,
+        requires_approval: true,
+        side_effect_level: :privileged
+      }
+    },
+    %{
+      adapter: :web,
+      type: :tool,
+      capabilities: %{
+        filesystem: false,
+        network: true,
+        writes_state: false,
+        requires_approval: false,
+        side_effect_level: :read
+      }
+    },
+    %{
+      adapter: :file_system,
+      type: :tool,
+      capabilities: %{
+        filesystem: true,
+        network: false,
+        writes_state: true,
+        requires_approval: true,
+        side_effect_level: :guarded_write
+      }
+    },
+    %{
+      adapter: :telegram,
+      type: :channel,
+      capabilities: %{
+        buttons: true,
+        markdown_html: true,
+        attachments: true,
+        streaming_support: true
+      }
+    },
+    %{
+      adapter: :discord,
+      type: :channel,
+      capabilities: %{
+        buttons: true,
+        markdown_html: true,
+        attachments: true,
+        streaming_support: true
+      }
+    },
+    %{
+      adapter: :cli,
+      type: :channel,
+      capabilities: %{
+        buttons: false,
+        markdown_html: false,
+        attachments: true,
+        streaming_support: true
+      }
+    }
+  ]
 
   @doc "Returns the current schema version."
   @spec schema_version() :: String.t()
@@ -74,6 +165,17 @@ defmodule Pincer.Core.Capabilities do
       type_matches?(entry, type) and feature_matches?(entry, feature)
     end)
   end
+
+  @doc """
+  Returns declared adapter capabilities.
+  """
+  @spec declarations(adapter_type() | :all) :: [declaration()]
+  def declarations(type \\ :all)
+
+  def declarations(:all), do: @declarations
+
+  def declarations(type) when type in [:provider, :tool, :channel],
+    do: query(@declarations, type: type)
 
   defp required_fields(:provider), do: @provider_required
   defp required_fields(:tool), do: @tool_required
