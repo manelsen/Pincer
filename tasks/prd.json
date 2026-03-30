@@ -239,8 +239,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 13,
-      "passes": false,
-      "notes": "",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-013-unify-observability-doctor-audit. Unified operational diagnostics by linking Doctor and SecurityAudit outputs with correlation run_id across all checks and adding explicit selection/recovery metadata per check. Doctor now includes runtime cohesion checks for policy/trace/tool-runtime/memory-pipeline health; both Mix tasks print run IDs and per-check run linkage. Added/updated tests in doctor_test, security_audit_test, and Mix task tests to validate linked IDs and enriched output behavior. Validated with mix format, focused test suite (doctor/security audit core + mix tasks), and mix compile --warnings-as-errors.",
       "dependsOn": [
         "US-004",
         "US-009",
