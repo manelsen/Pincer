@@ -45,17 +45,31 @@ mix pincer.chat                   # interactive CLI agent
 Runtime config lives in `config.yaml`, not `config/*.exs`. The `Pincer.Infra.Config` module loads it at startup. Edit `config.yaml` to configure:
 
 - **LLM providers** — set `llm.provider` and add API keys to `.env`
-- **Channels** — enable/disable Telegram, Discord, CLI, webhook, WhatsApp
+- **Channels** — enable/disable Telegram, Discord, CLI, webhook, WhatsApp, LINE
 - **MCP servers** — add external tool servers under `mcp.servers`
 - **Database** — override via `config.yaml` or `PINCER_DB_*` env vars
 - **Workspace isolation** — `tools.restrict_to_workspace: true` (default) confines file/shell tools to the agent's workspace
+
+### LINE Messaging API
+
+```yaml
+# config.yaml
+channels:
+  line:
+    enabled: true
+    adapter: "Pincer.Channels.Line"
+    token_env: "LINE_CHANNEL_ACCESS_TOKEN"
+    secret_env: "LINE_CHANNEL_SECRET"
+```
+
+Set `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_CHANNEL_SECRET` in `.env`.
 
 ## Architecture
 
 Pincer uses **Hexagonal Architecture** (Ports & Adapters) with compile-time boundary enforcement. Dependencies flow inward — outer layers can depend on inner, never the reverse:
 
 ```
-Channels       Telegram, Discord, Slack, WhatsApp, CLI, Webhook
+Channels       Telegram, Discord, Slack, WhatsApp, LINE, CLI, Webhook
     ↓
 Adapters       Concrete implementations: MCP, Cron, Tools
     ↓
@@ -134,6 +148,7 @@ Each channel implements the `Pincer.Ports.Channel` behaviour and uses the inject
 | Discord | `Pincer.Channels.Discord` | Requires `DISCORD_BOT_TOKEN` |
 | Slack | `Pincer.Channels.Slack` | Requires Slack app credentials |
 | WhatsApp | `Pincer.Channels.WhatsApp` | Requires Go bridge binary |
+| LINE | `Pincer.Channels.Line` | Requires `LINE_CHANNEL_ACCESS_TOKEN` + `LINE_CHANNEL_SECRET` |
 | Webhook | `Pincer.Channels.Webhook` | Generic HTTP endpoint |
 
 ### Multi-agent routing (Telegram)
