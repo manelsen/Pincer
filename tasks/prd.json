@@ -259,8 +259,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 14,
-      "passes": false,
-      "notes": "",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-014-validate-release-operational-cohesion. Implemented release validator (Pincer.Core.ReleaseValidation + release_validation_test) and resolved baseline suite incompatibilities surfaced while closing gate: blackboard scope-sensitive reads, streaming/tool-use payload assertions, archivist graph extraction test prompt, Feishu test cleanup race, Pairing.reset ETS idempotence, Telegram chunking edge case and reasoning-format expectation alignment. Validated with MIX_ENV=test mix qa (green: 2 doctests, 1000 tests, 0 failures) plus focused suites during TDD iterations.",
       "dependsOn": [
         "US-005",
         "US-011",

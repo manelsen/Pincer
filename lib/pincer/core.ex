@@ -11,6 +11,7 @@ defmodule Pincer.Core do
       ProjectFlowDelivery,
       ProjectOrchestrator,
       ProjectFSM,
+      ReleaseValidation,
       Structs.IncomingMessage,
       Executor,
       UX,

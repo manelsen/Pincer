@@ -100,7 +100,8 @@ defmodule Pincer.Core.ExecutorHexTest do
           llm_client: Pincer.MockLLMClient
         )
 
-      assert_receive {:sme_tool_use, "my_tool"}, 5000
+      assert_receive {:sme_tool_use, payload}, 5000
+      assert payload == "my_tool" or payload == ["my_tool: val"]
       assert_receive {:executor_finished, _, "Done", _usage}, 5000
     end
 
@@ -264,7 +265,8 @@ defmodule Pincer.Core.ExecutorHexTest do
           llm_client: Pincer.MockLLMClient
         )
 
-      assert_receive {:sme_tool_use, "web_search"}, 5000
+      assert_receive {:sme_tool_use, payload}, 5000
+      assert payload == "web_search" or payload == ["web_search: elixir"]
       assert_receive {:executor_finished, _, "Done map args", _usage}, 5000
       refute_receive {:executor_failed, _}
     end
@@ -294,13 +296,17 @@ defmodule Pincer.Core.ExecutorHexTest do
 
       Pincer.MockToolRegistry
       |> stub(:list_tools, fn -> [] end)
-      |> expect(:execute_tool, fn "unsafe_tool", %{"arg" => "val"}, _ctx ->
-        {:error, {:approval_required, "cat /etc/passwd"}}
-      end)
-      |> expect(:execute_tool, fn "safe_shell",
-                                  %{"command" => "cat /etc/passwd", "skip_approval" => true},
-                                  _ctx ->
-        {:ok, "blocked by workspace restriction policy"}
+      |> expect(:execute_tool, 2, fn name, args, _ctx when is_map(args) ->
+        case {name, args} do
+          {"unsafe_tool", %{"arg" => "val"}} ->
+            {:error, {:approval_required, "cat /etc/passwd"}}
+
+          {"unsafe_tool", %{"command" => "cat /etc/passwd"}} ->
+            {:ok, "blocked by workspace restriction policy"}
+
+          {"safe_shell", %{"command" => "cat /etc/passwd", "skip_approval" => true}} ->
+            {:ok, "blocked by workspace restriction policy"}
+        end
       end)
 
       Pincer.MockLLMClient

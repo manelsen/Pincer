@@ -20,7 +20,7 @@ defmodule Pincer.Channels.Feishu.APITest do
 
     on_exit(fn ->
       if pid = Process.whereis(cache_name) do
-        GenServer.stop(pid, :shutdown)
+        Process.exit(pid, :shutdown)
       end
     end)
 

@@ -269,11 +269,18 @@ defmodule Pincer.Core.Pairing do
   @spec reset() :: :ok
   def reset do
     ensure_tables()
-    :ets.delete_all_objects(@table_pending)
-    :ets.delete_all_objects(@table_invites)
-    :ets.delete_all_objects(@table_pairs)
+    clear_table_if_exists(@table_pending)
+    clear_table_if_exists(@table_invites)
+    clear_table_if_exists(@table_pairs)
     clear_persistent_store()
     :ok
+  end
+
+  defp clear_table_if_exists(table) do
+    case :ets.whereis(table) do
+      :undefined -> :ok
+      _tid -> :ets.delete_all_objects(table)
+    end
   end
 
   defp create_pending(channel, sender_id, key, now, opts) do
