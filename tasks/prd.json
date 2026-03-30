@@ -69,8 +69,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 4,
-      "passes": false,
-      "notes": "",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-004-emit-trace-events-executor. Executor now emits structured trace step events for prompt prep, policy decisions, LLM invocation, tool invocation/results, fallback/recovery, and terminal checkpoints when trace_events? is enabled. Added executor_trace_test to validate step emission and snapshot delivery.",
       "dependsOn": [
         "US-002",
         "US-003"
