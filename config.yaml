@@ -25,6 +25,11 @@ channels:
     token_env: "LINE_CHANNEL_ACCESS_TOKEN"
     secret_env: "LINE_CHANNEL_SECRET"
   whatsapp:
+  dingtalk:
+    enabled: false
+    adapter: "Pincer.Channels.DingTalk"
+    client_id_env: "DINGTALK_CLIENT_ID"
+    client_secret_env: "DINGTALK_CLIENT_SECRET"
     adapter: "Pincer.Channels.WhatsApp"
     bridge:
       args: []
