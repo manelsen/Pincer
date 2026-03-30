@@ -200,8 +200,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 11,
-      "passes": false,
-      "notes": "",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-011-integrate-fsm-orchestrator-subagents. Integrated ProjectOrchestrator with explicit ProjectFSM state and project_id lifecycle. Orchestrator now carries fsm_state in session project state, transitions through scope/plan/execution during wizard flow and review/delivery on completion, includes phase + project_id metadata in kickoff/retry/next/completed payloads, and enriches task prompts with Project ID/Phase for downstream sub-agent routing context. Added test coverage in project_orchestrator_test for execution phase metadata on kickoff/resume and delivery phase on full completion. Validated with mix format, mix test --warnings-as-errors test/pincer/core/project_orchestrator_test.exs, and mix compile --warnings-as-errors.",
       "dependsOn": [
         "US-002",
         "US-010"
