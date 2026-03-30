@@ -19,6 +19,11 @@ channels:
     enabled: false
     session_mode: "per_sender"
     token_env: "PINCER_WEBHOOK_TOKEN"
+  line:
+    enabled: false
+    adapter: "Pincer.Channels.Line"
+    token_env: "LINE_CHANNEL_ACCESS_TOKEN"
+    secret_env: "LINE_CHANNEL_SECRET"
   whatsapp:
     adapter: "Pincer.Channels.WhatsApp"
     bridge:
