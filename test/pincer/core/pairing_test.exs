@@ -180,6 +180,16 @@ defmodule Pincer.Core.PairingTest do
     end
   end
 
+  describe "reset/0" do
+    test "is idempotent even if runtime tables disappear between calls" do
+      assert :ok = Pairing.reset()
+      delete_runtime_table(:pincer_pairing_pending)
+      delete_runtime_table(:pincer_pairing_invites)
+      delete_runtime_table(:pincer_pairing_pairs)
+      assert :ok = Pairing.reset()
+    end
+  end
+
   defp delete_runtime_table(table) do
     case :ets.whereis(table) do
       :undefined -> :ok

@@ -283,6 +283,24 @@
       "dependsOn": [
         "US-014"
       ]
+    },
+    {
+      "id": "US-016",
+      "title": "Remove legacy priv template files",
+      "description": "Finalize canonical template source by removing duplicated legacy templates and stabilizing teardown races uncovered during validation.",
+      "acceptanceCriteria": [
+        "Legacy files under priv/pincer/templates are removed",
+        "Contract tests assert legacy files are absent",
+        "Pairing reset remains idempotent under ETS table churn",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 16,
+      "passes": true,
+      "notes": "Complete. Branch: us/us-016-remove-legacy-template-files. Added RED test asserting legacy priv template files are absent, removed BOOTSTRAP/IDENTITY/USER from priv/pincer/templates, and aligned API appendix text to canonical template resolution. Full QA surfaced an intermittent pairing teardown race (ETS table missing during reset/bootstrap); fixed by hardening Pairing.reset/0 table initialization and safe clear handling, plus idempotency regression test in pairing_test. Validated with focused AgentPaths/Pairing/SessionScopePolicy suites and MIX_ENV=test mix qa (green: 2 doctests, 1006 tests, 0 failures).",
+      "dependsOn": [
+        "US-015"
+      ]
     }
   ]
 }
