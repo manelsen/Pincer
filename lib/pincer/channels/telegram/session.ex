@@ -106,11 +106,13 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def on_agent_partial(token, state) do
+    session_status = session_status(state.session_id)
+
     StreamDelivery.handle_partial(
       state,
       token,
       System.system_time(:millisecond),
-      stream_transport(state, session_status(state.session_id)),
+      stream_transport(state, session_status, skip_formatting: true),
       suppress_preview?: &suppress_preview?/2
     )
   end
@@ -129,7 +131,7 @@ defmodule Pincer.Channels.Telegram.Session do
         StreamDelivery.handle_final(
           state,
           text_with_usage,
-          stream_transport(state, session_status)
+          stream_transport(state, session_status, skip_formatting: false)
         )
 
       maybe_advance_project_flow(state)
@@ -206,8 +208,11 @@ defmodule Pincer.Channels.Telegram.Session do
     _ -> %{}
   end
 
-  defp stream_transport(state, session_status) do
-    opts = ResponseEnvelope.delivery_options(:telegram, session_status)
+  defp stream_transport(state, session_status, extra_opts) do
+    opts =
+      session_status
+      |> then(&ResponseEnvelope.delivery_options(:telegram, &1))
+      |> Keyword.merge(extra_opts)
 
     [
       send: fn text ->

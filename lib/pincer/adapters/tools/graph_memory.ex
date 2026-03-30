@@ -105,14 +105,14 @@ defmodule Pincer.Adapters.Tools.GraphMemory do
     %{
       name: "graph_history",
       description:
-        "Retrieves the history of bugs and fixes registered in the project's knowledge graph.",
+        "Queries the project knowledge graph. Returns bugs+fixes, architectural decisions, and code patterns extracted from past sessions. Use to check prior decisions, known issues, or established patterns before implementing something.",
       parameters: %{
         type: "object",
         properties: %{
           filter: %{
             type: "string",
             description:
-              "Optional: term to filter the history search (e.g., a file name or error type)."
+              "Optional: term to filter results (file name, error type, topic, or pattern name)."
           }
         }
       }

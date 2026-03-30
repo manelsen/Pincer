@@ -77,6 +77,9 @@ defmodule Pincer.Channels.Telegram do
   alias Pincer.Core.UX.MenuPolicy
   alias Pincer.Utils.Text
 
+  @file_extensions ~w(md go py pl sh am at be cc)
+  @file_extension_pattern ~r/(^|[^a-zA-Z0-9_\-\/])([a-zA-Z0-9_.\-\.\/]+\.(?:#{Enum.join(@file_extensions, "|")}))(?=$|[^a-zA-Z0-9_\-\/])/i
+
   @doc """
   Starts the Telegram channel supervisor.
 
@@ -146,14 +149,19 @@ defmodule Pincer.Channels.Telegram do
           {:ok, integer()} | {:error, any()}
   @impl Pincer.Ports.Channel
   def send_message(chat_id, text, opts \\ []) do
-    html_text =
-      if Keyword.get(opts, :skip_reasoning_strip, false) do
-        text |> Text.format_reasoning_html() |> markdown_to_html()
-      else
-        text |> Text.strip_reasoning() |> markdown_to_html()
-      end
+    if Keyword.get(opts, :skip_formatting, false) do
+      # Plain text mode for streaming performance and safety
+      do_send_message(chat_id, text, Keyword.delete(opts, :parse_mode))
+    else
+      html_text =
+        if Keyword.get(opts, :skip_reasoning_strip, false) do
+          text |> Text.format_reasoning_html() |> markdown_to_html()
+        else
+          text |> Text.strip_reasoning() |> markdown_to_html()
+        end
 
-    do_send_message(chat_id, html_text, Keyword.put(opts, :parse_mode, "HTML"))
+      do_send_message(chat_id, html_text, Keyword.put(opts, :parse_mode, "HTML"))
+    end
   end
 
   @doc """
@@ -161,19 +169,67 @@ defmodule Pincer.Channels.Telegram do
   """
   @impl Pincer.Ports.Channel
   def update_message(chat_id, message_id, text, opts \\ []) do
-    html_text =
-      if Keyword.get(opts, :skip_reasoning_strip, false) do
-        text |> Text.format_reasoning_html() |> markdown_to_html()
-      else
-        text |> Text.strip_reasoning() |> markdown_to_html()
+    if Keyword.get(opts, :skip_formatting, false) do
+      # Plain text update for streaming
+      case Pincer.Channels.Telegram.api_client().edit_message_text(chat_id, message_id, text,
+             Keyword.delete(opts, :parse_mode)
+           ) do
+        {:ok, _} -> :ok
+        {:error, %Telegex.Error{description: "Bad Request: message is not modified"}} -> :ok
+        {:error, reason} -> {:error, reason}
       end
+    else
+      html_text =
+        if Keyword.get(opts, :skip_reasoning_strip, false) do
+          text |> Text.format_reasoning_html() |> markdown_to_html()
+        else
+          text |> Text.strip_reasoning() |> markdown_to_html()
+        end
 
-    case Pincer.Channels.Telegram.api_client().edit_message_text(chat_id, message_id, html_text,
-           parse_mode: "HTML"
-         ) do
-      {:ok, _} -> :ok
-      {:error, %Telegex.Error{description: "Bad Request: message is not modified"}} -> :ok
-      {:error, reason} -> {:error, reason}
+      case Pincer.Channels.Telegram.api_client().edit_message_text(chat_id, message_id, html_text,
+             parse_mode: "HTML"
+           ) do
+        {:ok, _} ->
+          :ok
+
+        {:error, %Telegex.Error{description: "Bad Request: message is not modified"}} ->
+          :ok
+
+        {:error, %Telegex.Error{description: desc}} ->
+          is_parse_error =
+            String.contains?(desc, "can't parse entities") or
+              String.contains?(desc, "can't find end tag")
+
+          if is_parse_error do
+            Logger.warning(
+              "Telegram HTML update failed. Falling back to plain text update. Error: #{desc}"
+            )
+
+            plain_text =
+              html_text
+              |> String.replace("&lt;", "<")
+              |> String.replace("&gt;", ">")
+              |> String.replace("&amp;", "&")
+              |> String.replace("&quot;", "\"")
+              |> String.replace(~r/<br\s*\/?>/i, "\n")
+              |> String.replace(~r/<[^>]+>/, "")
+
+            case Pincer.Channels.Telegram.api_client().edit_message_text(
+                   chat_id,
+                   message_id,
+                   plain_text
+                 ) do
+              {:ok, _} -> :ok
+              {:error, %Telegex.Error{description: "Bad Request: message is not modified"}} -> :ok
+              {:error, reason} -> {:error, reason}
+            end
+          else
+            {:error, desc}
+          end
+
+        {:error, reason} ->
+          {:error, reason}
+      end
     end
   end
 
@@ -184,33 +240,35 @@ defmodule Pincer.Channels.Telegram do
 
       {:error, %Telegex.Error{description: desc}}
       when desc in ["Bad Request: message is too long", "Bad Request: text is too long"] ->
-        Logger.warning("Telegram message too long. Splitting into chunks...")
+        Logger.warning("Telegram message too long. Splitting into semantic chunks...")
 
-        # Split into ~4000 char chunks to stay well under the 4096 limit
-        # We perform splitting on the raw text for simplicity
-        chunks =
-          text
-          |> String.codepoints()
-          |> Enum.chunk_every(4000)
-          |> Enum.map(&Enum.join/1)
+        # Split into semantic chunks to keep line/tag integrity where possible
+        chunks = smart_chunk_text(text, 4000)
 
         # We return the first chunk's ID to keep the streaming flow if needed
-        # though splitting usually happens at the end.
         [first | rest] = chunks
 
-        {:ok, %{message_id: mid}} =
-          Pincer.Channels.Telegram.api_client().send_message(chat_id, first, opts)
+        # Recursive call to do_send_message for chunks, which handles parse errors
+        case do_send_message(chat_id, first, opts) do
+          {:ok, mid} ->
+            Enum.each(rest, fn chunk ->
+              Process.sleep(100)
+              do_send_message(chat_id, chunk, opts)
+            end)
 
-        Enum.each(rest, fn chunk ->
-          Process.sleep(100)
-          Pincer.Channels.Telegram.api_client().send_message(chat_id, chunk, opts)
-        end)
+            {:ok, mid}
 
-        {:ok, mid}
+          {:error, reason} ->
+            {:error, reason}
+        end
 
       {:error, %Telegex.Error{description: desc}} ->
         # ONLY attempt fallback if we are currently using a parse_mode (like HTML)
-        if Keyword.has_key?(opts, :parse_mode) do
+        # Handle "can't parse entities" as well as any other parse error
+        is_parse_error = String.contains?(desc, "can't parse entities") or
+                        String.contains?(desc, "can't find end tag")
+
+        if Keyword.has_key?(opts, :parse_mode) and (desc in ["Bad Request: Can't parse entities"] or is_parse_error) do
           Logger.warning(
             "Telegram HTML parsing failed. Falling back to plain text. Error: #{desc}"
           )
@@ -221,6 +279,8 @@ defmodule Pincer.Channels.Telegram do
             |> String.replace("&gt;", ">")
             |> String.replace("&amp;", "&")
             |> String.replace("&quot;", "\"")
+            # Remove remaining HTML tags but keep newlines
+            |> String.replace(~r/<br\s*\/?>/i, "\n")
             |> String.replace(~r/<[^>]+>/, "")
 
           # Re-call do_send_message WITHOUT the parse_mode
@@ -331,7 +391,19 @@ defmodule Pincer.Channels.Telegram do
         String.replace(acc, placeholder, content)
       end)
 
-    String.trim(restored)
+    # 5. File Reference Wrapping (OpenClaw style)
+    # This prevents Telegram from generating previews for README.md, main.go, etc.
+    final_html = wrap_file_references(restored)
+
+    String.trim(final_html)
+  end
+
+  defp wrap_file_references(html) do
+    # We skip content already inside <code>, <pre>, or <a> tags.
+    # We use a simple targeted regex replacement that avoids common HTML pitfalls.
+    Regex.replace(@file_extension_pattern, html, fn _full, prefix, filename ->
+      "#{prefix}<code>#{filename}</code>"
+    end)
   end
 
   @doc false
@@ -395,6 +467,43 @@ defmodule Pincer.Channels.Telegram do
 
   def api_client do
     Application.get_env(:pincer, :telegram_api, Pincer.Channels.Telegram.API.Adapter)
+  end
+
+  defp smart_chunk_text(text, limit) do
+    lines = String.split(text, ~r/\n/)
+
+    {chunks, current_chunk} =
+      Enum.reduce(lines, {[], ""}, fn line, {acc, current} ->
+        line_with_newline = line <> "\n"
+
+        cond do
+          # Line alone exceeds the limit - split it blindly
+          String.length(line_with_newline) > limit ->
+            # Finish current chunk first
+            acc = if current == "", do: acc, else: acc ++ [current]
+
+            # Split huge line into parts
+            blind_parts =
+              line_with_newline
+              |> String.codepoints()
+              |> Enum.chunk_every(limit)
+              |> Enum.map(&Enum.join/1)
+
+            # Last part of the blind split becomes the new current chunk
+            {new_current, rest} = List.pop_at(blind_parts, -1)
+            {acc ++ rest, new_current}
+
+          # Current chunk + line exceeds limit - start new chunk
+          String.length(current) + String.length(line_with_newline) > limit ->
+            {acc ++ [current], line_with_newline}
+
+          # Otherwise, keep adding to current chunk
+          true ->
+            {acc, current <> line_with_newline}
+        end
+      end)
+
+    if current_chunk == "", do: chunks, else: chunks ++ [current_chunk]
   end
 end
 

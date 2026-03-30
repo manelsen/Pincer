@@ -1,0 +1,1 @@
+{"message_reaction":{"chat":{"id":12345678,"type":"private","last_name":"Name","first_name":"AnonymizedUser","username":"anonymized_bot"},"message_id":150,"user":{"is_bot":false,"id":12345678,"last_name":"Name","first_name":"AnonymizedUser","username":"anonymized_bot"},"old_reaction":[],"date":1774567800,"new_reaction":[{"emoji":"❤️","type":"emoji"}]},"update_id":123456790}

@@ -599,6 +599,8 @@ defmodule Pincer.Core.Session.Server do
     identity = AgentPaths.read_file(AgentPaths.identity_path(workspace))
     soul = AgentPaths.read_file(AgentPaths.soul_path(workspace))
     user = AgentPaths.read_file(AgentPaths.user_path(workspace))
+    style = AgentPaths.read_file(AgentPaths.style_path(workspace))
+    history = AgentPaths.read_file(AgentPaths.history_path(workspace))
 
     bootstrap =
       if bootstrap_active?(workspace) do
@@ -619,6 +621,8 @@ defmodule Pincer.Core.Session.Server do
     ## USER:
     #{user}
 
+    #{if style != "", do: "## COMMUNICATION STYLE:\n#{style}\n", else: ""}
+    #{if history != "", do: "## SESSION HISTORY:\n#{history}\n", else: ""}
     ## CAPABILITIES & TOOLS:
     You are a technical agent with access to multiple tools through the Model Context Protocol (MCP) and native Elixir integrations.
     You can read and write files, execute shell commands, manage projects, and more.

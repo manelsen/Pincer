@@ -286,7 +286,13 @@ defmodule Pincer.Core.Orchestration.Blackboard do
   defp normalize_limit(limit) when is_integer(limit) and limit >= 0, do: limit
   defp normalize_limit(_), do: 0
 
-  defp filter_scope(messages, nil), do: messages
+  defp filter_scope(messages, nil) do
+    # If no scope is requested, only return GLOBAL messages.
+    # This prevents accidental leakage between private sessions.
+    Enum.filter(messages, fn msg -> Map.get(msg, :scope) == :global end)
+  end
+
+  defp filter_scope(messages, :all), do: messages
 
   defp filter_scope(messages, scope) do
     Enum.filter(messages, fn msg -> Map.get(msg, :scope) == scope end)

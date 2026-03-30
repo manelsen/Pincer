@@ -19,14 +19,14 @@ defmodule Pincer.Channels.Telegram.Renderer do
     escape_html(text)
   end
 
-  # Paragraphs: Render content and add double newline (if not at end)
+  # Paragraphs: Render content and add newline
   defp render_node({"p", _attrs, children, _meta}) do
-    render(children) <> "\n\n"
+    render(children) <> "\n"
   end
 
   # Headers (h1-h6): Map to Bold
   defp render_node({tag, _attrs, children, _meta}) when tag in ~w(h1 h2 h3 h4 h5 h6) do
-    "<b>" <> render(children) <> "</b>\n\n"
+    "<b>" <> render(children) <> "</b>\n"
   end
 
   # Bold / Strong
@@ -51,22 +51,22 @@ defmodule Pincer.Channels.Telegram.Renderer do
 
   # Blockquote
   defp render_node({"blockquote", _attrs, children, _meta}) do
-    "\n<blockquote>" <> String.trim(render(children)) <> "</blockquote>\n\n"
+    "<blockquote>" <> String.trim(render(children)) <> "</blockquote>\n"
   end
 
   # Code Blocks (<pre>)
   defp render_node({"pre", _attrs, [{"code", [{"class", class}], [code], _m1}], _m2}) do
     lang = class |> String.replace("language-", "")
-    "<pre><code class=\"language-#{lang}\">" <> escape_html(code) <> "</code></pre>\n\n"
+    "<pre><code class=\"language-#{lang}\">" <> escape_html(code) <> "</code></pre>\n"
   end
 
   defp render_node({"pre", _attrs, [{"code", _attrs_code, [code], _m3}], _m4}) do
-    "<pre>" <> escape_html(code) <> "</pre>\n\n"
+    "<pre>" <> escape_html(code) <> "</pre>\n"
   end
 
   # Fallback for complex pre blocks (often from Earmark fallbacks)
   defp render_node({"pre", _attrs, children, _m5}) when is_list(children) do
-    "<pre>" <> render(children) <> "</pre>\n\n"
+    "<pre>" <> render(children) <> "</pre>\n"
   end
 
   # Inline Code

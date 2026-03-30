@@ -131,7 +131,7 @@ defmodule Pincer.Utils.Text do
       |> String.trim()
       |> html_escape()
 
-    "<b>💭 Reasoning</b>\n<pre>#{escaped}</pre>"
+    "<b>💭 Reasoning</b>\n<i>#{escaped}</i>"
   end
 
   defp html_escape(text) do

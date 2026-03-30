@@ -262,23 +262,12 @@ defmodule Pincer.Core.MemoryRecall do
       end
 
     {graph_hits, graph_count, graph_outcome} =
-      if incident_query?(query) do
-        search_source(
-          :graph,
-          fn -> storage.search_graph_history(query, limit) end,
-          telemetry,
-          telemetry_opts
-        )
-      else
-        maybe_emit_search_telemetry(
-          telemetry,
-          %{duration_ms: 0, hit_count: 0},
-          search_metadata(telemetry_opts, :graph, :skipped),
-          telemetry_opts
-        )
-
-        {[], 0, :skipped}
-      end
+      search_source(
+        :graph,
+        fn -> storage.search_graph_history(query, limit) end,
+        telemetry,
+        telemetry_opts
+      )
 
     filtered_messages = filter_message_hits(message_hits, telemetry_opts)
 
@@ -387,15 +376,6 @@ defmodule Pincer.Core.MemoryRecall do
   end
 
   defp extract_session_id(_), do: nil
-
-  defp incident_query?(query) when is_binary(query) do
-    query
-    |> String.downcase()
-    |> String.split(~r/[^[:alnum:]_]+/u, trim: true)
-    |> Enum.any?(&(&1 in ["bug", "fix", "timeout", "incident", "deploy", "retry", "retries"]))
-  end
-
-  defp incident_query?(_query), do: false
 
   defp normalize_hit(hit) do
     %{
