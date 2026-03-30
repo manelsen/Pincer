@@ -475,11 +475,18 @@ defmodule Pincer.Channels.Telegram do
   end
 
   defp smart_chunk_text(text, limit) do
-    lines = String.split(text, ~r/\n/)
+    lines = String.split(text, "\n", trim: false)
+    last_index = length(lines) - 1
 
     {chunks, current_chunk} =
-      Enum.reduce(lines, {[], ""}, fn line, {acc, current} ->
-        line_with_newline = line <> "\n"
+      Enum.with_index(lines)
+      |> Enum.reduce({[], ""}, fn {line, idx}, {acc, current} ->
+        line_with_newline =
+          if idx < last_index do
+            line <> "\n"
+          else
+            line
+          end
 
         cond do
           # Line alone exceeds the limit - split it blindly

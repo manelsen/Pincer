@@ -49,7 +49,7 @@ defmodule Pincer.Core.Project.DiagnosticTest do
     # 4. Verificamos se o Blackboard recebeu o diagnóstico
     wait_for_status(id, :error)
 
-    {messages, _} = Blackboard.fetch_new(0)
+    {messages, _} = Blackboard.fetch_new(0, scope: :all)
 
     diagnostic_msg =
       Enum.find(messages, fn m -> String.contains?(m.content, "ERROR_DIAGNOSTIC") end)

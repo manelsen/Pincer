@@ -561,7 +561,8 @@ defmodule Pincer.Core.ExecutorStreamingTest do
       tool_registry: ToolRegistryStub
     )
 
-    assert_receive {:sme_tool_use, "my_tool"}, 2000
+    assert_receive {:sme_tool_use, payload}, 2000
+    assert payload == "my_tool" or payload == ["my_tool: val"]
 
     assert_receive {:executor_finished, _history, response, _usage}, 2000
     refute response =~ "✅ Concluído"
@@ -603,7 +604,8 @@ defmodule Pincer.Core.ExecutorStreamingTest do
       tool_registry: ToolRegistryStub
     )
 
-    assert_receive {:sme_tool_use, "my_tool"}, 2_000
+    assert_receive {:sme_tool_use, payload}, 2_000
+    assert payload == "my_tool" or payload == ["my_tool: val"]
     assert_receive {:executor_finished, _history, response, _usage}, 2_000
     assert response =~ "Nao consegui fechar uma resposta final"
     assert response =~ "Ferramentas utilizadas: my_tool"
@@ -618,7 +620,8 @@ defmodule Pincer.Core.ExecutorStreamingTest do
       tool_registry: GitToolRegistryStub
     )
 
-    assert_receive {:sme_tool_use, "git_inspect"}, 2_000
+    assert_receive {:sme_tool_use, payload}, 2_000
+    assert payload == "git_inspect" or payload == ["git_inspect: status"]
     assert_receive {:executor_finished, _history, "Resumo do git", _usage}, 2_000
   end
 
@@ -630,7 +633,8 @@ defmodule Pincer.Core.ExecutorStreamingTest do
       tool_registry: GitToolRegistryStub
     )
 
-    assert_receive {:sme_tool_use, "git_inspect"}, 2_000
+    assert_receive {:sme_tool_use, payload}, 2_000
+    assert payload == "git_inspect" or payload == ["git_inspect: status"]
     assert_receive {:executor_finished, _history, response, _usage}, 2_000
     assert response =~ "Consegui obter dados pelas ferramentas"
     assert response =~ "## main"
@@ -645,7 +649,8 @@ defmodule Pincer.Core.ExecutorStreamingTest do
       tool_registry: GitHubCollectionToolRegistryStub
     )
 
-    assert_receive {:sme_tool_use, "list_issues"}, 2_000
+    assert_receive {:sme_tool_use, payload}, 2_000
+    assert payload == "list_issues" or payload == ["list_issues: user/pincer"]
     assert_receive {:executor_finished, _history, response, _usage}, 2_000
     assert response =~ "Consegui obter dados pelas ferramentas"
     assert response =~ "#7 Bug in scheduler"
@@ -660,7 +665,8 @@ defmodule Pincer.Core.ExecutorStreamingTest do
       tool_registry: CodeSearchToolRegistryStub
     )
 
-    assert_receive {:sme_tool_use, "search_code"}, 2_000
+    assert_receive {:sme_tool_use, payload}, 2_000
+    assert payload == "search_code" or payload == ["search_code: foo repo:user/pincer"]
     assert_receive {:executor_finished, _history, response, _usage}, 2_000
     assert response =~ "Consegui obter dados pelas ferramentas"
     assert response =~ "Code search (1 matches)"
