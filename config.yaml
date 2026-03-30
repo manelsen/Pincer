@@ -24,6 +24,13 @@ channels:
     adapter: "Pincer.Channels.Line"
     token_env: "LINE_CHANNEL_ACCESS_TOKEN"
     secret_env: "LINE_CHANNEL_SECRET"
+  feishu:
+    enabled: false
+    adapter: "Pincer.Channels.Feishu"
+    base_url: "https://open.feishu.cn"  # or https://open.larksuite.com for Lark
+    app_id_env: "FEISHU_APP_ID"
+    app_secret_env: "FEISHU_APP_SECRET"
+
   whatsapp:
   dingtalk:
     enabled: false
