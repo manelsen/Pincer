@@ -415,13 +415,34 @@ defmodule Pincer.Core.Orchestration.Archivist do
 
   defp extract_relational_data(content) do
     graph_instruction = """
-    You are a Software Architecture and bug tracking specialist.
-    Read the session below and identify if any BUG was fixed.
+    You are a Knowledge Graph specialist. Read the session and extract structured knowledge entries.
 
-    RULES:
-    1. If a bug was fixed, extract: Bug Description, Fix Summary, and Affected File.
-    2. Format as: "BUG_FIX: [bug] | [fix] | [file_path]"
-    3. If no bugs were fixed, respond "NONE".
+    EXTRACTION RULES — use ONLY the formats below, one entry per line:
+
+    1. BUG_FIX — a bug was identified and fixed:
+       "BUG_FIX: [bug description] | [fix summary] | [affected file path]"
+
+    2. DECISION — an architectural or technical decision was made:
+       "DECISION: [topic] | [rationale] | [affected file or NONE]"
+
+    3. PATTERN — a reusable code pattern or approach was established:
+       "PATTERN: [pattern name] | [description]"
+
+    4. PERSON — a person was mentioned (real person, not a fictional character):
+       "PERSON: [name] | [role or relationship] | [notes or NONE]"
+       Example: "PERSON: João | maintainer of nullclaw | works with Zig"
+
+    5. ANIMAL — an animal was mentioned:
+       "ANIMAL: [name] | [species or NONE] | [notes or NONE]"
+       Example: "ANIMAL: Rex | dog | belongs to the user"
+
+    6. RELATION — a relationship between two entities (persons or animals):
+       "RELATION: [entity1 name] | [entity1 type: person/animal] | [relation] | [entity2 name] | [entity2 type: person/animal]"
+       Example: "RELATION: João | person | works_with | Maria | person"
+       Valid relations: knows, works_with, related_to, companion_of, sibling_of, owner_of, friend_of
+
+    If nothing applies, respond "NONE".
+    Extract ALL applicable entries — multiple lines are expected.
 
     ## SESSION TO PROCESS
     #{content}
@@ -429,23 +450,112 @@ defmodule Pincer.Core.Orchestration.Archivist do
 
     case LLM.chat_completion([%{"role" => "system", "content" => graph_instruction}]) do
       {:ok, %{"content" => response}, _usage} ->
-        case String.split(response, "BUG_FIX:") do
-          [_, data] ->
-            [bug, fix, file] = data |> String.split("|") |> Enum.map(&String.trim/1)
-            Pincer.Ports.Storage.ingest_bug_fix(bug, fix, file)
-
-            Logger.info(
-              "[ARCHIVIST] 🕸️ Bug fix relationship ingested into Postgres graph: #{file}"
-            )
-
-          _ ->
-            :ok
-        end
+        lines = String.split(response, "\n", trim: true)
+        ingest_graph_lines(lines)
 
       _ ->
         :ok
     end
   end
+
+  defp ingest_graph_lines(lines) do
+    Enum.each(lines, fn line ->
+      cond do
+        String.starts_with?(line, "BUG_FIX:") ->
+          line
+          |> strip_prefix("BUG_FIX:")
+          |> String.split("|", parts: 3)
+          |> Enum.map(&String.trim/1)
+          |> case do
+            [bug, fix, file] ->
+              Storage.ingest_bug_fix(bug, fix, file)
+              Logger.info("[ARCHIVIST] 🕸️ Bug fix ingested: #{file}")
+            _ -> :ok
+          end
+
+        String.starts_with?(line, "DECISION:") ->
+          line
+          |> strip_prefix("DECISION:")
+          |> String.split("|", parts: 3)
+          |> Enum.map(&String.trim/1)
+          |> case do
+            [topic, rationale, affects] ->
+              file = if affects in ["NONE", ""], do: nil, else: affects
+              Storage.ingest_decision(topic, rationale, file)
+              Logger.info("[ARCHIVIST] 🧠 Decision ingested: #{topic}")
+            _ -> :ok
+          end
+
+        String.starts_with?(line, "PATTERN:") ->
+          line
+          |> strip_prefix("PATTERN:")
+          |> String.split("|", parts: 2)
+          |> Enum.map(&String.trim/1)
+          |> case do
+            [name, description] ->
+              Storage.ingest_pattern(name, description)
+              Logger.info("[ARCHIVIST] 🔷 Pattern ingested: #{name}")
+            _ -> :ok
+          end
+
+        String.starts_with?(line, "PERSON:") ->
+          line
+          |> strip_prefix("PERSON:")
+          |> String.split("|", parts: 3)
+          |> Enum.map(&String.trim/1)
+          |> case do
+            [name, role, notes] ->
+              attrs = %{role: role} |> maybe_merge_note(notes)
+              Storage.ingest_person(name, attrs)
+              Logger.info("[ARCHIVIST] 👤 Person ingested: #{name}")
+            [name, role] ->
+              Storage.ingest_person(name, %{role: role})
+              Logger.info("[ARCHIVIST] 👤 Person ingested: #{name}")
+            _ -> :ok
+          end
+
+        String.starts_with?(line, "ANIMAL:") ->
+          line
+          |> strip_prefix("ANIMAL:")
+          |> String.split("|", parts: 3)
+          |> Enum.map(&String.trim/1)
+          |> case do
+            [name, species, notes] ->
+              Storage.ingest_animal(name, nil_if_none(species), nil_if_none(notes))
+              Logger.info("[ARCHIVIST] 🐾 Animal ingested: #{name}")
+            [name, species] ->
+              Storage.ingest_animal(name, nil_if_none(species), nil)
+              Logger.info("[ARCHIVIST] 🐾 Animal ingested: #{name}")
+            _ -> :ok
+          end
+
+        String.starts_with?(line, "RELATION:") ->
+          line
+          |> strip_prefix("RELATION:")
+          |> String.split("|", parts: 5)
+          |> Enum.map(&String.trim/1)
+          |> case do
+            [from_name, from_type, relation, to_name, to_type] ->
+              Storage.ingest_entity_relation(from_name, from_type, relation, to_name, to_type)
+              Logger.info("[ARCHIVIST] 🔗 Relation ingested: #{from_name} -[#{relation}]-> #{to_name}")
+            _ -> :ok
+          end
+
+        true ->
+          :ok
+      end
+    end)
+  end
+
+  defp strip_prefix(line, prefix) do
+    line |> String.replace_prefix(prefix, "") |> String.trim()
+  end
+
+  defp nil_if_none(s) when s in ["NONE", ""], do: nil
+  defp nil_if_none(s), do: s
+
+  defp maybe_merge_note(attrs, notes) when notes in ["NONE", ""], do: attrs
+  defp maybe_merge_note(attrs, notes), do: Map.put(attrs, :notes, notes)
 
   @spec sanitize_markdown(String.t()) :: String.t()
   defp sanitize_markdown(text) do

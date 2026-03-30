@@ -20,6 +20,7 @@ defmodule Pincer.Core.AgentPaths do
   @identity_file "IDENTITY.md"
   @soul_file "SOUL.md"
   @user_file "USER.md"
+  @style_file "STYLE.md"
   @bootstrap_file "BOOTSTRAP.md"
   @memory_file "MEMORY.md"
   @history_file "HISTORY.md"
@@ -80,6 +81,9 @@ defmodule Pincer.Core.AgentPaths do
 
   @spec user_path(String.t()) :: String.t()
   def user_path(workspace_path), do: Path.join(pincer_dir(workspace_path), @user_file)
+
+  @spec style_path(String.t()) :: String.t()
+  def style_path(workspace_path), do: Path.join(pincer_dir(workspace_path), @style_file)
 
   @spec bootstrap_path(String.t()) :: String.t()
   def bootstrap_path(workspace_path), do: Path.join(pincer_dir(workspace_path), @bootstrap_file)

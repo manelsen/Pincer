@@ -262,32 +262,94 @@ defmodule Pincer.Storage.Adapters.Postgres do
     if tokens == [] do
       {:ok, []}
     else
-      query =
-        from(b in Node,
-          join: occurs in Edge,
-          on: occurs.from_id == b.id and occurs.type == "occurs_in",
-          join: f in Node,
-          on: f.id == occurs.to_id and f.type == "file",
-          left_join: solves in Edge,
-          on: solves.to_id == b.id and solves.type == "solves",
-          left_join: fx in Node,
-          on: fx.id == solves.from_id and fx.type == "fix",
-          where: b.type == "bug",
-          select: %{
-            bug: fragment("COALESCE(?->>'description', '')", b.data),
-            fix: fragment("COALESCE(?->>'summary', '')", fx.data),
-            file: fragment("COALESCE(?->>'path', '')", f.data)
-          }
-        )
+      bug_hits = search_bug_fix_nodes(tokens, limit)
+      knowledge_hits = search_knowledge_nodes(tokens, limit)
 
       {:ok,
-       query
-       |> Repo.all()
-       |> Enum.map(&graph_history_result(&1, tokens))
-       |> Enum.filter(&(&1.score > 0.0))
-       |> Enum.sort_by(&{-&1.score, &1.file})
-       |> Enum.uniq_by(&{&1.bug, &1.fix, &1.file})
+       (bug_hits ++ knowledge_hits)
+       |> Enum.filter(&(&1.score > 0.3))
+       |> Enum.sort_by(&(-&1.score))
+       |> Enum.uniq_by(&Map.get(&1, :content, ""))
        |> Enum.take(limit)}
+    end
+  end
+
+  @impl true
+  def ingest_decision(topic, rationale, affects_file \\ nil) do
+    now = DateTime.utc_now() |> DateTime.to_iso8601()
+    data = %{"topic" => topic, "rationale" => rationale, "timestamp" => now}
+
+    result =
+      Repo.transaction(fn ->
+        {:ok, decision_node} = create_node("decision", data)
+
+        if is_binary(affects_file) and affects_file != "" do
+          file_node = ensure_node("file", %{"path" => affects_file})
+          create_edge(decision_node.id, file_node.id, "affects")
+        end
+
+        :ok
+      end)
+
+    case result do
+      {:ok, :ok} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
+  def ingest_pattern(name, description) do
+    now = DateTime.utc_now() |> DateTime.to_iso8601()
+    data = %{"name" => name, "description" => description, "timestamp" => now}
+
+    case create_node("pattern", data) do
+      {:ok, _node} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
+  def ingest_person(name, attrs \\ %{}) do
+    now = DateTime.utc_now() |> DateTime.to_iso8601()
+    data = Map.merge(%{"name" => name, "timestamp" => now}, stringify_keys(attrs))
+
+    case find_or_create_entity("person", name, data) do
+      {:ok, _node} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
+  def ingest_animal(name, species \\ nil, notes \\ nil) do
+    now = DateTime.utc_now() |> DateTime.to_iso8601()
+
+    data =
+      %{"name" => name, "timestamp" => now}
+      |> maybe_put("species", species)
+      |> maybe_put("notes", notes)
+
+    case find_or_create_entity("animal", name, data) do
+      {:ok, _node} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
+  def ingest_entity_relation(from_name, from_type, relation, to_name, to_type) do
+    result =
+      Repo.transaction(fn ->
+        {:ok, from_node} = find_or_create_entity(from_type, from_name, %{"name" => from_name})
+        {:ok, to_node} = find_or_create_entity(to_type, to_name, %{"name" => to_name})
+
+        case find_edge(from_node.id, to_node.id, relation) do
+          nil -> create_edge(from_node.id, to_node.id, relation)
+          _existing -> {:ok, :noop}
+        end
+      end)
+
+    case result do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -402,6 +464,36 @@ defmodule Pincer.Storage.Adapters.Postgres do
       )
 
     Repo.one(query)
+  end
+
+  defp find_node_by_name(type, name) do
+    Repo.one(
+      from(n in Node,
+        where: n.type == ^type and fragment("lower(?->>'name') = lower(?)", n.data, ^name)
+      )
+    )
+  end
+
+  defp find_or_create_entity(type, name, data) do
+    case find_node_by_name(type, name) do
+      nil -> create_node(type, data)
+      node -> {:ok, node}
+    end
+  end
+
+  defp find_edge(from_id, to_id, type) do
+    Repo.one(
+      from(e in Edge,
+        where: e.from_id == ^from_id and e.to_id == ^to_id and e.type == ^type
+      )
+    )
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp stringify_keys(map) do
+    Map.new(map, fn {k, v} -> {to_string(k), v} end)
   end
 
   defp search_messages_fts(query, limit) do
@@ -846,6 +938,108 @@ defmodule Pincer.Storage.Adapters.Postgres do
         {length(bug_nodes), length(fix_nodes), overlap_count}
     end
   end
+
+  defp search_bug_fix_nodes(tokens, limit) do
+    query =
+      from(b in Node,
+        join: occurs in Edge,
+        on: occurs.from_id == b.id and occurs.type == "occurs_in",
+        join: f in Node,
+        on: f.id == occurs.to_id and f.type == "file",
+        left_join: solves in Edge,
+        on: solves.to_id == b.id and solves.type == "solves",
+        left_join: fx in Node,
+        on: fx.id == solves.from_id and fx.type == "fix",
+        where: b.type == "bug",
+        select: %{
+          bug: fragment("COALESCE(?->>'description', '')", b.data),
+          fix: fragment("COALESCE(?->>'summary', '')", fx.data),
+          file: fragment("COALESCE(?->>'path', '')", f.data)
+        },
+        limit: ^(limit * 3)
+      )
+
+    Repo.all(query)
+    |> Enum.map(&graph_history_result(&1, tokens))
+  end
+
+  defp search_knowledge_nodes(tokens, limit) do
+    Node
+    |> where([n], n.type in ["decision", "pattern", "person", "animal"])
+    |> limit(^(limit * 4))
+    |> Repo.all()
+    |> Enum.map(&knowledge_node_result(&1, tokens))
+  end
+
+  defp knowledge_node_result(%Node{type: "decision"} = node, tokens) do
+    topic = node.data["topic"] || ""
+    rationale = node.data["rationale"] || ""
+    text = String.downcase("#{topic} #{rationale}")
+    overlap = Enum.count(tokens, &String.contains?(text, &1))
+    score = overlap / max(length(tokens), 1)
+
+    %{
+      kind: :graph,
+      content: "Decision: #{topic}. Rationale: #{rationale}",
+      source: "graph://decision/#{node.id}",
+      citation: "decision",
+      score: score
+    }
+  end
+
+  defp knowledge_node_result(%Node{type: "pattern"} = node, tokens) do
+    name = node.data["name"] || ""
+    description = node.data["description"] || ""
+    text = String.downcase("#{name} #{description}")
+    overlap = Enum.count(tokens, &String.contains?(text, &1))
+    score = overlap / max(length(tokens), 1)
+
+    %{
+      kind: :graph,
+      content: "Pattern: #{name}. #{description}",
+      source: "graph://pattern/#{node.id}",
+      citation: "pattern",
+      score: score
+    }
+  end
+
+  defp knowledge_node_result(%Node{type: "person"} = node, tokens) do
+    name = node.data["name"] || ""
+    role = node.data["role"] || ""
+    notes = node.data["notes"] || ""
+    text = String.downcase("#{name} #{role} #{notes}")
+    overlap = Enum.count(tokens, &String.contains?(text, &1))
+    score = overlap / max(length(tokens), 1)
+
+    description = [role, notes] |> Enum.reject(&(&1 == "")) |> Enum.join(". ")
+
+    content =
+      if description == "",
+        do: "Person: #{name}",
+        else: "Person: #{name}. #{description}"
+
+    %{kind: :graph, content: content, source: "graph://person/#{name}", citation: "person", score: score}
+  end
+
+  defp knowledge_node_result(%Node{type: "animal"} = node, tokens) do
+    name = node.data["name"] || ""
+    species = node.data["species"] || ""
+    notes = node.data["notes"] || ""
+    text = String.downcase("#{name} #{species} #{notes}")
+    overlap = Enum.count(tokens, &String.contains?(text, &1))
+    score = overlap / max(length(tokens), 1)
+
+    description = [species, notes] |> Enum.reject(&(&1 == "")) |> Enum.join(", ")
+
+    content =
+      if description == "",
+        do: "Animal: #{name}",
+        else: "Animal: #{name} (#{description})"
+
+    %{kind: :graph, content: content, source: "graph://animal/#{name}", citation: "animal", score: score}
+  end
+
+  defp knowledge_node_result(_node, _tokens), do: %{kind: :graph, content: "", score: 0.0}
 
   defp graph_history_result(%{bug: bug, fix: fix, file: file}, query_tokens) do
     graph_text = Enum.join([bug, fix, file], " ") |> String.downcase()

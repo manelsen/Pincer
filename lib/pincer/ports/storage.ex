@@ -5,6 +5,12 @@ defmodule Pincer.Ports.Storage do
   @callback save_message(String.t(), String.t(), String.t()) :: {:ok, term()} | {:error, term()}
   @callback delete_messages(String.t()) :: :ok | {:error, term()}
   @callback ingest_bug_fix(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  @callback ingest_decision(String.t(), String.t(), String.t() | nil) :: :ok | {:error, term()}
+  @callback ingest_pattern(String.t(), String.t()) :: :ok | {:error, term()}
+  @callback ingest_person(String.t(), map()) :: :ok | {:error, term()}
+  @callback ingest_animal(String.t(), String.t() | nil, String.t() | nil) :: :ok | {:error, term()}
+  @callback ingest_entity_relation(String.t(), String.t(), String.t(), String.t(), String.t()) ::
+              :ok | {:error, term()}
   @callback query_history() :: [map()]
   @callback save_learning(String.t(), String.t()) :: {:ok, term()} | {:error, term()}
   @callback save_tool_error(String.t(), map(), String.t()) :: {:ok, term()} | {:error, term()}
@@ -42,6 +48,11 @@ defmodule Pincer.Ports.Storage do
 
   def delete_messages(session_id), do: adapter().delete_messages(session_id)
   def ingest_bug_fix(bug, fix, file), do: adapter().ingest_bug_fix(bug, fix, file)
+  def ingest_decision(topic, rationale, affects_file \\ nil), do: adapter().ingest_decision(topic, rationale, affects_file)
+  def ingest_pattern(name, description), do: adapter().ingest_pattern(name, description)
+  def ingest_person(name, attrs \\ %{}), do: adapter().ingest_person(name, attrs)
+  def ingest_animal(name, species \\ nil, notes \\ nil), do: adapter().ingest_animal(name, species, notes)
+  def ingest_entity_relation(from_name, from_type, relation, to_name, to_type), do: adapter().ingest_entity_relation(from_name, from_type, relation, to_name, to_type)
   def query_history, do: adapter().query_history()
   def save_learning(cat, sum), do: adapter().save_learning(cat, sum)
   def save_tool_error(tool, args, err), do: adapter().save_tool_error(tool, args, err)
