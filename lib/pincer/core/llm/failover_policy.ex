@@ -9,7 +9,7 @@ defmodule Pincer.Core.LLM.FailoverPolicy do
   alias Pincer.Core.ErrorClass
   alias Pincer.Core.LLM.CooldownStore
   alias Pincer.Core.Models.Registry, as: ModelRegistry
-  alias Pincer.Core.RetryPolicy
+  alias Pincer.Core.Policy
 
   @default_retry_same_limit 0
 
@@ -78,7 +78,7 @@ defmodule Pincer.Core.LLM.FailoverPolicy do
     class = ErrorClass.classify(reason)
 
     cond do
-      not RetryPolicy.retryable?(reason) ->
+      not Policy.classify(:retryable, %{reason: reason}) ->
         {:stop, stop(state, reason, class)}
 
       state.retry_same_count < state.retry_same_limit ->

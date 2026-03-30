@@ -44,6 +44,16 @@ defmodule Pincer.Core.Policy do
   def route(_kind, _attrs), do: {:error, :unsupported_route_policy}
 
   @doc """
+  Classifications for transient and fail-fast flows.
+  """
+  @spec classify(atom(), map()) :: term()
+  def classify(:retryable, %{reason: reason}), do: RetryPolicy.retryable?(reason)
+  def classify(:transient, %{reason: reason}), do: RetryPolicy.transient?(reason)
+  def classify(:fail_fast, %{reason: reason}), do: RetryPolicy.fail_fast?(reason)
+  def classify(:status_kind, %{text: text}), do: ChannelEventPolicy.status_kind(text)
+  def classify(_kind, _attrs), do: {:error, :unsupported_classification_policy}
+
+  @doc """
   Budget/deadline decisions.
   """
   @spec budget(atom(), map()) :: term()

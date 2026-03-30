@@ -10,8 +10,8 @@ defmodule Pincer.Core.Executor do
   require Logger
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.ContextOverflowRecovery
-  alias Pincer.Core.EmptyResponseRecoveryPolicy
   alias Pincer.Core.MemoryRecall
+  alias Pincer.Core.Policy
   alias Pincer.Core.PromptAssembly
   alias Pincer.Core.ToolAnswerPatternPolicy
   alias Pincer.Core.ToolOnlyOutcomeFormatter
@@ -373,7 +373,7 @@ defmodule Pincer.Core.Executor do
     if depth == 0 do
       Logger.warning("[EXECUTOR] Empty streaming response. Retrying lightweight chat completion.")
 
-      retry_history = EmptyResponseRecoveryPolicy.retry_history(prompt_history)
+      retry_history = Policy.recover(:empty_response_history, %{history: prompt_history})
 
       case deps.llm_client.chat_completion(retry_history, client_opts) do
         {:ok, assistant_msg, usage} ->
