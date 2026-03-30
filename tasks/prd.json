@@ -108,8 +108,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 6,
-      "passes": false,
-      "notes": "",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-006-define-formal-capability-schema. Added Pincer.Core.Capabilities with explicit schema_version/0 (\"1.0\"), validation API by adapter type (provider/tool/channel) with structured missing-field errors, and query/2 API filtering catalog entries by type + feature. Added test coverage in capabilities_test.exs for versioning, validation success/failure, and query behavior. Validated with mix test test/pincer/core/capabilities_test.exs, mix format, and mix compile --warnings-as-errors.",
       "dependsOn": []
     },
     {
