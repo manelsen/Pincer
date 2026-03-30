@@ -1,66 +1,163 @@
 # Pincer
 
-Autonomous AI agent framework built on the BEAM. OTP supervision, multi-channel messaging, MCP integration, sub-agents via Blackboard pattern, and provider-agnostic LLM access with failover.
+Autonomous AI agents on the BEAM — OTP supervision, multi-channel messaging, MCP tool integration, and provider-agnostic LLM access with automatic failover.
+
+**What it does**: Pincer is an Elixir/OTP framework that runs persistent AI agents. Each agent gets a supervised GenServer session, can use 80+ tool actions across 21 built-in tool modules, talks to humans through Telegram/Discord/CLI/webhook, and remembers conversations across restarts using a tiered memory system backed by PostgreSQL + pgvector.
+
+**Who it's for**: Developers building long-running AI assistants that need fault tolerance, multi-channel presence, and structured memory — without babysitting.
+
+**Who it's not for**: If you need a stateless chatbot wrapper, a single-function-call orchestrator, or something that runs in a Lambda, Pincer is more infrastructure than you need.
+
+---
+
+## Quickstart
+
+```bash
+git clone https://github.com/micelio/pincer.git && cd pincer
+cp .env.example .env
+# Set at least one LLM provider key in .env
+docker compose up --build -d
+docker compose exec pincer-server mix pincer.chat
+```
+
+That's it. You're talking to an agent. The Docker build starts PostgreSQL with pgvector, runs migrations, and boots the Pincer supervision tree.
+
+To run locally instead:
+
+```bash
+docker compose up -d postgres    # just the database
+mix deps.get
+mix ecto.create && mix ecto.migrate
+mix pincer.chat                   # interactive CLI agent
+```
+
+## Requirements
+
+| Dependency | Minimum Version | Why |
+|---|---|---|
+| Elixir | 1.14+ | Compilation target |
+| Erlang/OTP | 27+ | `boundary` compiler plugin |
+| PostgreSQL | 18+ with pgvector | Graph memory + message storage |
+| Node.js | 18+ | MCP sidecar servers (optional) |
+
+## Configuration
+
+Runtime config lives in `config.yaml`, not `config/*.exs`. The `Pincer.Infra.Config` module loads it at startup. Edit `config.yaml` to configure:
+
+- **LLM providers** — set `llm.provider` and add API keys to `.env`
+- **Channels** — enable/disable Telegram, Discord, CLI, webhook, WhatsApp
+- **MCP servers** — add external tool servers under `mcp.servers`
+- **Database** — override via `config.yaml` or `PINCER_DB_*` env vars
+- **Workspace isolation** — `tools.restrict_to_workspace: true` (default) confines file/shell tools to the agent's workspace
 
 ## Architecture
 
-Pincer uses a **Hexagonal Architecture** (Ports & Adapters) with boundary enforcement via the `boundary` compiler plugin. Dependencies flow inward:
+Pincer uses **Hexagonal Architecture** (Ports & Adapters) with compile-time boundary enforcement. Dependencies flow inward — outer layers can depend on inner, never the reverse:
 
 ```
-Pincer.Infra       PubSub, Config, Ecto Repo
-      ↑
-Pincer.Ports       Behaviour contracts (LLM, Storage, Channel, Tool, Cron...)
-      ↑
-Pincer.Core        Domain logic: Executor, Session, Orchestration, Memory, LLM failover
-      ↑
-Pincer.Adapters    Concrete implementations: MCP, Cron, Tools, Channel adapters
-      ↑
-Pincer.Channels    Telegram, Discord, Slack, WhatsApp, CLI, Webhook
+Channels       Telegram, Discord, Slack, WhatsApp, CLI, Webhook
+    ↓
+Adapters       Concrete implementations: MCP, Cron, Tools
+    ↓
+Core           Domain logic: Executor, Session, Orchestration, Memory
+    ↓
+Ports          Behaviour contracts (LLM, Storage, Channel, Tool)
+    ↓
+Infra          PubSub, Config, Ecto Repo
 ```
+
+The `boundary` compiler plugin enforces this at compile time. `mix compile --warnings-as-errors` will fail if an inner layer reaches outward.
 
 ### Supervision Tree
 
+Every component is supervised. If the LLM client crashes, it restarts. If a user session dies, it restarts — without losing the rest of the tree.
+
 ```
 Pincer.Supervisor (one_for_one)
-├── Pincer.Infra.PubSub
-├── Pincer.Finch                    HTTP connection pool
-├── Pincer.Infra.Repo               Ecto/PostgreSQL
-├── Pincer.Core.Heartbeat           Health checks + GitHub watcher
-├── Pincer.Dispatcher.Registry      Message dispatcher (duplicate keys)
-├── Pincer.MCP.Supervisor           DynamicSupervisor for MCP servers
-├── MCP.Manager                     MCP lifecycle + tool discovery
-├── Session.Registry                Active sessions (unique keys)
-├── HookDispatcher                  Lifecycle hooks
-├── Session.Supervisor              DynamicSupervisor for user sessions
-├── Project.Registry / Supervisor   Multi-project isolation
-├── Cron.Scheduler                  Persistent scheduled jobs
-├── Channels.Supervisor             Channel adapters
-├── Telegram/Discord/WhatsApp       SessionSupervisors per channel
-└── Reloader (dev only)             Hot code reloading
+├── Infra.PubSub
+├── Finch                       HTTP connection pool
+├── Infra.Repo                  Ecto/PostgreSQL
+├── Heartbeat                   Health checks + GitHub watcher
+├── Dispatcher.Registry         Message dispatcher
+├── MCP.Supervisor              DynamicSupervisor for MCP servers
+│   └── MCP.Manager             Lifecycle + tool discovery
+├── Session.Registry            Active sessions (unique per user)
+├── Session.Supervisor          DynamicSupervisor for user sessions
+├── Cron.Scheduler              Persistent scheduled jobs
+├── Channels.Supervisor         One SessionSupervisor per enabled channel
+└── Reloader                    Hot code reloading (dev only)
 ```
 
-## Key Subsystems
+### The Executor (agentic loop)
 
-| Subsystem | Location | Purpose |
+The core of Pincer is `Pincer.Core.Executor` — a recursive reasoning loop:
+
+1. **Assemble prompt** — injects identity, soul, user profile, communication style, session history, and memory recall
+2. **Call LLM** — dispatches to the configured provider via `LLM.Client`
+3. **Process response** — if the LLM requests tool calls, execute them and recurse
+4. **Deliver** — stream partial tokens to the channel, deliver final response
+5. **Consolidate** — archivist extracts knowledge graph entries from the session
+
+The loop has a max recursion depth of 25. Each turn resolves tools from the native registry plus any MCP-discovered tools, so the LLM sees a unified tool surface regardless of origin.
+
+### The Blackboard (inter-agent communication)
+
+`Pincer.Core.Orchestration.Blackboard` is a tiered event store:
+
+- **Hot tier**: ETS table in RAM for recent messages (auto-pruned at 95% capacity)
+- **Cold tier**: append-only disk journal for durability across restarts
+
+Agents post scoped messages (per-session, per-project, or global). A nil scope returns only global messages, preventing cross-session leakage. Sub-agents spawned by the orchestrator communicate through the blackboard, not direct messages.
+
+### Memory System
+
+Three layers, each serving a different recall horizon:
+
+| Layer | Storage | Purpose |
 |---|---|---|
-| **Executor** | `lib/pincer/core/executor.ex` | Agentic reasoning loop; resolves tools and LLM, max 25 recursion depth |
-| **Session** | `lib/pincer/core/session/` | `GenServer` per user session; supervised by `Session.Supervisor` |
-| **Blackboard** | `lib/pincer/core/orchestration/blackboard.ex` | Tiered ETS (hot) + disk journal (cold) event store for inter-agent communication |
-| **SubAgent** | `lib/pincer/core/orchestration/sub_agent.ex` | Spawns child agents; progress tracked via `SubAgentProgress` |
-| **MCP Manager** | `lib/pincer/adapters/connectors/mcp/manager.ex` | Lifecycle + tool discovery for MCP servers |
-| **LLM Client** | `lib/pincer/llm/client.ex` | Provider-agnostic LLM calls with failover (`FailoverPolicy`) |
-| **Graph Memory** | `lib/pincer/storage/graph/` | Relational memory stored as nodes/edges in PostgreSQL with pgvector |
-| **Cron Scheduler** | `lib/pincer/adapters/cron/scheduler.ex` | Persistent cron jobs via Ecto-backed storage |
-| **Memory** | `lib/pincer/core/memory.ex` | Two-layer memory: rolling `HISTORY.md` + curated `MEMORY.md` with consolidation |
-| **Archivist** | `lib/pincer/core/orchestration/archivist.ex` | Memory consolidation, snippet indexing, user preference extraction |
+| **Session** | `HISTORY.md` | Rolling log of the current session |
+| **Curated** | `MEMORY.md` | Consolidated insights extracted by the Archivist |
+| **Semantic** | PostgreSQL nodes/edges + pgvector | Structured knowledge graph: bugs, decisions, patterns, people, entities |
+
+Before each LLM call, `MemoryRecall` searches all three layers and injects relevant context into the prompt. Memory content is sanitized to prevent prompt injection.
+
+The **Archivist** runs after each session turn and extracts structured knowledge — bug fixes, architectural decisions, code patterns, people, animals, and entity relationships — storing them as typed nodes and edges in the graph.
+
+## Channels
+
+Each channel implements the `Pincer.Ports.Channel` behaviour and uses the injected `__using__` macro for PubSub-driven session callbacks. To add a new channel, implement the behaviour and override the callbacks you need (`on_agent_response`, `on_agent_partial`, `on_agent_error`, etc.) — the rest default to no-ops.
+
+| Channel | Module | Status |
+|---|---|---|
+| CLI | `Pincer.Channels.CLI` | Active |
+| Telegram | `Pincer.Channels.Telegram` | Active |
+| Discord | `Pincer.Channels.Discord` | Available |
+| Slack | `Pincer.Channels.Slack` | Available |
+| WhatsApp | `Pincer.Channels.WhatsApp` | Available (Go bridge) |
+| Webhook | `Pincer.Channels.Webhook` | Available |
+
+### Multi-agent routing (Telegram)
+
+One Telegram bot can route different DM users to different agents:
+
+```yaml
+# config.yaml
+channels:
+  telegram:
+    agent_map:
+      "123456": "annie"
+      "789012": "lucie"
+```
+
+Each agent gets an isolated workspace at `workspaces/<agent_id>/.pincer/`. Dynamic pairing via `/pair <code>` is also supported.
 
 ## LLM Providers
 
-Each provider implements the `Pincer.LLM.Provider` behaviour. The `LLM.Client` dispatches to the configured adapter and handles retry/failover transparently.
+14 providers, all implementing the `Pincer.LLM.Provider` behaviour. The `LLM.Client` dispatches to the configured adapter and handles retry/failover transparently.
 
 | Provider | Module | Notes |
 |---|---|---|
-| OpenAI-compatible | `Providers.OpenAICompat` | Base for most providers |
+| OpenAI-compatible | `Providers.OpenAICompat` | Base adapter for most providers |
 | Google Gemini | `Providers.Google` | Native file support (PDF, images) |
 | Anthropic | `Providers.Anthropic` | |
 | OpenRouter | `Providers.OpenRouter` | |
@@ -75,22 +172,9 @@ Each provider implements the `Pincer.LLM.Provider` behaviour. The `LLM.Client` d
 | Minimax | `Providers.Minimax` | |
 | OpenCode Zen | `Providers.OpencodeZen` | |
 
-## Channels
-
-Each channel implements the `Pincer.Ports.Channel` behaviour and uses the injected `__using__` macro for PubSub-driven session callbacks (`on_agent_response`, `on_agent_partial`, `on_agent_error`, etc.).
-
-| Channel | Module | Status |
-|---|---|---|
-| CLI | `Pincer.Channels.CLI` | Active |
-| Telegram | `Pincer.Channels.Telegram` | Active |
-| Discord | `Pincer.Channels.Discord` | Available |
-| Slack | `Pincer.Channels.Slack` | Available |
-| WhatsApp | `Pincer.Channels.WhatsApp` | Available (Go bridge) |
-| Webhook | `Pincer.Channels.Webhook` | Available |
-
 ## Built-in Tools
 
-21 tool modules (~80 actions), all implementing the `Pincer.Ports.Tool` behaviour (`spec/0` + `execute/1` or `execute/2`).
+21 tool modules with ~80 actions, all implementing the `Pincer.Ports.Tool` behaviour (`spec/0` + `execute/1` or `execute/2`). MCP-discovered tools merge into the same surface at runtime.
 
 | Tool | Capabilities |
 |---|---|
@@ -114,63 +198,18 @@ Each channel implements the `Pincer.Ports.Channel` behaviour and uses the inject
 
 ## MCP Integration
 
-MCP (Model Context Protocol) servers are configured in `config.yaml` and managed at runtime by `MCP.Manager`. Tools are discovered dynamically and merged with native tools in the Executor's function calling interface.
+MCP (Model Context Protocol) servers are configured in `config.yaml` and managed at runtime by `MCP.Manager`. Tools are discovered dynamically and merged with native tools in the Executor's function calling interface — the LLM sees one unified tool list regardless of origin.
 
 Supported transports: **stdio**, **HTTP**.
 
-## Memory System
-
-- **Short-term**: `workspaces/<agent_id>/.pincer/HISTORY.md` -- rolling session log
-- **Long-term**: `workspaces/<agent_id>/.pincer/MEMORY.md` -- curated insights with consolidation
-- **Semantic**: PostgreSQL nodes/edges with pgvector embeddings
-- **Recall**: `MemoryRecall` module performs automatic context injection before each LLM call
-- **Sanitization**: Memory content is sanitized before prompt injection to prevent prompt injection attacks
-
-## Requirements
-
-- Elixir 1.18+ / Erlang 27+
-- PostgreSQL 18+ with pgvector extension
-- Node.js (for MCP sidecar servers)
-
-## Quick Start
-
-### 1. Clone and configure
-
-```bash
-git clone https://github.com/micelio/pincer.git
-cd pincer
-cp .env.example .env
-# Edit .env with your API keys
+```yaml
+# config.yaml
+mcp:
+  servers:
+    github:
+      command: npx
+      args: ["-y", "@modelcontextprotocol/server-github"]
 ```
-
-### 2. Start with Docker Compose
-
-```bash
-docker compose up --build -d
-```
-
-This starts PostgreSQL (pgvector) and the Pincer server.
-
-### 3. Or run locally
-
-```bash
-# Start PostgreSQL
-docker compose up -d postgres
-
-# Setup database
-mix deps.get
-mix ecto.create && mix ecto.migrate
-
-# Start the server
-mix pincer.server
-
-# Or use the interactive CLI
-mix pincer.chat
-```
-
-### Configuration
-
-Runtime config is loaded from `config.yaml` (not `config/*.exs`) by `Pincer.Infra.Config` at startup. Edit `config.yaml` to configure channels, LLM providers, MCP servers, and database connections.
 
 ## Mix Tasks
 
@@ -179,8 +218,8 @@ Runtime config is loaded from `config.yaml` (not `config/*.exs`) by `Pincer.Infr
 | `mix pincer.chat` | Interactive CLI agent |
 | `mix pincer.server` | Start persistent node (all enabled channels) |
 | `mix pincer.onboard` | Bootstrap config and scaffold agent workspaces |
-| `mix pincer.agent new <id>` | Create a new agent |
-| `mix pincer.agent pair <id>` | Pair an agent with a channel |
+| `mix pincer.agent new <id>` | Create a new agent workspace |
+| `mix pincer.agent pair <id>` | Generate a Telegram pairing code |
 | `mix pincer.doctor [--strict]` | Operational diagnostics |
 | `mix pincer.security_audit [--strict]` | Security-focused audit |
 | `mix pincer.memory.report` | Memory system report |
@@ -196,42 +235,41 @@ Runtime config is loaded from `config.yaml` (not `config/*.exs`) by `Pincer.Infr
 mix qa
 ```
 
-Runs `format --check-formatted`, `compile --warnings-as-errors`, and `test --warnings-as-errors --max-failures 1`.
+Runs `format --check-formatted`, `compile --warnings-as-errors`, and `test --warnings-as-errors --max-failures 1`. All three must pass.
 
-### Quick Test
+### Running Tests
 
 ```bash
-mix test.quick              # Stale tests only
-mix test                    # All tests
-mix test test/pincer/core/executor_test.exs  # Single file
+docker compose up -d postgres     # database required
+mix test                          # all tests
+mix test.quick                    # stale tests only
+mix test test/pincer/core/executor_test.exs   # single file
 ```
 
 ### Development Protocol
 
 All development follows **Doc-First + TDD**:
 
-1. **Spec first**: Document the interface in `SPECS.md` or the task plan before writing code.
-2. **Red -> Green -> Refactor**: Write a failing test, implement minimal code, then improve.
-3. No `.ex` without a corresponding `.exs` test file.
-4. Acceptance requires `@moduledoc`/`@doc`, happy-path + error-path tests, and `mix format` passing.
+1. **Spec first** — document the interface before writing code
+2. **Red -> Green -> Refactor** — write a failing test, implement minimum code, then improve
+3. No `.ex` without a corresponding `.exs` test file
+4. Acceptance requires `@moduledoc`/`@doc`, happy-path + error-path tests, and `mix format` passing
 
 ### Boundary Enforcement
 
 The `boundary` compiler plugin enforces dependency direction at compile time:
 
-- `Pincer.Adapters` may depend on `Pincer.Core`, `Pincer.Ports`, `Pincer.Infra`, `Pincer.Utils`.
-- `Pincer.Core` may only depend on `Pincer.Ports`, `Pincer.Infra`, `Pincer.Utils`.
-- `Pincer.Ports` may only depend on `Pincer.Infra`.
-- Violations surface as compiler warnings; `mix compile --warnings-as-errors` will fail on them.
+- `Adapters` may depend on `Core`, `Ports`, `Infra`, `Utils`
+- `Core` may only depend on `Ports`, `Infra`, `Utils`
+- `Ports` may only depend on `Infra`
+- Violations surface as compiler warnings; `mix compile --warnings-as-errors` fails on them
 
-## Project Stats
+## Stats
 
-- **214** source modules (`lib/`)
-- **150** test files (`test/`)
-- **17** LLM provider adapters
-- **6** channel adapters
-- **21** built-in tool modules
+- 214 source modules, 163 test files
+- 14 LLM provider adapters, 6 channel adapters, 21 tool modules
+- ~80 tool actions available to agents
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+[MIT](LICENSE)
