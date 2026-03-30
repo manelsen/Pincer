@@ -45,11 +45,25 @@ mix pincer.chat                   # interactive CLI agent
 Runtime config lives in `config.yaml`, not `config/*.exs`. The `Pincer.Infra.Config` module loads it at startup. Edit `config.yaml` to configure:
 
 - **LLM providers** — set `llm.provider` and add API keys to `.env`
-- **Channels** — enable/disable Telegram, Discord, CLI, webhook, WhatsApp, LINE
+- **Channels** — enable/disable Telegram, Discord, CLI, webhook, WhatsApp, LINE, DingTalk
 - **MCP servers** — add external tool servers under `mcp.servers`
 - **Database** — override via `config.yaml` or `PINCER_DB_*` env vars
 - **Workspace isolation** — `tools.restrict_to_workspace: true` (default) confines file/shell tools to the agent's workspace
 
+
+### DingTalk
+
+```yaml
+# config.yaml
+channels:
+  dingtalk:
+    enabled: true
+    adapter: "Pincer.Channels.DingTalk"
+    client_id_env: "DINGTALK_CLIENT_ID"
+    client_secret_env: "DINGTALK_CLIENT_SECRET"
+```
+
+Set `DINGTALK_CLIENT_ID` and `DINGTALK_CLIENT_SECRET` in `.env`.
 ### LINE Messaging API
 
 ```yaml
@@ -149,6 +163,7 @@ Each channel implements the `Pincer.Ports.Channel` behaviour and uses the inject
 | Slack | `Pincer.Channels.Slack` | Requires Slack app credentials |
 | WhatsApp | `Pincer.Channels.WhatsApp` | Requires Go bridge binary |
 | LINE | `Pincer.Channels.Line` | Requires `LINE_CHANNEL_ACCESS_TOKEN` + `LINE_CHANNEL_SECRET` |
+| DingTalk | `Pincer.Channels.DingTalk` | Requires `DINGTALK_CLIENT_ID` + `DINGTALK_CLIENT_SECRET` |
 | Webhook | `Pincer.Channels.Webhook` | Generic HTTP endpoint |
 
 ### Multi-agent routing (Telegram)
