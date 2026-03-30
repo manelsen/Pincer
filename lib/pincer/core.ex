@@ -42,6 +42,7 @@ defmodule Pincer.Core do
       StatusDelivery,
       RetryPolicy,
       Trace,
+      Capabilities,
       Telemetry,
       AuthProfiles,
       Models.Registry,
