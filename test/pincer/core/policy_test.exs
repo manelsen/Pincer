@@ -61,6 +61,11 @@ defmodule Pincer.Core.PolicyTest do
       assert Policy.guard!(:stream_final, %{state: state, final_text: "Done"}) ==
                StreamingPolicy.on_final(state, "Done")
     end
+
+    test "passes through structured tool audit events" do
+      attrs = %{tool: "safe_shell", class: :privileged, status: :approval_required}
+      assert Policy.guard!(:tool_audit_event, attrs) == attrs
+    end
   end
 
   describe "recover/2" do
@@ -77,6 +82,21 @@ defmodule Pincer.Core.PolicyTest do
     test "delegates turn outcome resolution" do
       attrs = %{final_text: "done", streamed_text: nil, tool_messages: []}
       assert Policy.recover(:turn_outcome, %{attrs: attrs}) == TurnOutcomePolicy.resolve(attrs)
+    end
+
+    test "returns structured recovery info for approval denial" do
+      recovery =
+        Policy.recover(:tool_approval_denied, %{
+          tool: "safe_shell",
+          class: :privileged,
+          reason: :user_denied
+        })
+
+      assert recovery.code == "TOOL_APPROVAL_DENIED"
+      assert recovery.tool == "safe_shell"
+      assert recovery.class == :privileged
+      assert recovery.reason == :user_denied
+      assert recovery.retryable == true
     end
   end
 end

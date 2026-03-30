@@ -163,8 +163,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 9,
-      "passes": false,
-      "notes": "",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-009-enforce-approval-policy-hooks-privileged. Enforced privileged-tool approval at ToolRuntime level with structured approval payloads; Executor now emits mandatory tool_audit trace steps for guarded_write/privileged flows (approval_required/approved/denied/ok/error/timeout), routes audit payloads through Policy.guard!/2, and returns structured recovery output when approval is denied via Policy.recover(:tool_approval_denied,...). Added/updated tests in tool_runtime_test.exs, policy_test.exs, and executor_hex_test.exs (privileged denial path with trace/audit + recovery). Validated with mix format, mix test --warnings-as-errors (focused suite), and mix compile --warnings-as-errors.",
       "dependsOn": [
         "US-002",
         "US-008"

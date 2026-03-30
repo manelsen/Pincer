@@ -55,31 +55,47 @@ defmodule Pincer.Core.ToolRuntime do
     end
   end
 
+  @spec requires_approval?(String.t()) :: boolean()
+  def requires_approval?(tool_name) when is_binary(tool_name) do
+    case classify(tool_name) do
+      {:ok, :privileged} -> true
+      _ -> false
+    end
+  end
+
   @spec execute(String.t(), map(), map(), module(), keyword()) ::
           {:ok, any(), exec_meta()} | {:error, any(), exec_meta()}
   def execute(tool_name, args, context, registry, opts \\ [])
       when is_binary(tool_name) and is_map(args) and is_map(context) and is_list(opts) do
     class = Keyword.get(opts, :class, class_for(tool_name))
     timeout_ms = Keyword.get(opts, :timeout_ms, timeout_for(class))
+    approval_granted? = Keyword.get(opts, :approval_granted, false)
 
-    task =
-      Task.async(fn ->
-        registry.execute_tool(tool_name, args, context)
-      end)
+    if class == :privileged and not approval_granted? and requires_approval?(tool_name) do
+      {:error,
+       {:approval_required,
+        %{tool: tool_name, args: args, class: class, reason: :privileged_tool}},
+       %{class: class, timeout_ms: timeout_ms, cancelled?: false}}
+    else
+      task =
+        Task.async(fn ->
+          registry.execute_tool(tool_name, args, context)
+        end)
 
-    case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {:ok, value}} ->
-        {:ok, value, %{class: class, timeout_ms: timeout_ms, cancelled?: false}}
+      case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
+        {:ok, {:ok, value}} ->
+          {:ok, value, %{class: class, timeout_ms: timeout_ms, cancelled?: false}}
 
-      {:ok, {:error, reason}} ->
-        {:error, reason, %{class: class, timeout_ms: timeout_ms, cancelled?: false}}
+        {:ok, {:error, reason}} ->
+          {:error, reason, %{class: class, timeout_ms: timeout_ms, cancelled?: false}}
 
-      {:ok, other} ->
-        {:error, {:unexpected_tool_return, other},
-         %{class: class, timeout_ms: timeout_ms, cancelled?: false}}
+        {:ok, other} ->
+          {:error, {:unexpected_tool_return, other},
+           %{class: class, timeout_ms: timeout_ms, cancelled?: false}}
 
-      nil ->
-        {:error, :timeout, %{class: class, timeout_ms: timeout_ms, cancelled?: true}}
+        nil ->
+          {:error, :timeout, %{class: class, timeout_ms: timeout_ms, cancelled?: true}}
+      end
     end
   end
 

@@ -39,6 +39,26 @@ defmodule Pincer.Core.ToolRuntimeTest do
     assert is_integer(meta.timeout_ms)
   end
 
+  test "privileged tools require explicit approval before execution" do
+    assert {:error, {:approval_required, details}, meta} =
+             ToolRuntime.execute("safe_shell", %{"command" => "ls"}, %{}, RegistryOkStub)
+
+    assert details.tool == "safe_shell"
+    assert details.class == :privileged
+    assert details.reason == :privileged_tool
+    assert meta.class == :privileged
+  end
+
+  test "privileged tools execute when approval is granted" do
+    assert {:ok, "sensitive output 123", meta} =
+             ToolRuntime.execute("safe_shell", %{"command" => "ls"}, %{}, RegistryOkStub,
+               approval_granted: true
+             )
+
+    assert meta.class == :privileged
+    assert meta.cancelled? == false
+  end
+
   test "sanitize_summary applies class-specific sanitization" do
     assert ToolRuntime.sanitize_summary(
              "get_code_skeleton",
