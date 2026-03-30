@@ -153,8 +153,6 @@ defmodule Pincer.Core.ArchivistTest do
     def search_sessions(_query, _limit), do: {:ok, []}
 
     @impl true
-
-    @impl true
     def ingest_decision(_topic, _rationale, _file \\ nil), do: :ok
 
     @impl true
@@ -169,7 +167,9 @@ defmodule Pincer.Core.ArchivistTest do
     @impl true
     def ingest_entity_relation(_from_name, _from_type, _relation, _to_name, _to_type), do: :ok
 
+    @impl true
     def forget_memory(_source), do: :ok
+
     @impl true
     def save_checkpoint(_session_id, _checkpoint), do: :ok
     @impl true

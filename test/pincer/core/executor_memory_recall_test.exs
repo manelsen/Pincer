@@ -132,6 +132,21 @@ defmodule Pincer.Core.ExecutorMemoryRecallTest do
     def search_graph_history(_query, _limit), do: {:ok, []}
 
     @impl true
+    def ingest_decision(_topic, _rationale, _file \\ nil), do: :ok
+
+    @impl true
+    def ingest_pattern(_name, _description), do: :ok
+
+    @impl true
+    def ingest_person(_name, _attrs \\ %{}), do: :ok
+
+    @impl true
+    def ingest_animal(_name, _species \\ nil, _notes \\ nil), do: :ok
+
+    @impl true
+    def ingest_entity_relation(_from_name, _from_type, _relation, _to_name, _to_type), do: :ok
+
+    @impl true
     def save_checkpoint(_session_id, _checkpoint), do: :ok
 
     @impl true

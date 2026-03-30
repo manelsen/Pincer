@@ -313,7 +313,7 @@
         "mix test --warnings-as-errors --max-failures 1 passes"
       ],
       "priority": 14,
-      "passes": false,
+      "passes": true,
       "notes": "Final validation gate. All previous stories must pass. This is the definition of done for the feature.",
       "dependsOn": [
         "US-007",
