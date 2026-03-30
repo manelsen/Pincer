@@ -8,6 +8,7 @@ defmodule Pincer.Core.MemoryPipeline do
   alias Pincer.Core.MemoryRecall
   alias Pincer.Core.MemoryTypes
   alias Pincer.Utils.ETSHelper
+  alias Pincer.Utils.Time
 
   @table __MODULE__
 
@@ -120,10 +121,10 @@ defmodule Pincer.Core.MemoryPipeline do
 
   defp compact(capture, _opts) do
     key = {:last_compact, capture.session_id}
-    now = System.system_time(:second)
+    now = Time.monotonic_ms()
     last = lookup_counter(key)
 
-    if is_integer(last) and now - last < 1 do
+    if is_integer(last) and now - last < 1_000 do
       %{status: :noop, reason: :recently_compacted}
     else
       put_counter(key, now)

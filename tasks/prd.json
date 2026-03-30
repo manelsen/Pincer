@@ -350,8 +350,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 19,
-      "passes": false,
-      "notes": "Backlog item from correctness sweep: inconsistent system_time/monotonic_time and unit usage.",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-019-standardize-timebase-units. Added Pincer.Utils.Time and standardized internal runtime timing calls to monotonic milliseconds in Pairing, AuthProfiles, and LLM.CooldownStore. Updated MemoryPipeline compact window to monotonic ms (1_000ms debounce) to remove second/ms drift and added regression coverage in memory_pipeline_test for compact window behavior. Validation completed with focused suites plus MIX_ENV=test mix qa (green on final run: 2 doctests, 1009 tests, 0 failures; intermittent baseline flakes were observed in unrelated tests during prior attempts).",
       "dependsOn": [
         "US-017"
       ]

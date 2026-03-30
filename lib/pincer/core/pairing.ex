@@ -13,6 +13,7 @@ defmodule Pincer.Core.Pairing do
   alias Pincer.Core.AgentRegistry
   alias Pincer.Infra.PubSub
   alias Pincer.Utils.ETSHelper
+  alias Pincer.Utils.Time
 
   @table_pending :pincer_pairing_pending
   @table_invites :pincer_pairing_invites
@@ -389,7 +390,7 @@ defmodule Pincer.Core.Pairing do
   defp now_ms(opts) do
     case Keyword.get(opts, :now_ms) do
       value when is_integer(value) -> value
-      _ -> System.system_time(:millisecond)
+      _ -> Time.monotonic_ms()
     end
   end
 
@@ -655,7 +656,7 @@ defmodule Pincer.Core.Pairing do
 
   defp announce_pairing_code(channel, sender_id, code, expires_at_ms, opts) do
     reused? = Keyword.get(opts, :reused, false)
-    issued_at_ms = Keyword.get(opts, :issued_at_ms, System.system_time(:millisecond))
+    issued_at_ms = Keyword.get(opts, :issued_at_ms, Time.monotonic_ms())
     normalized_channel = normalize_channel(channel)
     normalized_sender = normalize_sender(sender_id)
     action = if reused?, do: "reused", else: "issued"
@@ -684,7 +685,7 @@ defmodule Pincer.Core.Pairing do
   end
 
   defp announce_invite_code(channel, code, expires_at_ms, opts) do
-    issued_at_ms = Keyword.get(opts, :issued_at_ms, System.system_time(:millisecond))
+    issued_at_ms = Keyword.get(opts, :issued_at_ms, Time.monotonic_ms())
     normalized_channel = normalize_channel(channel)
     target_agent_id = normalize_agent_id(Keyword.get(opts, :agent_id))
     ttl_ms = max(expires_at_ms - issued_at_ms, 0)
