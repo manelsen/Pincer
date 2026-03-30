@@ -122,7 +122,12 @@ defmodule Pincer.Channels.Telegram.Session do
     session_status = session_status(state.session_id)
 
     text_with_usage =
-      ResponseEnvelope.build(:telegram, text, usage || %{}, Map.get(session_status, :usage_display))
+      ResponseEnvelope.build(
+        :telegram,
+        text,
+        usage || %{},
+        Map.get(session_status, :usage_display)
+      )
 
     state = reset_tool_state(state)
 

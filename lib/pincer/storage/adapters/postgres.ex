@@ -1018,7 +1018,13 @@ defmodule Pincer.Storage.Adapters.Postgres do
         do: "Person: #{name}",
         else: "Person: #{name}. #{description}"
 
-    %{kind: :graph, content: content, source: "graph://person/#{name}", citation: "person", score: score}
+    %{
+      kind: :graph,
+      content: content,
+      source: "graph://person/#{name}",
+      citation: "person",
+      score: score
+    }
   end
 
   defp knowledge_node_result(%Node{type: "animal"} = node, tokens) do
@@ -1036,7 +1042,13 @@ defmodule Pincer.Storage.Adapters.Postgres do
         do: "Animal: #{name}",
         else: "Animal: #{name} (#{description})"
 
-    %{kind: :graph, content: content, source: "graph://animal/#{name}", citation: "animal", score: score}
+    %{
+      kind: :graph,
+      content: content,
+      source: "graph://animal/#{name}",
+      citation: "animal",
+      score: score
+    }
   end
 
   defp knowledge_node_result(_node, _tokens), do: %{kind: :graph, content: "", score: 0.0}

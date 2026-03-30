@@ -145,8 +145,7 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   end
 
   def execute(args) do
-    {:error,
-     "dispatch_agent requires a 'goal' parameter. Got keys: #{inspect(Map.keys(args))}"}
+    {:error, "dispatch_agent requires a 'goal' parameter. Got keys: #{inspect(Map.keys(args))}"}
   end
 end
 

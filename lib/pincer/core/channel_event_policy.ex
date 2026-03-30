@@ -29,7 +29,8 @@ defmodule Pincer.Core.ChannelEventPolicy do
     do: "**⚠️ Aprovação necessária**\n\nO agente quer executar:\n```\n#{command}\n```"
 
   def approval_message(_channel, command),
-    do: "⚠️ Aprovação necessária\n\nO agente quer executar:\n#{command}\n\nResponda Aprovo ou Rejeito."
+    do:
+      "⚠️ Aprovação necessária\n\nO agente quer executar:\n#{command}\n\nResponda Aprovo ou Rejeito."
 
   @doc """
   Classifies a status string so channel workers can route it without owning

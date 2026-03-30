@@ -103,7 +103,9 @@ defmodule Pincer.Adapters.Browser.Pool do
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    Logger.warning("[BROWSER POOL] Sidecar exited with status #{status}. Will restart on next call.")
+    Logger.warning(
+      "[BROWSER POOL] Sidecar exited with status #{status}. Will restart on next call."
+    )
 
     # Fail all pending callers
     Enum.each(state.pending, fn {_id, from} ->
@@ -115,6 +117,7 @@ defmodule Pincer.Adapters.Browser.Pool do
 
   def handle_info({:EXIT, port, reason}, %{port: port} = state) do
     Logger.warning("[BROWSER POOL] Sidecar port exited: #{inspect(reason)}")
+
     Enum.each(state.pending, fn {_id, from} ->
       GenServer.reply(from, {:error, :sidecar_crashed})
     end)

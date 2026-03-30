@@ -10,7 +10,7 @@ defmodule Pincer.Core.BlackboardIsolationTest do
   test "fetch_new with nil scope returns only global messages" do
     # Post a private message
     Blackboard.post("agent-1", "Private info", "proj-1", scope: "private-session")
-    
+
     # Post a global message
     Blackboard.post("agent-2", "Public info", "proj-1", scope: :global)
 

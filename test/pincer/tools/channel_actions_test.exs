@@ -220,14 +220,12 @@ defmodule Pincer.Adapters.Tools.ChannelActionsTest do
 
   test "reply_to sends message with reply_to_message_id opt via telegram" do
     assert {:ok, result} =
-             ChannelActions.execute(
-               %{
-                 "action" => "reply_to",
-                 "content" => "got it",
-                 "message_id" => "42",
-                 "target_session_id" => "telegram_123"
-               }
-             )
+             ChannelActions.execute(%{
+               "action" => "reply_to",
+               "content" => "got it",
+               "message_id" => "42",
+               "target_session_id" => "telegram_123"
+             })
 
     assert result =~ "Reply sent"
     assert result =~ "42"

@@ -79,8 +79,7 @@ defmodule Pincer.Adapters.Tools.Media do
           },
           page_range: %{
             type: "string",
-            description:
-              "Page range for 'pdf_extract', e.g. '1-5' or '3'. Default: all pages."
+            description: "Page range for 'pdf_extract', e.g. '1-5' or '3'. Default: all pages."
           },
           provider: %{
             type: "string",
@@ -278,7 +277,8 @@ defmodule Pincer.Adapters.Tools.Media do
           trimmed = String.trim(text)
 
           if trimmed == "" do
-            {:ok, "(PDF contains no extractable text — may be a scanned image. Use 'ocr' action instead.)"}
+            {:ok,
+             "(PDF contains no extractable text — may be a scanned image. Use 'ocr' action instead.)"}
           else
             {:ok, trimmed}
           end
@@ -314,8 +314,7 @@ defmodule Pincer.Adapters.Tools.Media do
         # Try OpenAI directly from env
         case System.get_env("OPENAI_API_KEY") do
           nil ->
-            {:error,
-             "TTS provider '#{provider_key}' not configured and OPENAI_API_KEY not set"}
+            {:error, "TTS provider '#{provider_key}' not configured and OPENAI_API_KEY not set"}
 
           key ->
             {:ok, key, @tts_url, @tts_default_model}

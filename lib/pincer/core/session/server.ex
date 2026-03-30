@@ -568,8 +568,7 @@ defmodule Pincer.Core.Session.Server do
 
     {:ok, pid} = Executor.start(self(), state.session_id, new_history, executor_opts)
 
-    {:reply, {:ok, :started},
-     %{state | history: new_history, worker_pid: pid, status: :working}}
+    {:reply, {:ok, :started}, %{state | history: new_history, worker_pid: pid, status: :working}}
   end
 
   defp map_input_to_history(%IncomingMessage{text: text, attachments: []}),

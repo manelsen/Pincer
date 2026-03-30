@@ -195,7 +195,8 @@ defmodule Pincer.Core.Session.ServerTest do
     send(
       pid,
       {:executor_failed,
-       {:http_error, 400, ~s({"error":{"message":"`tool calling` is not supported with this model"}})}}
+       {:http_error, 400,
+        ~s({"error":{"message":"`tool calling` is not supported with this model"}})}}
     )
 
     assert_receive {:agent_response, message}, 1000

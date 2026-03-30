@@ -50,9 +50,9 @@ defmodule Pincer.Adapters.Tools.MediaTest do
   defp tmp_png do
     # 1x1 white PNG (minimal valid PNG)
     png =
-      <<137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1,
-        8, 2, 0, 0, 0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 8, 215, 99, 248, 207,
-        192, 0, 0, 0, 2, 0, 1, 226, 33, 188, 51, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130>>
+      <<137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8,
+        2, 0, 0, 0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 8, 215, 99, 248, 207, 192, 0,
+        0, 0, 2, 0, 1, 226, 33, 188, 51, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130>>
 
     path = Path.join(@tmp_dir, "pincer_test_#{:rand.uniform(999_999)}.png")
     File.write!(path, png)
@@ -285,7 +285,10 @@ defmodule Pincer.Adapters.Tools.MediaTest do
     Media.execute(%{"action" => "describe", "path" => rel}, %{"workspace_path" => @tmp_dir})
 
     assert_received {:chat_completion, messages, _}
-    inline = get_in(messages, [Access.at(0), "content"]) |> Enum.find(&(&1["type"] == "inline_data"))
+
+    inline =
+      get_in(messages, [Access.at(0), "content"]) |> Enum.find(&(&1["type"] == "inline_data"))
+
     assert inline["mime_type"] == "image/jpeg"
 
     File.rm(jpg)

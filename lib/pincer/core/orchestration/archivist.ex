@@ -470,7 +470,9 @@ defmodule Pincer.Core.Orchestration.Archivist do
             [bug, fix, file] ->
               Storage.ingest_bug_fix(bug, fix, file)
               Logger.info("[ARCHIVIST] 🕸️ Bug fix ingested: #{file}")
-            _ -> :ok
+
+            _ ->
+              :ok
           end
 
         String.starts_with?(line, "DECISION:") ->
@@ -483,7 +485,9 @@ defmodule Pincer.Core.Orchestration.Archivist do
               file = if affects in ["NONE", ""], do: nil, else: affects
               Storage.ingest_decision(topic, rationale, file)
               Logger.info("[ARCHIVIST] 🧠 Decision ingested: #{topic}")
-            _ -> :ok
+
+            _ ->
+              :ok
           end
 
         String.starts_with?(line, "PATTERN:") ->
@@ -495,7 +499,9 @@ defmodule Pincer.Core.Orchestration.Archivist do
             [name, description] ->
               Storage.ingest_pattern(name, description)
               Logger.info("[ARCHIVIST] 🔷 Pattern ingested: #{name}")
-            _ -> :ok
+
+            _ ->
+              :ok
           end
 
         String.starts_with?(line, "PERSON:") ->
@@ -508,10 +514,13 @@ defmodule Pincer.Core.Orchestration.Archivist do
               attrs = %{role: role} |> maybe_merge_note(notes)
               Storage.ingest_person(name, attrs)
               Logger.info("[ARCHIVIST] 👤 Person ingested: #{name}")
+
             [name, role] ->
               Storage.ingest_person(name, %{role: role})
               Logger.info("[ARCHIVIST] 👤 Person ingested: #{name}")
-            _ -> :ok
+
+            _ ->
+              :ok
           end
 
         String.starts_with?(line, "ANIMAL:") ->
@@ -523,10 +532,13 @@ defmodule Pincer.Core.Orchestration.Archivist do
             [name, species, notes] ->
               Storage.ingest_animal(name, nil_if_none(species), nil_if_none(notes))
               Logger.info("[ARCHIVIST] 🐾 Animal ingested: #{name}")
+
             [name, species] ->
               Storage.ingest_animal(name, nil_if_none(species), nil)
               Logger.info("[ARCHIVIST] 🐾 Animal ingested: #{name}")
-            _ -> :ok
+
+            _ ->
+              :ok
           end
 
         String.starts_with?(line, "RELATION:") ->
@@ -537,8 +549,13 @@ defmodule Pincer.Core.Orchestration.Archivist do
           |> case do
             [from_name, from_type, relation, to_name, to_type] ->
               Storage.ingest_entity_relation(from_name, from_type, relation, to_name, to_type)
-              Logger.info("[ARCHIVIST] 🔗 Relation ingested: #{from_name} -[#{relation}]-> #{to_name}")
-            _ -> :ok
+
+              Logger.info(
+                "[ARCHIVIST] 🔗 Relation ingested: #{from_name} -[#{relation}]-> #{to_name}"
+              )
+
+            _ ->
+              :ok
           end
 
         true ->
