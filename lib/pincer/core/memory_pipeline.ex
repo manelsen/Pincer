@@ -158,17 +158,35 @@ defmodule Pincer.Core.MemoryPipeline do
   end
 
   defp bump_counter(key) do
-    :ets.update_counter(@table, key, {2, 1}, {key, 0})
+    with_table(fn ->
+      :ets.update_counter(@table, key, {2, 1}, {key, 0})
+    end)
   end
 
   defp lookup_counter(key) do
-    case :ets.lookup(@table, key) do
-      [{^key, value}] -> value
-      _ -> nil
-    end
+    with_table(fn ->
+      case :ets.lookup(@table, key) do
+        [{^key, value}] -> value
+        _ -> nil
+      end
+    end)
   end
 
   defp put_counter(key, value) do
-    :ets.insert(@table, {key, value})
+    with_table(fn ->
+      :ets.insert(@table, {key, value})
+    end)
+  end
+
+  defp with_table(fun) when is_function(fun, 0) do
+    ensure_table()
+
+    try do
+      fun.()
+    rescue
+      ArgumentError ->
+        ensure_table()
+        fun.()
+    end
   end
 end

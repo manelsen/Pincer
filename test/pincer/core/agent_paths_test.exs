@@ -93,6 +93,18 @@ defmodule Pincer.Core.AgentPathsTest do
     assert File.read!(AgentPaths.bootstrap_path(workspace)) =~ "# BOOTSTRAP: THE BIRTH RITUAL"
   end
 
+  test "template seed paths point to canonical workspace template only" do
+    paths = AgentPaths.template_seed_paths()
+
+    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/IDENTITY.md"))
+    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/SOUL.md"))
+    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/USER.md"))
+    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/BOOTSTRAP.md"))
+    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/MEMORY.md"))
+    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/HISTORY.md"))
+    refute Enum.any?(paths, &String.contains?(&1, "priv/pincer/templates"))
+  end
+
   defp tempdir(prefix) do
     path = Path.join(System.tmp_dir!(), "#{prefix}_#{System.unique_integer([:positive])}")
     File.mkdir_p!(path)

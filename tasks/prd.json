@@ -266,6 +266,23 @@
         "US-011",
         "US-013"
       ]
+    },
+    {
+      "id": "US-015",
+      "title": "Canonicalize template source contracts",
+      "description": "Expose and enforce canonical template seed source under workspaces/.template/.pincer.",
+      "acceptanceCriteria": [
+        "AgentPaths exposes canonical template seed paths",
+        "Contracts assert canonical workspace template and reject legacy priv template path coupling",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 15,
+      "passes": true,
+      "notes": "Complete. Branch: us/us-015-canonicalize-template-source. Added AgentPaths.template_seed_paths/0 to make canonical template source explicit and testable. Added contract test asserting seed paths resolve to workspaces/.template/.pincer and do not couple to priv/pincer/templates. During full-gate validation, hardened MemoryPipeline ETS counter access with table re-check/retry to prevent intermittent missing-table crashes under concurrent suite execution. Validated with focused AgentPaths/Onboard/MemoryPipeline suites and MIX_ENV=test mix qa (green: 2 doctests, 1004 tests, 0 failures).",
+      "dependsOn": [
+        "US-014"
+      ]
     }
   ]
 }
