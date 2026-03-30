@@ -183,8 +183,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 10,
-      "passes": false,
-      "notes": "",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-010-implement-explicit-project-fsm. Added explicit lifecycle FSM in Pincer.Core.ProjectFSM with phases objective/scope/plan/execution/review/delivery, strict adjacent-transition validation with structured rejection reasons, and checkpoint persistence on every transition (including metadata for from/to states and project_id). Added project_fsm_test coverage for valid flow, invalid transitions, and persisted checkpoint metadata. Validated with mix format, mix compile --warnings-as-errors, and mix test --warnings-as-errors test/pincer/core/project_fsm_test.exs.",
       "dependsOn": []
     },
     {

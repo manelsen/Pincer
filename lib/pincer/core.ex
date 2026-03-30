@@ -10,6 +10,7 @@ defmodule Pincer.Core do
       ProjectRouter,
       ProjectFlowDelivery,
       ProjectOrchestrator,
+      ProjectFSM,
       Structs.IncomingMessage,
       Executor,
       UX,
