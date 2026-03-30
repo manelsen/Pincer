@@ -16,6 +16,7 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.Trace
   alias Pincer.Core.ToolAnswerPatternPolicy
   alias Pincer.Core.ToolOnlyOutcomeFormatter
+  alias Pincer.Core.ToolRuntime
   alias Pincer.Core.TurnOutcomePolicy
   alias Pincer.Utils.Text
 
@@ -904,16 +905,21 @@ defmodule Pincer.Core.Executor do
 
     result =
       try do
-        case registry.execute_tool(name, args, context) do
-          {:ok, c} ->
+        case ToolRuntime.execute(name, args, context, registry) do
+          {:ok, c, _meta} ->
             Process.put(:consecutive_errors, 0)
             c
 
-          {:error, {:approval_required, cmd}} ->
+          {:error, {:approval_required, cmd}, _meta} ->
             Process.put(:consecutive_errors, 0)
             handle_approval(call_id, cmd, session_pid, session_id, registry)
 
-          {:error, r} ->
+          {:error, :timeout, _meta} ->
+            errors = Process.get(:consecutive_errors, 0) + 1
+            Process.put(:consecutive_errors, errors)
+            "Error: tool '#{name}' timed out and was cancelled."
+
+          {:error, r, _meta} ->
             errors = Process.get(:consecutive_errors, 0) + 1
             Process.put(:consecutive_errors, errors)
 
@@ -955,7 +961,11 @@ defmodule Pincer.Core.Executor do
 
     # DEBUG: Log exact tool output
     Logger.debug("[EXECUTOR] TOOL RESULT (#{name}): #{inspect(content)}")
-    emit_trace_step(:tool, "tool_result", %{tool: name, summary: summarize_tool_result(content)})
+
+    emit_trace_step(:tool, "tool_result", %{
+      tool: name,
+      summary: ToolRuntime.sanitize_summary(name, content)
+    })
 
     %{"role" => "tool", "tool_call_id" => call_id, "name" => name, "content" => content}
   end
@@ -1079,10 +1089,6 @@ defmodule Pincer.Core.Executor do
         end
     end
   end
-
-  defp summarize_tool_result(result) when is_list(result), do: "list_result"
-  defp summarize_tool_result(result) when is_binary(result), do: String.slice(result, 0, 160)
-  defp summarize_tool_result(result), do: inspect(result)
 
   defp format_tool_calls(full_tool_calls) do
     if map_size(full_tool_calls) > 0 do
