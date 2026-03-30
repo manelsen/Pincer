@@ -45,7 +45,7 @@ mix pincer.chat                   # interactive CLI agent
 Runtime config lives in `config.yaml`, not `config/*.exs`. The `Pincer.Infra.Config` module loads it at startup. Edit `config.yaml` to configure:
 
 - **LLM providers** — set `llm.provider` and add API keys to `.env`
-- **Channels** — enable/disable Telegram, Discord, CLI, webhook, WhatsApp, LINE, DingTalk
+- **Channels** — enable/disable Telegram, Discord, CLI, webhook, WhatsApp, LINE, DingTalk, Feishu/Lark
 - **MCP servers** — add external tool servers under `mcp.servers`
 - **Database** — override via `config.yaml` or `PINCER_DB_*` env vars
 - **Workspace isolation** — `tools.restrict_to_workspace: true` (default) confines file/shell tools to the agent's workspace
@@ -78,12 +78,29 @@ channels:
 
 Set `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_CHANNEL_SECRET` in `.env`.
 
+### Feishu / Lark
+
+```yaml
+# config.yaml
+channels:
+  feishu:
+    enabled: true
+    adapter: "Pincer.Channels.Feishu"
+    # Feishu (China): https://open.feishu.cn
+    # Lark (International): https://open.larksuite.com
+    base_url: "https://open.feishu.cn"
+    app_id_env: "FEISHU_APP_ID"
+    app_secret_env: "FEISHU_APP_SECRET"
+```
+
+Set `FEISHU_APP_ID` and `FEISHU_APP_SECRET` in `.env`.
+
 ## Architecture
 
 Pincer uses **Hexagonal Architecture** (Ports & Adapters) with compile-time boundary enforcement. Dependencies flow inward — outer layers can depend on inner, never the reverse:
 
 ```
-Channels       Telegram, Discord, Slack, WhatsApp, LINE, CLI, Webhook
+Channels       Telegram, Discord, Slack, WhatsApp, LINE, Feishu/Lark, DingTalk, CLI, Webhook
     ↓
 Adapters       Concrete implementations: MCP, Cron, Tools
     ↓
@@ -164,6 +181,7 @@ Each channel implements the `Pincer.Ports.Channel` behaviour and uses the inject
 | WhatsApp | `Pincer.Channels.WhatsApp` | Requires Go bridge binary |
 | LINE | `Pincer.Channels.Line` | Requires `LINE_CHANNEL_ACCESS_TOKEN` + `LINE_CHANNEL_SECRET` |
 | DingTalk | `Pincer.Channels.DingTalk` | Requires `DINGTALK_CLIENT_ID` + `DINGTALK_CLIENT_SECRET` |
+| Feishu / Lark | `Pincer.Channels.Feishu` | Requires `FEISHU_APP_ID` + `FEISHU_APP_SECRET`. Set `base_url` for Lark (international) |
 | Webhook | `Pincer.Channels.Webhook` | Generic HTTP endpoint |
 
 ### Multi-agent routing (Telegram)
