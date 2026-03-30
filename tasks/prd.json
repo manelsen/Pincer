@@ -301,6 +301,133 @@
       "dependsOn": [
         "US-015"
       ]
+    },
+    {
+      "id": "US-017",
+      "title": "Extract shared ETS table helper",
+      "description": "Remove duplicated ensure_table patterns by introducing a shared ETS helper and migrating core modules.",
+      "acceptanceCriteria": [
+        "Introduce shared ETS helper for named table init/recovery",
+        "Migrate Pairing, MemoryPipeline, CooldownStore, AuthProfiles (and any equivalent copy) to helper",
+        "Behavior remains unchanged under concurrent table recreation",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 17,
+      "passes": false,
+      "notes": "Backlog item from codebase quality sweep: duplicated ETS init logic across modules.",
+      "dependsOn": [
+        "US-016"
+      ]
+    },
+    {
+      "id": "US-018",
+      "title": "Optimize Pairing bound agent lookup",
+      "description": "Replace full ETS table scans in bound_agent_session?/2 with indexed/select-based lookup.",
+      "acceptanceCriteria": [
+        "Eliminate :ets.tab2list full-scan path in bound_agent_session?/2",
+        "Use ETS select/match_spec or secondary index preserving semantics",
+        "Add tests for correctness with multiple channels/senders",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 18,
+      "passes": false,
+      "notes": "Backlog item from performance sweep: avoid O(N) lookup and memory pressure.",
+      "dependsOn": [
+        "US-017"
+      ]
+    },
+    {
+      "id": "US-019",
+      "title": "Standardize internal timebase and units",
+      "description": "Normalize internal timing APIs to monotonic milliseconds across core runtime components.",
+      "acceptanceCriteria": [
+        "Adopt consistent monotonic-ms time source for internal TTL/cooldown/counter windows",
+        "Remove mixed second/millisecond drift in comparable paths",
+        "Document timing contract where relevant",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 19,
+      "passes": false,
+      "notes": "Backlog item from correctness sweep: inconsistent system_time/monotonic_time and unit usage.",
+      "dependsOn": [
+        "US-017"
+      ]
+    },
+    {
+      "id": "US-020",
+      "title": "Extract shared normalization and field-reader utilities",
+      "description": "Consolidate duplicated normalize/read_field helpers into reusable utility module(s).",
+      "acceptanceCriteria": [
+        "Create shared helper(s) for mixed map/keyword field access and string normalization",
+        "Migrate duplicated call sites in core modules",
+        "Preserve existing behavior via regression tests",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 20,
+      "passes": false,
+      "notes": "Backlog item from maintainability sweep: repeated utility logic across modules.",
+      "dependsOn": [
+        "US-017"
+      ]
+    },
+    {
+      "id": "US-021",
+      "title": "Modularize Onboard orchestration",
+      "description": "Split large Onboard module into focused submodules while keeping facade API stable.",
+      "acceptanceCriteria": [
+        "Extract defaults/validation/fileops concerns into dedicated modules",
+        "Keep public Onboard API and behavior stable",
+        "Update tests to cover extracted boundaries",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 21,
+      "passes": false,
+      "notes": "Backlog item from structural sweep: reduce module size/coupling and improve maintainability.",
+      "dependsOn": [
+        "US-020"
+      ]
+    },
+    {
+      "id": "US-022",
+      "title": "Refactor AgentPaths seeding flow",
+      "description": "Reduce repetitive root persona seeding logic and centralize template source iteration.",
+      "acceptanceCriteria": [
+        "Deduplicate repeated seed_file_from_sources calls with table-driven flow",
+        "Preserve template precedence and fallback semantics",
+        "Keep existing AgentPaths contracts green",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 22,
+      "passes": false,
+      "notes": "Backlog item from non-idiomatic/duplication sweep in AgentPaths.",
+      "dependsOn": [
+        "US-020"
+      ]
+    },
+    {
+      "id": "US-023",
+      "title": "Tighten Pairing agent_id contract",
+      "description": "Align pairing agent_id normalization/validation with AgentRegistry invariants.",
+      "acceptanceCriteria": [
+        "Validate/normalize pairing agent ids using shared contract",
+        "Reject invalid ids with explicit error semantics",
+        "Add regression tests for valid/invalid id paths",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 23,
+      "passes": false,
+      "notes": "Backlog item from contract sweep: avoid implicit acceptance of malformed agent IDs.",
+      "dependsOn": [
+        "US-018",
+        "US-020"
+      ]
     }
   ]
 }
