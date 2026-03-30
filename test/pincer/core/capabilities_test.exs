@@ -55,4 +55,38 @@ defmodule Pincer.Core.CapabilitiesTest do
     assert [%{adapter: :discord}] =
              Capabilities.query(catalog, type: :channel, feature: :attachments)
   end
+
+  test "provider declarations are explicit and schema-valid" do
+    providers = Capabilities.declarations(:provider)
+
+    assert Enum.any?(providers, &(&1.adapter == :openrouter))
+    assert Enum.any?(providers, &(&1.adapter == :google))
+
+    assert Enum.all?(providers, fn entry ->
+             :ok == Capabilities.validate(:provider, entry.capabilities)
+           end)
+  end
+
+  test "tool declarations include risk metadata and validate against schema" do
+    tools = Capabilities.declarations(:tool)
+
+    assert Enum.any?(tools, &(&1.adapter == :safe_shell))
+    assert Enum.all?(tools, &Map.has_key?(&1.capabilities, :side_effect_level))
+
+    assert Enum.all?(tools, fn entry ->
+             :ok == Capabilities.validate(:tool, entry.capabilities)
+           end)
+  end
+
+  test "channel declarations expose ux and streaming capabilities" do
+    channels = Capabilities.declarations(:channel)
+
+    assert Enum.any?(channels, &(&1.adapter == :telegram))
+    assert Enum.all?(channels, &Map.has_key?(&1.capabilities, :attachments))
+    assert Enum.all?(channels, &Map.has_key?(&1.capabilities, :streaming_support))
+
+    assert Enum.all?(channels, fn entry ->
+             :ok == Capabilities.validate(:channel, entry.capabilities)
+           end)
+  end
 end
