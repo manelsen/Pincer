@@ -18,8 +18,8 @@
         "TokenCache tests pass with mix test test/pincer/channels/shared/token_cache_test.exs"
       ],
       "priority": 1,
-      "passes": false,
-      "notes": "Foundation for Feishu (US-003) and DingTalk (US-011). Pattern: GenServer with :timer.send_interval for proactive refresh.",
+      "passes": true,
+      "notes": "Complete. Branch: us/001-shared-token-cache. Files: lib/pincer/channels/shared/token_cache.ex, test/pincer/channels/shared/token_cache_test.exs. 6 tests pass.",
       "dependsOn": []
     },
     {
@@ -38,7 +38,7 @@
         "WebhookVerifier tests pass"
       ],
       "priority": 2,
-      "passes": false,
+      "passes": true,
       "notes": "Foundation for all three channel webhook handlers. Uses :crypto.hash/2 and Base.encode64/1 from Erlang stdlib.",
       "dependsOn": []
     },
@@ -60,9 +60,11 @@
         "Feishu API tests pass"
       ],
       "priority": 3,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-001 (TokenCache). Uses Req for HTTP (already in deps). Base URL: open.feishu.cn (CN) or open.larksuite.com (international).",
-      "dependsOn": ["US-001"]
+      "dependsOn": [
+        "US-001"
+      ]
     },
     {
       "id": "US-004",
@@ -80,7 +82,7 @@
         "Card builder tests pass"
       ],
       "priority": 4,
-      "passes": false,
+      "passes": true,
       "notes": "Independent of API client. Pure data transformation module. Cards use Feishu CardKit v2 format.",
       "dependsOn": []
     },
@@ -104,9 +106,12 @@
         "Feishu channel tests pass"
       ],
       "priority": 5,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-002 (WebhookVerifier), US-003 (API client). Follow the same pattern as lib/pincer/channels/telegram.ex (Supervisor with child modules).",
-      "dependsOn": ["US-002", "US-003"]
+      "dependsOn": [
+        "US-002",
+        "US-003"
+      ]
     },
     {
       "id": "US-006",
@@ -125,9 +130,13 @@
         "Feishu session tests pass"
       ],
       "priority": 6,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-003 (API client), US-004 (cards), US-005 (channel adapter). Follow pattern from lib/pincer/channels/telegram/session.ex.",
-      "dependsOn": ["US-003", "US-004", "US-005"]
+      "dependsOn": [
+        "US-003",
+        "US-004",
+        "US-005"
+      ]
     },
     {
       "id": "US-007",
@@ -142,9 +151,11 @@
         "mix compile --warnings-as-errors passes"
       ],
       "priority": 7,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-005 (channel adapter must exist). Verify factory integration works by checking channel starts with config.",
-      "dependsOn": ["US-005"]
+      "dependsOn": [
+        "US-005"
+      ]
     },
     {
       "id": "US-008",
@@ -163,7 +174,7 @@
         "LINE API tests pass"
       ],
       "priority": 8,
-      "passes": false,
+      "passes": true,
       "notes": "No dependency on US-001 (TokenCache) since LINE uses a static token. Uses Req for HTTP.",
       "dependsOn": []
     },
@@ -188,9 +199,12 @@
         "LINE channel tests pass"
       ],
       "priority": 9,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-002 (WebhookVerifier), US-008 (LINE API). Streaming strategy: send initial message, then push follow-up chunks. Consider 500-char chunks.",
-      "dependsOn": ["US-002", "US-008"]
+      "dependsOn": [
+        "US-002",
+        "US-008"
+      ]
     },
     {
       "id": "US-010",
@@ -205,9 +219,11 @@
         "mix compile --warnings-as-errors passes"
       ],
       "priority": 10,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-009 (LINE channel adapter must exist).",
-      "dependsOn": ["US-009"]
+      "dependsOn": [
+        "US-009"
+      ]
     },
     {
       "id": "US-011",
@@ -228,9 +244,11 @@
         "DingTalk API tests pass"
       ],
       "priority": 11,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-001 (TokenCache). DingTalk API base: oapi.dingtalk.com. Uses Req for HTTP.",
-      "dependsOn": ["US-001"]
+      "dependsOn": [
+        "US-001"
+      ]
     },
     {
       "id": "US-012",
@@ -253,9 +271,12 @@
         "DingTalk channel tests pass"
       ],
       "priority": 12,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-002 (WebhookVerifier), US-011 (DingTalk API). Follow Feishu card streaming pattern from US-006.",
-      "dependsOn": ["US-002", "US-011"]
+      "dependsOn": [
+        "US-002",
+        "US-011"
+      ]
     },
     {
       "id": "US-013",
@@ -270,9 +291,11 @@
         "mix compile --warnings-as-errors passes"
       ],
       "priority": 13,
-      "passes": false,
+      "passes": true,
       "notes": "Depends on US-012 (DingTalk channel adapter must exist).",
-      "dependsOn": ["US-012"]
+      "dependsOn": [
+        "US-012"
+      ]
     },
     {
       "id": "US-014",
@@ -292,7 +315,11 @@
       "priority": 14,
       "passes": false,
       "notes": "Final validation gate. All previous stories must pass. This is the definition of done for the feature.",
-      "dependsOn": ["US-007", "US-010", "US-013"]
+      "dependsOn": [
+        "US-007",
+        "US-010",
+        "US-013"
+      ]
     }
   ]
 }

@@ -94,7 +94,6 @@ defmodule Pincer.MixProject do
       # Boundary Enforcement
       {:boundary, "~> 0.10", runtime: false},
 
-
       # Dev & Hot Reload
       {:mox, "~> 1.0", only: :test},
       {:file_system, "~> 1.0"},

@@ -70,8 +70,7 @@ defmodule Pincer.Adapters.Tools.Workflow do
           },
           session_id: %{
             type: "string",
-            description:
-              "Target session ID. Defaults to the current session when omitted."
+            description: "Target session ID. Defaults to the current session when omitted."
           },
           task_id: %{
             type: "string",
@@ -87,7 +86,8 @@ defmodule Pincer.Adapters.Tools.Workflow do
           },
           status: %{
             type: "string",
-            description: "Task status for 'update_task': 'pending', 'in_progress', 'done', 'cancelled'",
+            description:
+              "Task status for 'update_task': 'pending', 'in_progress', 'done', 'cancelled'",
             enum: @task_statuses
           },
           filter: %{
@@ -114,7 +114,12 @@ defmodule Pincer.Adapters.Tools.Workflow do
         Path.join("workspaces", session_id)
 
     deps = %{
-      session_registry: Application.get_env(:pincer, :workflow_session_registry, __MODULE__.DefaultSessionRegistry),
+      session_registry:
+        Application.get_env(
+          :pincer,
+          :workflow_session_registry,
+          __MODULE__.DefaultSessionRegistry
+        ),
       session_server: Application.get_env(:pincer, :workflow_session_server, SessionServer),
       orchestrator: Application.get_env(:pincer, :workflow_orchestrator, ProjectOrchestrator)
     }
@@ -134,7 +139,8 @@ defmodule Pincer.Adapters.Tools.Workflow do
     if sessions == [] do
       {:ok, "No active sessions."}
     else
-      {:ok, "Active sessions (#{length(sessions)}):\n" <> Enum.map_join(sessions, "\n", &"- #{&1}")}
+      {:ok,
+       "Active sessions (#{length(sessions)}):\n" <> Enum.map_join(sessions, "\n", &"- #{&1}")}
     end
   rescue
     e -> {:error, "Could not list sessions: #{Exception.message(e)}"}
@@ -242,7 +248,10 @@ defmodule Pincer.Adapters.Tools.Workflow do
       lines =
         Enum.map(filtered, fn t ->
           "[#{t["id"]}] **#{t["title"]}** — #{t["status"]}" <>
-            if(t["description"] && t["description"] != "", do: "\n  #{t["description"]}", else: "")
+            if(t["description"] && t["description"] != "",
+              do: "\n  #{t["description"]}",
+              else: ""
+            )
         end)
 
       {:ok, "Tasks (#{length(filtered)}):\n\n" <> Enum.join(lines, "\n")}

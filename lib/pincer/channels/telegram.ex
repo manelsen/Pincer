@@ -171,7 +171,10 @@ defmodule Pincer.Channels.Telegram do
   def update_message(chat_id, message_id, text, opts \\ []) do
     if Keyword.get(opts, :skip_formatting, false) do
       # Plain text update for streaming
-      case Pincer.Channels.Telegram.api_client().edit_message_text(chat_id, message_id, text,
+      case Pincer.Channels.Telegram.api_client().edit_message_text(
+             chat_id,
+             message_id,
+             text,
              Keyword.delete(opts, :parse_mode)
            ) do
         {:ok, _} -> :ok
@@ -265,10 +268,12 @@ defmodule Pincer.Channels.Telegram do
       {:error, %Telegex.Error{description: desc}} ->
         # ONLY attempt fallback if we are currently using a parse_mode (like HTML)
         # Handle "can't parse entities" as well as any other parse error
-        is_parse_error = String.contains?(desc, "can't parse entities") or
-                        String.contains?(desc, "can't find end tag")
+        is_parse_error =
+          String.contains?(desc, "can't parse entities") or
+            String.contains?(desc, "can't find end tag")
 
-        if Keyword.has_key?(opts, :parse_mode) and (desc in ["Bad Request: Can't parse entities"] or is_parse_error) do
+        if Keyword.has_key?(opts, :parse_mode) and
+             (desc in ["Bad Request: Can't parse entities"] or is_parse_error) do
           Logger.warning(
             "Telegram HTML parsing failed. Falling back to plain text. Error: #{desc}"
           )

@@ -51,6 +51,8 @@ defmodule Pincer.Adapters.Tools.Timer do
 
   def execute(args) do
     missing = ["prompt", "seconds"] |> Enum.reject(&Map.has_key?(args, &1))
-    {:error, "schedule_timer_delay is missing required parameters: #{Enum.join(missing, ", ")}. Please provide 'prompt' (string) and 'seconds' (integer)."}
+
+    {:error,
+     "schedule_timer_delay is missing required parameters: #{Enum.join(missing, ", ")}. Please provide 'prompt' (string) and 'seconds' (integer)."}
   end
 end

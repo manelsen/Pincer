@@ -114,7 +114,9 @@ defmodule Pincer.Adapters.Tools.WorkflowTest do
   test "get_session returns session details" do
     Application.put_env(:pincer, :workflow_session_server, StubSessionServer)
 
-    assert {:ok, text} = Workflow.execute(%{"action" => "get_session", "session_id" => "existing"})
+    assert {:ok, text} =
+             Workflow.execute(%{"action" => "get_session", "session_id" => "existing"})
+
     assert text =~ "existing"
     assert text =~ "active"
     assert text =~ "google"
@@ -262,7 +264,10 @@ defmodule Pincer.Adapters.Tools.WorkflowTest do
     execute(%{"action" => "create_task", "title" => "Work item"}, ws)
 
     assert {:ok, msg} =
-             execute(%{"action" => "update_task", "task_id" => "T1", "status" => "in_progress"}, ws)
+             execute(
+               %{"action" => "update_task", "task_id" => "T1", "status" => "in_progress"},
+               ws
+             )
 
     assert msg =~ "in_progress"
 
