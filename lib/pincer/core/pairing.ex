@@ -268,7 +268,9 @@ defmodule Pincer.Core.Pairing do
   """
   @spec reset() :: :ok
   def reset do
-    ensure_tables()
+    ensure_table(@table_pending)
+    ensure_table(@table_invites)
+    ensure_table(@table_pairs)
     clear_table_if_exists(@table_pending)
     clear_table_if_exists(@table_invites)
     clear_table_if_exists(@table_pairs)
@@ -278,8 +280,15 @@ defmodule Pincer.Core.Pairing do
 
   defp clear_table_if_exists(table) do
     case :ets.whereis(table) do
-      :undefined -> :ok
-      _tid -> :ets.delete_all_objects(table)
+      :undefined ->
+        :ok
+
+      _tid ->
+        try do
+          :ets.delete_all_objects(table)
+        rescue
+          ArgumentError -> :ok
+        end
     end
   end
 

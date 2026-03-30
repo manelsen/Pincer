@@ -105,6 +105,12 @@ defmodule Pincer.Core.AgentPathsTest do
     refute Enum.any?(paths, &String.contains?(&1, "priv/pincer/templates"))
   end
 
+  test "legacy priv template files are no longer present" do
+    refute File.exists?("priv/pincer/templates/BOOTSTRAP.md")
+    refute File.exists?("priv/pincer/templates/IDENTITY.md")
+    refute File.exists?("priv/pincer/templates/USER.md")
+  end
+
   defp tempdir(prefix) do
     path = Path.join(System.tmp_dir!(), "#{prefix}_#{System.unique_integer([:positive])}")
     File.mkdir_p!(path)
