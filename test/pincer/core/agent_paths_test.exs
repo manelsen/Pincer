@@ -52,6 +52,47 @@ defmodule Pincer.Core.AgentPathsTest do
     assert File.exists?(AgentPaths.history_path(subagent_workspace))
   end
 
+  test "template_root override takes precedence over workspace template" do
+    tmp = tempdir("agent_paths_precedence")
+    workspace = Path.join(tmp, "workspaces/root_agent")
+    override = Path.join(tmp, "override")
+
+    File.mkdir_p!(Path.join(tmp, "workspaces/.template/.pincer"))
+
+    File.write!(
+      Path.join(tmp, "workspaces/.template/.pincer/IDENTITY.md"),
+      "# Workspace Identity\n"
+    )
+
+    File.mkdir_p!(Path.join(override, ".template/.pincer"))
+    File.write!(Path.join(override, ".template/.pincer/IDENTITY.md"), "# Override Identity\n")
+    File.write!(Path.join(override, ".template/.pincer/SOUL.md"), "# Override Soul\n")
+    File.write!(Path.join(override, ".template/.pincer/USER.md"), "# Override User\n")
+    File.write!(Path.join(override, ".template/.pincer/BOOTSTRAP.md"), "# Override Bootstrap\n")
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: true, template_root: override)
+
+    assert File.read!(AgentPaths.identity_path(workspace)) == "# Override Identity\n"
+    assert File.read!(AgentPaths.soul_path(workspace)) == "# Override Soul\n"
+    assert File.read!(AgentPaths.user_path(workspace)) == "# Override User\n"
+    assert File.read!(AgentPaths.bootstrap_path(workspace)) == "# Override Bootstrap\n"
+  end
+
+  test "falls back to built-in defaults when templates are missing" do
+    tmp = tempdir("agent_paths_fallback")
+    workspace = Path.join(tmp, "workspaces/root_agent")
+
+    AgentPaths.ensure_workspace!(workspace,
+      bootstrap?: true,
+      template_root: Path.join(tmp, "missing")
+    )
+
+    assert File.read!(AgentPaths.identity_path(workspace)) =~ "# Pincer"
+    assert File.read!(AgentPaths.soul_path(workspace)) =~ "Core Truths"
+    assert File.read!(AgentPaths.user_path(workspace)) =~ "# User Context"
+    assert File.read!(AgentPaths.bootstrap_path(workspace)) =~ "# BOOTSTRAP: THE BIRTH RITUAL"
+  end
+
   defp tempdir(prefix) do
     path = Path.join(System.tmp_dir!(), "#{prefix}_#{System.unique_integer([:positive])}")
     File.mkdir_p!(path)
