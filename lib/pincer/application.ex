@@ -123,6 +123,7 @@ defmodule Pincer.Application do
     )
 
     children = [
+      Pincer.Telemetry.PromEx,
       Pincer.Infra.PubSub,
       Pincer.Core.Orchestration.Blackboard,
       Pincer.Core.MemoryObservability,
@@ -133,6 +134,8 @@ defmodule Pincer.Application do
       {DynamicSupervisor, strategy: :one_for_one, name: Pincer.MCP.Supervisor},
       Pincer.Adapters.Connectors.MCP.Manager,
       {Registry, keys: :unique, name: Pincer.Core.Session.Registry},
+      Pincer.Core.CircuitBreaker,
+      Pincer.Core.RateLimiter,
       Pincer.Core.HookDispatcher,
       Pincer.Core.Session.Supervisor,
       Pincer.Core.Project.Registry,

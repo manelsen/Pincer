@@ -428,6 +428,46 @@
         "US-018",
         "US-020"
       ]
+    },
+    {
+      "id": "US-024",
+      "title": "Parallel Tool Orchestration and Non-blocking Maestro Mode",
+      "description": "Enable automatic tool parallelization and responsive session feedback during execution.",
+      "acceptanceCriteria": [
+        "Executor parallelizes multiple independent tool calls using Task.async_stream",
+        "Session.Server handles /stop command to interrupt active workers",
+        "User receives immediate feedback ('Vou processar após concluir...') when sending input while agent is busy",
+        "Propagate trace and workspace context to parallel task processes",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 24,
+      "passes": true,
+      "notes": "Complete. Implemented automatic parallelization in Executor with Task.async_stream (concurrency: 10). Enhanced Session.Server with non-blocking feedback and interruption logic. Fixed OTEL status reporting. Added regression tests in test/pincer/core/executor_parallel_test.exs.",
+      "dependsOn": [
+        "US-004",
+        "US-008"
+      ]
+    },
+    {
+      "id": "US-025",
+      "title": "Core Resilience and Security Guardrails",
+      "description": "Implement CircuitBreaker, RateLimiter, RBAC, and AuditLog components.",
+      "acceptanceCriteria": [
+        "CircuitBreaker manages LLM provider stability using ETSHelper",
+        "RateLimiter enforces per-channel request limits using ETSHelper",
+        "RBAC defines explicit session/user roles and permissions",
+        "AuditLog persists security events via Ecto with dedicated migration",
+        "mix qa passes",
+        "mix test --warnings-as-errors passes"
+      ],
+      "priority": 25,
+      "passes": true,
+      "notes": "Complete. Implemented CircuitBreaker, RateLimiter (with ETSHelper), RBAC, AuditLog, and DeadLetterQueue. Added full test coverage and registered services in Application supervision tree.",
+      "dependsOn": [
+        "US-001",
+        "US-017"
+      ]
     }
   ]
 }
