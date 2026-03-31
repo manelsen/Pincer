@@ -422,8 +422,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 23,
-      "passes": false,
-      "notes": "Backlog item from contract sweep: avoid implicit acceptance of malformed agent IDs.",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-023-tighten-pairing-agentid-contract. Pairing now validates explicit agent IDs with AgentRegistry invariants (issue_invite/bind return {:error, {:invalid_agent_id, message}} on invalid input) and normalizes stored/default/factory IDs through strict contract-aware helpers. Added regressions for invalid explicit IDs and malformed stored IDs. Validated with mix test test/pincer/core/pairing_test.exs and MIX_ENV=test mix qa.",
       "dependsOn": [
         "US-018",
         "US-020"
