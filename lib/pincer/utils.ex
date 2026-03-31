@@ -4,6 +4,7 @@ defmodule Pincer.Utils do
     exports: [
       ETSHelper,
       Time,
+      Value,
       LoggerFormatter,
       MessageSplitter,
       TokenCounter,

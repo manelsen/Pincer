@@ -368,8 +368,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 20,
-      "passes": false,
-      "notes": "Backlog item from maintainability sweep: repeated utility logic across modules.",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-020-extract-normalization-field-reader. Added Pincer.Utils.Value with fetch/3, trim_to_nil/1, trim_string/1 and migrated duplicated field/normalization logic in AuthProfiles and LLM.CooldownStore. Validated with focused suites and MIX_ENV=test mix qa (2 doctests, 1012 tests, 0 failures).",
       "dependsOn": [
         "US-017"
       ]
