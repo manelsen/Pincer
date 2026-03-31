@@ -13,10 +13,13 @@ defmodule Mix.Tasks.Pincer.AgentTest do
     cwd = File.cwd!()
     File.cd!(tmp)
 
-    File.mkdir_p!("workspaces/.template/.pincer")
-    File.write!("workspaces/.template/.pincer/BOOTSTRAP.md", "# Template Bootstrap\n")
-    File.write!("workspaces/.template/.pincer/MEMORY.md", "# Template Memory\n")
-    File.write!("workspaces/.template/.pincer/HISTORY.md", "# Template History\n")
+    File.mkdir_p!("tmp/test_workspaces/.template/.pincer")
+    File.write!("tmp/test_workspaces/.template/.pincer/BOOTSTRAP.md", "# Template Bootstrap\n")
+    File.write!("tmp/test_workspaces/.template/.pincer/MEMORY.md", "# Template Memory\n")
+    File.write!("tmp/test_workspaces/.template/.pincer/HISTORY.md", "# Template History\n")
+    File.write!("tmp/test_workspaces/.template/.pincer/IDENTITY.md", "# Template Identity\n")
+    File.write!("tmp/test_workspaces/.template/.pincer/SOUL.md", "# Template Soul\n")
+    File.write!("tmp/test_workspaces/.template/.pincer/USER.md", "# Template User\n")
 
     File.write!("IDENTITY.md", "# Legacy Identity\n")
     File.write!("SOUL.md", "# Legacy Soul\n")
@@ -51,14 +54,14 @@ defmodule Mix.Tasks.Pincer.AgentTest do
 
     workspace = AgentPaths.workspace_root("annie")
 
-    assert File.read!(AgentPaths.bootstrap_path(workspace)) =~ "BOOTSTRAP"
-    assert File.read!(AgentPaths.memory_path(workspace)) =~ "Long-term Memory"
-    assert File.read!(AgentPaths.history_path(workspace)) =~ "Session History"
+    assert File.read!(AgentPaths.bootstrap_path(workspace)) =~ "Template Bootstrap"
+    assert File.read!(AgentPaths.memory_path(workspace)) =~ "Template Memory"
+    assert File.read!(AgentPaths.history_path(workspace)) =~ "Template History"
     assert File.dir?(AgentPaths.sessions_dir(workspace))
 
-    assert File.read!(AgentPaths.identity_path(workspace)) =~ "Pincer"
-    assert File.read!(AgentPaths.soul_path(workspace)) =~ "Core Truths"
-    assert File.read!(AgentPaths.user_path(workspace)) =~ "Context"
+    assert File.read!(AgentPaths.identity_path(workspace)) =~ "Template Identity"
+    assert File.read!(AgentPaths.soul_path(workspace)) =~ "Template Soul"
+    assert File.read!(AgentPaths.user_path(workspace)) =~ "Template User"
 
     assert output =~ "workspaces/annie/.pincer"
   end

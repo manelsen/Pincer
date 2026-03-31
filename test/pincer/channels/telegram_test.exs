@@ -39,7 +39,7 @@ defmodule Pincer.Channels.TelegramTest do
 
       APIMock
       |> expect(:send_message, fn ^chat_id, text, opts ->
-        assert text =~ "<pre>"
+        assert text =~ "💭 Reasoning"
         assert text =~ "segredo"
         assert text =~ "Resposta final"
         assert opts[:parse_mode] == "HTML"

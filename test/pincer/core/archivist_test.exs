@@ -20,7 +20,7 @@ defmodule Pincer.Core.ArchivistTest do
           prompt =~ "extract \"Knowledge Snippets\"" ->
             "SNIPPET: bug_solution | 9 | Deployment timeout was fixed by increasing webhook timeout.\nSNIPPET: user_preference | 8 | User prefers concise summaries."
 
-          prompt =~ "identify if any BUG was fixed" ->
+          prompt =~ "Knowledge Graph specialist" ->
             "BUG_FIX: Deploy timeout after webhook retries | Increase timeout to 60s | lib/pincer/deploy.ex"
 
           true ->

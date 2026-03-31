@@ -12,6 +12,8 @@ defmodule Pincer.Core.Pairing do
 
   alias Pincer.Core.AgentRegistry
   alias Pincer.Infra.PubSub
+  alias Pincer.Utils.ETSHelper
+  alias Pincer.Utils.Time
 
   @table_pending :pincer_pairing_pending
   @table_invites :pincer_pairing_invites
@@ -35,6 +37,7 @@ defmodule Pincer.Core.Pairing do
              expires_at_ms: non_neg_integer(),
              agent_id: String.t() | nil
            }}
+          | {:error, {:invalid_agent_id, String.t()}}
   @type approve_result ::
           :ok | {:error, :not_pending | :expired | :invalid_code | :attempts_exceeded}
   @type reject_result :: :ok | {:error, :not_pending | :expired | :invalid_code}
@@ -77,37 +80,42 @@ defmodule Pincer.Core.Pairing do
   """
   @spec issue_invite(channel(), keyword()) :: invite_issue_result()
   def issue_invite(channel, opts \\ []) do
-    ensure_tables()
-    now = now_ms(opts)
-    code = generate_invite_code(opts)
-    expires_at_ms = now + ttl_ms(opts)
-    agent_id = normalize_agent_id(Keyword.get(opts, :agent_id))
-    invite_key = invite_key(channel, code)
+    with {:ok, agent_id} <-
+           normalize_explicit_agent_id(Keyword.get(opts, :agent_id), allow_nil?: true) do
+      ensure_tables()
+      now = now_ms(opts)
+      code = generate_invite_code(opts)
+      expires_at_ms = now + ttl_ms(opts)
+      invite_key = invite_key(channel, code)
 
-    invite = %{
-      code: code,
-      code_hash: hash_code(code),
-      issued_at_ms: now,
-      expires_at_ms: expires_at_ms,
-      agent_id: agent_id
-    }
+      invite = %{
+        code: code,
+        code_hash: hash_code(code),
+        issued_at_ms: now,
+        expires_at_ms: expires_at_ms,
+        agent_id: agent_id
+      }
 
-    put_invite(invite_key, invite)
-    announce_invite_code(channel, code, expires_at_ms, issued_at_ms: now, agent_id: agent_id)
+      put_invite(invite_key, invite)
+      announce_invite_code(channel, code, expires_at_ms, issued_at_ms: now, agent_id: agent_id)
 
-    {:ok, %{code: code, expires_at_ms: expires_at_ms, agent_id: agent_id}}
+      {:ok, %{code: code, expires_at_ms: expires_at_ms, agent_id: agent_id}}
+    end
   end
 
   @doc """
   Persists a direct sender-to-agent binding through the pairing store.
   """
-  @spec bind(channel(), sender_id(), String.t(), keyword()) :: :ok
+  @spec bind(channel(), sender_id(), String.t(), keyword()) ::
+          :ok | {:error, {:invalid_agent_id, String.t()}}
   def bind(channel, sender_id, agent_id, opts \\ []) do
-    ensure_tables()
-    key = key(channel, sender_id)
-    now = now_ms(opts)
-    put_pair(key, build_pair_data(channel, sender_id, now, opts, agent_id))
-    :ok
+    with {:ok, normalized_agent_id} <- normalize_explicit_agent_id(agent_id, allow_nil?: false) do
+      ensure_tables()
+      key = key(channel, sender_id)
+      now = now_ms(opts)
+      put_pair(key, build_pair_data(channel, sender_id, now, opts, normalized_agent_id))
+      :ok
+    end
   end
 
   @doc """
@@ -231,7 +239,7 @@ defmodule Pincer.Core.Pairing do
 
     case :ets.lookup(@table_pairs, key) do
       [{^key, pair_data}] when is_map(pair_data) ->
-        normalize_agent_id(Map.get(pair_data, :agent_id) || Map.get(pair_data, "agent_id"))
+        normalize_stored_agent_id(Map.get(pair_data, :agent_id) || Map.get(pair_data, "agent_id"))
 
       _ ->
         nil
@@ -245,16 +253,18 @@ defmodule Pincer.Core.Pairing do
   def bound_agent_session?(channel, agent_id) do
     ensure_tables()
     normalized_channel = normalize_channel(channel)
-    normalized_agent_id = normalize_agent_id(agent_id)
+    normalized_agent_id = normalize_stored_agent_id(agent_id)
 
     if is_nil(normalized_agent_id) do
       false
     else
-      @table_pairs
-      |> :ets.tab2list()
+      normalized_channel
+      |> select_pair_data_for_channel()
       |> Enum.any?(fn
-        {{^normalized_channel, _sender}, pair_data} when is_map(pair_data) ->
-          normalize_agent_id(Map.get(pair_data, :agent_id) || Map.get(pair_data, "agent_id")) ==
+        pair_data when is_map(pair_data) ->
+          normalize_stored_agent_id(
+            Map.get(pair_data, :agent_id) || Map.get(pair_data, "agent_id")
+          ) ==
             normalized_agent_id
 
         _ ->
@@ -268,12 +278,28 @@ defmodule Pincer.Core.Pairing do
   """
   @spec reset() :: :ok
   def reset do
-    ensure_tables()
-    :ets.delete_all_objects(@table_pending)
-    :ets.delete_all_objects(@table_invites)
-    :ets.delete_all_objects(@table_pairs)
+    ensure_table(@table_pending)
+    ensure_table(@table_invites)
+    ensure_table(@table_pairs)
+    clear_table_if_exists(@table_pending)
+    clear_table_if_exists(@table_invites)
+    clear_table_if_exists(@table_pairs)
     clear_persistent_store()
     :ok
+  end
+
+  defp clear_table_if_exists(table) do
+    case :ets.whereis(table) do
+      :undefined ->
+        :ok
+
+      _tid ->
+        try do
+          :ets.delete_all_objects(table)
+        rescue
+          ArgumentError -> :ok
+        end
+    end
   end
 
   defp create_pending(channel, sender_id, key, now, opts) do
@@ -372,7 +398,7 @@ defmodule Pincer.Core.Pairing do
   defp now_ms(opts) do
     case Keyword.get(opts, :now_ms) do
       value when is_integer(value) -> value
-      _ -> System.system_time(:millisecond)
+      _ -> Time.monotonic_ms()
     end
   end
 
@@ -423,6 +449,12 @@ defmodule Pincer.Core.Pairing do
     normalize_code("PAIR_#{token}")
   end
 
+  defp select_pair_data_for_channel(channel) when is_binary(channel) do
+    :ets.select(@table_pairs, [
+      {{{channel, :_}, :"$1"}, [], [:"$1"]}
+    ])
+  end
+
   defp ensure_tables do
     pending_status = ensure_table(@table_pending)
     invite_status = ensure_table(@table_invites)
@@ -437,18 +469,7 @@ defmodule Pincer.Core.Pairing do
   end
 
   defp ensure_table(table) do
-    case :ets.whereis(table) do
-      :undefined ->
-        try do
-          :ets.new(table, [:named_table, :set, :public, read_concurrency: true])
-          :created
-        rescue
-          ArgumentError -> :existing
-        end
-
-      _tid ->
-        :existing
-    end
+    ETSHelper.ensure_named_table(table)
   end
 
   defp bootstrap_from_store do
@@ -643,7 +664,7 @@ defmodule Pincer.Core.Pairing do
 
   defp announce_pairing_code(channel, sender_id, code, expires_at_ms, opts) do
     reused? = Keyword.get(opts, :reused, false)
-    issued_at_ms = Keyword.get(opts, :issued_at_ms, System.system_time(:millisecond))
+    issued_at_ms = Keyword.get(opts, :issued_at_ms, Time.monotonic_ms())
     normalized_channel = normalize_channel(channel)
     normalized_sender = normalize_sender(sender_id)
     action = if reused?, do: "reused", else: "issued"
@@ -672,9 +693,9 @@ defmodule Pincer.Core.Pairing do
   end
 
   defp announce_invite_code(channel, code, expires_at_ms, opts) do
-    issued_at_ms = Keyword.get(opts, :issued_at_ms, System.system_time(:millisecond))
+    issued_at_ms = Keyword.get(opts, :issued_at_ms, Time.monotonic_ms())
     normalized_channel = normalize_channel(channel)
-    target_agent_id = normalize_agent_id(Keyword.get(opts, :agent_id))
+    target_agent_id = normalize_stored_agent_id(Keyword.get(opts, :agent_id))
     ttl_ms = max(expires_at_ms - issued_at_ms, 0)
     ttl_seconds = div(ttl_ms, 1000)
     expires_at_iso = format_timestamp_ms(expires_at_ms)
@@ -739,32 +760,35 @@ defmodule Pincer.Core.Pairing do
     agent_id = resolve_agent_id(channel, sender_id, explicit_agent_id, opts)
 
     %{paired_at_ms: now}
-    |> maybe_put_agent_id(normalize_agent_id(agent_id))
+    |> maybe_put_agent_id(normalize_stored_agent_id(agent_id))
   end
 
   defp resolve_agent_id(_channel, _sender_id, explicit_agent_id, _opts)
        when is_binary(explicit_agent_id) and explicit_agent_id != "" do
-    explicit_agent_id
+    normalize_stored_agent_id(explicit_agent_id)
   end
 
   defp resolve_agent_id(_channel, _sender_id, _explicit_agent_id, opts) do
-    cond do
-      is_binary(Keyword.get(opts, :default_agent_id)) ->
-        Keyword.get(opts, :default_agent_id)
+    default_agent_id =
+      opts
+      |> Keyword.get(:default_agent_id)
+      |> normalize_stored_agent_id()
 
-      true ->
-        opts
-        |> Keyword.get(:agent_factory, &default_agent_factory/0)
-        |> invoke_agent_factory()
+    if is_binary(default_agent_id) do
+      default_agent_id
+    else
+      opts
+      |> Keyword.get(:agent_factory, &default_agent_factory/0)
+      |> invoke_agent_factory()
     end
   end
 
   defp invoke_agent_factory(factory) when is_function(factory, 0) do
     case factory.() do
-      %{agent_id: agent_id} -> normalize_agent_id(agent_id)
-      {:ok, %{agent_id: agent_id}} -> normalize_agent_id(agent_id)
-      {:ok, agent_id} -> normalize_agent_id(agent_id)
-      agent_id when is_binary(agent_id) -> normalize_agent_id(agent_id)
+      %{agent_id: agent_id} -> normalize_stored_agent_id(agent_id)
+      {:ok, %{agent_id: agent_id}} -> normalize_stored_agent_id(agent_id)
+      {:ok, agent_id} -> normalize_stored_agent_id(agent_id)
+      agent_id when is_binary(agent_id) -> normalize_stored_agent_id(agent_id)
       _ -> nil
     end
   rescue
@@ -782,16 +806,49 @@ defmodule Pincer.Core.Pairing do
   defp maybe_put_agent_id(pair_data, nil), do: pair_data
   defp maybe_put_agent_id(pair_data, agent_id), do: Map.put(pair_data, :agent_id, agent_id)
 
-  defp normalize_agent_id(nil), do: nil
+  defp normalize_explicit_agent_id(agent_id, opts) do
+    allow_nil? = Keyword.get(opts, :allow_nil?, false)
+    candidate = normalize_trimmed_agent_id(agent_id)
 
-  defp normalize_agent_id(agent_id) do
-    agent_id
-    |> to_string()
-    |> String.trim()
-    |> case do
-      "" -> nil
-      normalized -> normalized
+    cond do
+      is_nil(candidate) and allow_nil? ->
+        {:ok, nil}
+
+      is_nil(candidate) ->
+        {:error, {:invalid_agent_id, "Invalid agent_id #{inspect(agent_id)}: cannot be empty"}}
+
+      true ->
+        try do
+          {:ok, AgentRegistry.normalize_agent_id!(candidate)}
+        rescue
+          error in ArgumentError -> {:error, {:invalid_agent_id, Exception.message(error)}}
+        end
     end
+  end
+
+  defp normalize_stored_agent_id(agent_id) do
+    case normalize_trimmed_agent_id(agent_id) do
+      nil ->
+        nil
+
+      candidate ->
+        try do
+          AgentRegistry.normalize_agent_id!(candidate)
+        rescue
+          ArgumentError -> nil
+        end
+    end
+  end
+
+  defp normalize_trimmed_agent_id(nil), do: nil
+
+  defp normalize_trimmed_agent_id(agent_id) do
+    candidate =
+      agent_id
+      |> to_string()
+      |> String.trim()
+
+    if candidate == "", do: nil, else: candidate
   end
 
   defp normalize_code(code) do

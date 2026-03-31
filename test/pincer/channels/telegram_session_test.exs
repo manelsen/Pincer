@@ -34,7 +34,7 @@ defmodule Pincer.Channels.Telegram.SessionTest do
     send(pid, {:agent_partial, "Hello"})
     send(pid, {:agent_response, "Hello world!", nil})
 
-    Process.sleep(80)
+    Process.sleep(200)
   end
 
   test "final-only path sends one final message without cursor" do

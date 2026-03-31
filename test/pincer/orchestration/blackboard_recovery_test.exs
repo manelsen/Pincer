@@ -34,7 +34,7 @@ defmodule Pincer.Core.Orchestration.BlackboardRecoveryTest do
     assert :ets.info(:pincer_blackboard, :size) == 5
 
     # 3. Solicitamos mensagens desde o ID 0 (que foram deletadas da RAM)
-    {messages, last_id} = Blackboard.fetch_new(0, 10)
+    {messages, last_id} = Blackboard.fetch_new(0, limit: 10, scope: :all)
 
     # O sistema deve ter buscado as 5 primeiras no disco e as outras 5 na RAM
     assert length(messages) == 10

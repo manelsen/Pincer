@@ -118,6 +118,42 @@ defmodule Pincer.Core.PairingTest do
       assert Pairing.bound_agent_session?(:telegram, "annie")
     end
 
+    test "issue_invite rejects invalid explicit agent ids with clear error" do
+      assert {:error, {:invalid_agent_id, message}} =
+               Pairing.issue_invite(:telegram,
+                 agent_id: "../oops",
+                 now_ms: 1_000,
+                 ttl_ms: 60_000,
+                 code_generator: fn -> "BAD001" end
+               )
+
+      assert message =~ "agent_id must match"
+    end
+
+    test "bound_agent_session?/2 ignores malformed pair rows and matches valid channel bindings" do
+      assert {:ok, %{code: "ANNIE42"}} =
+               Pairing.issue_invite(:telegram,
+                 agent_id: "annie",
+                 now_ms: 1_000,
+                 ttl_ms: 60_000,
+                 code_generator: fn -> "ANNIE42" end
+               )
+
+      assert :ok =
+               Pairing.approve_code(:telegram, "123", "ANNIE42",
+                 now_ms: 1_001,
+                 default_agent_id: "telegram_123"
+               )
+
+      # Explicitly insert malformed/non-map rows to lock behavior while optimizing lookup internals.
+      :ets.insert(:pincer_pairing_pairs, {{"telegram", "bad"}, "malformed"})
+      :ets.insert(:pincer_pairing_pairs, {{"discord", "321"}, %{agent_id: "annie"}})
+
+      assert Pairing.bound_agent_session?(:telegram, "annie")
+      refute Pairing.bound_agent_session?(:telegram, "lucie")
+      refute Pairing.bound_agent_session?(:discord, "a1b2c3")
+    end
+
     test "approve_code binds generic invite codes to a dedicated telegram agent" do
       assert {:ok, %{code: "GENERIC42", expires_at_ms: 61_000, agent_id: nil}} =
                Pairing.issue_invite(:telegram,
@@ -177,6 +213,33 @@ defmodule Pincer.Core.PairingTest do
 
       assert {:error, :not_pending} =
                Pairing.approve_code(:telegram, "user-4", code, now_ms: 2)
+    end
+  end
+
+  describe "bind/4" do
+    test "rejects invalid explicit agent ids with clear error" do
+      assert {:error, {:invalid_agent_id, message}} =
+               Pairing.bind(:telegram, "user-bind", "../oops")
+
+      assert message =~ "agent_id must match"
+    end
+  end
+
+  describe "bound_agent_id/2" do
+    test "ignores malformed stored ids that violate AgentRegistry contract" do
+      :ets.insert(:pincer_pairing_pairs, {{"telegram", "bad-id"}, %{agent_id: "../oops"}})
+
+      assert Pairing.bound_agent_id(:telegram, "bad-id") == nil
+    end
+  end
+
+  describe "reset/0" do
+    test "is idempotent even if runtime tables disappear between calls" do
+      assert :ok = Pairing.reset()
+      delete_runtime_table(:pincer_pairing_pending)
+      delete_runtime_table(:pincer_pairing_invites)
+      delete_runtime_table(:pincer_pairing_pairs)
+      assert :ok = Pairing.reset()
     end
   end
 

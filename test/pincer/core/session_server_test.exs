@@ -181,6 +181,38 @@ defmodule Pincer.Core.Session.ServerTest do
     refute prompt =~ "# Legacy Soul"
   end
 
+  test "workspace bootstrap uses template workspace as source of truth" do
+    tmp =
+      Path.join(
+        System.tmp_dir!(),
+        "pincer_template_bootstrap_#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(tmp)
+    cwd = File.cwd!()
+    workspace = Path.join(tmp, "workspaces/template_agent")
+
+    File.cd!(tmp)
+
+    on_exit(fn ->
+      File.cd!(cwd)
+      File.rm_rf!(tmp)
+    end)
+
+    File.mkdir_p!("workspaces/.template/.pincer")
+    File.write!("workspaces/.template/.pincer/IDENTITY.md", "# Template Identity\n")
+    File.write!("workspaces/.template/.pincer/SOUL.md", "# Template Soul\n")
+    File.write!("workspaces/.template/.pincer/USER.md", "# Template User\n")
+    File.write!("workspaces/.template/.pincer/BOOTSTRAP.md", "# Template Bootstrap\n")
+
+    AgentPaths.ensure_workspace!(workspace)
+
+    assert File.read!(AgentPaths.identity_path(workspace)) == "# Template Identity\n"
+    assert File.read!(AgentPaths.soul_path(workspace)) == "# Template Soul\n"
+    assert File.read!(AgentPaths.user_path(workspace)) == "# Template User\n"
+    assert File.read!(AgentPaths.bootstrap_path(workspace)) == "# Template Bootstrap\n"
+  end
+
   test "persists assistant replies for recovery" do
     session_id = "session_server_test_#{System.unique_integer([:positive])}"
     StorageStub.put_messages(session_id, [%{"role" => "user", "content" => "existing"}])

@@ -884,6 +884,38 @@ defmodule Pincer.Core.SecurityAuditTest do
       assert report.counts.error == 0
       assert report.counts.warn == 0
     end
+
+    test "links checks with run id and recovery hints" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        channels:
+          telegram:
+            enabled: true
+            token_env: "TELEGRAM_BOT_TOKEN"
+            dm_policy:
+              mode: "open"
+        """
+      )
+
+      report =
+        SecurityAudit.run(
+          root: tmp,
+          env_fetcher: fn
+            "TELEGRAM_BOT_TOKEN" -> "token"
+            _ -> nil
+          end
+        )
+
+      assert is_binary(report.run_id)
+      assert Enum.all?(report.checks, fn check -> check.meta[:run_id] == report.run_id end)
+
+      assert Enum.any?(report.checks, fn check ->
+               check.severity == :warn and is_binary(check.meta[:recovery])
+             end)
+    end
   end
 
   defp tmp_dir! do

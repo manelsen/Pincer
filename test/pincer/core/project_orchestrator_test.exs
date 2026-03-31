@@ -142,6 +142,12 @@ defmodule Pincer.Core.ProjectOrchestratorTest do
       assert board =~ "Kanban Board"
       assert board =~ "Flow DDD/TDD"
       assert board =~ "Spec -> Contract -> Red -> Green -> Refactor -> Review -> Done"
+
+      assert {:ok, kickoff} = ProjectOrchestrator.kickoff(session_id)
+      assert kickoff.phase == :execution
+      assert is_binary(kickoff.project_id)
+      assert kickoff.prompt =~ "Phase: execution"
+      assert kickoff.prompt =~ "Project ID:"
     end
 
     test "keeps project flow alive when branch creation fails" do
@@ -223,6 +229,27 @@ defmodule Pincer.Core.ProjectOrchestratorTest do
       assert {:ok, resumed} = ProjectOrchestrator.kickoff(session_id)
       assert resumed.task =~ "Architect:"
       assert resumed.status_message =~ "Task started"
+      assert resumed.phase == :execution
+    end
+
+    test "advances FSM to delivery after all tasks complete" do
+      session_id = unique_session_id()
+      on_exit(fn -> ProjectOrchestrator.reset(session_id) end)
+
+      assert ProjectOrchestrator.start(session_id) =~ "Project Manager"
+      assert {:handled, _} = ProjectOrchestrator.continue(session_id, "Pesquisa de mercado")
+      assert {:handled, _} = ProjectOrchestrator.continue(session_id, "nao-software")
+      assert {:handled, _} = ProjectOrchestrator.continue(session_id, "Brasil, internet aberta")
+      assert {:handled, _} = ProjectOrchestrator.continue(session_id, "Relatorio comparativo")
+      assert {:ok, _kickoff} = ProjectOrchestrator.kickoff(session_id)
+
+      assert {:next, _} = ProjectOrchestrator.on_agent_response(session_id)
+      assert {:next, _} = ProjectOrchestrator.on_agent_response(session_id)
+      assert {:next, _} = ProjectOrchestrator.on_agent_response(session_id)
+      assert {:next, _} = ProjectOrchestrator.on_agent_response(session_id)
+
+      assert {:completed, done} = ProjectOrchestrator.on_agent_response(session_id)
+      assert done.phase == :delivery
     end
   end
 

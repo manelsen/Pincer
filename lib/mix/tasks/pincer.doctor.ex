@@ -51,11 +51,15 @@ defmodule Mix.Tasks.Pincer.Doctor do
   defp print_report(report) do
     Mix.shell().info("Pincer Doctor Report")
     Mix.shell().info("Config: #{report.config_path}")
+    Mix.shell().info("Run ID: #{report.run_id}")
     Mix.shell().info("")
 
     Enum.each(report.checks, fn check ->
       level = check.severity |> to_string() |> String.upcase()
-      Mix.shell().info("[#{level}] #{format_id(check.id)} - #{check.message}")
+
+      Mix.shell().info(
+        "[#{level}] #{format_id(check.id)} - #{check.message} (run: #{check.meta[:run_id]})"
+      )
     end)
 
     Mix.shell().info("")

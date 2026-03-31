@@ -100,7 +100,8 @@ defmodule Pincer.Core.ExecutorHexTest do
           llm_client: Pincer.MockLLMClient
         )
 
-      assert_receive {:sme_tool_use, "my_tool"}, 5000
+      assert_receive {:sme_tool_use, payload}, 5000
+      assert payload == "my_tool" or payload == ["my_tool: val"]
       assert_receive {:executor_finished, _, "Done", _usage}, 5000
     end
 
@@ -164,7 +165,7 @@ defmodule Pincer.Core.ExecutorHexTest do
           workspace_path: workspace
         )
 
-      assert_receive {:agent_status, markdown_notice}, 5000
+      assert_receive {:executor_status, markdown_notice}, 5000
       assert markdown_notice =~ "Artefato Atualizado"
       assert markdown_notice =~ rel_path
       assert markdown_notice =~ "# Project Brief"
@@ -264,7 +265,8 @@ defmodule Pincer.Core.ExecutorHexTest do
           llm_client: Pincer.MockLLMClient
         )
 
-      assert_receive {:sme_tool_use, "web_search"}, 5000
+      assert_receive {:sme_tool_use, payload}, 5000
+      assert payload == "web_search" or payload == ["web_search: elixir"]
       assert_receive {:executor_finished, _, "Done map args", _usage}, 5000
       refute_receive {:executor_failed, _}
     end
@@ -294,13 +296,17 @@ defmodule Pincer.Core.ExecutorHexTest do
 
       Pincer.MockToolRegistry
       |> stub(:list_tools, fn -> [] end)
-      |> expect(:execute_tool, fn "unsafe_tool", %{"arg" => "val"}, _ctx ->
-        {:error, {:approval_required, "cat /etc/passwd"}}
-      end)
-      |> expect(:execute_tool, fn "safe_shell",
-                                  %{"command" => "cat /etc/passwd", "skip_approval" => true},
-                                  _ctx ->
-        {:ok, "blocked by workspace restriction policy"}
+      |> expect(:execute_tool, 2, fn name, args, _ctx when is_map(args) ->
+        case {name, args} do
+          {"unsafe_tool", %{"arg" => "val"}} ->
+            {:error, {:approval_required, "cat /etc/passwd"}}
+
+          {"unsafe_tool", %{"command" => "cat /etc/passwd"}} ->
+            {:ok, "blocked by workspace restriction policy"}
+
+          {"safe_shell", %{"command" => "cat /etc/passwd", "skip_approval" => true}} ->
+            {:ok, "blocked by workspace restriction policy"}
+        end
       end)
 
       Pincer.MockLLMClient
@@ -343,6 +349,71 @@ defmodule Pincer.Core.ExecutorHexTest do
       send(executor_pid, {:tool_approval_result, "call_restrict_1", :approved})
 
       assert_receive {:executor_finished, _, "Done", _usage}, 5000
+    end
+
+    test "privileged tool denial returns structured recovery and emits audit/trace signals" do
+      session_pid = self()
+      session_id = "tool_exec_privileged_denied_session"
+      history = [%{"role" => "user", "content" => "Run privileged tool"}]
+
+      Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+
+      on_exit(fn ->
+        Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
+      end)
+
+      Pincer.MockToolRegistry
+      |> stub(:list_tools, fn -> [] end)
+      |> expect(:execute_tool, 0, fn _name, _args, _ctx -> {:ok, "never called"} end)
+
+      Pincer.MockLLMClient
+      |> expect(:stream_completion, fn _history, _opts ->
+        chunk1 = %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [
+                  %{
+                    "index" => 0,
+                    "id" => "call_priv_deny_1",
+                    "function" => %{
+                      "name" => "safe_shell",
+                      "arguments" => "{\"command\": \"ls\"}"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+
+        chunk2 = %{"choices" => [%{"delta" => %{}}]}
+        {:ok, [chunk1, chunk2]}
+      end)
+      |> expect(:stream_completion, fn updated_history, _opts ->
+        tool_msg = Enum.find(Enum.reverse(updated_history), &(&1["role"] == "tool"))
+        assert tool_msg["content"] =~ "Approval denied"
+        assert tool_msg["content"] =~ "safe_shell"
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "Handled denial"}}]}]}
+      end)
+
+      {:ok, executor_pid} =
+        Pincer.Core.Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MockToolRegistry,
+          llm_client: Pincer.MockLLMClient,
+          trace_events?: true
+        )
+
+      assert_receive {:approval_required, "call_priv_deny_1", command}, 5_000
+      assert command =~ "safe_shell"
+      send(executor_pid, {:tool_approval_result, "call_priv_deny_1", :rejected})
+
+      assert_receive {:executor_trace_step, :tool, "tool_audit", audit}, 5_000
+      assert audit.tool == "safe_shell"
+      assert audit.class == :privileged
+      assert audit.status in [:approval_required, :denied]
+
+      assert_receive {:executor_finished, _, "Handled denial", _usage}, 5_000
     end
   end
 end

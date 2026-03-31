@@ -23,7 +23,8 @@ defmodule Pincer.Core.SecurityAudit do
           status: severity(),
           counts: %{ok: non_neg_integer(), warn: non_neg_integer(), error: non_neg_integer()},
           checks: [check()],
-          config_path: String.t()
+          config_path: String.t(),
+          run_id: String.t()
         }
 
   @default_config_file "config.yaml"
@@ -69,6 +70,8 @@ defmodule Pincer.Core.SecurityAudit do
           {%{}, [check]}
       end
 
+    run_id = make_run_id("AUD")
+
     checks =
       checks ++
         channel_auth_checks(config, env_fetcher) ++
@@ -78,13 +81,15 @@ defmodule Pincer.Core.SecurityAudit do
         workspace_restriction_checks(config) ++
         sidecar_isolation_checks(config)
 
-    counts = counts(checks)
+    linked_checks = Enum.map(checks, &link_check(&1, run_id))
+    counts = counts(linked_checks)
 
     %{
       status: status_from_counts(counts),
       counts: counts,
-      checks: checks,
-      config_path: config_path
+      checks: linked_checks,
+      config_path: config_path,
+      run_id: run_id
     }
   end
 
@@ -525,4 +530,28 @@ defmodule Pincer.Core.SecurityAudit do
 
   defp error_check(id, message, meta),
     do: %{id: id, severity: :error, message: message, meta: meta}
+
+  defp link_check(check, run_id) do
+    meta =
+      check
+      |> Map.get(:meta, %{})
+      |> Map.put(:run_id, run_id)
+      |> Map.put(:selection, selection_reason(check.id))
+      |> Map.put(:recovery, recovery_hint(check.id, check.severity))
+
+    %{check | meta: meta}
+  end
+
+  defp selection_reason(id), do: "selected_by:#{format_id(id)}"
+
+  defp recovery_hint(_id, :ok), do: "none"
+  defp recovery_hint(id, :warn), do: "review #{format_id(id)} and apply hardening controls"
+  defp recovery_hint(id, :error), do: "fix #{format_id(id)} before enabling public surface"
+
+  defp format_id({left, right}), do: "#{left}:#{right}"
+  defp format_id(id), do: to_string(id)
+
+  defp make_run_id(prefix) do
+    "#{prefix}-#{System.system_time(:millisecond)}-#{System.unique_integer([:positive])}"
+  end
 end
