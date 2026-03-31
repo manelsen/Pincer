@@ -404,8 +404,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 22,
-      "passes": false,
-      "notes": "Backlog item from non-idiomatic/duplication sweep in AgentPaths.",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-022-refactor-agentpaths-seeding-flow. Refactored AgentPaths seeding to table-driven specs (`seed_specs_for/3`, `seed_specs/1`, `target_path/2`) and unified template seed path assembly via shared file spec list. Preserved precedence/fallback semantics and validated with mix test test/pincer/core/agent_paths_test.exs plus MIX_ENV=test mix qa.",
       "dependsOn": [
         "US-020"
       ]

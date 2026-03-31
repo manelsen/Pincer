@@ -107,16 +107,10 @@ defmodule Pincer.Core.AgentPaths do
   """
   @spec template_seed_paths() :: [String.t()]
   def template_seed_paths do
-    template_pincer_dir = Path.join(template_workspace(), @pincer_dir)
-
-    [
-      Path.join(template_pincer_dir, @identity_file),
-      Path.join(template_pincer_dir, @soul_file),
-      Path.join(template_pincer_dir, @user_file),
-      Path.join(template_pincer_dir, @bootstrap_file),
-      Path.join(template_pincer_dir, @memory_file),
-      Path.join(template_pincer_dir, @history_file)
-    ]
+    template_file_specs()
+    |> Enum.map(fn {filename, _fallback} ->
+      Path.join(template_workspace_pincer_dir(), filename)
+    end)
   end
 
   @default_memory_md """
@@ -258,23 +252,12 @@ defmodule Pincer.Core.AgentPaths do
   defp seed_memory_files(workspace_path, opts) do
     template_root = Keyword.get(opts, :template_root)
 
-    seed_file_from_sources(
-      memory_path(workspace_path),
-      [
-        template_file(template_root, @memory_file),
-        workspace_template_file(workspace_path, @memory_file)
-      ],
-      default_memory()
+    workspace_path
+    |> seed_specs_for(
+      [{@memory_file, default_memory()}, {@history_file, default_history()}],
+      template_root
     )
-
-    seed_file_from_sources(
-      history_path(workspace_path),
-      [
-        template_file(template_root, @history_file),
-        workspace_template_file(workspace_path, @history_file)
-      ],
-      default_history()
-    )
+    |> seed_specs()
   end
 
   defp inherit_persona(_workspace_path, nil), do: :ok
@@ -288,44 +271,20 @@ defmodule Pincer.Core.AgentPaths do
   defp seed_root_persona(workspace_path, opts) do
     template_root = Keyword.get(opts, :template_root)
 
-    seed_file_from_sources(
-      identity_path(workspace_path),
-      [
-        template_file(template_root, @identity_file),
-        workspace_template_file(workspace_path, @identity_file)
-      ],
-      default_identity()
-    )
+    bootstrap_fallback =
+      if(Keyword.get(opts, :bootstrap?, true), do: default_bootstrap(), else: nil)
 
-    seed_file_from_sources(
-      soul_path(workspace_path),
+    workspace_path
+    |> seed_specs_for(
       [
-        template_file(template_root, @soul_file),
-        workspace_template_file(workspace_path, @soul_file)
+        {@identity_file, default_identity()},
+        {@soul_file, default_soul()},
+        {@user_file, default_user()},
+        {@bootstrap_file, bootstrap_fallback}
       ],
-      default_soul()
+      template_root
     )
-
-    seed_file_from_sources(
-      user_path(workspace_path),
-      [
-        template_file(template_root, @user_file),
-        workspace_template_file(workspace_path, @user_file)
-      ],
-      default_user()
-    )
-
-    seed_file_from_sources(
-      bootstrap_path(workspace_path),
-      [
-        template_file(template_root, @bootstrap_file),
-        workspace_template_file(workspace_path, @bootstrap_file)
-      ],
-      if(Keyword.get(opts, :bootstrap?, true),
-        do: default_bootstrap(),
-        else: nil
-      )
-    )
+    |> seed_specs()
 
     :ok
   end
@@ -360,6 +319,48 @@ defmodule Pincer.Core.AgentPaths do
       end
     else
       :ok
+    end
+  end
+
+  defp seed_specs_for(workspace_path, file_specs, template_root) do
+    Enum.map(file_specs, fn {filename, fallback_content} ->
+      {target_path(workspace_path, filename),
+       [
+         template_file(template_root, filename),
+         workspace_template_file(workspace_path, filename)
+       ], fallback_content}
+    end)
+  end
+
+  defp seed_specs(specs) do
+    Enum.each(specs, fn {destination, sources, fallback_content} ->
+      seed_file_from_sources(destination, sources, fallback_content)
+    end)
+  end
+
+  defp template_workspace_pincer_dir do
+    Path.join(template_workspace(), @pincer_dir)
+  end
+
+  defp template_file_specs do
+    [
+      {@identity_file, default_identity()},
+      {@soul_file, default_soul()},
+      {@user_file, default_user()},
+      {@bootstrap_file, default_bootstrap()},
+      {@memory_file, default_memory()},
+      {@history_file, default_history()}
+    ]
+  end
+
+  defp target_path(workspace_path, filename) do
+    case filename do
+      @identity_file -> identity_path(workspace_path)
+      @soul_file -> soul_path(workspace_path)
+      @user_file -> user_path(workspace_path)
+      @bootstrap_file -> bootstrap_path(workspace_path)
+      @memory_file -> memory_path(workspace_path)
+      @history_file -> history_path(workspace_path)
     end
   end
 
