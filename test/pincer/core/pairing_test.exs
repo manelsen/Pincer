@@ -118,6 +118,18 @@ defmodule Pincer.Core.PairingTest do
       assert Pairing.bound_agent_session?(:telegram, "annie")
     end
 
+    test "issue_invite rejects invalid explicit agent ids with clear error" do
+      assert {:error, {:invalid_agent_id, message}} =
+               Pairing.issue_invite(:telegram,
+                 agent_id: "../oops",
+                 now_ms: 1_000,
+                 ttl_ms: 60_000,
+                 code_generator: fn -> "BAD001" end
+               )
+
+      assert message =~ "agent_id must match"
+    end
+
     test "bound_agent_session?/2 ignores malformed pair rows and matches valid channel bindings" do
       assert {:ok, %{code: "ANNIE42"}} =
                Pairing.issue_invite(:telegram,
@@ -201,6 +213,23 @@ defmodule Pincer.Core.PairingTest do
 
       assert {:error, :not_pending} =
                Pairing.approve_code(:telegram, "user-4", code, now_ms: 2)
+    end
+  end
+
+  describe "bind/4" do
+    test "rejects invalid explicit agent ids with clear error" do
+      assert {:error, {:invalid_agent_id, message}} =
+               Pairing.bind(:telegram, "user-bind", "../oops")
+
+      assert message =~ "agent_id must match"
+    end
+  end
+
+  describe "bound_agent_id/2" do
+    test "ignores malformed stored ids that violate AgentRegistry contract" do
+      :ets.insert(:pincer_pairing_pairs, {{"telegram", "bad-id"}, %{agent_id: "../oops"}})
+
+      assert Pairing.bound_agent_id(:telegram, "bad-id") == nil
     end
   end
 
