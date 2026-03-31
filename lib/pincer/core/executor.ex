@@ -783,10 +783,54 @@ defmodule Pincer.Core.Executor do
 
         send(session_pid, {:sme_tool_use, tool_descriptions})
 
+        # Planning step: If multiple tools, notify user and execute in parallel
         tool_results =
-          Enum.map(normalized_tool_calls, fn call ->
-            execute_tool_via_registry(call, session_pid, session_id, deps.tool_registry)
-          end)
+          if length(normalized_tool_calls) > 1 do
+            tool_names =
+              normalized_tool_calls
+              |> Enum.map(&tool_call_name/1)
+              |> Enum.reject(&is_nil_or_blank/1)
+              |> Enum.join(", ")
+
+            send(
+              session_pid,
+              {:executor_status,
+               "⚡ **Orquestração Paralela**: Executando #{length(normalized_tool_calls)} tarefas simultâneas (#{tool_names})."}
+            )
+
+            # Capture context for parallel tasks
+            parent_context = %{
+              workspace_path: Process.get(:workspace_path),
+              executor_deps: Process.get(:executor_deps),
+              executor_trace: Process.get(:executor_trace),
+              executor_trace_session_pid: Process.get(:executor_trace_session_pid),
+              executor_run_opts: Process.get(:executor_run_opts)
+            }
+
+            normalized_tool_calls
+            |> Task.async_stream(
+              fn call ->
+                # Restore context in the new process
+                Process.put(:workspace_path, parent_context.workspace_path)
+                Process.put(:executor_deps, parent_context.executor_deps)
+                Process.put(:executor_trace, parent_context.executor_trace)
+                Process.put(:executor_trace_session_pid, parent_context.executor_trace_session_pid)
+                Process.put(:executor_run_opts, parent_context.executor_run_opts)
+
+                execute_tool_via_registry(call, session_pid, session_id, deps.tool_registry)
+              end,
+              max_concurrency: 10,
+              timeout: 300_000
+            )
+            |> Enum.map(fn
+              {:ok, result} -> result
+              {:error, reason} -> %{"role" => "tool", "content" => "Parallel execution error: #{inspect(reason)}"}
+            end)
+          else
+            Enum.map(normalized_tool_calls, fn call ->
+              execute_tool_via_registry(call, session_pid, session_id, deps.tool_registry)
+            end)
+          end
 
         # Update both histories for the next turn
         new_logical_history = logical_history ++ [assistant_msg] ++ tool_results
@@ -1122,7 +1166,7 @@ defmodule Pincer.Core.Executor do
               case File.read(path) do
                 {:ok, content} ->
                   msg = "📝 **Artefato Atualizado**: `#{file}`\n\n#{truncate_markdown(content)}"
-                  send(session_pid, {:agent_status, msg})
+                  send(session_pid, {:executor_status, msg})
 
                 _ ->
                   :ok
