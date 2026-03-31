@@ -94,8 +94,18 @@ defmodule Pincer.MixProject do
       # Boundary Enforcement
       {:boundary, "~> 0.10", runtime: false},
 
+      # Observability
+      {:prom_ex, "~> 1.11"},
+      {:opentelemetry, "~> 1.5"},
+      {:opentelemetry_api, "~> 1.4"},
+      {:opentelemetry_exporter, "~> 1.8"},
+      {:opentelemetry_phoenix, "~> 1.2"},
+      {:telemetry_metrics, "~> 1.0"},
+      {:telemetry_poller, "~> 1.1"},
+
       # Dev & Hot Reload
       {:mox, "~> 1.0", only: :test},
+      {:benchee, "~> 1.3", only: :bench},
       {:file_system, "~> 1.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
