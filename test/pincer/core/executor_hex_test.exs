@@ -165,7 +165,7 @@ defmodule Pincer.Core.ExecutorHexTest do
           workspace_path: workspace
         )
 
-      assert_receive {:agent_status, markdown_notice}, 5000
+      assert_receive {:executor_status, markdown_notice}, 5000
       assert markdown_notice =~ "Artefato Atualizado"
       assert markdown_notice =~ rel_path
       assert markdown_notice =~ "# Project Brief"
