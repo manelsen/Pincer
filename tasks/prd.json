@@ -386,8 +386,8 @@
         "mix test --warnings-as-errors passes"
       ],
       "priority": 21,
-      "passes": false,
-      "notes": "Backlog item from structural sweep: reduce module size/coupling and improve maintainability.",
+      "passes": true,
+      "notes": "Complete. Branch: us/us-021-modularize-onboard-orchestration. Extracted onboarding defaults/capabilities and validation concerns into Pincer.Core.Onboard.Defaults and Pincer.Core.Onboard.Preflight while preserving Onboard facade API. Added modular boundary tests in onboard_test and validated with mix test test/pincer/core/onboard_test.exs plus MIX_ENV=test mix qa (baseline includes unrelated intermittent Telegram Mox flake, re-run green).",
       "dependsOn": [
         "US-020"
       ]

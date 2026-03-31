@@ -8,6 +8,8 @@ defmodule Pincer.Core.Onboard do
   """
 
   @behaviour Pincer.Ports.Onboarding
+  alias Pincer.Core.Onboard.Defaults
+  alias Pincer.Core.Onboard.Preflight
 
   @channels_requiring_token MapSet.new(["telegram", "discord", "slack"])
 
@@ -65,7 +67,7 @@ defmodule Pincer.Core.Onboard do
   """
   @spec onboarded?(String.t()) :: boolean()
   def onboarded?(root \\ File.cwd!()) when is_binary(root) do
-    Enum.all?(required_paths(), fn rel_path ->
+    Enum.all?(Defaults.required_paths(), fn rel_path ->
       root
       |> Path.join(rel_path)
       |> File.exists?()
@@ -76,101 +78,20 @@ defmodule Pincer.Core.Onboard do
   Returns onboarding defaults used for `config.yaml` generation.
   """
   @spec defaults() :: map()
-  def defaults do
-    %{
-      "database" => %{
-        "adapter" => "Ecto.Adapters.PostgreSQL",
-        "hostname" => "localhost",
-        "port" => 5432,
-        "username" => "postgres",
-        "password" => "postgres",
-        "database" => "pincer",
-        "pool_size" => 10
-      },
-      "channels" => %{
-        "telegram" => %{
-          "enabled" => true,
-          "adapter" => "Pincer.Channels.Telegram",
-          "token_env" => "TELEGRAM_BOT_TOKEN"
-        },
-        "cli" => %{
-          "enabled" => true,
-          "adapter" => "Pincer.Channels.CLI"
-        },
-        "discord" => %{
-          "enabled" => true,
-          "adapter" => "Pincer.Channels.Discord",
-          "token_env" => "DISCORD_BOT_TOKEN"
-        },
-        "whatsapp" => %{
-          "enabled" => false,
-          "adapter" => "Pincer.Channels.WhatsApp",
-          "dm_policy" => %{"mode" => "pairing"},
-          "bridge" => %{
-            "command" => "node",
-            "args" => ["infrastructure/whatsapp/baileys_bridge.js"],
-            "auth_dir" => "sessions/whatsapp",
-            "qr_ascii" => true,
-            "qr_ascii_small" => true,
-            "pairing_phone" => ""
-          }
-        }
-      },
-      "llm" => %{
-        "provider" => "z_ai",
-        "z_ai" => %{
-          "base_url" => "https://api.z.ai/api/coding/paas/v4/chat/completions",
-          "default_model" => "glm-4.7"
-        },
-        "opencode_zen" => %{
-          "base_url" => "https://opencode.ai/zen/v1/chat/completions",
-          "default_model" => "kimi-k2.5-free"
-        },
-        "openrouter" => %{
-          "base_url" => "https://openrouter.ai/api/v1/chat/completions",
-          "default_model" => "openrouter/free"
-        }
-      },
-      "mcp" => %{
-        "servers" => %{
-          "filesystem" => %{
-            "command" => "npx",
-            "args" => ["-y", "@modelcontextprotocol/server-filesystem", "."]
-          },
-          "github" => %{
-            "command" => "npx",
-            "args" => ["-y", "@modelcontextprotocol/server-github"]
-          }
-        }
-      }
-    }
-  end
+  def defaults, do: Defaults.defaults()
 
   @doc """
   Returns the minimum paths required for a workspace to be considered onboarded.
   """
   @spec required_paths() :: [String.t()]
-  def required_paths do
-    [
-      "config.yaml",
-      Pincer.Core.AgentPaths.base_dir(),
-      "sessions",
-      "memory",
-      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/BOOTSTRAP.md",
-      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/IDENTITY.md",
-      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/SOUL.md",
-      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/USER.md",
-      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/MEMORY.md",
-      "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/HISTORY.md"
-    ]
-  end
+  def required_paths, do: Defaults.required_paths()
 
   @doc """
   Builds the deterministic onboarding plan from configuration values.
   """
   @spec plan(map()) :: [operation()]
   def plan(config) when is_map(config) do
-    case plan(config, capabilities: available_capabilities()) do
+    case plan(config, capabilities: Defaults.available_capabilities()) do
       {:ok, operations} -> operations
       {:error, _reason} -> []
     end
@@ -187,18 +108,18 @@ defmodule Pincer.Core.Onboard do
     capabilities =
       opts
       |> Keyword.get(:capabilities)
-      |> normalize_capabilities()
+      |> Defaults.normalize_capabilities()
 
     unknown =
       capabilities
       |> Enum.uniq()
-      |> Enum.reject(&(&1 in available_capabilities()))
+      |> Enum.reject(&(&1 in Defaults.available_capabilities()))
 
     if unknown == [] do
       operations =
         capabilities
         |> Enum.uniq()
-        |> Enum.flat_map(&capability_operations(&1, config))
+        |> Enum.flat_map(&Defaults.capability_operations(&1, config))
 
       {:ok, operations}
     else
@@ -210,22 +131,13 @@ defmodule Pincer.Core.Onboard do
   Returns onboarding capabilities supported by the core planner.
   """
   @spec available_capabilities() :: [capability_id()]
-  def available_capabilities do
-    ["workspace_dirs", "memory_file", "config_yaml"]
-  end
+  def available_capabilities, do: Defaults.available_capabilities()
 
   @doc """
   Runs onboarding preflight checks and returns actionable hints on failure.
   """
   @spec preflight(map()) :: :ok | {:error, [preflight_issue()]}
-  def preflight(config) when is_map(config) do
-    issues =
-      []
-      |> maybe_add_invalid_db_name(get_in(config, ["database", "database"]))
-      |> maybe_add_missing_provider_or_model(config)
-
-    if issues == [], do: :ok, else: {:error, issues}
-  end
+  def preflight(config) when is_map(config), do: Preflight.preflight(config)
 
   @doc """
   Runs an expanded environment checklist for assisted onboarding flows.
@@ -269,7 +181,7 @@ defmodule Pincer.Core.Onboard do
     capabilities =
       opts
       |> Keyword.get(:capabilities, [])
-      |> normalize_remote_capabilities()
+      |> Defaults.normalize_remote_capabilities()
 
     with :ok <- validate_remote_host(remote_host),
          :ok <- validate_remote_path(remote_path) do
@@ -376,70 +288,6 @@ defmodule Pincer.Core.Onboard do
       end
     end
   end
-
-  defp default_memory_md do
-    Pincer.Core.AgentPaths.default_memory()
-  end
-
-  defp default_history_md do
-    Pincer.Core.AgentPaths.default_history()
-  end
-
-  defp default_bootstrap_md do
-    Pincer.Core.AgentPaths.default_bootstrap()
-  end
-
-  defp capability_operations("workspace_dirs", _config) do
-    base = Pincer.Core.AgentPaths.base_dir()
-
-    [
-      {:mkdir_p, base},
-      {:mkdir_p, "sessions"},
-      {:mkdir_p, "memory"}
-    ]
-  end
-
-  defp capability_operations("memory_file", _config) do
-    tpl = Pincer.Core.AgentPaths.template_workspace()
-
-    [
-      {:mkdir_p, Path.join(tpl, ".pincer")},
-      {:write_if_missing, Path.join([tpl, ".pincer", "BOOTSTRAP.md"]), default_bootstrap_md()},
-      {:write_if_missing, Path.join([tpl, ".pincer", "IDENTITY.md"]),
-       Pincer.Core.AgentPaths.default_identity()},
-      {:write_if_missing, Path.join([tpl, ".pincer", "SOUL.md"]),
-       Pincer.Core.AgentPaths.default_soul()},
-      {:write_if_missing, Path.join([tpl, ".pincer", "USER.md"]),
-       Pincer.Core.AgentPaths.default_user()},
-      {:write_if_missing, Path.join([tpl, ".pincer", "MEMORY.md"]), default_memory_md()},
-      {:write_if_missing, Path.join([tpl, ".pincer", "HISTORY.md"]), default_history_md()}
-    ]
-  end
-
-  defp capability_operations("config_yaml", config) do
-    [{:write_config_yaml, "config.yaml", config}]
-  end
-
-  defp capability_operations(_unknown, _config), do: []
-
-  defp normalize_capabilities(nil), do: available_capabilities()
-
-  defp normalize_capabilities(capabilities) when is_list(capabilities) do
-    capabilities
-    |> Enum.map(&to_string/1)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-  end
-
-  defp normalize_remote_capabilities(capabilities) when is_list(capabilities) do
-    capabilities
-    |> Enum.map(&to_string/1)
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-  end
-
-  defp normalize_remote_capabilities(_), do: []
 
   defp channel_token_checks(config, env_fetcher) do
     config
@@ -696,88 +544,6 @@ defmodule Pincer.Core.Onboard do
 
   defp assisted_warn(id, message, hint, meta) do
     %{id: id, severity: :warn, message: message, hint: hint, meta: meta}
-  end
-
-  defp maybe_add_invalid_db_name(issues, db_name) do
-    cond do
-      not is_binary(db_name) or String.trim(db_name) == "" ->
-        [
-          %{
-            id: :invalid_db_name,
-            message: "database.database is empty or invalid",
-            hint: "Use a PostgreSQL database name like pincer"
-          }
-          | issues
-        ]
-
-      String.contains?(db_name, "/") or String.contains?(db_name, "\\") ->
-        [
-          %{
-            id: :invalid_db_name,
-            message:
-              "database.database must be a PostgreSQL database name, not a filesystem path",
-            hint: "Use a database name like pincer"
-          }
-          | issues
-        ]
-
-      String.contains?(db_name, "..") or
-          not Regex.match?(~r/^[a-zA-Z0-9_][a-zA-Z0-9_-]*$/, db_name) ->
-        [
-          %{
-            id: :invalid_db_name,
-            message: "database.database contains unsupported characters",
-            hint: "Use letters, numbers, underscore or hyphen, e.g. pincer"
-          }
-          | issues
-        ]
-
-      true ->
-        issues
-    end
-  end
-
-  defp maybe_add_missing_provider_or_model(issues, config) do
-    provider =
-      config
-      |> get_in(["llm", "provider"])
-      |> normalize_string()
-
-    cond do
-      is_nil(provider) ->
-        [
-          %{
-            id: :missing_model,
-            message: "llm provider model is missing",
-            hint: "Set llm.<provider>.default_model to a non-empty value"
-          },
-          %{
-            id: :missing_provider,
-            message: "llm.provider is missing",
-            hint: "Set llm.provider to a non-empty provider id"
-          }
-          | issues
-        ]
-
-      true ->
-        model =
-          config
-          |> get_in(["llm", provider, "default_model"])
-          |> normalize_string()
-
-        if is_nil(model) do
-          [
-            %{
-              id: :missing_model,
-              message: "llm provider model is missing",
-              hint: "Set llm.#{provider}.default_model to a non-empty value"
-            }
-            | issues
-          ]
-        else
-          issues
-        end
-    end
   end
 
   defp normalize_string(value) when is_binary(value) do

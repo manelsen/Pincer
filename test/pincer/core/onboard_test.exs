@@ -2,6 +2,8 @@ defmodule Pincer.Core.OnboardTest do
   use ExUnit.Case, async: true
 
   alias Pincer.Core.Onboard
+  alias Pincer.Core.Onboard.Defaults
+  alias Pincer.Core.Onboard.Preflight
 
   describe "defaults/0" do
     test "includes postgres database defaults" do
@@ -180,6 +182,19 @@ defmodule Pincer.Core.OnboardTest do
 
       assert :missing_provider in issue_ids
       assert :missing_model in issue_ids
+    end
+  end
+
+  describe "modular components" do
+    test "defaults module keeps the canonical onboarding capabilities" do
+      assert Defaults.available_capabilities() == Onboard.available_capabilities()
+    end
+
+    test "preflight module validates invalid db names explicitly" do
+      config = put_in(Onboard.defaults(), ["database", "database"], "../outside")
+
+      assert {:error, issues} = Preflight.preflight(config)
+      assert Enum.any?(issues, &(&1.id == :invalid_db_name))
     end
   end
 
