@@ -209,8 +209,15 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
+  def handle_info({:executor_status, status}, state) do
+    # Broadcast to PubSub so external channels (Telegram, etc) see it
+    publish(state.session_id, {:agent_status, status})
+    {:noreply, state}
+  end
+
+  @impl true
   def handle_info({:agent_status, _status}, state) do
-    # Ignore self-broadcast status updates
+    # Ignore PubSub self-broadcast
     {:noreply, state}
   end
 
@@ -517,15 +524,38 @@ defmodule Pincer.Core.Session.Server do
         end
 
       nil ->
-        # Cancel previous timer if exists
-        if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
+        text = content_to_text(input)
+        normalized = text |> String.downcase() |> String.trim()
 
-        # For buffering, we collect the text from the incoming message
-        new_buffer = state.input_buffer ++ [input.text]
-        # Wait 1200ms for more chunks before flushing (safer for high latency)
-        new_timer = Process.send_after(self(), :flush_input, 1200)
+        # 1. Handle Interruption/Cancellation
+        if normalized in ["para", "stop", "cancel", "cancela", "/stop", "/cancel"] do
+          if is_pid(state.worker_pid) and Process.alive?(state.worker_pid) do
+            Process.exit(state.worker_pid, :kill)
+            publish(state.session_id, {:agent_response, "🛑 Execução cancelada pelo usuário."})
 
-        {:reply, {:ok, :buffered}, %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
+            if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
+
+            {:reply, {:ok, :stopped},
+             %{state | status: :idle, worker_pid: nil, input_buffer: [], debounce_timer: nil}}
+          else
+            {:reply, {:ok, :idle}, state}
+          end
+        else
+          # 2. Non-blocking Maestro Feedback
+          if state.status == :working do
+            publish(
+              state.session_id,
+              {:agent_status, "⏳ Mensagem recebida. Vou processar após concluir o passo atual..."}
+            )
+          end
+
+          # 3. Standard Buffering
+          if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
+          new_buffer = state.input_buffer ++ [input.text]
+          new_timer = Process.send_after(self(), :flush_input, 1200)
+
+          {:reply, {:ok, :buffered}, %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
+        end
     end
   end
 

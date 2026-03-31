@@ -22,7 +22,8 @@ defmodule Pincer.Core.Doctor do
           status: severity(),
           counts: %{ok: non_neg_integer(), warn: non_neg_integer(), error: non_neg_integer()},
           checks: [check()],
-          config_path: String.t()
+          config_path: String.t(),
+          run_id: String.t()
         }
 
   @default_config_file "config.yaml"
@@ -53,20 +54,70 @@ defmodule Pincer.Core.Doctor do
           {%{}, [config_check]}
       end
 
+    run_id = make_run_id("DOC")
+
     checks =
       checks ++
         channel_token_checks(config, env_fetcher) ++
-        dm_policy_checks(config)
+        dm_policy_checks(config) ++
+        runtime_cohesion_checks()
 
-    counts = counts(checks)
+    linked_checks = Enum.map(checks, &link_check(&1, run_id))
+
+    counts = counts(linked_checks)
     status = status_from_counts(counts)
 
     %{
       status: status,
       counts: counts,
-      checks: checks,
-      config_path: config_path
+      checks: linked_checks,
+      config_path: config_path,
+      run_id: run_id
     }
+  end
+
+  defp runtime_cohesion_checks do
+    [
+      check_runtime(
+        :policy_kernel,
+        Pincer.Core.Policy,
+        [allow?: 2, route: 2, budget: 2, guard!: 2, recover: 2],
+        "Policy kernel facade is available"
+      ),
+      check_runtime(
+        :trace_runtime,
+        Pincer.Core.Trace,
+        [new: 2, add_step: 4, to_checkpoint_metadata: 1],
+        "Trace runtime is available"
+      ),
+      check_runtime(
+        :tool_risk_runtime,
+        Pincer.Core.ToolRuntime,
+        [classify: 1, requires_approval?: 1, execute: 5],
+        "Tool risk runtime is available"
+      ),
+      check_runtime(
+        :memory_health,
+        Pincer.Core.MemoryPipeline,
+        [run: 2],
+        "Unified memory pipeline is available"
+      )
+    ]
+  end
+
+  defp check_runtime(id, module, exports, ok_message) do
+    if Enum.all?(exports, fn {name, arity} -> function_exported?(module, name, arity) end) do
+      ok_check(id, ok_message, %{module: inspect(module), exports: exports})
+    else
+      warn_check(
+        id,
+        "Missing runtime exports for #{inspect(module)}",
+        %{
+          module: inspect(module),
+          expected_exports: exports
+        }
+      )
+    end
   end
 
   defp resolve_config_path(root, config_file) do
@@ -308,5 +359,29 @@ defmodule Pincer.Core.Doctor do
 
   defp error_check(id, message, meta) do
     %{id: id, severity: :error, message: message, meta: meta}
+  end
+
+  defp link_check(check, run_id) do
+    meta =
+      check
+      |> Map.get(:meta, %{})
+      |> Map.put(:run_id, run_id)
+      |> Map.put(:selection, selection_reason(check.id))
+      |> Map.put(:recovery, recovery_hint(check.id, check.severity))
+
+    %{check | meta: meta}
+  end
+
+  defp selection_reason(id), do: "selected_by:#{format_id(id)}"
+
+  defp recovery_hint(_id, :ok), do: "none"
+  defp recovery_hint(id, :warn), do: "review #{format_id(id)} and harden configuration"
+  defp recovery_hint(id, :error), do: "fix #{format_id(id)} before production rollout"
+
+  defp format_id({left, right}), do: "#{left}:#{right}"
+  defp format_id(id), do: to_string(id)
+
+  defp make_run_id(prefix) do
+    "#{prefix}-#{System.system_time(:millisecond)}-#{System.unique_integer([:positive])}"
   end
 end

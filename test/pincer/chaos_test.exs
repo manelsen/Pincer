@@ -50,14 +50,14 @@ defmodule Pincer.ChaosTest do
     )
 
     # 2. Verificação de integridade
-    {msgs, last_id} = Blackboard.fetch_new(0)
+    {msgs, last_id} = Blackboard.fetch_new(0, scope: :all)
     Logger.info("✅ Blackboard integrada. Mensagens: #{length(msgs)}. Last ID: #{last_id}")
 
     assert length(msgs) == n
     assert last_id == n
 
     # 3. Teste de latência de leitura com base de dados cheia
-    {read_duration, _} = :timer.tc(fn -> Blackboard.fetch_new(n - 100) end)
+    {read_duration, _} = :timer.tc(fn -> Blackboard.fetch_new(n - 100, scope: :all) end)
     Logger.info("⏱️ Latência de leitura (últimas 100 de 100k): #{read_duration} microsegundos.")
 
     # Deve ler 100 mensagens em menos de 50ms (geralmente < 1ms em ETS)

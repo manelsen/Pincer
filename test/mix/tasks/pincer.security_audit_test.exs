@@ -44,6 +44,7 @@ defmodule Mix.Tasks.Pincer.SecurityAuditTest do
       end)
 
     assert output =~ "[WARN]"
+    assert output =~ "Run ID:"
     assert output =~ "status: warn"
   end
 

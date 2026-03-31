@@ -5,6 +5,9 @@ defmodule Pincer.Core.ProjectOrchestrator do
   This module keeps lightweight per-session project state in ETS and exposes
   a deterministic API for collection, board rendering, and execution recovery.
   """
+  require Logger
+  alias Pincer.Core.ProjectFSM
+  alias Pincer.Utils.ETSHelper
 
   @table __MODULE__
   @default_max_items 6
@@ -18,7 +21,9 @@ defmodule Pincer.Core.ProjectOrchestrator do
 
   @type state :: %{
           session_id: String.t(),
+          project_id: String.t(),
           phase: phase(),
+          fsm_state: Pincer.Core.ProjectFSM.state(),
           objective: String.t() | nil,
           kind: project_kind() | nil,
           scope: String.t() | nil,
@@ -141,8 +146,10 @@ defmodule Pincer.Core.ProjectOrchestrator do
             {:ok,
              %{
                task: task,
-               prompt: build_task_prompt(state.objective, task),
-               status_message: "Project Runner: Task started"
+               prompt: build_task_prompt(state, task),
+               status_message: "Project Runner: Task started",
+               phase: state.fsm_state.phase,
+               project_id: state.project_id
              }}
 
           true ->
@@ -173,16 +180,30 @@ defmodule Pincer.Core.ProjectOrchestrator do
                %{
                  completed: completed_task,
                  task: next_task,
-                 prompt: build_task_prompt(next_state.objective, next_task),
-                 status_message: "Project Runner: Next task started"
+                 prompt: build_task_prompt(next_state, next_task),
+                 status_message: "Project Runner: Next task started",
+                 phase: next_state.fsm_state.phase,
+                 project_id: next_state.project_id
                }}
             else
-              put_state(%{updated | retry_count: 0})
+              completed_state =
+                updated
+                |> transition_fsm(:review, %{
+                  execution: %{completed_task: completed_task, retries: updated.retry_count}
+                })
+                |> transition_fsm(:delivery, %{
+                  review: %{approved: true, completed_task: completed_task}
+                })
+                |> Map.put(:retry_count, 0)
+
+              put_state(completed_state)
 
               {:completed,
                %{
                  completed: completed_task,
-                 status_message: "Project Runner: All tasks completed"
+                 status_message: "Project Runner: All tasks completed",
+                 phase: completed_state.fsm_state.phase,
+                 project_id: completed_state.project_id
                }}
             end
 
@@ -217,9 +238,11 @@ defmodule Pincer.Core.ProjectOrchestrator do
               {:retry,
                %{
                  task: task,
-                 prompt: build_task_prompt(state.objective, task),
+                 prompt: build_task_prompt(state, task),
                  status_message:
-                   "Project Runner: Task retrying (#{next_retry}/#{state.retry_limit})"
+                   "Project Runner: Task retrying (#{next_retry}/#{state.retry_limit})",
+                 phase: state.fsm_state.phase,
+                 project_id: state.project_id
                }}
             else
               paused = pause_in_progress_item(state)
@@ -229,7 +252,9 @@ defmodule Pincer.Core.ProjectOrchestrator do
                %{
                  task: task,
                  status_message:
-                   "Project Runner: Task paused after #{state.retry_limit} retries. Use /project para retomar."
+                   "Project Runner: Task paused after #{state.retry_limit} retries. Use /project para retomar.",
+                 phase: state.fsm_state.phase,
+                 project_id: state.project_id
                }}
             end
         end
@@ -295,9 +320,13 @@ defmodule Pincer.Core.ProjectOrchestrator do
   end
 
   defp new_state(session_id) do
+    project_id = build_project_id(session_id)
+
     %{
       session_id: session_id,
+      project_id: project_id,
       phase: :await_objective,
+      fsm_state: ProjectFSM.new(project_id, session_id),
       objective: nil,
       kind: nil,
       scope: nil,
@@ -316,7 +345,13 @@ defmodule Pincer.Core.ProjectOrchestrator do
     case state.phase do
       :await_objective ->
         objective = fallback_text(message, "Projeto sem objetivo definido")
-        next_state = %{state | phase: :await_kind, objective: objective}
+
+        next_state =
+          state
+          |> Map.put(:phase, :await_kind)
+          |> Map.put(:objective, objective)
+          |> transition_fsm(:scope, %{objective: objective})
+
         put_state(next_state)
 
         """
@@ -346,7 +381,13 @@ defmodule Pincer.Core.ProjectOrchestrator do
 
       :await_scope ->
         scope = fallback_text(message, "Sem escopo declarado")
-        next_state = %{state | phase: :await_success, scope: scope}
+
+        next_state =
+          state
+          |> Map.put(:phase, :await_success)
+          |> Map.put(:scope, scope)
+          |> transition_fsm(:plan, %{scope: scope})
+
         put_state(next_state)
         build_success_prompt(state.kind)
 
@@ -358,6 +399,7 @@ defmodule Pincer.Core.ProjectOrchestrator do
           |> Map.put(:success_criteria, success_criteria)
           |> Map.put(:phase, :ready)
           |> finalize_state()
+          |> transition_fsm(:execution, %{plan: %{kind: state.kind, items: state.items}})
 
         put_state(ready_state)
         render_ready_message(ready_state)
@@ -745,21 +787,49 @@ defmodule Pincer.Core.ProjectOrchestrator do
     |> then(fn {reversed, task, _shifted} -> {Enum.reverse(reversed), task} end)
   end
 
-  defp build_task_prompt(objective, task) when is_binary(task) do
+  defp build_task_prompt(state, task) when is_map(state) and is_binary(task) do
     """
     PROJECT TASK
-    Objective: #{objective}
+    Project ID: #{state.project_id}
+    Phase: #{state.fsm_state.phase}
+    Objective: #{state.objective}
     Task: #{task}
     """
     |> String.trim()
   end
 
-  defp build_task_prompt(objective, _task) do
+  defp build_task_prompt(state, _task) do
     """
     PROJECT TASK
-    Objective: #{objective}
+    Project ID: #{state.project_id}
+    Phase: #{state.fsm_state.phase}
+    Objective: #{state.objective}
     """
     |> String.trim()
+  end
+
+  defp transition_fsm(%{fsm_state: fsm_state} = state, to_phase, attrs) do
+    case ProjectFSM.transition(fsm_state, to_phase, attrs, storage: fsm_storage()) do
+      {:ok, next_fsm} ->
+        %{state | fsm_state: next_fsm}
+
+      {:error, reason} ->
+        Logger.debug("[PROJECT] FSM transition skipped: #{inspect(reason)}")
+        state
+    end
+  end
+
+  defp fsm_storage do
+    Application.get_env(:pincer, :project_fsm_storage, __MODULE__.NoopFSMStorage)
+  end
+
+  defmodule NoopFSMStorage do
+    @moduledoc false
+    def save_checkpoint(_session_id, _checkpoint), do: :ok
+  end
+
+  defp build_project_id(session_id) do
+    "project-" <> slugify(session_id, 24)
   end
 
   defp git_adapter do
@@ -798,16 +868,11 @@ defmodule Pincer.Core.ProjectOrchestrator do
   defp normalize_max_items(_), do: @default_max_items
 
   defp ensure_table do
-    case :ets.whereis(@table) do
-      :undefined ->
-        :ets.new(@table, [:set, :named_table, :public, read_concurrency: true])
-        :ok
+    _ =
+      ETSHelper.ensure_named_table(@table,
+        options: [:set, :named_table, :public, read_concurrency: true]
+      )
 
-      _ ->
-        :ok
-    end
-  rescue
-    ArgumentError ->
-      :ok
+    :ok
   end
 end

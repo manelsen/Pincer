@@ -34,6 +34,7 @@ defmodule Pincer.LLM.Client do
   alias Pincer.Core.LLM.CooldownStore
   alias Pincer.Core.LLM.FailoverPolicy
   alias Pincer.Core.Models.Registry, as: ModelRegistry
+  alias Pincer.Core.Policy
   alias Pincer.Core.RetryPolicy
   alias Pincer.Core.Telemetry, as: CoreTelemetry
 
@@ -434,7 +435,7 @@ defmodule Pincer.LLM.Client do
             CoreTelemetry.emit_error(reason, %{action: action, reason: :quota_exhausted})
             {:error, reason}
 
-          retries > 0 and RetryPolicy.retryable?(reason) ->
+          retries > 0 and Policy.classify(:retryable, %{reason: reason}) ->
             elapsed_ms = elapsed_since(started_at_ms)
 
             if elapsed_ms >= retry_policy.max_elapsed_ms do
@@ -450,7 +451,11 @@ defmodule Pincer.LLM.Client do
               {:error, {:retry_timeout, reason}}
             else
               base_wait =
-                case RetryPolicy.retry_after_ms(reason, elapsed_ms, retry_policy.max_elapsed_ms) do
+                case Policy.budget(:retry_after_ms, %{
+                       reason: reason,
+                       elapsed_ms: elapsed_ms,
+                       max_elapsed_ms: retry_policy.max_elapsed_ms
+                     }) do
                   ms when is_integer(ms) and ms > 0 -> ms
                   _ -> delay
                 end
@@ -639,7 +644,7 @@ defmodule Pincer.LLM.Client do
          failover_state,
          auth_context
        ) do
-    if RetryPolicy.fail_fast?(reason) do
+    if Policy.classify(:fail_fast, %{reason: reason}) do
       CoreTelemetry.emit_error(reason, %{action: :stream_completion, failover_action: :fail_fast})
       {:error, reason}
     else
@@ -757,7 +762,7 @@ defmodule Pincer.LLM.Client do
          failover_state,
          auth_context
        ) do
-    if RetryPolicy.fail_fast?(reason) do
+    if Policy.classify(:fail_fast, %{reason: reason}) do
       CoreTelemetry.emit_error(reason, %{action: :chat_completion, failover_action: :fail_fast})
       {:error, reason}
     else

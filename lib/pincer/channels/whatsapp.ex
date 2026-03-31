@@ -9,7 +9,7 @@ defmodule Pincer.Channels.WhatsApp do
   use Pincer.Ports.Channel
   require Logger
 
-  alias Pincer.Core.AccessPolicy
+  alias Pincer.Core.Policy
   alias Pincer.Core.Pairing
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.SessionResolver
@@ -488,7 +488,7 @@ defmodule Pincer.Channels.WhatsApp do
         true -> "unknown"
       end
 
-    case AccessPolicy.authorize_dm(:whatsapp, candidate_id, config) do
+    case Policy.allow?(:dm_access, %{channel: :whatsapp, sender_id: candidate_id, config: config}) do
       {:allow, _meta} -> :allow
       {:deny, %{user_message: message}} -> {:deny, message}
     end

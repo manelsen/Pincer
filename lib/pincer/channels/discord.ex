@@ -230,7 +230,7 @@ defmodule Pincer.Channels.Discord do
     Consumes Discord events and routes messages to Pincer sessions.
     """
     use Nostrum.Consumer
-    alias Pincer.Core.AccessPolicy
+    alias Pincer.Core.Policy
     alias Pincer.Core.ChannelInteractionPolicy
     alias Pincer.Core.Pairing
     alias Pincer.Core.ProjectRouter
@@ -363,7 +363,11 @@ defmodule Pincer.Channels.Discord do
         sender_id = read_sender_id(msg.author)
         policy_config = Application.get_env(:pincer, :discord_channel_config, %{})
 
-        case AccessPolicy.authorize_dm(:discord, sender_id, policy_config) do
+        case Policy.allow?(:dm_access, %{
+               channel: :discord,
+               sender_id: sender_id,
+               config: policy_config
+             }) do
           {:allow, _meta} -> :allow
           {:deny, %{user_message: message}} -> {:deny, message}
         end

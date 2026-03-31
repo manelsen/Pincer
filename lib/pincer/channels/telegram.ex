@@ -475,11 +475,18 @@ defmodule Pincer.Channels.Telegram do
   end
 
   defp smart_chunk_text(text, limit) do
-    lines = String.split(text, ~r/\n/)
+    lines = String.split(text, "\n", trim: false)
+    last_index = length(lines) - 1
 
     {chunks, current_chunk} =
-      Enum.reduce(lines, {[], ""}, fn line, {acc, current} ->
-        line_with_newline = line <> "\n"
+      Enum.with_index(lines)
+      |> Enum.reduce({[], ""}, fn {line, idx}, {acc, current} ->
+        line_with_newline =
+          if idx < last_index do
+            line <> "\n"
+          else
+            line
+          end
 
         cond do
           # Line alone exceeds the limit - split it blindly
@@ -555,12 +562,11 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   use GenServer
   require Logger
-  alias Pincer.Core.AccessPolicy
+  alias Pincer.Core.Policy
   alias Pincer.Core.ChannelInteractionPolicy
   alias Pincer.Core.Pairing
   alias Pincer.Core.ProjectOrchestrator
   alias Pincer.Core.ProjectRouter
-  alias Pincer.Core.RetryPolicy
   alias Pincer.Core.Telemetry, as: CoreTelemetry
   alias Pincer.Core.UX
   alias Pincer.Core.Session.Server
@@ -711,7 +717,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         CoreTelemetry.emit_error(reason, %{component: :telegram_poller, failures: next_failures})
         interval_ms = next_poll_interval(next_failures)
 
-        if RetryPolicy.transient?(reason) do
+        if Policy.classify(:transient, %{reason: reason}) do
           Logger.warning(
             "Telegram polling error: #{inspect(reason)}. Next interval: #{interval_ms}ms"
           )
@@ -1622,7 +1628,11 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp authorize_private_dm(chat_id, "private") do
     policy_config = Application.get_env(:pincer, :telegram_channel_config, %{})
 
-    case AccessPolicy.authorize_dm(:telegram, chat_id, policy_config) do
+    case Policy.allow?(:dm_access, %{
+           channel: :telegram,
+           sender_id: chat_id,
+           config: policy_config
+         }) do
       {:allow, _meta} -> :allow
       {:deny, %{user_message: message}} -> {:deny, message}
     end

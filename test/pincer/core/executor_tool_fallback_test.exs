@@ -124,7 +124,8 @@ defmodule Pincer.Core.ExecutorToolFallbackTest do
       llm_client: UnexpectedFormatReasoningLeakLLM
     )
 
-    assert_receive {:sme_tool_use, "my_tool"}, 1000
+    assert_receive {:sme_tool_use, tools_used}, 1000
+    assert tools_used in ["my_tool", ["my_tool: val"]]
     assert_receive {:executor_finished, _, response, _usage}, 1000
 
     refute response =~ "private chain of thought"

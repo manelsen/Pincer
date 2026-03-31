@@ -43,6 +43,7 @@ defmodule Mix.Tasks.Pincer.DoctorTest do
       end)
 
     assert output =~ "[WARN]"
+    assert output =~ "Run ID:"
     assert output =~ "status: warn"
   end
 

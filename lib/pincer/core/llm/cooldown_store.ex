@@ -6,6 +6,9 @@ defmodule Pincer.Core.LLM.CooldownStore do
   """
 
   alias Pincer.Core.ErrorClass
+  alias Pincer.Utils.ETSHelper
+  alias Pincer.Utils.Time
+  alias Pincer.Utils.Value
 
   @table :pincer_llm_cooldown_store
 
@@ -107,7 +110,7 @@ defmodule Pincer.Core.LLM.CooldownStore do
 
   defp configured_durations do
     config = Application.get_env(:pincer, :llm_cooldown, [])
-    durations = fetch_key(config, :durations_ms, %{})
+    durations = Value.fetch(config, :durations_ms, %{})
 
     map =
       cond do
@@ -122,53 +125,10 @@ defmodule Pincer.Core.LLM.CooldownStore do
   defp classify(reason_or_class) when is_atom(reason_or_class), do: reason_or_class
   defp classify(reason_or_class), do: ErrorClass.classify(reason_or_class)
 
-  defp fetch_key(map, key, default) when is_map(map) do
-    Map.get(map, key, Map.get(map, to_string(key), default))
-  end
-
-  defp fetch_key(list, key, default) when is_list(list) do
-    string_key = to_string(key)
-
-    cond do
-      Keyword.keyword?(list) ->
-        Keyword.get(list, key, default)
-
-      true ->
-        Enum.find_value(list, default, fn
-          {^key, value} ->
-            value
-
-          {list_key, value} when is_binary(list_key) and list_key == string_key ->
-            value
-
-          {list_key, value} when is_atom(list_key) ->
-            if Atom.to_string(list_key) == string_key, do: value, else: nil
-
-          %{} = map ->
-            Map.get(map, key) || Map.get(map, string_key)
-
-          _ ->
-            nil
-        end)
-    end
-  end
-
-  defp fetch_key(_other, _key, default), do: default
-
-  defp now_ms, do: System.monotonic_time(:millisecond)
+  defp now_ms, do: Time.monotonic_ms()
 
   defp ensure_table do
-    case :ets.whereis(@table) do
-      :undefined ->
-        try do
-          :ets.new(@table, [:named_table, :set, :public, read_concurrency: true])
-          :ok
-        rescue
-          ArgumentError -> :ok
-        end
-
-      _tid ->
-        :ok
-    end
+    _ = ETSHelper.ensure_named_table(@table)
+    :ok
   end
 end

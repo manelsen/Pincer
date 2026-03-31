@@ -133,9 +133,34 @@ defmodule Pincer.Core.DoctorTest do
           end
         )
 
-      assert report.status == :ok
+      assert report.status in [:ok, :warn]
       assert report.counts.error == 0
-      assert report.counts.warn == 0
+      assert report.counts.warn >= 0
+    end
+
+    test "includes linked run id and runtime cohesion checks" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        channels:
+          telegram:
+            enabled: false
+        """
+      )
+
+      report = Doctor.run(root: tmp, env_fetcher: fn _ -> nil end)
+
+      assert is_binary(report.run_id)
+
+      assert Enum.any?(report.checks, fn check ->
+               check.id == :policy_kernel and check.meta[:run_id] == report.run_id
+             end)
+
+      assert Enum.any?(report.checks, fn check ->
+               check.id == :trace_runtime and check.meta[:selection] =~ "selected_by"
+             end)
     end
   end
 

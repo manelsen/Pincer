@@ -7,19 +7,19 @@ defmodule Pincer.Core.AgentPathsTest do
     tmp = tempdir("agent_paths_root")
     workspace = Path.join(tmp, "workspaces/root_agent")
 
-    File.mkdir_p!(Path.join(tmp, ".pincer"))
-    File.write!(Path.join(tmp, ".pincer/IDENTITY.md"), "# Root Identity\n")
-    File.write!(Path.join(tmp, ".pincer/SOUL.md"), "# Root Soul\n")
-    File.write!(Path.join(tmp, ".pincer/USER.md"), "# Root User\n")
-    File.write!(Path.join(tmp, ".pincer/BOOTSTRAP.md"), "# Root Bootstrap\n")
+    File.mkdir_p!(Path.join(tmp, ".template/.pincer"))
+    File.write!(Path.join(tmp, ".template/.pincer/IDENTITY.md"), "# Root Identity\n")
+    File.write!(Path.join(tmp, ".template/.pincer/SOUL.md"), "# Root Soul\n")
+    File.write!(Path.join(tmp, ".template/.pincer/USER.md"), "# Root User\n")
+    File.write!(Path.join(tmp, ".template/.pincer/BOOTSTRAP.md"), "# Root Bootstrap\n")
 
     assert workspace ==
              AgentPaths.ensure_workspace!(workspace, bootstrap?: true, template_root: tmp)
 
-    assert File.read!(AgentPaths.identity_path(workspace)) =~ "Pincer"
-    assert File.read!(AgentPaths.soul_path(workspace)) =~ "Core Truths"
-    assert File.read!(AgentPaths.user_path(workspace)) =~ "Context"
-    assert File.read!(AgentPaths.bootstrap_path(workspace)) =~ "BOOTSTRAP"
+    assert File.read!(AgentPaths.identity_path(workspace)) == "# Root Identity\n"
+    assert File.read!(AgentPaths.soul_path(workspace)) == "# Root Soul\n"
+    assert File.read!(AgentPaths.user_path(workspace)) == "# Root User\n"
+    assert File.read!(AgentPaths.bootstrap_path(workspace)) == "# Root Bootstrap\n"
     assert File.exists?(AgentPaths.memory_path(workspace))
     assert File.exists?(AgentPaths.history_path(workspace))
     assert File.dir?(AgentPaths.sessions_dir(workspace))
@@ -50,6 +50,69 @@ defmodule Pincer.Core.AgentPathsTest do
     refute AgentPaths.bootstrap_active?(subagent_workspace)
     assert File.exists?(AgentPaths.memory_path(subagent_workspace))
     assert File.exists?(AgentPaths.history_path(subagent_workspace))
+  end
+
+  test "template_root override takes precedence over workspace template" do
+    tmp = tempdir("agent_paths_precedence")
+    workspace = Path.join(tmp, "workspaces/root_agent")
+    override = Path.join(tmp, "override")
+
+    File.mkdir_p!(Path.join(tmp, "workspaces/.template/.pincer"))
+
+    File.write!(
+      Path.join(tmp, "workspaces/.template/.pincer/IDENTITY.md"),
+      "# Workspace Identity\n"
+    )
+
+    File.mkdir_p!(Path.join(override, ".template/.pincer"))
+    File.write!(Path.join(override, ".template/.pincer/IDENTITY.md"), "# Override Identity\n")
+    File.write!(Path.join(override, ".template/.pincer/SOUL.md"), "# Override Soul\n")
+    File.write!(Path.join(override, ".template/.pincer/USER.md"), "# Override User\n")
+    File.write!(Path.join(override, ".template/.pincer/BOOTSTRAP.md"), "# Override Bootstrap\n")
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: true, template_root: override)
+
+    assert File.read!(AgentPaths.identity_path(workspace)) == "# Override Identity\n"
+    assert File.read!(AgentPaths.soul_path(workspace)) == "# Override Soul\n"
+    assert File.read!(AgentPaths.user_path(workspace)) == "# Override User\n"
+    assert File.read!(AgentPaths.bootstrap_path(workspace)) == "# Override Bootstrap\n"
+  end
+
+  test "falls back to built-in defaults when templates are missing" do
+    tmp = tempdir("agent_paths_fallback")
+    workspace = Path.join(tmp, "workspaces/root_agent")
+
+    AgentPaths.ensure_workspace!(workspace,
+      bootstrap?: true,
+      template_root: Path.join(tmp, "missing")
+    )
+
+    assert File.read!(AgentPaths.identity_path(workspace)) =~ "# Pincer"
+    assert File.read!(AgentPaths.soul_path(workspace)) =~ "Core Truths"
+    assert File.read!(AgentPaths.user_path(workspace)) =~ "# User Context"
+    assert File.read!(AgentPaths.bootstrap_path(workspace)) =~ "# BOOTSTRAP: THE BIRTH RITUAL"
+  end
+
+  test "template seed paths point to canonical workspace template only" do
+    paths = AgentPaths.template_seed_paths()
+    template_pincer_dir = Path.join(AgentPaths.template_workspace(), ".pincer")
+
+    assert paths == [
+             Path.join(template_pincer_dir, "IDENTITY.md"),
+             Path.join(template_pincer_dir, "SOUL.md"),
+             Path.join(template_pincer_dir, "USER.md"),
+             Path.join(template_pincer_dir, "BOOTSTRAP.md"),
+             Path.join(template_pincer_dir, "MEMORY.md"),
+             Path.join(template_pincer_dir, "HISTORY.md")
+           ]
+
+    refute Enum.any?(paths, &String.contains?(&1, "priv/pincer/templates"))
+  end
+
+  test "legacy priv template files are no longer present" do
+    refute File.exists?("priv/pincer/templates/BOOTSTRAP.md")
+    refute File.exists?("priv/pincer/templates/IDENTITY.md")
+    refute File.exists?("priv/pincer/templates/USER.md")
   end
 
   defp tempdir(prefix) do

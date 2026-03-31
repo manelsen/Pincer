@@ -10,11 +10,13 @@ defmodule Pincer.Core.Executor do
   require Logger
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.ContextOverflowRecovery
-  alias Pincer.Core.EmptyResponseRecoveryPolicy
   alias Pincer.Core.MemoryRecall
+  alias Pincer.Core.Policy
   alias Pincer.Core.PromptAssembly
+  alias Pincer.Core.Trace
   alias Pincer.Core.ToolAnswerPatternPolicy
   alias Pincer.Core.ToolOnlyOutcomeFormatter
+  alias Pincer.Core.ToolRuntime
   alias Pincer.Core.TurnOutcomePolicy
   alias Pincer.Utils.Text
 
@@ -48,29 +50,54 @@ defmodule Pincer.Core.Executor do
     Process.put(:workspace_path, workspace_path)
     Process.put(:executor_deps, deps)
     Process.put(:executor_run_opts, opts)
+    Process.put(:executor_trace_session_pid, session_pid)
+
+    if Keyword.get(opts, :trace_events?, false) do
+      Process.put(
+        :executor_trace,
+        Trace.new(session_id, "turn-#{System.unique_integer([:positive])}", %{
+          depth_limit: @max_recursion_depth
+        })
+      )
+
+      emit_trace_step(:checkpoint, "turn_started", %{history_size: length(history)})
+    end
 
     # 2. Setup initial state
     Logger.info("[EXECUTOR] Starting cycle for #{session_id}")
 
-    try do
-      # 3. Enter recursion loop
-      # Initial call uses depth 0
+    # 3. Enter recursion loop
+    # Initial call uses depth 0
+    result =
       run_loop(history, session_id, session_pid, 0, opts[:model_override], deps)
-    after
-      Process.delete(:workspace_path)
-      Process.delete(:executor_deps)
-      Process.delete(:executor_run_opts)
-      Process.delete(:consecutive_errors)
-    end
-    |> case do
-      {:ok, final_history, final_content, usage} ->
-        send(session_pid, {:executor_finished, final_history, final_content, usage})
-        :ok
 
-      {:error, reason} ->
-        send(session_pid, {:executor_failed, reason})
-        :error
-    end
+    outcome =
+      case result do
+        {:ok, final_history, final_content, usage} ->
+          emit_trace_step(:checkpoint, "turn_finished", %{
+            final_history_size: length(final_history),
+            has_usage: not is_nil(usage)
+          })
+
+          maybe_emit_trace_snapshot()
+          send(session_pid, {:executor_finished, final_history, final_content, usage})
+          :ok
+
+        {:error, reason} ->
+          emit_trace_step(:error, "turn_failed", %{reason: inspect(reason)})
+          maybe_emit_trace_snapshot()
+          send(session_pid, {:executor_failed, reason})
+          :error
+      end
+
+    Process.delete(:workspace_path)
+    Process.delete(:executor_deps)
+    Process.delete(:executor_run_opts)
+    Process.delete(:consecutive_errors)
+    Process.delete(:executor_trace)
+    Process.delete(:executor_trace_session_pid)
+
+    outcome
   end
 
   @doc """
@@ -197,18 +224,26 @@ defmodule Pincer.Core.Executor do
 
     context_strategy = Keyword.get(Process.get(:executor_run_opts, []), :context_strategy)
 
-    history
-    |> PromptAssembly.prepare(model_override,
-      long_term_memory: Process.get(:long_term_memory, ""),
-      current_time: DateTime.utc_now() |> DateTime.to_string(),
-      workspace_path: Process.get(:workspace_path, File.cwd!()),
-      llm_client: Pincer.Ports.LLM,
-      storage: Pincer.Ports.Storage,
-      memory_recall: MemoryRecall,
-      safe_limit_scale: Keyword.get(opts, :safe_limit_scale, 1.0),
-      context_strategy: context_strategy
-    )
-    |> resolve_lazy_attachments(provider_config)
+    prepared_history =
+      history
+      |> PromptAssembly.prepare(model_override,
+        long_term_memory: Process.get(:long_term_memory, ""),
+        current_time: DateTime.utc_now() |> DateTime.to_string(),
+        workspace_path: Process.get(:workspace_path, File.cwd!()),
+        llm_client: Pincer.Ports.LLM,
+        storage: Pincer.Ports.Storage,
+        memory_recall: MemoryRecall,
+        safe_limit_scale: Keyword.get(opts, :safe_limit_scale, 1.0),
+        context_strategy: context_strategy
+      )
+      |> resolve_lazy_attachments(provider_config)
+
+    emit_trace_step(:memory, "prompt_prepared", %{
+      messages: length(prepared_history),
+      provider: provider_name
+    })
+
+    prepared_history
   end
 
   defp do_run_loop(
@@ -241,6 +276,9 @@ defmodule Pincer.Core.Executor do
     Logger.info(
       "[EXECUTOR] Sending prompt to LLM (STREAMING). History size: #{length(prompt_history)}"
     )
+
+    emit_trace_step(:policy, "llm_request_prepared", %{depth: depth, tools: length(tools_spec)})
+    emit_trace_step(:llm, "stream_completion_invoked", %{depth: depth})
 
     case deps.llm_client.stream_completion(prompt_history, [tools: tools_spec] ++ client_opts) do
       {:ok, stream} ->
@@ -300,6 +338,11 @@ defmodule Pincer.Core.Executor do
       {:error, reason} ->
         Logger.error("[EXECUTOR] LLM streaming failed: #{inspect(reason)}")
 
+        emit_trace_step(:error, "stream_completion_failed", %{
+          reason: inspect(reason),
+          depth: depth
+        })
+
         fallback_chat_completion(
           reason,
           logical_history,
@@ -328,6 +371,7 @@ defmodule Pincer.Core.Executor do
          tools_spec
        ) do
     Logger.warning("[EXECUTOR] Falling back to chat completion. Reason: #{inspect(reason)}")
+    emit_trace_step(:policy, "fallback_chat_completion", %{reason: inspect(reason)})
 
     {fallback_history, chat_opts} =
       build_fallback_request(
@@ -341,6 +385,8 @@ defmodule Pincer.Core.Executor do
 
     case deps.llm_client.chat_completion(fallback_history, chat_opts) do
       {:ok, assistant_msg, usage} ->
+        emit_trace_step(:llm, "chat_completion_invoked", %{fallback: true})
+
         finalize_assistant_message(
           assistant_msg,
           logical_history,
@@ -355,6 +401,7 @@ defmodule Pincer.Core.Executor do
 
       {:error, reason} ->
         Logger.error("[EXECUTOR] Fallback chat completion failed: #{inspect(reason)}")
+        emit_trace_step(:error, "fallback_chat_completion_failed", %{reason: inspect(reason)})
         send(session_pid, {:executor_failed, reason})
         {:error, reason}
     end
@@ -372,11 +419,14 @@ defmodule Pincer.Core.Executor do
        ) do
     if depth == 0 do
       Logger.warning("[EXECUTOR] Empty streaming response. Retrying lightweight chat completion.")
+      emit_trace_step(:policy, "empty_response_recovery", %{depth: depth})
 
-      retry_history = EmptyResponseRecoveryPolicy.retry_history(prompt_history)
+      retry_history = Policy.recover(:empty_response_history, %{history: prompt_history})
 
       case deps.llm_client.chat_completion(retry_history, client_opts) do
         {:ok, assistant_msg, usage} ->
+          emit_trace_step(:llm, "chat_completion_invoked", %{fallback: false, recovery: true})
+
           case finalize_assistant_message(
                  assistant_msg,
                  logical_history,
@@ -394,6 +444,7 @@ defmodule Pincer.Core.Executor do
 
         {:error, reason} ->
           Logger.error("[EXECUTOR] Empty-response recovery failed: #{inspect(reason)}")
+          emit_trace_step(:error, "empty_response_recovery_failed", %{reason: inspect(reason)})
           {:error, :empty_response}
       end
     else
@@ -732,10 +783,54 @@ defmodule Pincer.Core.Executor do
 
         send(session_pid, {:sme_tool_use, tool_descriptions})
 
+        # Planning step: If multiple tools, notify user and execute in parallel
         tool_results =
-          Enum.map(normalized_tool_calls, fn call ->
-            execute_tool_via_registry(call, session_pid, session_id, deps.tool_registry)
-          end)
+          if length(normalized_tool_calls) > 1 do
+            tool_names =
+              normalized_tool_calls
+              |> Enum.map(&tool_call_name/1)
+              |> Enum.reject(&is_nil_or_blank/1)
+              |> Enum.join(", ")
+
+            send(
+              session_pid,
+              {:executor_status,
+               "⚡ **Orquestração Paralela**: Executando #{length(normalized_tool_calls)} tarefas simultâneas (#{tool_names})."}
+            )
+
+            # Capture context for parallel tasks
+            parent_context = %{
+              workspace_path: Process.get(:workspace_path),
+              executor_deps: Process.get(:executor_deps),
+              executor_trace: Process.get(:executor_trace),
+              executor_trace_session_pid: Process.get(:executor_trace_session_pid),
+              executor_run_opts: Process.get(:executor_run_opts)
+            }
+
+            normalized_tool_calls
+            |> Task.async_stream(
+              fn call ->
+                # Restore context in the new process
+                Process.put(:workspace_path, parent_context.workspace_path)
+                Process.put(:executor_deps, parent_context.executor_deps)
+                Process.put(:executor_trace, parent_context.executor_trace)
+                Process.put(:executor_trace_session_pid, parent_context.executor_trace_session_pid)
+                Process.put(:executor_run_opts, parent_context.executor_run_opts)
+
+                execute_tool_via_registry(call, session_pid, session_id, deps.tool_registry)
+              end,
+              max_concurrency: 10,
+              timeout: 300_000
+            )
+            |> Enum.map(fn
+              {:ok, result} -> result
+              {:error, reason} -> %{"role" => "tool", "content" => "Parallel execution error: #{inspect(reason)}"}
+            end)
+          else
+            Enum.map(normalized_tool_calls, fn call ->
+              execute_tool_via_registry(call, session_pid, session_id, deps.tool_registry)
+            end)
+          end
 
         # Update both histories for the next turn
         new_logical_history = logical_history ++ [assistant_msg] ++ tool_results
@@ -840,6 +935,14 @@ defmodule Pincer.Core.Executor do
     {call_id, name, raw_arguments} = normalize_tool_call(tool_call)
     Logger.info("[TOOL] Executing #{name}")
 
+    tool_class =
+      case ToolRuntime.classify(name) do
+        {:ok, class} -> class
+        _ -> :privileged
+      end
+
+    emit_trace_step(:tool, "tool_invoked", %{tool: name, tool_call_id: call_id, class: tool_class})
+
     args = parse_tool_arguments(raw_arguments)
 
     workspace_path = Process.get(:workspace_path)
@@ -853,16 +956,60 @@ defmodule Pincer.Core.Executor do
 
     result =
       try do
-        case registry.execute_tool(name, args, context) do
-          {:ok, c} ->
+        case ToolRuntime.execute(name, args, context, registry, approval_granted: false) do
+          {:ok, c, _meta} ->
             Process.put(:consecutive_errors, 0)
+
+            audit =
+              Policy.guard!(:tool_audit_event, %{tool: name, class: tool_class, status: :ok})
+
+            emit_trace_step(:tool, "tool_audit", audit)
             c
 
-          {:error, {:approval_required, cmd}} ->
+          {:error, {:approval_required, approval_data}, _meta} when is_map(approval_data) ->
             Process.put(:consecutive_errors, 0)
-            handle_approval(call_id, cmd, session_pid, session_id, registry)
 
-          {:error, r} ->
+            audit =
+              Policy.guard!(:tool_audit_event, %{
+                tool: name,
+                class: tool_class,
+                status: :approval_required
+              })
+
+            emit_trace_step(:tool, "tool_audit", audit)
+            handle_approval(call_id, approval_data, session_pid, session_id, registry)
+
+          {:error, {:approval_required, cmd}, _meta} ->
+            Process.put(:consecutive_errors, 0)
+
+            audit =
+              Policy.guard!(:tool_audit_event, %{
+                tool: name,
+                class: tool_class,
+                status: :approval_required
+              })
+
+            emit_trace_step(:tool, "tool_audit", audit)
+
+            handle_approval(
+              call_id,
+              %{tool: name, command: cmd, class: tool_class},
+              session_pid,
+              session_id,
+              registry
+            )
+
+          {:error, :timeout, _meta} ->
+            errors = Process.get(:consecutive_errors, 0) + 1
+            Process.put(:consecutive_errors, errors)
+
+            audit =
+              Policy.guard!(:tool_audit_event, %{tool: name, class: tool_class, status: :timeout})
+
+            emit_trace_step(:tool, "tool_audit", audit)
+            "Error: tool '#{name}' timed out and was cancelled."
+
+          {:error, r, _meta} ->
             errors = Process.get(:consecutive_errors, 0) + 1
             Process.put(:consecutive_errors, errors)
 
@@ -875,6 +1022,10 @@ defmodule Pincer.Core.Executor do
               Pincer.Ports.Storage.save_tool_error(name, args, inspect(r))
             end
 
+            audit =
+              Policy.guard!(:tool_audit_event, %{tool: name, class: tool_class, status: :error})
+
+            emit_trace_step(:tool, "tool_audit", audit)
             "Error: #{inspect(r)}"
         end
       rescue
@@ -905,10 +1056,17 @@ defmodule Pincer.Core.Executor do
     # DEBUG: Log exact tool output
     Logger.debug("[EXECUTOR] TOOL RESULT (#{name}): #{inspect(content)}")
 
+    emit_trace_step(:tool, "tool_result", %{
+      tool: name,
+      summary: ToolRuntime.sanitize_summary(name, content)
+    })
+
     %{"role" => "tool", "tool_call_id" => call_id, "name" => name, "content" => content}
   end
 
   defp execute_tool_via_registry(_invalid_call, _session_pid, _session_id, _registry) do
+    emit_trace_step(:error, "tool_invalid_call", %{})
+
     %{
       "role" => "tool",
       "tool_call_id" => "tool_call_invalid",
@@ -917,12 +1075,27 @@ defmodule Pincer.Core.Executor do
     }
   end
 
-  defp handle_approval(call_id, command, _session_pid, session_id, registry) do
-    Logger.warning("[EXECUTOR] Waiting for approval for: #{command}")
+  defp handle_approval(call_id, approval_data, _session_pid, session_id, registry) do
+    command = Map.get(approval_data, :command) || Map.get(approval_data, "command") || ""
+    tool_name = Map.get(approval_data, :tool) || Map.get(approval_data, "tool") || "safe_shell"
+
+    tool_args =
+      Map.get(approval_data, :args) || Map.get(approval_data, "args") || %{"command" => command}
+
+    tool_class = Map.get(approval_data, :class) || Map.get(approval_data, "class") || :privileged
+
+    approval_prompt =
+      if is_binary(command) and String.trim(command) != "" do
+        command
+      else
+        "#{tool_name} (privileged tool requires approval)"
+      end
+
+    Logger.warning("[EXECUTOR] Waiting for approval for: #{approval_prompt}")
 
     Pincer.Infra.PubSub.broadcast(
       "session:#{session_id}",
-      {:approval_required, call_id, command}
+      {:approval_required, call_id, approval_prompt}
     )
 
     # We wait synchronously here but the session GenServer remains responsive
@@ -931,20 +1104,42 @@ defmodule Pincer.Core.Executor do
       {:tool_approval_result, ^call_id, :approved} ->
         Logger.info("[EXECUTOR] Command approved: #{command}")
 
-        case registry.execute_tool(
-               "safe_shell",
-               %{"command" => command, "skip_approval" => true},
-               %{
-                 "session_id" => session_id
-               }
+        audit =
+          Policy.guard!(:tool_audit_event, %{
+            tool: tool_name,
+            class: tool_class,
+            status: :approved
+          })
+
+        emit_trace_step(:tool, "tool_audit", audit)
+
+        case ToolRuntime.execute(tool_name, tool_args, %{"session_id" => session_id}, registry,
+               approval_granted: true,
+               class: tool_class
              ) do
-          {:ok, result} -> result
-          {:error, reason} -> "Error: #{inspect(reason)}"
+          {:ok, result, _meta} ->
+            result
+
+          {:error, reason, _meta} ->
+            "Error: #{inspect(reason)}"
         end
 
       {:tool_approval_result, ^call_id, :rejected} ->
         Logger.info("[EXECUTOR] Command rejected: #{command}")
-        "Error: Command rejected by user."
+
+        audit =
+          Policy.guard!(:tool_audit_event, %{tool: tool_name, class: tool_class, status: :denied})
+
+        emit_trace_step(:tool, "tool_audit", audit)
+
+        recovery =
+          Policy.recover(:tool_approval_denied, %{
+            tool: tool_name,
+            class: tool_class,
+            reason: :user_denied
+          })
+
+        "Approval denied for #{tool_name}. Recovery: #{inspect(recovery)}"
     after
       @approval_timeout_ms ->
         Logger.warning("[EXECUTOR] Approval timeout for: #{command}")
@@ -971,7 +1166,7 @@ defmodule Pincer.Core.Executor do
               case File.read(path) do
                 {:ok, content} ->
                   msg = "📝 **Artefato Atualizado**: `#{file}`\n\n#{truncate_markdown(content)}"
-                  send(session_pid, {:agent_status, msg})
+                  send(session_pid, {:executor_status, msg})
 
                 _ ->
                   :ok
@@ -990,6 +1185,39 @@ defmodule Pincer.Core.Executor do
       String.slice(content, 0, 1000) <> "\n\n[...conteúdo truncado]"
     else
       content
+    end
+  end
+
+  defp maybe_emit_trace_snapshot do
+    case Process.get(:executor_trace) do
+      nil ->
+        :ok
+
+      trace ->
+        case Process.get(:executor_trace_session_pid) do
+          pid when is_pid(pid) ->
+            send(pid, {:executor_trace, Trace.to_checkpoint_metadata(trace)})
+
+          _ ->
+            :ok
+        end
+    end
+  end
+
+  defp emit_trace_step(kind, name, details)
+       when is_atom(kind) and is_binary(name) and is_map(details) do
+    case Process.get(:executor_trace) do
+      nil ->
+        :ok
+
+      trace ->
+        updated = Trace.add_step(trace, kind, name, details)
+        Process.put(:executor_trace, updated)
+
+        case Process.get(:executor_trace_session_pid) do
+          pid when is_pid(pid) -> send(pid, {:executor_trace_step, kind, name, details})
+          _ -> :ok
+        end
     end
   end
 
