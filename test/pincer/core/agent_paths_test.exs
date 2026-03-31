@@ -95,13 +95,17 @@ defmodule Pincer.Core.AgentPathsTest do
 
   test "template seed paths point to canonical workspace template only" do
     paths = AgentPaths.template_seed_paths()
+    template_pincer_dir = Path.join(AgentPaths.template_workspace(), ".pincer")
 
-    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/IDENTITY.md"))
-    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/SOUL.md"))
-    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/USER.md"))
-    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/BOOTSTRAP.md"))
-    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/MEMORY.md"))
-    assert Enum.any?(paths, &String.ends_with?(&1, "workspaces/.template/.pincer/HISTORY.md"))
+    assert paths == [
+             Path.join(template_pincer_dir, "IDENTITY.md"),
+             Path.join(template_pincer_dir, "SOUL.md"),
+             Path.join(template_pincer_dir, "USER.md"),
+             Path.join(template_pincer_dir, "BOOTSTRAP.md"),
+             Path.join(template_pincer_dir, "MEMORY.md"),
+             Path.join(template_pincer_dir, "HISTORY.md")
+           ]
+
     refute Enum.any?(paths, &String.contains?(&1, "priv/pincer/templates"))
   end
 
