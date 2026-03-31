@@ -11,6 +11,7 @@ defmodule Pincer.Core.AuthProfiles do
   alias Pincer.Core.ErrorClass
   alias Pincer.Utils.ETSHelper
   alias Pincer.Utils.Time
+  alias Pincer.Utils.Value
 
   @table :pincer_auth_profile_cooldown
   @default_profile "default"
@@ -152,7 +153,7 @@ defmodule Pincer.Core.AuthProfiles do
   end
 
   defp provider_profiles(config) when is_map(config) do
-    profiles = read_field(config, :auth_profiles)
+    profiles = Value.fetch(config, :auth_profiles, nil)
 
     cond do
       is_list(profiles) and profiles != [] ->
@@ -160,8 +161,8 @@ defmodule Pincer.Core.AuthProfiles do
         |> Enum.map(&normalize_profile/1)
         |> Enum.reject(&is_nil/1)
 
-      present?(read_field(config, :env_key)) ->
-        [%{name: @default_profile, env_key: to_string(read_field(config, :env_key))}]
+      present?(Value.fetch(config, :env_key, nil)) ->
+        [%{name: @default_profile, env_key: to_string(Value.fetch(config, :env_key, nil))}]
 
       true ->
         []
@@ -173,7 +174,7 @@ defmodule Pincer.Core.AuthProfiles do
   end
 
   defp legacy_selection(provider_config) do
-    api_key = normalize_api_key(read_field(provider_config, :api_key))
+    api_key = normalize_api_key(Value.fetch(provider_config, :api_key, nil))
 
     %{
       profile: nil,
@@ -190,12 +191,12 @@ defmodule Pincer.Core.AuthProfiles do
   defp normalize_profile(%{} = profile) do
     name =
       profile
-      |> read_field(:name)
+      |> Value.fetch(:name, nil)
       |> normalize_profile_name()
 
     env_key =
       profile
-      |> read_field(:env_key)
+      |> Value.fetch(:env_key, nil)
       |> normalize_env_key()
 
     if present?(name) and present?(env_key) do
@@ -219,33 +220,19 @@ defmodule Pincer.Core.AuthProfiles do
   defp normalize_profile_name(nil), do: nil
 
   defp normalize_profile_name(value) do
-    value
-    |> to_string()
-    |> String.trim()
-    |> case do
-      "" -> nil
-      name -> name
-    end
+    Value.trim_to_nil(value)
   end
 
   defp normalize_env_key(nil), do: nil
 
   defp normalize_env_key(value) do
-    value
-    |> to_string()
-    |> String.trim()
-    |> case do
-      "" -> nil
-      key -> key
-    end
+    Value.trim_to_nil(value)
   end
 
   defp normalize_api_key(nil), do: nil
 
   defp normalize_api_key(value) do
-    value
-    |> to_string()
-    |> String.trim()
+    Value.trim_string(value)
   end
 
   defp present?(value) when is_binary(value), do: String.trim(value) != ""
@@ -272,7 +259,7 @@ defmodule Pincer.Core.AuthProfiles do
 
   defp configured_durations do
     config = Application.get_env(:pincer, :auth_profile_cooldown, [])
-    durations = read_field(config, :durations_ms)
+    durations = Value.fetch(config, :durations_ms, nil)
 
     runtime_map =
       cond do
@@ -295,37 +282,4 @@ defmodule Pincer.Core.AuthProfiles do
     _ = ETSHelper.ensure_named_table(@table)
     :ok
   end
-
-  defp read_field(map, key) when is_map(map) and is_atom(key) do
-    Map.get(map, key) || Map.get(map, Atom.to_string(key))
-  end
-
-  defp read_field(list, key) when is_list(list) and is_atom(key) do
-    string_key = Atom.to_string(key)
-
-    cond do
-      Keyword.keyword?(list) ->
-        Keyword.get(list, key)
-
-      true ->
-        Enum.find_value(list, fn
-          {^key, value} ->
-            value
-
-          {list_key, value} when is_binary(list_key) and list_key == string_key ->
-            value
-
-          {list_key, value} when is_atom(list_key) ->
-            if Atom.to_string(list_key) == string_key, do: value, else: nil
-
-          %{} = map ->
-            Map.get(map, key) || Map.get(map, string_key)
-
-          _ ->
-            nil
-        end)
-    end
-  end
-
-  defp read_field(_other, _key), do: nil
 end
