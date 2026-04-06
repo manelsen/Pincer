@@ -73,6 +73,11 @@ llm:
   z_ai:
     base_url: "https://api.z.ai/api/coding/paas/v4/chat/completions"
     default_model: "glm-4.7"
+introspection:
+  provider: "z_ai"
+  model: "glm-4.7"
+  max_tokens: 512
+  temperature: 0.7
 mcp:
   servers:
     github:
@@ -83,3 +88,4 @@ mcp:
       command: "infrastructure/mcp/venv/bin/python3"
 tools:
   restrict_to_workspace: true
+log_utc_offset: -3
