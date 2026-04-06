@@ -111,6 +111,29 @@ defmodule Pincer.Core.Session.ServerTest do
     end
   end
 
+  defmodule ReflectionLLMStub do
+    @behaviour Pincer.Ports.LLM
+
+    @impl true
+    def stream_completion(_messages, _opts) do
+      {:ok, [%{"choices" => [%{"delta" => %{"content" => "reflexão ok"}}]}]}
+    end
+
+    @impl true
+    def chat_completion(_messages, _opts) do
+      {:ok, %{"role" => "assistant", "content" => "reflexão ok"}, nil}
+    end
+
+    @impl true
+    def list_providers, do: []
+    @impl true
+    def list_models(_provider_id), do: []
+    @impl true
+    def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+    @impl true
+    def provider_config(_provider_id), do: nil
+  end
+
   setup do
     agent = start_supervised!({Agent, fn -> %{} end})
 
@@ -207,17 +230,42 @@ defmodule Pincer.Core.Session.ServerTest do
 
     AgentPaths.ensure_workspace!(workspace)
 
-    assert File.read!(AgentPaths.identity_path(workspace)) == "# Template Identity\n"
-    assert File.read!(AgentPaths.soul_path(workspace)) == "# Template Soul\n"
+    # IDENTITY and SOUL are NOT seeded — deferred to bootstrap ritual
+    refute File.exists?(AgentPaths.identity_path(workspace))
+    refute File.exists?(AgentPaths.soul_path(workspace))
     assert File.read!(AgentPaths.user_path(workspace)) == "# Template User\n"
     assert File.read!(AgentPaths.bootstrap_path(workspace)) == "# Template Bootstrap\n"
   end
 
+  test "bootstrap is active when identity and soul are absent" do
+    tmp =
+      Path.join(
+        System.tmp_dir!(),
+        "pincer_bootstrap_absent_#{System.unique_integer([:positive])}"
+      )
+
+    workspace = Path.join(tmp, "workspaces/bootstrap_absent")
+    File.mkdir_p!(AgentPaths.pincer_dir(workspace))
+    File.write!(AgentPaths.bootstrap_path(workspace), "# Bootstrap\n")
+
+    assert Server.bootstrap_active?(workspace)
+  end
+
   test "persists assistant replies for recovery" do
+    tmp = Path.join(System.tmp_dir!(), "pincer_persist_#{System.unique_integer([:positive])}")
     session_id = "session_server_test_#{System.unique_integer([:positive])}"
+    workspace = Path.join(tmp, "workspaces/#{session_id}")
+
+    File.mkdir_p!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
     StorageStub.put_messages(session_id, [%{"role" => "user", "content" => "existing"}])
 
-    pid = start_supervised!({Server, [session_id: session_id]})
+    pid =
+      start_supervised!(
+        {Server, [session_id: session_id, workspace_path: workspace, bootstrap?: false]}
+      )
 
     send(pid, {:assistant_reply_finished, "hello"})
 
@@ -235,10 +283,20 @@ defmodule Pincer.Core.Session.ServerTest do
   end
 
   test "publishes friendly executor errors instead of raw provider payloads" do
+    tmp = Path.join(System.tmp_dir!(), "pincer_error_#{System.unique_integer([:positive])}")
     session_id = "session_server_error_#{System.unique_integer([:positive])}"
+    workspace = Path.join(tmp, "workspaces/#{session_id}")
+
+    File.mkdir_p!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
     Pincer.Infra.PubSub.subscribe("session:#{session_id}")
 
-    pid = start_supervised!({Server, [session_id: session_id]})
+    pid =
+      start_supervised!(
+        {Server, [session_id: session_id, workspace_path: workspace, bootstrap?: false]}
+      )
 
     send(
       pid,
@@ -364,5 +422,58 @@ defmodule Pincer.Core.Session.ServerTest do
     assert lucie_prompt =~ "# Lucie"
     assert lucie_prompt =~ "Assistente sarcastica"
     refute lucie_prompt =~ "# Annie"
+  end
+
+  test "session delegates traces to Consciousness Kernel" do
+    tmp = Path.join(System.tmp_dir!(), "pincer_kernel_#{System.unique_integer([:positive])}")
+    session_id = "session_kernel_#{System.unique_integer([:positive])}"
+    workspace = Path.join(tmp, "workspaces/#{session_id}")
+
+    File.mkdir_p!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
+
+    pid =
+      start_supervised!(
+        {Server, [session_id: session_id, workspace_path: workspace, bootstrap?: false]}
+      )
+
+    trace = %{"steps" => [%{"kind" => "memory"}, %{"kind" => "error"}]}
+    send(pid, {:executor_trace, trace})
+    Process.sleep(50)
+
+    # Verify Session stored the trace locally
+    assert {:ok, state} = Server.get_status(session_id)
+    assert state.last_executor_trace == trace
+
+    # Verify Kernel received the trace (session_id is used as root_agent_id by default)
+    [{kernel_pid, _}] = Registry.lookup(Pincer.Core.Introspection.Kernel.Registry, session_id)
+    kernel_state = :sys.get_state(kernel_pid)
+    assert kernel_state.last_trace == trace
+  end
+
+  test "session receives self_state updates from Kernel" do
+    tmp = Path.join(System.tmp_dir!(), "pincer_kstate_#{System.unique_integer([:positive])}")
+    session_id = "session_kstate_#{System.unique_integer([:positive])}"
+    workspace = Path.join(tmp, "workspaces/#{session_id}")
+
+    File.mkdir_p!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
+
+    pid =
+      start_supervised!(
+        {Server, [session_id: session_id, workspace_path: workspace, bootstrap?: false]}
+      )
+
+    # Simulate a kernel broadcast
+    mock_state = %{agent_id: session_id, focus: "testing"}
+    send(pid, {:kernel_self_state_updated, mock_state})
+    Process.sleep(20)
+
+    assert {:ok, state} = Server.get_status(session_id)
+    assert state.self_state == mock_state
   end
 end

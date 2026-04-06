@@ -112,6 +112,7 @@ defmodule Pincer.Application do
     # Logger starts early (before project config is applied) so its handler may still
     # use the default OTP template. Reconfigure it now that config is fully loaded.
     :logger.update_handler_config(:default, :formatter, Logger.default_formatter())
+    Logger.configure(level: :info)
     Pincer.Infra.Config.load()
 
     repo_config = Pincer.Infra.Config.get(:repo)
@@ -133,6 +134,8 @@ defmodule Pincer.Application do
       {Registry, keys: :duplicate, name: Pincer.Dispatcher.Registry},
       {DynamicSupervisor, strategy: :one_for_one, name: Pincer.MCP.Supervisor},
       Pincer.Adapters.Connectors.MCP.Manager,
+      {Registry, keys: :unique, name: Pincer.Core.Introspection.Kernel.Registry},
+      Pincer.Core.Introspection.Kernel.Supervisor,
       {Registry, keys: :unique, name: Pincer.Core.Session.Registry},
       Pincer.Core.CircuitBreaker,
       Pincer.Core.RateLimiter,

@@ -47,14 +47,15 @@ defmodule Pincer.Core.ExecutorParallelTest do
           }
         ]
       }
+
       {:ok, [chunk]}
     end)
     |> expect(:stream_completion, fn history, _opts ->
       # Verify both tool results are in history
       tool_results = Enum.filter(history, &(&1["role"] == "tool"))
       assert length(tool_results) == 2
-      
-      names = Enum.map(tool_results, &(&1["name"])) |> Enum.sort()
+
+      names = Enum.map(tool_results, & &1["name"]) |> Enum.sort()
       assert names == ["tool_a", "tool_b"]
 
       {:ok, [%{"choices" => [%{"delta" => %{"content" => "Done"}}]}]}
@@ -74,6 +75,7 @@ defmodule Pincer.Core.ExecutorParallelTest do
     duration = end_time - start_time
 
     # If sequential, it should take ~1000ms. If parallel, ~500ms + overhead.
-    assert duration < 850, "Expected parallel execution to take less than 850ms, but took #{duration}ms"
+    assert duration < 850,
+           "Expected parallel execution to take less than 850ms, but took #{duration}ms"
   end
 end
