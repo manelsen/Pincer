@@ -77,9 +77,10 @@ defmodule Pincer.Core.ToolRuntime do
         %{tool: tool_name, args: args, class: class, reason: :privileged_tool}},
        %{class: class, timeout_ms: timeout_ms, cancelled?: false}}
     else
+      context_with_approval = Map.put(context, "approval_granted", approval_granted?)
       task =
         Task.async(fn ->
-          registry.execute_tool(tool_name, args, context)
+          registry.execute_tool(tool_name, args, context_with_approval)
         end)
 
       case Task.yield(task, timeout_ms) || Task.shutdown(task, :brutal_kill) do
