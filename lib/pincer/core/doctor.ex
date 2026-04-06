@@ -60,7 +60,8 @@ defmodule Pincer.Core.Doctor do
       checks ++
         channel_token_checks(config, env_fetcher) ++
         dm_policy_checks(config) ++
-        runtime_cohesion_checks()
+        runtime_cohesion_checks() ++
+        alignment_integrity_checks()
 
     linked_checks = Enum.map(checks, &link_check(&1, run_id))
 
@@ -74,6 +75,47 @@ defmodule Pincer.Core.Doctor do
       config_path: config_path,
       run_id: run_id
     }
+  end
+
+  defp alignment_integrity_checks do
+    alias Pincer.Core.{AgentPaths, AlignmentIntegrity}
+
+    base = AgentPaths.base_dir()
+
+    if File.dir?(base) do
+      base
+      |> File.ls!()
+      |> Enum.reject(&String.starts_with?(&1, "."))
+      |> Enum.filter(&File.dir?(Path.join(base, &1)))
+      |> Enum.flat_map(fn agent_id ->
+        workspace = AgentPaths.workspace_root(agent_id)
+
+        case AlignmentIntegrity.verify(workspace) do
+          {:ok, []} ->
+            [
+              ok_check(
+                {:alignment, agent_id},
+                "Alignment integrity OK for #{agent_id}",
+                %{agent_id: agent_id}
+              )
+            ]
+
+          {:ok, violations} ->
+            Enum.map(violations, fn %{file: file, status: status} ->
+              warn_check(
+                {:alignment, agent_id},
+                "#{file} #{status} in #{agent_id} — possible tamper",
+                %{agent_id: agent_id, file: file, status: status}
+              )
+            end)
+
+          {:error, :no_snapshot} ->
+            []
+        end
+      end)
+    else
+      []
+    end
   end
 
   defp runtime_cohesion_checks do

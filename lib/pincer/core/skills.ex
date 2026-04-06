@@ -9,6 +9,7 @@ defmodule Pincer.Core.Skills do
   - install path confinement inside sandbox root
   """
 
+  alias Pincer.Adapters.SkillsRegistry.ClawHub, as: ClawHubRegistry
   alias Pincer.Adapters.SkillsRegistry.Local, as: LocalRegistry
 
   @default_sandbox_root "skills"
@@ -67,7 +68,12 @@ defmodule Pincer.Core.Skills do
   defp ensure_install_allowed(_), do: {:error, :install_not_allowed}
 
   defp registry_config(opts) do
-    registry = Keyword.get(opts, :registry, LocalRegistry)
+    registry =
+      case Keyword.get(opts, :registry, LocalRegistry) do
+        :clawhub -> ClawHubRegistry
+        module -> module
+      end
+
     registry_opts = Keyword.get(opts, :registry_opts, [])
     {registry, registry_opts}
   end

@@ -814,7 +814,12 @@ defmodule Pincer.Core.Executor do
                 Process.put(:workspace_path, parent_context.workspace_path)
                 Process.put(:executor_deps, parent_context.executor_deps)
                 Process.put(:executor_trace, parent_context.executor_trace)
-                Process.put(:executor_trace_session_pid, parent_context.executor_trace_session_pid)
+
+                Process.put(
+                  :executor_trace_session_pid,
+                  parent_context.executor_trace_session_pid
+                )
+
                 Process.put(:executor_run_opts, parent_context.executor_run_opts)
 
                 execute_tool_via_registry(call, session_pid, session_id, deps.tool_registry)
@@ -823,8 +828,11 @@ defmodule Pincer.Core.Executor do
               timeout: 300_000
             )
             |> Enum.map(fn
-              {:ok, result} -> result
-              {:error, reason} -> %{"role" => "tool", "content" => "Parallel execution error: #{inspect(reason)}"}
+              {:ok, result} ->
+                result
+
+              {:error, reason} ->
+                %{"role" => "tool", "content" => "Parallel execution error: #{inspect(reason)}"}
             end)
           else
             Enum.map(normalized_tool_calls, fn call ->

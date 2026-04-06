@@ -1,5 +1,7 @@
 import Config
 
+config :logger, level: :info
+
 config :pincer, Pincer.Infra.Repo,
   username: System.get_env("PINCER_DB_USER", "postgres"),
   password: System.get_env("PINCER_DB_PASSWORD", "postgres"),

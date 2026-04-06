@@ -57,6 +57,11 @@ config :pincer, :llm_providers, %{
     adapter: Pincer.LLM.Providers.GroqWhisper,
     env_key: "GROQ_API_KEY",
     default_model: "whisper-large-v3-turbo"
+  },
+  "minimax" => %{
+    adapter: Pincer.LLM.Providers.MiniMax,
+    env_key: "MINIMAX_API_KEY",
+    default_model: "MiniMax-M1"
   }
 }
 
@@ -67,7 +72,7 @@ config :pincer, :tool_adapters, [Pincer.Adapters.NativeToolRegistry]
 
 # Configuração de Logs
 config :logger,
-  level: :debug,
+  level: :info,
   colors: [enabled: true, info: :cyan, warn: :yellow, error: :red, debug: :magenta]
 
 config :logger, :default_formatter,

@@ -14,6 +14,7 @@ defmodule Pincer.Core.Session.Server do
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.ErrorUX
   alias Pincer.Core.Executor
+  alias Pincer.Core.Introspection
   alias Pincer.Core.SubAgentProgress
   alias Pincer.Infra.PubSub
   alias Pincer.Core.Orchestration.Blackboard
@@ -36,6 +37,14 @@ defmodule Pincer.Core.Session.Server do
 
     # 1. Retrieve persisted messages
     persisted = Storage.get_messages(session_id)
+
+    # 1b. Start Consciousness Kernel and register this session
+    Introspection.Kernel.ensure_started(root_agent_id)
+    Introspection.Kernel.register_session(root_agent_id, self())
+    self_state = Introspection.Kernel.get_self_state(root_agent_id)
+
+    # 1c. Verify alignment integrity (non-blocking)
+    verify_alignment_integrity(workspace_path, session_id)
 
     # 2. Subscribe to PubSub topics
     PubSub.subscribe("session:#{session_id}")
@@ -65,7 +74,10 @@ defmodule Pincer.Core.Session.Server do
       debounce_timer: nil,
       llm_client: llm_client,
       watcher_pid: nil,
-      pending_approval: nil
+      pending_approval: nil,
+      last_executor_trace: nil,
+      self_state: self_state,
+      injected_lesson_ids: []
     }
 
     # 4. Start Graph Watcher for this workspace
@@ -185,6 +197,7 @@ defmodule Pincer.Core.Session.Server do
     }
 
     publish(state.session_id, {:agent_response, response, usage})
+    Introspection.Kernel.report_activity(state.root_agent_id, :idle)
 
     {:noreply,
      %{
@@ -194,6 +207,24 @@ defmodule Pincer.Core.Session.Server do
          worker_pid: nil,
          token_usage_total: new_totals
      }}
+  end
+
+  @impl true
+  def handle_info({:executor_trace, trace_meta}, state) when is_map(trace_meta) do
+    # Delegate trace to Consciousness Kernel (reflection + lesson extraction)
+    Introspection.Kernel.report_trace(state.root_agent_id, trace_meta)
+
+    # Local lesson outcome feedback (depends on session-specific injected_lesson_ids)
+    if state.injected_lesson_ids != [] do
+      lesson_ids = state.injected_lesson_ids
+      outcome = trace_outcome(trace_meta)
+
+      Task.start(fn ->
+        update_lesson_outcomes(lesson_ids, outcome)
+      end)
+    end
+
+    {:noreply, %{state | last_executor_trace: trace_meta, injected_lesson_ids: []}}
   end
 
   @impl true
@@ -353,6 +384,15 @@ defmodule Pincer.Core.Session.Server do
       _ -> {:noreply, state}
     end
   end
+
+  # --- Consciousness Kernel callbacks ---
+
+  @impl true
+  def handle_info({:kernel_self_state_updated, self_state}, state) do
+    {:noreply, %{state | self_state: self_state}}
+  end
+
+  # --- Catch-all ---
 
   @impl true
   def handle_info(msg, state) do
@@ -554,7 +594,8 @@ defmodule Pincer.Core.Session.Server do
           new_buffer = state.input_buffer ++ [input.text]
           new_timer = Process.send_after(self(), :flush_input, 1200)
 
-          {:reply, {:ok, :buffered}, %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
+          {:reply, {:ok, :buffered},
+           %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
         end
     end
   end
@@ -591,14 +632,24 @@ defmodule Pincer.Core.Session.Server do
       end
 
     executor_opts =
-      [model_override: model_override_with_thinking, workspace_path: state.workspace_path]
+      [model_override: model_override_with_thinking, workspace_path: state.workspace_path, trace_events?: true]
       |> then(fn opts ->
         if state.llm_client, do: Keyword.put(opts, :llm_client, state.llm_client), else: opts
       end)
 
     {:ok, pid} = Executor.start(self(), state.session_id, new_history, executor_opts)
 
-    {:reply, {:ok, :started}, %{state | history: new_history, worker_pid: pid, status: :working}}
+    lesson_ids = Introspection.Kernel.get_lesson_ids(state.root_agent_id)
+    Introspection.Kernel.report_activity(state.root_agent_id, :working)
+
+    {:reply, {:ok, :started},
+     %{
+       state
+       | history: new_history,
+         worker_pid: pid,
+         status: :working,
+         injected_lesson_ids: lesson_ids
+     }}
   end
 
   defp map_input_to_history(%IncomingMessage{text: text, attachments: []}),
@@ -652,6 +703,8 @@ defmodule Pincer.Core.Session.Server do
 
     #{if style != "", do: "## COMMUNICATION STYLE:\n#{style}\n", else: ""}
     #{if history != "", do: "## SESSION HISTORY:\n#{history}\n", else: ""}
+    #{self_state_section(state)}
+    #{lessons_section(state.root_agent_id)}
     ## CAPABILITIES & TOOLS:
     You are a technical agent with access to multiple tools through the Model Context Protocol (MCP) and native Elixir integrations.
     You can read and write files, execute shell commands, manage projects, and more.
@@ -727,6 +780,88 @@ defmodule Pincer.Core.Session.Server do
       {:error, reason} ->
         Logger.error("[SESSION] #{sid} evaluate_blackboard_update failed: #{inspect(reason)}")
     end
+  end
+
+  defp self_state_section(state) do
+    case state.self_state do
+      nil ->
+        ""
+
+      self_state ->
+        context = Pincer.Core.Introspection.SelfState.to_prompt_context(self_state)
+
+        if context == "" do
+          ""
+        else
+          """
+          ## INTERNAL STATE:
+          #{context}
+          """
+        end
+    end
+  end
+
+  defp lessons_section(agent_id) do
+    alias Pincer.Core.Introspection.LessonStore
+
+    lessons = LessonStore.top_lessons(agent_id, 5, min_confidence: 0.4)
+
+    if lessons == [] do
+      ""
+    else
+      items = Enum.map_join(lessons, "\n", fn l -> "- #{l.content}" end)
+
+      """
+      ## LESSONS FROM EXPERIENCE:
+      #{items}
+      """
+    end
+  rescue
+    _ -> ""
+  end
+
+  defp verify_alignment_integrity(workspace_path, session_id) do
+    alias Pincer.Core.AlignmentIntegrity
+
+    case AlignmentIntegrity.verify(workspace_path) do
+      {:ok, []} ->
+        :ok
+
+      {:ok, violations} ->
+        files = Enum.map_join(violations, ", ", & &1.file)
+
+        Logger.warning("[SESSION] #{session_id} alignment integrity violation: #{files}")
+
+      {:error, :no_snapshot} ->
+        # First boot or post-bootstrap — create initial snapshot if files exist
+        if AlignmentIntegrity.protected_files(workspace_path) != [] do
+          AlignmentIntegrity.snapshot!(workspace_path)
+          Logger.info("[SESSION] #{session_id} alignment integrity snapshot created")
+        end
+    end
+  end
+
+  # --- SIS (Self-Improving System) helpers ---
+
+  defp trace_outcome(trace_meta) do
+    steps = trace_meta[:steps] || trace_meta["steps"] || []
+
+    has_error? =
+      Enum.any?(steps, fn
+        %{kind: "error"} -> true
+        %{"kind" => "error"} -> true
+        _ -> false
+      end)
+
+    if has_error?, do: :failure, else: :success
+  end
+
+  defp update_lesson_outcomes(lesson_ids, outcome) do
+    alias Pincer.Core.Introspection.LessonStore
+
+    Enum.each(lesson_ids, fn id ->
+      LessonStore.record_outcome(id, outcome)
+    end)
   end
 
   # --- Boilerplate API ---

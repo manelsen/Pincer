@@ -19,6 +19,20 @@ defmodule Pincer.Core.SkillsTest do
     end
   end
 
+  defmodule ClawHubHttpStub do
+    def get(_url, _opts) do
+      {:ok,
+       %{
+         status: 200,
+         body: %{
+           "id" => "skill-a",
+           "source" => "https://trusted.example.com/skill-a.tgz",
+           "checksum" => "sha256:" <> String.duplicate("a", 64)
+         }
+       }}
+    end
+  end
+
   setup do
     tmp = Path.join(System.tmp_dir!(), "pincer_skills_#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
@@ -180,6 +194,17 @@ defmodule Pincer.Core.SkillsTest do
                allow_install: true,
                allowed_sources: ["trusted.example.com"],
                sandbox_root: link_root
+             )
+  end
+
+  test "install/2 supports symbolic clawhub registry selector", %{tmp: tmp} do
+    assert {:ok, %{id: "skill-a"}} =
+             Skills.install("skill-a",
+               registry: :clawhub,
+               registry_opts: [http_client: ClawHubHttpStub, base_url: "https://clawhub.local"],
+               allow_install: true,
+               allowed_sources: ["trusted.example.com"],
+               sandbox_root: tmp
              )
   end
 end
