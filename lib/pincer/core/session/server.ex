@@ -75,6 +75,7 @@ defmodule Pincer.Core.Session.Server do
       llm_client: llm_client,
       watcher_pid: nil,
       pending_approval: nil,
+      auto_approve_until: nil,
       last_executor_trace: nil,
       self_state: self_state,
       injected_lesson_ids: []
@@ -360,9 +361,14 @@ defmodule Pincer.Core.Session.Server do
   def handle_info({:approval_required, call_id, command}, state) do
     Logger.info("[SESSION] #{state.session_id} Approval required for #{call_id}: #{command}")
 
-    publish(state.session_id, {:approval_ui, call_id, command})
-
-    {:noreply, %{state | pending_approval: {call_id, command}}}
+    if auto_approve_active?(state) do
+      Logger.info("[SESSION] #{state.session_id} Auto-approved: #{command}")
+      send_auto_approval(state, call_id)
+      {:noreply, state}
+    else
+      publish(state.session_id, {:approval_ui, call_id, command})
+      {:noreply, %{state | pending_approval: {call_id, command}}}
+    end
   end
 
   @impl true
@@ -532,6 +538,15 @@ defmodule Pincer.Core.Session.Server do
     {:reply, :ok, %{state | usage_display: level}}
   end
 
+  @impl true
+  def handle_call({:approve_all, seconds}, _from, state) do
+    until = DateTime.add(DateTime.utc_now(), seconds, :second)
+    Logger.info("[SESSION] #{state.session_id} Auto-approve enabled until #{until}")
+    # If there's a pending approval, auto-approve it immediately
+    state = maybe_auto_approve_pending(%{state | auto_approve_until: until})
+    {:reply, :ok, state}
+  end
+
   alias Pincer.Core.Structs.IncomingMessage
 
   @impl true
@@ -665,6 +680,30 @@ defmodule Pincer.Core.Session.Server do
 
   defp map_input_to_history(input) when is_binary(input),
     do: %{"role" => "user", "content" => input}
+
+  defp auto_approve_active?(%{auto_approve_until: nil}), do: false
+
+  defp auto_approve_active?(%{auto_approve_until: until}) do
+    DateTime.compare(until, DateTime.utc_now()) == :gt
+  end
+
+  defp send_auto_approval(state, call_id) do
+    if is_pid(state.worker_pid) and Process.alive?(state.worker_pid) do
+      send(state.worker_pid, {:tool_approval_result, call_id, :approved})
+    end
+  end
+
+  defp maybe_auto_approve_pending(%{pending_approval: nil} = state), do: state
+
+  defp maybe_auto_approve_pending(%{pending_approval: {call_id, _}} = state) do
+    if auto_approve_active?(state) do
+      Logger.info("[SESSION] #{state.session_id} Auto-approved pending: #{call_id}")
+      send_auto_approval(state, call_id)
+      %{state | pending_approval: nil}
+    else
+      state
+    end
+  end
 
   defp publish(session_id, event) do
     PubSub.broadcast("session:#{session_id}", event)
@@ -891,4 +930,11 @@ defmodule Pincer.Core.Session.Server do
 
   def set_usage(id, level),
     do: GenServer.call(via_tuple(id), {:set_usage, level})
+
+  @doc """
+  Enable auto-approval for all privileged tools for `duration_seconds`.
+  """
+  @spec approve_all(String.t(), pos_integer()) :: :ok
+  def approve_all(id, duration_seconds \\ 600),
+    do: GenServer.call(via_tuple(id), {:approve_all, duration_seconds})
 end

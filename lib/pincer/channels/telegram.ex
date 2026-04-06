@@ -1531,10 +1531,20 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         context = session_context_for_chat(chat_id, chat_type)
         session_id = context.session_id
         ensure_session_started(context)
-        answer = if decision == :approved, do: "aprovo", else: "rejeito"
-        Server.process_input(session_id, answer)
-        label = if decision == :approved, do: "✅ Aprovado", else: "❌ Rejeitado"
-        edit_callback_message(chat_id, message_id, label, parse_mode: "HTML")
+
+        case decision do
+          :approved ->
+            Server.process_input(session_id, "aprovo")
+            edit_callback_message(chat_id, message_id, "✅ Aprovado", parse_mode: "HTML")
+
+          :rejected ->
+            Server.process_input(session_id, "rejeito")
+            edit_callback_message(chat_id, message_id, "❌ Rejeitado", parse_mode: "HTML")
+
+          :approve_all ->
+            Server.approve_all(session_id, 600)
+            edit_callback_message(chat_id, message_id, "🔓 Auto-aprovação ativa por 10 minutos", parse_mode: "HTML")
+        end
 
       {:error, reason} ->
         Logger.warning("[TELEGRAM] Invalid callback payload: #{inspect(reason)}")
