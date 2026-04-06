@@ -136,11 +136,19 @@ defmodule Pincer.Adapters.Tools.SafeShell do
   def execute(%{"command" => command} = args, context \\ %{}) do
     workspace_restrict = restrict_to_workspace?(args)
     workspace_root = Map.get(context, "workspace_path") || workspace_root(args)
+    approval_granted = Map.get(context, "approval_granted", false)
 
     # 1. Truncate
     command = String.slice(command, 0, @max_command_length)
 
     cond do
+      approval_granted ->
+        Logger.info("[SAFE-SHELL] Pre-approved command: #{command}")
+        call_mcp(command,
+          workspace_restrict: workspace_restrict,
+          workspace_root: workspace_root
+        )
+
       String.match?(command, @multiline_or_line_continuation) ->
         audit_required(command, "Detected multiline or line-continuation shell payload")
 
