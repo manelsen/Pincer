@@ -59,8 +59,9 @@ defmodule Mix.Tasks.Pincer.AgentTest do
     assert File.read!(AgentPaths.history_path(workspace)) =~ "Template History"
     assert File.dir?(AgentPaths.sessions_dir(workspace))
 
-    assert File.read!(AgentPaths.identity_path(workspace)) =~ "Template Identity"
-    assert File.read!(AgentPaths.soul_path(workspace)) =~ "Template Soul"
+    # IDENTITY and SOUL are NOT seeded — deferred to bootstrap ritual
+    refute File.exists?(AgentPaths.identity_path(workspace))
+    refute File.exists?(AgentPaths.soul_path(workspace))
     assert File.read!(AgentPaths.user_path(workspace)) =~ "Template User"
 
     assert output =~ "workspaces/annie/.pincer"

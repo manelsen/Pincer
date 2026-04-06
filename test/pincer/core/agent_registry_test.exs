@@ -35,8 +35,9 @@ defmodule Pincer.Core.AgentRegistryTest do
     assert agent_id =~ ~r/^[0-9a-f]{6}$/
     assert workspace_path == AgentPaths.workspace_root(agent_id)
     assert File.read!(AgentPaths.bootstrap_path(workspace_path)) =~ "Template Bootstrap"
-    assert File.read!(AgentPaths.identity_path(workspace_path)) =~ "Template Identity"
-    assert File.read!(AgentPaths.soul_path(workspace_path)) =~ "Template Soul"
+    # IDENTITY and SOUL are NOT seeded — deferred to bootstrap ritual
+    refute File.exists?(AgentPaths.identity_path(workspace_path))
+    refute File.exists?(AgentPaths.soul_path(workspace_path))
   end
 
   test "create_root_agent!/1 accepts explicit ids" do
@@ -44,7 +45,8 @@ defmodule Pincer.Core.AgentRegistryTest do
       AgentRegistry.create_root_agent!(agent_id: "annie")
 
     assert workspace_path == AgentPaths.workspace_root("annie")
-    assert File.read!(AgentPaths.identity_path(workspace_path)) =~ "Template Identity"
-    assert File.read!(AgentPaths.soul_path(workspace_path)) =~ "Template Soul"
+    # IDENTITY and SOUL are NOT seeded — deferred to bootstrap ritual
+    refute File.exists?(AgentPaths.identity_path(workspace_path))
+    refute File.exists?(AgentPaths.soul_path(workspace_path))
   end
 end

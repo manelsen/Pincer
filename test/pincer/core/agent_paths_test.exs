@@ -16,8 +16,9 @@ defmodule Pincer.Core.AgentPathsTest do
     assert workspace ==
              AgentPaths.ensure_workspace!(workspace, bootstrap?: true, template_root: tmp)
 
-    assert File.read!(AgentPaths.identity_path(workspace)) == "# Root Identity\n"
-    assert File.read!(AgentPaths.soul_path(workspace)) == "# Root Soul\n"
+    # IDENTITY and SOUL are NOT seeded — deferred to the bootstrap ritual
+    refute File.exists?(AgentPaths.identity_path(workspace))
+    refute File.exists?(AgentPaths.soul_path(workspace))
     assert File.read!(AgentPaths.user_path(workspace)) == "# Root User\n"
     assert File.read!(AgentPaths.bootstrap_path(workspace)) == "# Root Bootstrap\n"
     assert File.exists?(AgentPaths.memory_path(workspace))
@@ -72,8 +73,9 @@ defmodule Pincer.Core.AgentPathsTest do
 
     AgentPaths.ensure_workspace!(workspace, bootstrap?: true, template_root: override)
 
-    assert File.read!(AgentPaths.identity_path(workspace)) == "# Override Identity\n"
-    assert File.read!(AgentPaths.soul_path(workspace)) == "# Override Soul\n"
+    # IDENTITY and SOUL are NOT seeded — deferred to bootstrap ritual
+    refute File.exists?(AgentPaths.identity_path(workspace))
+    refute File.exists?(AgentPaths.soul_path(workspace))
     assert File.read!(AgentPaths.user_path(workspace)) == "# Override User\n"
     assert File.read!(AgentPaths.bootstrap_path(workspace)) == "# Override Bootstrap\n"
   end
@@ -87,10 +89,23 @@ defmodule Pincer.Core.AgentPathsTest do
       template_root: Path.join(tmp, "missing")
     )
 
-    assert File.read!(AgentPaths.identity_path(workspace)) =~ "# Pincer"
-    assert File.read!(AgentPaths.soul_path(workspace)) =~ "Core Truths"
+    # IDENTITY and SOUL are NOT seeded — deferred to bootstrap ritual
+    refute File.exists?(AgentPaths.identity_path(workspace))
+    refute File.exists?(AgentPaths.soul_path(workspace))
     assert File.read!(AgentPaths.user_path(workspace)) =~ "# User Context"
     assert File.read!(AgentPaths.bootstrap_path(workspace)) =~ "# BOOTSTRAP: THE BIRTH RITUAL"
+  end
+
+  test "bootstrap_active? is true when identity and soul are absent" do
+    tmp = tempdir("agent_paths_bootstrap_active")
+    workspace = Path.join(tmp, "workspaces/root_agent")
+
+    AgentPaths.ensure_workspace!(workspace,
+      bootstrap?: true,
+      template_root: Path.join(tmp, "missing")
+    )
+
+    assert AgentPaths.bootstrap_active?(workspace)
   end
 
   test "template seed paths point to canonical workspace template only" do

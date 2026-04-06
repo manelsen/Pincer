@@ -277,8 +277,6 @@ defmodule Pincer.Core.AgentPaths do
     workspace_path
     |> seed_specs_for(
       [
-        {@identity_file, default_identity()},
-        {@soul_file, default_soul()},
         {@user_file, default_user()},
         {@bootstrap_file, bootstrap_fallback}
       ],
