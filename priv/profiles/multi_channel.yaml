@@ -1,0 +1,49 @@
+# Pincer — Multi-Channel Production Profile
+# Full setup: Discord + Telegram + Slack running simultaneously.
+
+database:
+  url: "ecto://pincer:pincer@postgres/pincer"
+  pool_size: 20
+
+llm:
+  default_provider: openrouter
+  providers:
+    openrouter:
+      adapter: Pincer.LLM.Providers.OpenaiCompat
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: "${OPENROUTER_API_KEY}"
+      default_model: "anthropic/claude-3-sonnet"
+      env_key: "OPENROUTER_API_KEY"
+    google:
+      adapter: Pincer.LLM.Providers.Google
+      api_key: "${GOOGLE_API_KEY}"
+      default_model: "gemini-2.0-flash"
+      env_key: "GOOGLE_API_KEY"
+
+channels:
+  discord:
+    enabled: true
+    token: "${DISCORD_BOT_TOKEN}"
+    application_id: "${DISCORD_APPLICATION_ID}"
+    intents: [guild_messages, direct_messages, message_content]
+    workspace_only: true
+  telegram:
+    enabled: true
+    token: "${TELEGRAM_BOT_TOKEN}"
+    pairing_mode: true
+  slack:
+    enabled: true
+    bot_token: "${SLACK_BOT_TOKEN}"
+    app_token: "${SLACK_APP_TOKEN}"
+    signing_secret: "${SLACK_SIGNING_SECRET}"
+    socket_mode: true
+
+agents:
+  default:
+    role: operator
+    workspace: "workspaces/prod"
+
+rate_limits:
+  discord: [20, 60000]
+  telegram: [30, 60000]
+  slack: [20, 60000]

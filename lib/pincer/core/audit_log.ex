@@ -14,14 +14,14 @@ defmodule Pincer.Core.AuditLog do
   @timestamps_opts [type: :utc_datetime_usec]
 
   schema "audit_log" do
-    field :event_type, :string
-    field :actor, :string
-    field :target, :string
-    field :channel, :string
-    field :session_id, :string
-    field :outcome, :string
-    field :metadata, :map, default: %{}
-    field :inserted_at, :utc_datetime_usec, autogenerate: {DateTime, :utc_now, []}
+    field(:event_type, :string)
+    field(:actor, :string)
+    field(:target, :string)
+    field(:channel, :string)
+    field(:session_id, :string)
+    field(:outcome, :string)
+    field(:metadata, :map, default: %{})
+    field(:inserted_at, :utc_datetime_usec, autogenerate: {DateTime, :utc_now, []})
   end
 
   @required [:event_type, :outcome]

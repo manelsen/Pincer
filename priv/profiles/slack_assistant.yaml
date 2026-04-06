@@ -1,0 +1,34 @@
+# Pincer — Slack Assistant Profile
+# Quick-start template for a Slack workspace assistant.
+# Usage: copy to config.yaml, fill in your tokens, and run:
+#   docker compose up --build -d
+
+database:
+  url: "ecto://pincer:pincer@postgres/pincer"
+  pool_size: 10
+
+llm:
+  default_provider: openrouter
+  providers:
+    openrouter:
+      adapter: Pincer.LLM.Providers.OpenaiCompat
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: "${OPENROUTER_API_KEY}"
+      default_model: "anthropic/claude-3-sonnet"
+      env_key: "OPENROUTER_API_KEY"
+
+channels:
+  slack:
+    enabled: true
+    bot_token: "${SLACK_BOT_TOKEN}"
+    app_token: "${SLACK_APP_TOKEN}"
+    signing_secret: "${SLACK_SIGNING_SECRET}"
+    socket_mode: true
+
+agents:
+  default:
+    role: operator
+    workspace: "workspaces/slack_assistant"
+
+rate_limits:
+  slack: [20, 60000]

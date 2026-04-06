@@ -1,0 +1,39 @@
+# Pincer — Discord Bot Profile
+# Quick-start template for running Pincer as a Discord bot.
+# Usage: copy to config.yaml, fill in your tokens, and run:
+#   docker compose up --build -d
+
+database:
+  url: "ecto://pincer:pincer@postgres/pincer"
+  pool_size: 10
+
+llm:
+  default_provider: openrouter
+  providers:
+    openrouter:
+      adapter: Pincer.LLM.Providers.OpenaiCompat
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: "${OPENROUTER_API_KEY}"
+      default_model: "anthropic/claude-3-haiku"
+      env_key: "OPENROUTER_API_KEY"
+
+channels:
+  discord:
+    enabled: true
+    token: "${DISCORD_BOT_TOKEN}"
+    application_id: "${DISCORD_APPLICATION_ID}"
+    command_prefix: "/"
+    intents:
+      - guild_messages
+      - direct_messages
+      - message_content
+    workspace_only: true
+    allow_dms: false
+
+agents:
+  default:
+    role: bot
+    workspace: "workspaces/discord_bot"
+
+rate_limits:
+  discord: [20, 60000]
