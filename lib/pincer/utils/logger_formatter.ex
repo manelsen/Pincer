@@ -45,9 +45,18 @@ defmodule Pincer.Utils.LoggerFormatter do
     end
   end
 
-  defp format_timestamp({date, {h, m, s, ms}}) do
+  defp format_timestamp(timestamp) do
+    {date, {h, m, s, ms}} = shift_utc(timestamp)
     {_y, month, d} = date
     "#{pad(d)}/#{pad(month)} #{pad(h)}:#{pad(m)}:#{pad(s)}.#{pad_ms(ms)}"
+  end
+
+  defp shift_utc({date, {h, m, s, ms}}) do
+    offset = Application.get_env(:pincer, :log_utc_offset, 0)
+    greg_secs = :calendar.datetime_to_gregorian_seconds({date, {h, m, s}})
+    shifted = greg_secs + offset * 3600
+    {new_date, {new_h, new_m, new_s}} = :calendar.gregorian_seconds_to_datetime(shifted)
+    {new_date, {new_h, new_m, new_s, ms}}
   end
 
   defp pad(n) when n < 10, do: "0#{n}"
