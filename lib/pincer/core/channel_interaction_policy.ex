@@ -15,6 +15,7 @@ defmodule Pincer.Core.ChannelInteractionPolicy do
           | {:ok, :show_menu}
           | {:ok, {:approval, :approved}}
           | {:ok, {:approval, :rejected}}
+          | {:ok, {:approval, :approve_all}}
           | {:error, :invalid_payload | :payload_too_large | :invalid_channel}
 
   @telegram_payload_max_bytes 64
@@ -68,7 +69,7 @@ defmodule Pincer.Core.ChannelInteractionPolicy do
   """
   @spec approval_button_spec() :: [{label :: String.t(), payload :: String.t()}]
   def approval_button_spec do
-    [{"✅ Aprovo", "appr:y"}, {"❌ Rejeito", "appr:n"}]
+    [{"✅ Aprovo", "appr:y"}, {"🔓 Tudo 10min", "appr:a"}, {"❌ Rejeito", "appr:n"}]
   end
 
   @doc """
@@ -88,6 +89,7 @@ defmodule Pincer.Core.ChannelInteractionPolicy do
   defp do_parse("show_menu"), do: {:ok, :show_menu}
   defp do_parse("appr:y"), do: {:ok, {:approval, :approved}}
   defp do_parse("appr:n"), do: {:ok, {:approval, :rejected}}
+  defp do_parse("appr:a"), do: {:ok, {:approval, :approve_all}}
 
   defp do_parse("select_provider:" <> provider_id) do
     if provider_id == "" do
