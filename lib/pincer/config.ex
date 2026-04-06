@@ -190,6 +190,11 @@ defmodule Pincer.Infra.Config do
           Logger.info("LLM Provider: #{provider}")
         end
 
+        if intro_config = config["introspection"] do
+          Application.put_env(:pincer, :introspection, intro_config)
+          Logger.info("Introspection Provider: #{intro_config["provider"] || "default LLM"}")
+        end
+
         if db_config = config["database"] do
           current_repo_config = Application.get_env(:pincer, Pincer.Infra.Repo, [])
 
