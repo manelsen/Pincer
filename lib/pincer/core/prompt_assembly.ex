@@ -9,6 +9,7 @@ defmodule Pincer.Core.PromptAssembly do
   require Logger
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.MemoryRecall
+  alias Pincer.Core.Session.Pruner
 
   @max_recent_messages 15
 
@@ -37,6 +38,7 @@ defmodule Pincer.Core.PromptAssembly do
     context_strategy = Keyword.get(opts, :context_strategy)
 
     history
+    |> Pruner.prune()
     |> prune_history(adjusted_limit, context_strategy: context_strategy, llm_client: llm_client)
     |> augment_history(long_term_memory, current_time, opts)
   end
