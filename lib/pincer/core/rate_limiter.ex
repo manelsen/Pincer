@@ -71,7 +71,9 @@ defmodule Pincer.Core.RateLimiter do
 
   defp limit_for(channel_type) when is_atom(channel_type) do
     custom = Application.get_env(:pincer, :rate_limits, %{})
-    Map.get(custom, channel_type) || Map.get(@default_limits, channel_type) || @default_limits.default
+
+    Map.get(custom, channel_type) || Map.get(@default_limits, channel_type) ||
+      @default_limits.default
   end
 
   defp limit_for(channel_type) when is_binary(channel_type) do

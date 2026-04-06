@@ -14,18 +14,29 @@ defmodule Pincer.Core.RBAC do
   @type role :: :admin | :operator | :bot
 
   @permissions %{
-    admin: MapSet.new([
-      :send_message, :manage_sessions, :approve_tools,
-      :view_audit_log, :change_config, :manage_agents,
-      :view_metrics, :override_policy
-    ]),
-    operator: MapSet.new([
-      :send_message, :manage_sessions, :approve_tools,
-      :view_metrics, :view_audit_log
-    ]),
-    bot: MapSet.new([
-      :send_message
-    ])
+    admin:
+      MapSet.new([
+        :send_message,
+        :manage_sessions,
+        :approve_tools,
+        :view_audit_log,
+        :change_config,
+        :manage_agents,
+        :view_metrics,
+        :override_policy
+      ]),
+    operator:
+      MapSet.new([
+        :send_message,
+        :manage_sessions,
+        :approve_tools,
+        :view_metrics,
+        :view_audit_log
+      ]),
+    bot:
+      MapSet.new([
+        :send_message
+      ])
   }
 
   @doc "Returns true if the given role has the given permission."

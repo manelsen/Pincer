@@ -114,7 +114,10 @@ defmodule Pincer.Core.CircuitBreaker do
 
   defp on_failure(name, reason) do
     cb = get_or_init(name)
-    threshold = Application.get_env(:pincer, :circuit_breaker_threshold, @default_failure_threshold)
+
+    threshold =
+      Application.get_env(:pincer, :circuit_breaker_threshold, @default_failure_threshold)
+
     new_count = cb.failure_count + 1
 
     updated =
@@ -123,7 +126,12 @@ defmodule Pincer.Core.CircuitBreaker do
           "CircuitBreaker: #{name} OPENED after #{new_count} failures. Reason: #{inspect(reason)}"
         )
 
-        %{cb | state: :open, failure_count: new_count, last_failure_at: System.monotonic_time(:millisecond)}
+        %{
+          cb
+          | state: :open,
+            failure_count: new_count,
+            last_failure_at: System.monotonic_time(:millisecond)
+        }
       else
         %{cb | failure_count: new_count, last_failure_at: System.monotonic_time(:millisecond)}
       end

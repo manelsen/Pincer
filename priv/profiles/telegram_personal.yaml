@@ -1,0 +1,38 @@
+# Pincer — Telegram Personal Assistant Profile
+# Quick-start for a personal Telegram bot (DM pairing mode).
+# Usage: copy to config.yaml, fill in your token, and run:
+#   docker compose up --build -d
+
+database:
+  url: "ecto://pincer:pincer@postgres/pincer"
+  pool_size: 5
+
+llm:
+  default_provider: google
+  providers:
+    google:
+      adapter: Pincer.LLM.Providers.Google
+      api_key: "${GOOGLE_API_KEY}"
+      default_model: "gemini-2.0-flash"
+      env_key: "GOOGLE_API_KEY"
+    openrouter:
+      adapter: Pincer.LLM.Providers.OpenaiCompat
+      base_url: "https://openrouter.ai/api/v1"
+      api_key: "${OPENROUTER_API_KEY}"
+      default_model: "anthropic/claude-3-haiku"
+      env_key: "OPENROUTER_API_KEY"
+
+channels:
+  telegram:
+    enabled: true
+    token: "${TELEGRAM_BOT_TOKEN}"
+    pairing_mode: true
+    allow_dms: true
+
+agents:
+  default:
+    role: admin
+    workspace: "workspaces/telegram_personal"
+
+rate_limits:
+  telegram: [30, 60000]

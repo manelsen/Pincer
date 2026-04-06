@@ -24,13 +24,13 @@ defmodule Pincer.Core.DeadLetterQueue do
   @timestamps_opts [type: :utc_datetime_usec]
 
   schema "dead_letter_queue" do
-    field :operation_type, :string
-    field :payload, :map
-    field :error, :string
-    field :attempt_count, :integer, default: 1
-    field :last_attempted_at, :utc_datetime_usec
-    field :resolved_at, :utc_datetime_usec
-    field :resolution, :string
+    field(:operation_type, :string)
+    field(:payload, :map)
+    field(:error, :string)
+    field(:attempt_count, :integer, default: 1)
+    field(:last_attempted_at, :utc_datetime_usec)
+    field(:resolved_at, :utc_datetime_usec)
+    field(:resolution, :string)
 
     timestamps()
   end
