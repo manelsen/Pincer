@@ -1,82 +1,155 @@
-# SPECS — ClawHub Skills + Proatividade/Auto-Reflexao + Logging INFO
+# SPECS — Pincer Subsystems
 
-## Problema
+## Environment Variables & API Keys
 
-O Pincer esta com log default em `DEBUG`, sem integracao explicita com ClawHub para descoberta/instalacao de skills, e sem um loop estruturado de auto-reflexao proativa inspirado no ArgentOS Core.
+Each LLM provider requires its own API key set as an environment variable.
+The system resolves the key at runtime via the provider's `env_key` setting
+(defined in `config/config.exs` under `:llm_providers`).
 
-## Objetivos
+### Required keys per provider
 
-1. Alterar o nivel padrao de log para `INFO`.
-2. Adicionar suporte de registro de skills via ClawHub no fluxo `Pincer.Core.Skills`.
-3. Adicionar mecanismo de auto-reflexao e proatividade baseado em traces recentes do `Executor`.
+| Provider | Env Variable | Used by default? |
+|----------|-------------|-----------------|
+| `google` | `GOOGLE_API_KEY` | No |
+| `openrouter` | `OPENROUTER_API_KEY` | Yes (fallback) |
+| `opencode_zen` | `OPENCODE_ZEN_API_KEY` | Yes (fallback) |
+| `z_ai` | `Z_AI_API_KEY` | Yes (introspection + balanced tier) |
+| `z_ai_coding` | `Z_AI_CODING_API_KEY` | Yes (default provider + powerful tier) |
+| `moonshot` | `MOONSHOT_API_KEY` | No |
+| `groq` | `GROQ_API_KEY` | Yes (local/fast tiers) |
+| `minimax` | `MINIMAX_API_KEY` | No |
 
-## Interfaces (Doc-First)
+### Minimal setup
 
-### 1) Logging
+To run with introspection + model router + default provider:
 
-- Arquivo alvo: `config/config.exs`
-- Mudanca:
-  - `config :logger, level: :info`
+```
+Z_AI_API_KEY=...          # introspection + model router balanced tier
+Z_AI_CODING_API_KEY=...   # default LLM provider + model router powerful tier
+GROQ_API_KEY=...          # model router local/fast tiers
+TELEGRAM_BOT_TOKEN=...    # if Telegram channel enabled
+```
 
-### 2) ClawHub Skills Registry
+Copy `.env.example` to `.env` and fill in the keys for providers you use.
 
-- Novo modulo: `Pincer.Adapters.SkillsRegistry.ClawHub`
-- API publica:
-  - `list_skills(opts \\ []) :: {:ok, [map()]} | {:error, term()}`
-  - `fetch_skill(skill_id, opts \\ []) :: {:ok, map()} | {:error, term()}`
-- Entradas esperadas em `opts`:
-  - `:base_url` (default: `https://api.clawhub.dev`)
-  - `:api_key` (opcional; usa env `CLAWHUB_API_KEY` quando ausente)
-  - `:http_client` (injecao para testes; default `Req`)
-  - `:registry_path` (default endpoint de skills)
+### Database overrides
 
-### 3) Core Skills com selecao de registry
+Optional env vars can override `config.yaml` database settings:
 
-- Modulo: `Pincer.Core.Skills`
-- Nova regra:
-  - `registry_config/1` deve aceitar `registry: :clawhub` e mapear para `Pincer.Adapters.SkillsRegistry.ClawHub`.
-  - Mantem compatibilidade com `registry: module()`.
+```
+PINCER_DB_HOST, PINCER_DB_PORT, PINCER_DB_USER, PINCER_DB_PASSWORD,
+PINCER_DB_NAME, PINCER_DB_POOL_SIZE, PINCER_DB_SSL
+```
 
-### 4) Auto-reflexao + proatividade
+---
 
-- Novo modulo: `Pincer.Core.Reflection`
-- API publica:
-  - `next_prompt(trace_metadata, opts \\ []) :: {:ok, String.t()} | :ignore`
-  - `classify(trace_metadata) :: :success | :failure | :tool_heavy | :shallow`
-- Integracao:
-  - `Pincer.Core.Session.Server` passa a armazenar ultimo trace recebido em estado.
-  - A cada `:heartbeat`, quando sessao estiver `:idle`, pode disparar um prompt interno de reflexao via `process_standard_input/2`, sem depender de mensagem do usuario.
-- Regras iniciais:
-  - Somente refletir quando houver trace recente.
-  - Throttle minimo entre reflexoes (configuravel por opts).
-  - Nunca refletir se worker estiver ativo.
+## Subsystems
 
-## TDD (RED -> GREEN -> REFACTOR)
+### 1. Session Pruner (`Pincer.Core.Session.Pruner`)
 
-### Testes RED previstos
+Replaces old tool results in conversation history with compact summaries
+to reduce token bloat. Integrated into `PromptAssembly.prepare/3`.
 
-1. `test/pincer/adapters/skills_registry/clawhub_test.exs`
-   - lista skills a partir de payload ClawHub
-   - busca skill por id
-   - trata erro HTTP/JSON invalido
+```elixir
+# Default: keep last 6 messages intact, summarize older tool results
+Pruner.prune(history)
+# Custom window
+Pruner.prune(history, keep_recent: 10)
+```
 
-2. `test/pincer/core/skills_test.exs` (incremental)
-   - `registry: :clawhub` resolve para adapter correto
+### 2. Model Router (`Pincer.Core.LLM.ModelRouter`)
 
-3. `test/pincer/core/reflection_test.exs`
-   - classifica trace com erro como `:failure`
-   - gera prompt quando trace e elegivel
-   - retorna `:ignore` sem dados suficientes
+Scores request complexity (0.0–1.0) and routes to a tiered provider/model.
+Controlled by `config.yaml` → `model_router` section.
 
-4. `test/pincer/core/session_server_test.exs` (incremental)
-   - heartbeat em estado idle usa reflexao (quando elegivel)
-   - heartbeat nao dispara reflexao com worker ativo
+```elixir
+{:ok, :balanced, "z_ai", "glm-4.7"} = ModelRouter.route(history)
+{:ok, :default} = ModelRouter.route(history)  # when disabled
+```
 
-## Restricoes e seguranca
+Tier thresholds: `local < 0.25`, `fast < 0.45`, `balanced < 0.65`, `powerful >= 0.65`.
 
-- Manter boundary:
-  - `Core` nao faz HTTP direto.
-  - HTTP fica no adapter `Pincer.Adapters.SkillsRegistry.ClawHub`.
-- Sem catches amplos silenciosos.
-- Reaproveitar validacoes existentes de `Pincer.Core.Skills` para source/checksum/path.
+Scoring factors: tool calls (0.30), technical content (0.30), conversation depth (0.20),
+last message length (0.20).
 
+**Important:** each tier's provider must have its API key set in `.env`. If a key is
+missing the LLM client will fail on that tier. Set `model_router.enabled: false` in
+`config.yaml` to disable routing.
+
+### 3. Command Queue (`Pincer.Core.Session.CommandQueue`)
+
+Stateful message queue with three modes replacing the simple debounce buffer.
+
+| Mode | Behavior |
+|------|----------|
+| `:collect` | Buffer messages, flush on drain (agent idle) |
+| `:steer` | Flush immediately on every push (interrupt agent) |
+| `:followup` | Hold until explicit drain (next-turn queueing) |
+
+```elixir
+q = CommandQueue.new(:collect)
+{:ok, q} = CommandQueue.push(q, "hello")
+{messages, q} = CommandQueue.drain(q)
+```
+
+### 4. Heartbeat Contract Engine (`Pincer.Core.Heartbeat.ContractEngine`)
+
+ETS-backed promise tracking for proactive agent accountability. Agents record
+promises during turns; heartbeat pulses evaluate expiration.
+
+```elixir
+:ok = ContractEngine.make_promise("agent_1", "Monitor repo X", deadline: future)
+results = ContractEngine.evaluate("agent_1")  # [{:expired | :pending, promise}]
+pending = ContractEngine.pending("agent_1")
+:ok = ContractEngine.fulfill("agent_1", promise_id)
+```
+
+### 5. Skills Manifest (`Pincer.Core.Skills.Manifest` + `Loader`)
+
+Skills defined as markdown with YAML frontmatter, loaded from three tiers:
+workspace > shared > bundled.
+
+```markdown
+---
+name: web-search
+version: "1.0.0"
+description: Search the web
+requirements:
+  - binary: curl
+provides:
+  - tool: search_web
+    description: Search the web for a query
+---
+# Instructions...
+```
+
+```elixir
+skills = Loader.discover(bundled: "priv/skills", shared: "~/.pincer/skills",
+                         workspace: "workspaces/agent/.pincer/skills")
+issues = Loader.check_requirements(skills |> hd())
+```
+
+### 6. Consciousness Kernel (`Pincer.Core.Kernel`)
+
+Per-agent GenServer with configurable tick loop for introspection and
+self-reflection. Requires the `introspection` section in `config.yaml`
+with a valid provider and model.
+
+```yaml
+introspection:
+  provider: "z_ai"
+  model: "glm-4.7"
+  max_tokens: 512
+  temperature: 0.7
+```
+
+**Important:** the `Z_AI_API_KEY` (or whichever provider is configured) must be
+set in `.env` for introspection to work. If missing, reflection will time out
+with a warning and the kernel continues operating normally.
+
+### 7. Bootstrap Ritual
+
+New agents start without IDENTITY/SOUL files. The bootstrap ritual is triggered
+on first interaction via `BOOTSTRAP.md`, which drives an LLM conversation to
+form the agent's personality. Previously these files were pre-seeded, preventing
+the ritual from ever firing.
