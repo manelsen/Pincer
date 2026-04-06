@@ -78,6 +78,13 @@ introspection:
   model: "glm-4.7"
   max_tokens: 512
   temperature: 0.7
+model_router:
+  enabled: true
+  tiers:
+    local:     { provider: "groq",       model: "llama-3.3-70b-versatile" }
+    fast:      { provider: "groq",       model: "llama-3.3-70b-versatile" }
+    balanced:  { provider: "z_ai",       model: "glm-4.7" }
+    powerful:  { provider: "z_ai_coding", model: "glm-4.7" }
 mcp:
   servers:
     github:
