@@ -220,7 +220,8 @@ defmodule Pincer.Channels.Telegram do
             case Pincer.Channels.Telegram.api_client().edit_message_text(
                    chat_id,
                    message_id,
-                   plain_text
+                   plain_text,
+                   []
                  ) do
               {:ok, _} -> :ok
               {:error, %Telegex.Error{description: "Bad Request: message is not modified"}} -> :ok
