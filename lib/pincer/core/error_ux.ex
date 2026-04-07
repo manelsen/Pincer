@@ -96,6 +96,10 @@ defmodule Pincer.Core.ErrorUX do
   defp friendly_classified(:tool_loop, _reason, _scope),
     do: "Detectei um ciclo de ferramentas e interrompi a execucao para seguranca."
 
+  defp friendly_classified(:depth_exceeded, {:depth_exceeded, depth}, _scope),
+    do:
+      "Limite de profundidade atingido (#{depth} iteracoes). Digite \"continua\" se quiser que eu retome de onde parei."
+
   defp friendly_classified(:retry_timeout, _reason, _scope),
     do: "Atingi o tempo maximo de tentativas para este provedor. Tente novamente em instantes."
 
