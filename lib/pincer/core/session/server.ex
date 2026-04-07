@@ -18,7 +18,7 @@ defmodule Pincer.Core.Session.Server do
   alias Pincer.Core.SubAgentProgress
   alias Pincer.Infra.PubSub
   alias Pincer.Core.Orchestration.Blackboard
-
+  alias Pincer.Core.Orchestration.Archivist
   @impl true
   def init(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
@@ -965,4 +965,11 @@ defmodule Pincer.Core.Session.Server do
   @spec approve_all(String.t(), pos_integer()) :: :ok
   def approve_all(id, duration_seconds \\ 600),
     do: GenServer.call(via_tuple(id), {:approve_all, duration_seconds})
+
+  @impl true
+  def terminate(reason, state) do
+    Logger.info("[SERVER] Session #{state.session_id} terminating: #{inspect(reason)}")
+    Archivist.start_consolidation(state.session_id, [], workspace_path: state.workspace_path)
+    :ok
+  end
 end

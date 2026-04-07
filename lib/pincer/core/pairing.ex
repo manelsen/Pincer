@@ -473,6 +473,10 @@ defmodule Pincer.Core.Pairing do
   end
 
   defp bootstrap_from_store do
+    # Pairs are durable — loaded from Postgres into ETS (survives Docker restart)
+    load_pairs_from_postgres()
+
+    # Pending/invite are ephemeral — loaded from DETS (they expire anyway)
     _ =
       with_store(fn store ->
         :dets.foldl(
@@ -483,10 +487,6 @@ defmodule Pincer.Core.Pairing do
 
             {{:invite, key}, invite}, acc ->
               :ets.insert(@table_invites, {key, invite})
-              acc
-
-            {{:paired, key}, pair_data}, acc ->
-              :ets.insert(@table_pairs, {key, pair_data})
               acc
 
             _entry, acc ->
@@ -508,7 +508,7 @@ defmodule Pincer.Core.Pairing do
 
   defp put_pair(key, pair_data) do
     :ets.insert(@table_pairs, {key, pair_data})
-    persist_put(:paired, key, pair_data)
+    persist_pair_to_postgres(key, pair_data)
     :ok
   end
 
@@ -856,5 +856,61 @@ defmodule Pincer.Core.Pairing do
     |> to_string()
     |> String.trim()
     |> String.upcase()
+  end
+
+  # --- Postgres-backed durable pair storage ---
+
+  # Persists a pair to Postgres (durable) while ETS holds it for speed.
+  # Called after every successful bind/approve so pairs survive restarts.
+  defp persist_pair_to_postgres({channel, sender_id}, pair_data) do
+    channel_str = normalize_channel(channel)
+    sender_str = normalize_sender(sender_id)
+    agent_id =
+      case Map.get(pair_data, :agent_id) || Map.get(pair_data, "agent_id") do
+        nil -> nil
+        id -> to_string(id)
+      end
+
+    raw_data =
+      pair_data
+      |> Map.drop([:agent_id, "agent_id", :channel, "channel", :sender_id, "sender_id",
+                   :paired_at, "paired_at"])
+      |> Map.new(fn
+            {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+            pair -> pair
+          end)
+
+    Pincer.Core.PairingStorage.upsert(channel_str, sender_str, agent_id, raw_data)
+    :ok
+  rescue
+    _ ->
+      # Fail silently — pairing still works via ETS, just no durability
+      Logger.warning("[PAIRING] Could not persist pair to Postgres",
+        channel: normalize_channel(channel), sender_id: normalize_sender(sender_id))
+      :ok
+  end
+
+  # Loads all durable pairs from Postgres into ETS on startup.
+  # This is called from bootstrap_from_store so existing pairs survive reboots.
+  defp load_pairs_from_postgres do
+    for channel <- [:telegram, :discord, :whatsapp, "telegram", "discord", "whatsapp"] do
+      channel_str = normalize_channel(channel)
+
+      for pair <- Pincer.Core.PairingStorage.list_by_channel(channel_str) do
+        key = {channel_str, pair.sender_id}
+        pair_data =
+          %{
+            agent_id: pair.agent_id,
+            paired_at: pair.paired_at,
+          }
+          |> Map.merge(pair.raw_data || %{})
+
+        :ets.insert(@table_pairs, {key, pair_data})
+      end
+    end
+  rescue
+    _ ->
+      Logger.warning("[PAIRING] Could not load pairs from Postgres — tables may not exist yet")
+      :ok
   end
 end

@@ -7,6 +7,7 @@ defmodule Pincer.Core.MemoryRecall do
   untrusted context and sanitized before prompt injection.
   """
 
+  require Logger
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.Telemetry
 
@@ -119,6 +120,8 @@ defmodule Pincer.Core.MemoryRecall do
 
     {source_hits, hits, recall_stats} =
       if recall? do
+        Logger.info("[MEMORY-RECALL] Querying: \"#{String.slice(query, 0, 80)}\" (#{query_length} chars)")
+
         recall_hits(storage, embedding_fun, query, limit, telemetry,
           session_id: session_id,
           query_length: query_length,
@@ -140,6 +143,12 @@ defmodule Pincer.Core.MemoryRecall do
            graph_outcome: :skipped
          }}
       end
+
+    if recall? do
+      Logger.info(
+        "[MEMORY-RECALL] Results: #{recall_stats.message_hits} msgs, #{recall_stats.document_hits} docs, #{recall_stats.semantic_hits} semantic, #{recall_stats.graph_hits} graph (#{duration_ms(started_at)}ms)"
+      )
+    end
 
     prompt_block = format_prompt_block(user_memory, hits)
 
