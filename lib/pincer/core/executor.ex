@@ -20,7 +20,7 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.TurnOutcomePolicy
   alias Pincer.Utils.Text
 
-  @max_recursion_depth 25
+  @max_recursion_depth 50
   @approval_timeout_ms 60_000
   @tool_result_max_chars Application.compile_env(:pincer, :tool_result_max_chars, 32_000)
 
