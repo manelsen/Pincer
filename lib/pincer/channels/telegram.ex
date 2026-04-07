@@ -1368,15 +1368,18 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     level = text |> String.trim() |> String.downcase()
     valid = ["off", "low", "medium", "high"]
 
-    if level in valid do
-      Pincer.Core.Session.Server.set_thinking(session_id, level)
-      Pincer.Channels.Telegram.send_message(chat_id, "🧠 Thinking: <code>#{level}</code>")
-    else
-      Pincer.Channels.Telegram.send_message(
-        chat_id,
-        "Uso: /think off|low|medium|high"
-      )
-    end
+    new_level =
+      if level in valid do
+        level
+      else
+        # Toggle: cycle through levels
+        {:ok, status} = Pincer.Core.Session.Server.get_status(session_id)
+        current = status[:thinking_level] || "off"
+        cycle_thinking(current)
+      end
+
+    Pincer.Core.Session.Server.set_thinking(session_id, new_level)
+    Pincer.Channels.Telegram.send_message(chat_id, "🧠 Thinking: <code>#{new_level}</code>")
   end
 
   defp handle_command(chat_id, "/reasoning", text, chat_type) do
@@ -1384,18 +1387,22 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     session_id = context.session_id
     ensure_session_started(context)
 
-    case String.trim(text) |> String.downcase() do
-      "on" ->
-        Pincer.Core.Session.Server.set_reasoning_visible(session_id, true)
-        Pincer.Channels.Telegram.send_message(chat_id, "👁 Reasoning: visible")
+    arg = String.trim(text) |> String.downcase()
 
-      "off" ->
-        Pincer.Core.Session.Server.set_reasoning_visible(session_id, false)
-        Pincer.Channels.Telegram.send_message(chat_id, "🙈 Reasoning: oculto (strip ativado)")
+    new_visible =
+      case arg do
+        "on" -> true
+        "off" -> false
+        _ ->
+          # Toggle based on current state
+          {:ok, status} = Pincer.Core.Session.Server.get_status(session_id)
+          not (status[:reasoning_visible] || false)
+      end
 
-      _ ->
-        Pincer.Channels.Telegram.send_message(chat_id, "Uso: /reasoning on|off")
-    end
+    Pincer.Core.Session.Server.set_reasoning_visible(session_id, new_visible)
+
+    msg = if new_visible, do: "👁 Reasoning: visible", else: "🙈 Reasoning: oculto"
+    Pincer.Channels.Telegram.send_message(chat_id, msg)
   end
 
   defp handle_command(chat_id, "/verbose", text, chat_type) do
@@ -1544,7 +1551,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
           :approve_all ->
             Server.approve_all(session_id, 600)
-            edit_callback_message(chat_id, message_id, "🔓 Auto-aprovação ativa por 10 minutos", parse_mode: "HTML")
+
+            edit_callback_message(chat_id, message_id, "🔓 Auto-aprovação ativa por 10 minutos",
+              parse_mode: "HTML"
+            )
         end
 
       {:error, reason} ->
@@ -1655,6 +1665,11 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   defp normalize_chat_type(chat_type),
     do: chat_type |> to_string() |> String.trim() |> String.downcase()
+
+  defp cycle_thinking("off"), do: "low"
+  defp cycle_thinking("low"), do: "medium"
+  defp cycle_thinking("medium"), do: "high"
+  defp cycle_thinking(_), do: "off"
 
   defp session_context_for_chat(chat_id, chat_type) do
     channel_config = Application.get_env(:pincer, :telegram_channel_config, %{})

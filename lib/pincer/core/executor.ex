@@ -43,7 +43,9 @@ defmodule Pincer.Core.Executor do
       llm_client: opts[:llm_client] || Pincer.Ports.LLM,
       tool_registry: opts[:tool_registry] || Pincer.Ports.ToolRegistry,
       file_fetcher: opts[:file_fetcher] || (&default_file_fetch/1),
-      max_depth: opts[:max_depth] || Application.get_env(:pincer, :executor_max_depth, @max_recursion_depth)
+      max_depth:
+        opts[:max_depth] ||
+          Application.get_env(:pincer, :executor_max_depth, @max_recursion_depth)
     }
 
     # Store workspace path in process dictionary for easy access in nested calls
@@ -288,6 +290,54 @@ defmodule Pincer.Core.Executor do
     emit_trace_step(:llm, "stream_completion_invoked", %{depth: depth})
 
     case deps.llm_client.stream_completion(prompt_history, [tools: tools_spec] ++ client_opts) do
+      {:ok, stream, stream_usage} ->
+        try do
+          case handle_stream(
+                 stream,
+                 logical_history,
+                 prompt_history,
+                 session_id,
+                 session_pid,
+                 depth,
+                 model_override,
+                 deps,
+                 stream_usage
+               ) do
+            {:error, :empty_response} ->
+              recover_empty_response(
+                logical_history,
+                prompt_history,
+                session_id,
+                session_pid,
+                depth,
+                model_override,
+                deps,
+                client_opts
+              )
+
+            other ->
+              other
+          end
+        rescue
+          error in Protocol.UndefinedError ->
+            Logger.warning(
+              "[EXECUTOR] Invalid streaming payload. Falling back to chat completion."
+            )
+
+            fallback_chat_completion(
+              error,
+              logical_history,
+              prompt_history,
+              session_id,
+              session_pid,
+              depth,
+              model_override,
+              deps,
+              client_opts,
+              tools_spec
+            )
+        end
+
       {:ok, stream} ->
         try do
           case handle_stream(
@@ -298,7 +348,8 @@ defmodule Pincer.Core.Executor do
                  session_pid,
                  depth,
                  model_override,
-                 deps
+                 deps,
+                 nil
                ) do
             {:error, :empty_response} ->
               recover_empty_response(
@@ -566,7 +617,8 @@ defmodule Pincer.Core.Executor do
          session_pid,
          depth,
          model_override,
-         deps
+         deps,
+         stream_usage
        ) do
     # State: {full_content, full_reasoning, tool_calls_map, stream_buffer, is_filtering?}
     {full_content, full_reasoning, full_tool_calls, buffer, filtering?} =
@@ -609,7 +661,7 @@ defmodule Pincer.Core.Executor do
       depth,
       model_override,
       deps,
-      nil
+      stream_usage
     )
   end
 

@@ -144,6 +144,7 @@ defmodule Pincer.Adapters.Tools.SafeShell do
     cond do
       approval_granted ->
         Logger.info("[SAFE-SHELL] Pre-approved command: #{command}")
+
         call_mcp(command,
           workspace_restrict: workspace_restrict,
           workspace_root: workspace_root

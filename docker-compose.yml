@@ -5,6 +5,7 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     environment:
+      TZ: America/Sao_Paulo
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: pincer
@@ -28,6 +29,7 @@ services:
     env_file:
       - .env
     environment:
+      TZ: America/Sao_Paulo
       MIX_ENV: prod
       PINCER_DB_HOST: postgres
       PINCER_DB_PORT: 5432

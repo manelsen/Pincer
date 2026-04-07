@@ -111,11 +111,11 @@ defmodule Pincer.LLM.Providers.Anthropic do
     # Anthropic streaming is not wired yet in this adapter.
     # Fallback to single-shot completion and emit one stream chunk.
     case chat_completion(messages, model, config, tools) do
-      {:ok, %{"content" => content}, _usage} ->
-        {:ok, [%{"choices" => [%{"delta" => %{"content" => content || ""}}]}]}
+      {:ok, %{"content" => content}, usage} ->
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => content || ""}}]}], usage}
 
-      {:ok, _other, _usage} ->
-        {:ok, [%{"choices" => [%{"delta" => %{"content" => ""}}]}]}
+      {:ok, _other, usage} ->
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => ""}}]}], usage}
 
       {:error, reason} ->
         {:error, reason}

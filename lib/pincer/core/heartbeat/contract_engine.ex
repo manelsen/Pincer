@@ -69,7 +69,8 @@ defmodule Pincer.Core.Heartbeat.ContractEngine do
               p.status == :fulfilled ->
                 p
 
-              p.status == :pending and p.deadline != nil and DateTime.compare(p.deadline, now) == :lt ->
+              p.status == :pending and p.deadline != nil and
+                  DateTime.compare(p.deadline, now) == :lt ->
                 %{p | status: :expired}
 
               true ->

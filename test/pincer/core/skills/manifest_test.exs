@@ -28,7 +28,10 @@ defmodule Pincer.Core.Skills.ManifestTest do
       assert length(manifest.requirements) == 1
       assert [%{"binary" => "curl"}] = manifest.requirements
       assert length(manifest.provides) == 1
-      assert [%{"tool" => "search_web", "description" => "Search the web for a query"}] = manifest.provides
+
+      assert [%{"tool" => "search_web", "description" => "Search the web for a query"}] =
+               manifest.provides
+
       assert manifest.body =~ "Instructions for the agent"
     end
 

@@ -51,6 +51,8 @@ defmodule Pincer.Core.Session.Server do
     PubSub.subscribe("system:updates")
 
     # 3. Initial state
+    prefs = Pincer.Core.Session.Preferences.load(workspace_path)
+
     state = %{
       mode: :normal,
       session_id: session_id,
@@ -64,12 +66,12 @@ defmodule Pincer.Core.Session.Server do
       worker_pid: nil,
       last_blackboard_id: 0,
       subagent_progress_tracker: %{},
-      model_override: nil,
-      thinking_level: nil,
-      reasoning_visible: false,
+      model_override: prefs.model_override,
+      thinking_level: prefs.thinking_level,
+      reasoning_visible: prefs.reasoning_visible,
       verbose: false,
-      usage_display: "off",
-      token_usage_total: %{"prompt_tokens" => 0, "completion_tokens" => 0},
+      usage_display: prefs.usage_display,
+      token_usage_total: prefs.token_usage_total,
       input_buffer: [],
       debounce_timer: nil,
       llm_client: llm_client,
@@ -200,14 +202,17 @@ defmodule Pincer.Core.Session.Server do
     publish(state.session_id, {:agent_response, response, usage})
     Introspection.Kernel.report_activity(state.root_agent_id, :idle)
 
-    {:noreply,
-     %{
-       state
-       | history: final_history,
-         status: :idle,
-         worker_pid: nil,
-         token_usage_total: new_totals
-     }}
+    new_state = %{
+      state
+      | history: final_history,
+        status: :idle,
+        worker_pid: nil,
+        token_usage_total: new_totals
+    }
+
+    save_preferences(new_state)
+
+    {:noreply, new_state}
   end
 
   @impl true
@@ -515,17 +520,22 @@ defmodule Pincer.Core.Session.Server do
     end
 
     new_state = %{state | model_override: %{provider: provider, model: model}}
+    save_preferences(new_state)
     {:reply, :ok, new_state}
   end
 
   @impl true
   def handle_call({:set_thinking, level}, _from, state) do
-    {:reply, :ok, %{state | thinking_level: level}}
+    new_state = %{state | thinking_level: level}
+    save_preferences(new_state)
+    {:reply, :ok, new_state}
   end
 
   @impl true
   def handle_call({:set_reasoning_visible, visible}, _from, state) do
-    {:reply, :ok, %{state | reasoning_visible: visible}}
+    new_state = %{state | reasoning_visible: visible}
+    save_preferences(new_state)
+    {:reply, :ok, new_state}
   end
 
   @impl true
@@ -535,7 +545,9 @@ defmodule Pincer.Core.Session.Server do
 
   @impl true
   def handle_call({:set_usage, level}, _from, state) do
-    {:reply, :ok, %{state | usage_display: level}}
+    new_state = %{state | usage_display: level}
+    save_preferences(new_state)
+    {:reply, :ok, new_state}
   end
 
   @impl true
@@ -647,7 +659,11 @@ defmodule Pincer.Core.Session.Server do
       end
 
     executor_opts =
-      [model_override: model_override_with_thinking, workspace_path: state.workspace_path, trace_events?: true]
+      [
+        model_override: model_override_with_thinking,
+        workspace_path: state.workspace_path,
+        trace_events?: true
+      ]
       |> then(fn opts ->
         if state.llm_client, do: Keyword.put(opts, :llm_client, state.llm_client), else: opts
       end)
@@ -707,6 +723,18 @@ defmodule Pincer.Core.Session.Server do
 
   defp publish(session_id, event) do
     PubSub.broadcast("session:#{session_id}", event)
+  end
+
+  defp save_preferences(state) do
+    if workspace = state.workspace_path do
+      Pincer.Core.Session.Preferences.save(workspace, %{
+        model_override: state.model_override,
+        thinking_level: state.thinking_level,
+        reasoning_visible: state.reasoning_visible,
+        usage_display: state.usage_display,
+        token_usage_total: state.token_usage_total
+      })
+    end
   end
 
   # (Remaining helper functions kept for compatibility...)
