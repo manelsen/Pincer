@@ -36,6 +36,17 @@ defmodule Pincer.Ports.Storage do
   @callback load_checkpoint(session_id :: String.t(), opts :: keyword()) ::
               {:ok, term()} | {:error, term()}
 
+  # --- Pairing State (durable pairs) ---
+
+  @callback upsert_pairing_state(String.t(), String.t(), String.t() | nil, map()) ::
+              :ok | {:error, term()}
+
+  @callback get_pairing_state(String.t(), String.t()) :: map() | nil
+
+  @callback delete_pairing_state(String.t(), String.t()) :: :ok | {:error, term()}
+
+  @callback list_pairing_states_by_channel(String.t()) :: [map()]
+
   # --- Dispatcher ---
 
   defp adapter do
@@ -88,5 +99,18 @@ defmodule Pincer.Ports.Storage do
   def save_checkpoint(session_id, checkpoint),
     do: adapter().save_checkpoint(session_id, checkpoint)
 
-  def load_checkpoint(session_id, opts \\ []), do: adapter().load_checkpoint(session_id, opts)
+  def load_checkpoint(session_id, opts \\ []),
+    do: adapter().load_checkpoint(session_id, opts)
+
+  def upsert_pairing_state(channel, sender_id, agent_id, raw_data \\ %{}),
+    do: adapter().upsert_pairing_state(channel, sender_id, agent_id, raw_data)
+
+  def get_pairing_state(channel, sender_id),
+    do: adapter().get_pairing_state(channel, sender_id)
+
+  def delete_pairing_state(channel, sender_id),
+    do: adapter().delete_pairing_state(channel, sender_id)
+
+  def list_pairing_states_by_channel(channel),
+    do: adapter().list_pairing_states_by_channel(channel)
 end

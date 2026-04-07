@@ -17,6 +17,7 @@ defmodule Pincer.Storage.Adapters.Postgres do
   alias Pincer.Storage.Checkpoint
   alias Pincer.Storage.Graph.{Edge, Node}
   alias Pincer.Storage.Message
+  alias Pincer.Storage.PairingState
   import Ecto.Query
   import Pgvector.Ecto.Query
 
@@ -1227,5 +1228,77 @@ defmodule Pincer.Storage.Adapters.Postgres do
       nil -> {:error, :not_found}
       checkpoint -> {:ok, checkpoint}
     end
+  end
+
+  # --- Pairing State ---
+
+  @impl true
+  def upsert_pairing_state(channel, sender_id, agent_id, raw_data \\ %{}) do
+    now = DateTime.utc_now()
+
+    params = %{
+      channel: to_string(channel),
+      sender_id: sender_id,
+      agent_id: agent_id,
+      paired_at: now,
+      raw_data: raw_data
+    }
+
+    PairingState
+    |> where([p], p.channel == ^to_string(channel) and p.sender_id == ^sender_id)
+    |> Repo.one()
+    |> case do
+      nil -> %PairingState{}
+      existing -> existing
+    end
+    |> PairingState.changeset(params)
+    |> Repo.insert_or_update()
+    |> case do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
+  def get_pairing_state(channel, sender_id) do
+    PairingState
+    |> where([p], p.channel == ^to_string(channel) and p.sender_id == ^sender_id)
+    |> Repo.one()
+    |> case do
+      nil -> nil
+      p ->
+        %{
+          channel: p.channel,
+          sender_id: p.sender_id,
+          agent_id: p.agent_id,
+          paired_at: p.paired_at,
+          raw_data: p.raw_data || %{}
+        }
+    end
+  end
+
+  @impl true
+  def delete_pairing_state(channel, sender_id) do
+    PairingState
+    |> where([p], p.channel == ^to_string(channel) and p.sender_id == ^sender_id)
+    |> Repo.delete_all()
+
+    :ok
+  end
+
+  @impl true
+  def list_pairing_states_by_channel(channel) do
+    PairingState
+    |> where([p], p.channel == ^to_string(channel))
+    |> Repo.all()
+    |> Enum.map(fn p ->
+      %{
+        channel: p.channel,
+        sender_id: p.sender_id,
+        agent_id: p.agent_id,
+        paired_at: p.paired_at,
+        raw_data: p.raw_data || %{}
+      }
+    end)
   end
 end
