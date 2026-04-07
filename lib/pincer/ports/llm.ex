@@ -6,7 +6,7 @@ defmodule Pincer.Ports.LLM do
   @callback chat_completion(list(map()), keyword()) ::
               {:ok, map(), usage() | nil} | {:error, term()}
   @callback stream_completion(list(map()), keyword()) ::
-              {:ok, Enumerable.t()} | {:error, term()}
+              {:ok, Enumerable.t()} | {:ok, Enumerable.t(), usage() | nil} | {:error, term()}
   @callback list_providers() :: [%{id: String.t(), name: String.t()}]
   @callback list_models(String.t()) :: [String.t()]
   @callback transcribe_audio(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}

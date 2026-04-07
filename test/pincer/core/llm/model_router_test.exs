@@ -25,16 +25,17 @@ defmodule Pincer.Core.LLM.ModelRouterTest do
     end
 
     test "tool-heavy conversation scores high" do
-      history = [
-        %{"role" => "user", "content" => "fix all the bugs in the codebase"}
-      ] ++
-        for i <- 1..6 do
-          %{"role" => "tool", "content" => "result #{i} with long output data"}
-        end ++
+      history =
         [
-          %{"role" => "assistant", "content" => "fixed 6 issues"},
-          %{"role" => "user", "content" => "now refactor the error handling"}
-        ]
+          %{"role" => "user", "content" => "fix all the bugs in the codebase"}
+        ] ++
+          for i <- 1..6 do
+            %{"role" => "tool", "content" => "result #{i} with long output data"}
+          end ++
+          [
+            %{"role" => "assistant", "content" => "fixed 6 issues"},
+            %{"role" => "user", "content" => "now refactor the error handling"}
+          ]
 
       s = ModelRouter.score(history)
       assert s > 0.5
@@ -77,10 +78,10 @@ defmodule Pincer.Core.LLM.ModelRouterTest do
       }
 
       {:ok, tier, _provider, _model} =
-               ModelRouter.route([%{"role" => "user", "content" => "hi"}],
-                 enabled: true,
-                 tiers: tiers
-               )
+        ModelRouter.route([%{"role" => "user", "content" => "hi"}],
+          enabled: true,
+          tiers: tiers
+        )
 
       assert tier in [:local, :fast, :balanced]
     end
@@ -97,12 +98,18 @@ defmodule Pincer.Core.LLM.ModelRouterTest do
       history =
         for i <- 1..30 do
           role = if(rem(i, 2) == 0, do: "tool", else: "user")
-          content = if(role == "tool", do: String.duplicate("output data ", 100), else: "defmodule Foo do\ndef bar, do: :ok\nend")
+
+          content =
+            if(role == "tool",
+              do: String.duplicate("output data ", 100),
+              else: "defmodule Foo do\ndef bar, do: :ok\nend"
+            )
+
           %{"role" => role, "content" => content}
         end
 
       {:ok, tier, provider, model} =
-               ModelRouter.route(history, enabled: true, tiers: tiers)
+        ModelRouter.route(history, enabled: true, tiers: tiers)
 
       assert tier == :powerful
       assert provider == "z_ai_coding"

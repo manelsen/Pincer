@@ -54,8 +54,8 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     clean_messages = Enum.map(messages, &clean_message/1)
 
     case chat_completion(clean_messages, model, config, tools) do
-      {:ok, message, _usage} ->
-        {:ok, message_to_stream_chunks(message)}
+      {:ok, message, usage} ->
+        {:ok, message_to_stream_chunks(message), usage}
 
       {:error, reason} ->
         {:error, reason}

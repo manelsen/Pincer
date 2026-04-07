@@ -112,9 +112,9 @@ defmodule Pincer.LLM.Providers.Mistral do
 
   defp fallback_stream(messages, model, config, tools) do
     case chat_completion(messages, model, config, tools) do
-      {:ok, message, _usage} ->
+      {:ok, message, usage} ->
         content = message["content"] || ""
-        {:ok, [%{"choices" => [%{"delta" => %{"content" => content}}]}]}
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => content}}]}], usage}
 
       {:error, reason} ->
         {:error, reason}

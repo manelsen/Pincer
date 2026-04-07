@@ -395,10 +395,36 @@ defmodule Pincer.LLM.Client do
     result = apply(adapter, action, [messages, model, config, tools])
 
     case result do
-      {:ok, message, usage} ->
+      {:ok, message, usage} when action == :chat_completion ->
         maybe_clear_provider_cooldown(failover_state)
         maybe_clear_auth_profile_cooldown(auth_context)
         {:ok, Pincer.LLM.ToolParser.parse(message), usage}
+
+      {:ok, stream, usage} when action == :stream_completion ->
+        maybe_clear_provider_cooldown(failover_state)
+        maybe_clear_auth_profile_cooldown(auth_context)
+
+        case normalize_success(action, stream) do
+          {:ok, normalized} ->
+            {:ok, normalized, usage}
+
+          {:error, stream_reason} ->
+            maybe_fallback_stream_to_chat(
+              action,
+              adapter,
+              messages,
+              model,
+              config,
+              tools,
+              retries,
+              delay,
+              retry_policy,
+              started_at_ms,
+              stream_reason,
+              failover_state,
+              auth_context
+            )
+        end
 
       {:ok, stream} ->
         maybe_clear_provider_cooldown(failover_state)

@@ -267,14 +267,16 @@ defmodule Pincer.Channels.Telegram.Session do
   defp render_tool_window([]), do: ""
 
   defp render_tool_window(calls) do
-    calls
-    |> Enum.chunk_by(& &1)
-    |> Enum.map(fn
-      [name] -> name
-      [name | _] = group -> "#{name} ×#{length(group)}"
-    end)
-    |> Enum.join(" → ")
-    |> then(&"<blockquote>⚙️ #{&1}</blockquote>")
+    lines =
+      calls
+      |> Enum.chunk_by(& &1)
+      |> Enum.map(fn
+        [name] -> name
+        [name | _] = group -> "#{name} ×#{length(group)}"
+      end)
+      |> Enum.map_join("\n→ ", & &1)
+
+    "<blockquote>⚙️ #{lines}</blockquote>"
   end
 
   defp reset_tool_state(state) do
