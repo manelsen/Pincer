@@ -42,7 +42,8 @@ defmodule Pincer.Core.Executor do
     deps = %{
       llm_client: opts[:llm_client] || Pincer.Ports.LLM,
       tool_registry: opts[:tool_registry] || Pincer.Ports.ToolRegistry,
-      file_fetcher: opts[:file_fetcher] || (&default_file_fetch/1)
+      file_fetcher: opts[:file_fetcher] || (&default_file_fetch/1),
+      max_depth: opts[:max_depth] || Application.get_env(:pincer, :executor_max_depth, @max_recursion_depth)
     }
 
     # Store workspace path in process dictionary for easy access in nested calls
@@ -145,32 +146,34 @@ defmodule Pincer.Core.Executor do
   end
 
   defp run_loop(logical_history, session_id, session_pid, depth, model_override, deps) do
-    if depth > @max_recursion_depth, do: raise("Excessive recursion in Executor")
-
-    updated_model_override = check_messages(model_override)
-
-    if loop_detected?(logical_history) do
-      send(session_pid, {:executor_failed, "Tool loop detected. Aborting."})
-      {:error, :tool_loop}
+    if depth > max_depth(deps) do
+      Logger.warning("[EXECUTOR] Depth limit reached (#{depth}/#{max_depth(deps)})")
+      send(session_pid, {:executor_failed, {:depth_exceeded, depth}})
+      {:error, {:depth_exceeded, depth}}
     else
-      # Prompt history preparation: Only prune and augment at the beginning of the cycle (Depth 0)
-      prompt_history =
-        if depth == 0 do
-          prepare_prompt_history(logical_history, model_override)
-        else
-          # At depth > 0, we should have been using run_loop_recursive which passes prompt_history
-          raise "run_loop called with depth > 0 without prompt_history context"
-        end
+      updated_model_override = check_messages(model_override)
 
-      do_run_loop(
-        logical_history,
-        prompt_history,
-        session_id,
-        session_pid,
-        depth,
-        updated_model_override,
-        deps
-      )
+      if loop_detected?(logical_history) do
+        send(session_pid, {:executor_failed, "Tool loop detected. Aborting."})
+        {:error, :tool_loop}
+      else
+        prompt_history =
+          if depth == 0 do
+            prepare_prompt_history(logical_history, model_override)
+          else
+            raise "run_loop called with depth > 0 without prompt_history context"
+          end
+
+        do_run_loop(
+          logical_history,
+          prompt_history,
+          session_id,
+          session_pid,
+          depth,
+          updated_model_override,
+          deps
+        )
+      end
     end
   end
 
@@ -185,23 +188,27 @@ defmodule Pincer.Core.Executor do
          model_override,
          deps
        ) do
-    if depth > @max_recursion_depth, do: raise("Excessive recursion in Executor")
-
-    updated_model_override = check_messages(model_override)
-
-    if loop_detected?(logical_history) do
-      send(session_pid, {:executor_failed, "Tool loop detected. Aborting."})
-      {:error, :tool_loop}
+    if depth > max_depth(deps) do
+      Logger.warning("[EXECUTOR] Depth limit reached (#{depth}/#{max_depth(deps)})")
+      send(session_pid, {:executor_failed, {:depth_exceeded, depth}})
+      {:error, {:depth_exceeded, depth}}
     else
-      do_run_loop(
-        logical_history,
-        prompt_history,
-        session_id,
-        session_pid,
-        depth,
-        updated_model_override,
-        deps
-      )
+      updated_model_override = check_messages(model_override)
+
+      if loop_detected?(logical_history) do
+        send(session_pid, {:executor_failed, "Tool loop detected. Aborting."})
+        {:error, :tool_loop}
+      else
+        do_run_loop(
+          logical_history,
+          prompt_history,
+          session_id,
+          session_pid,
+          depth,
+          updated_model_override,
+          deps
+        )
+      end
     end
   end
 
@@ -1273,6 +1280,10 @@ defmodule Pincer.Core.Executor do
 
   defp ensure_tool_call_type(call) do
     call |> Map.put_new("type", "function")
+  end
+
+  defp max_depth(deps) do
+    Map.get(deps, :max_depth, @max_recursion_depth)
   end
 
   defp loop_detected?(history) do

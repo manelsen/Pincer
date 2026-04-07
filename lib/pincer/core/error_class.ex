@@ -59,6 +59,7 @@ defmodule Pincer.Core.ErrorClass do
   defp classify_normalized({:timeout, _}), do: :process_timeout
   defp classify_normalized({:retry_timeout, _}), do: :retry_timeout
   defp classify_normalized(:tool_loop), do: :tool_loop
+  defp classify_normalized({:depth_exceeded, _}), do: :depth_exceeded
 
   defp classify_normalized(%Postgrex.Error{postgres: %{code: :undefined_table}}), do: :db_schema
 
