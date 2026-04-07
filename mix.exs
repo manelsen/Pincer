@@ -11,11 +11,10 @@ defmodule Pincer.MixProject do
       version: @version,
       elixir: "~> 1.14",
       start_permanent: Mix.env() == :prod,
-      compilers: Mix.compilers(),  # boundary disabled: externals referencing Pincer.Storage from Pincer.Core requires additional config
+      compilers: [:boundary] ++ Mix.compilers(),
       boundary: [
         externals: [
-          {:html_entities, Pincer.Utils},
-          {Pincer.Storage.Adapters.Postgres, Pincer.Core}
+          {:html_entities, Pincer.Utils}
         ],
         ignore_unknown: true
       ],

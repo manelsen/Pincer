@@ -880,7 +880,7 @@ defmodule Pincer.Core.Pairing do
             pair -> pair
           end)
 
-    Pincer.Core.PairingStorage.upsert(channel_str, sender_str, agent_id, raw_data)
+    Pincer.Ports.Storage.upsert_pairing_state(channel_str, sender_str, agent_id, raw_data)
     :ok
   rescue
     _ ->
@@ -896,7 +896,7 @@ defmodule Pincer.Core.Pairing do
     for channel <- [:telegram, :discord, :whatsapp, "telegram", "discord", "whatsapp"] do
       channel_str = normalize_channel(channel)
 
-      for pair <- Pincer.Core.PairingStorage.list_by_channel(channel_str) do
+      for pair <- Pincer.Ports.Storage.list_pairing_states_by_channel(channel_str) do
         key = {channel_str, pair.sender_id}
         pair_data =
           %{
