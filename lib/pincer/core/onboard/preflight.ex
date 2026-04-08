@@ -99,6 +99,30 @@ defmodule Pincer.Core.Onboard.Preflight do
     end
   end
 
+  @doc """
+  Attempts a raw TCP connection to the configured PostgreSQL host/port.
+  Returns :ok or {:warn, message} — never blocks onboard, just warns.
+  """
+  @spec check_db_connectivity(map()) :: :ok | {:warn, String.t()}
+  def check_db_connectivity(config) do
+    host = get_in(config, ["database", "hostname"]) || "localhost"
+    port = get_in(config, ["database", "port"]) || 5432
+    port = if is_binary(port), do: String.to_integer(port), else: port
+    host_charlist = String.to_charlist(host)
+
+    case :gen_tcp.connect(host_charlist, port, [], 2000) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        :ok
+
+      {:error, reason} ->
+        {:warn,
+         "PostgreSQL inacessível em #{host}:#{port} (#{reason}).\n" <>
+           "   Para iniciar: docker compose up -d postgres\n" <>
+           "   Após iniciar, execute: mix ecto.create && mix ecto.migrate"}
+    end
+  end
+
   defp normalize_string(value) when is_binary(value) do
     value = String.trim(value)
     if value == "", do: nil, else: value

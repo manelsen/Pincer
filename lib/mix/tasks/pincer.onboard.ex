@@ -42,7 +42,8 @@ defmodule Mix.Tasks.Pincer.Onboard do
     mode: :string,
     remote_host: :string,
     remote_user: :string,
-    remote_path: :string
+    remote_path: :string,
+    api_key: :string
   ]
 
   @impl Mix.Task
@@ -68,6 +69,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
     mode = parse_mode!(opts[:mode])
     base_config = resolve_base_config(Onboard.defaults())
     onboarding_config = resolve_config(base_config, opts)
+    maybe_capture_api_key(onboarding_config, opts)
 
     capabilities = parse_capabilities(opts[:capabilities])
     validate_option_matrix!(opts, capabilities)
@@ -369,10 +371,22 @@ defmodule Mix.Tasks.Pincer.Onboard do
     case Onboard.apply_plan(plan, root: File.cwd!(), force: force?) do
       {:ok, report} ->
         print_summary(report)
+        check_db_connectivity(onboarding_config)
         :ok
 
       {:error, reason} ->
         Mix.raise("Onboarding failed: #{inspect(reason)}")
+    end
+  end
+
+  defp check_db_connectivity(config) do
+    case Onboard.check_db_connectivity(config) do
+      :ok ->
+        Mix.shell().info("  ✓ PostgreSQL acessível")
+
+      {:warn, message} ->
+        Mix.shell().info("")
+        Mix.shell().info("⚠  #{message}")
     end
   end
 
@@ -430,6 +444,67 @@ defmodule Mix.Tasks.Pincer.Onboard do
     |> Enum.each(fn {step, idx} ->
       Mix.shell().info("#{idx}) #{step}")
     end)
+  end
+
+  defp maybe_capture_api_key(config, opts) do
+    provider = get_in(config, ["llm", "provider"])
+    env_key = Pincer.Core.Onboard.Defaults.provider_env_key(provider)
+
+    cond do
+      opts[:non_interactive] ->
+        api_key = opts[:api_key]
+
+        if api_key && env_key do
+          write_env_key(".env", env_key, api_key)
+          System.put_env(env_key, api_key)
+          Mix.shell().info("  ✓ #{env_key} escrito em .env")
+        end
+
+      env_key && System.get_env(env_key) in [nil, ""] ->
+        Mix.shell().info("")
+        Mix.shell().info("O provider '#{provider}' requer a variável #{env_key}.")
+        answer = Mix.shell().prompt("  Cole sua chave (Enter para pular): ")
+        key = String.trim(answer)
+
+        if key != "" do
+          write_env_key(".env", env_key, key)
+          System.put_env(env_key, key)
+          Mix.shell().info("  ✓ #{env_key} escrito em .env")
+        else
+          Mix.shell().info("  ⚠ Pulado. Lembre-se de definir #{env_key} no .env antes de iniciar.")
+        end
+
+      true ->
+        :ok
+    end
+
+    config
+  end
+
+  defp write_env_key(path, key, value) do
+    content =
+      case File.read(path) do
+        {:ok, c} ->
+          c
+
+        {:error, _} ->
+          case File.read(".env.example") do
+            {:ok, c} -> c
+            {:error, _} -> ""
+          end
+      end
+
+    key_re = ~r/^#{Regex.escape(key)}=.*/m
+
+    updated =
+      if Regex.match?(key_re, content) do
+        Regex.replace(key_re, content, "#{key}=#{value}")
+      else
+        content = if String.ends_with?(content, "\n"), do: content, else: content <> "\n"
+        content <> "#{key}=#{value}\n"
+      end
+
+    File.write!(path, updated)
   end
 
   defp format_check_id({left, right}), do: "#{left}:#{right}"
