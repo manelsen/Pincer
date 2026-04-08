@@ -1,0 +1,1 @@
+[{"message":{"chat":{"id":12345678,"type":"private","last_name":"Name","first_name":"AnonymizedUser","username":"anonymized_bot"},"message_id":171,"from":{"is_bot":false,"id":12345678,"language_code":"pt-br","last_name":"Name","first_name":"AnonymizedUser","username":"anonymized_bot"},"text":"Anonymized message content","date":1774569232},"update_id":737343144}]
