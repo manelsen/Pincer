@@ -1,0 +1,18 @@
+id: telegram
+name: Pincer Telegram
+version: "0.1.0"
+kind: channel
+adapter: "Pincer.Channels.Telegram"
+description: "Telegram channel adapter via Bot API polling"
+config_schema:
+  token_env:
+    type: string
+    required: true
+    description: "Env var com o token do bot Telegram"
+  dm_policy:
+    type: object
+    properties:
+      mode:
+        type: string
+        enum: [open, pairing, disabled]
+        default: pairing
