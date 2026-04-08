@@ -84,6 +84,7 @@ defmodule Pincer.MixProject do
       {:pincer_telegram, path: "packages/pincer_telegram"},
       {:pincer_webhook, path: "packages/pincer_webhook"},
       {:pincer_whatsapp, path: "packages/pincer_whatsapp"},
+      {:pincer_line, path: "packages/pincer_line"},
 
       # Messaging
       {:nostrum, "~> 0.10", runtime: false},
