@@ -132,4 +132,57 @@ defmodule Pincer.Channels.Factory.Test do
       assert [MockExtraChild] == rest
     end
   end
+
+  describe "create_channel_specs/2 — manifest integration" do
+    setup :clean_whitelist
+
+    defp manifest(id, adapter) do
+      %Pincer.Plugin.Manifest{
+        id: id,
+        name: id,
+        version: "0.1.0",
+        kind: :channel,
+        adapter: adapter,
+        config_schema: %{}
+      }
+    end
+
+    test "usa adapter do manifest quando config.yaml não declara adapter" do
+      config = %{"mock" => %{"enabled" => true}}
+      manifests = [manifest("mock", MockTelegramChannel)]
+
+      specs = Factory.create_channel_specs(config, manifests)
+
+      assert [{MockTelegramChannel, _}] = specs
+    end
+
+    test "config adapter tem precedência sobre manifest quando ambos existem" do
+      config = %{
+        "mock" => %{"enabled" => true, "adapter" => "Pincer.Channels.Factory.Test.MockSignalChannel"}
+      }
+      manifests = [manifest("mock", MockTelegramChannel)]
+
+      specs = Factory.create_channel_specs(config, manifests)
+
+      assert [{MockSignalChannel, _}] = specs
+    end
+
+    test "canal habilitado sem adapter em config nem manifest é ignorado" do
+      config = %{"ghost" => %{"enabled" => true}}
+      specs = Factory.create_channel_specs(config, [])
+
+      assert specs == []
+    end
+
+    test "manifests de outros canais não interferem" do
+      config = %{
+        "mock" => %{"enabled" => true, "adapter" => "Pincer.Channels.Factory.Test.MockTelegramChannel"}
+      }
+      manifests = [manifest("discord", MockSignalChannel)]
+
+      specs = Factory.create_channel_specs(config, manifests)
+
+      assert [{MockTelegramChannel, _}] = specs
+    end
+  end
 end

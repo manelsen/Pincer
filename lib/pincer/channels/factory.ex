@@ -74,6 +74,8 @@ defmodule Pincer.Channels.Factory do
 
   require Logger
 
+  alias Pincer.Plugin.Manifest
+
   @doc """
   Creates child specs for all enabled channels.
 
@@ -100,13 +102,20 @@ defmodule Pincer.Channels.Factory do
       iex> Pincer.Channels.Factory.create_channel_specs(config)
       [{Pincer.Channels.CLI, %{"enabled" => true, "adapter" => "Pincer.Channels.CLI"}}]
   """
-  @spec create_channel_specs(config :: map() | nil) :: [{module(), map()}]
-  def create_channel_specs(config \\ nil) do
+  @spec create_channel_specs(config :: map() | nil, manifests :: [Manifest.t()] | :auto) ::
+          [{module(), map()}]
+  def create_channel_specs(config \\ nil, manifests \\ :auto) do
     config =
       case config do
         nil -> Pincer.Infra.Config.get(:channels, %{})
         %{"channels" => c} -> c
         c -> c
+      end
+
+    manifest_index =
+      case manifests do
+        :auto -> Map.new(Manifest.discover(), & {&1.id, &1})
+        list -> Map.new(list, & {&1.id, &1})
       end
 
     whitelist = Application.get_env(:pincer, :enabled_channels)
@@ -131,17 +140,56 @@ defmodule Pincer.Channels.Factory do
       result
     end)
     |> Enum.flat_map(fn {name, cfg} ->
-      module_name = cfg["adapter"]
-      module = Module.concat([module_name])
+      case resolve_adapter(name, cfg, manifest_index) do
+        nil ->
+          []
 
-      Logger.info("✅ CHANNEL ENABLED: #{name} (Adapter: #{module_name})")
+        module ->
+          Logger.info("✅ CHANNEL ENABLED: #{name} (Adapter: #{module})")
 
-      extra =
-        if function_exported?(module, :extra_child_specs, 0),
-          do: module.extra_child_specs(),
-          else: []
+          extra =
+            if function_exported?(module, :extra_child_specs, 0),
+              do: module.extra_child_specs(),
+              else: []
 
-      [{module, cfg} | extra]
+          [{module, cfg} | extra]
+      end
     end)
+  end
+
+  defp resolve_adapter(name, cfg, manifest_index) do
+    config_module =
+      case cfg["adapter"] do
+        nil -> nil
+        mod_name -> Module.concat([mod_name])
+      end
+
+    manifest_module =
+      case Map.get(manifest_index, name) do
+        %Manifest{adapter: mod} when not is_nil(mod) -> mod
+        _ -> nil
+      end
+
+    case {config_module, manifest_module} do
+      {nil, nil} ->
+        Logger.error("Channel '#{name}': no adapter in config or manifest — skipping")
+        nil
+
+      {nil, mod} ->
+        Logger.debug("Channel '#{name}': adapter resolved from manifest (#{mod})")
+        mod
+
+      {mod, nil} ->
+        mod
+
+      {mod, manifest_mod} when mod != manifest_mod ->
+        Logger.debug(
+          "Channel '#{name}': config adapter (#{mod}) differs from manifest (#{manifest_mod}) — using config"
+        )
+        mod
+
+      {mod, _} ->
+        mod
+    end
   end
 end
