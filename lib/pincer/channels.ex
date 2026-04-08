@@ -1,7 +1,7 @@
 defmodule Pincer.Channels do
   @moduledoc "Channel Adapters."
   use Boundary,
-    deps: [Pincer.Core, Pincer.Infra, Pincer.Ports, Pincer.Utils],
+    deps: [Pincer.Core, Pincer.Infra, Pincer.Plugin, Pincer.Ports, Pincer.Utils],
     exports: [
       CLI,
       Discord,
