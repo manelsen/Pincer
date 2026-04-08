@@ -1,4 +1,13 @@
 defmodule Pincer.Channels.WhatsApp.Session do
+  @compile {:no_warn_undefined, [
+    Pincer.Core.ChannelEventPolicy,
+    Pincer.Core.ProjectFlowDelivery,
+    Pincer.Core.Session.Context,
+    Pincer.Core.Session.Server,
+    Pincer.Infra.PubSub,
+    Pincer.Ports.LLM
+  ]}
+
   @moduledoc """
   WhatsApp session worker that forwards session PubSub events to a chat ID.
   """

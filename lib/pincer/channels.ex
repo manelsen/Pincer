@@ -4,7 +4,6 @@ defmodule Pincer.Channels do
     deps: [Pincer.Core, Pincer.Infra, Pincer.Plugin, Pincer.Ports, Pincer.Utils],
     exports: [
       Discord,
-      Slack,
-      WhatsApp
+      Slack
     ]
 end
