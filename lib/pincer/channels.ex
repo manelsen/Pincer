@@ -5,8 +5,6 @@ defmodule Pincer.Channels do
     exports: [
       Discord,
       Slack,
-      Telegram,
-      Telegram.API,
       Webhook,
       WhatsApp
     ]
