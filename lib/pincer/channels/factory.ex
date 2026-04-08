@@ -114,8 +114,8 @@ defmodule Pincer.Channels.Factory do
 
     manifest_index =
       case manifests do
-        :auto -> Map.new(Manifest.discover(), & {&1.id, &1})
-        list -> Map.new(list, & {&1.id, &1})
+        :auto -> Map.new(Manifest.discover(), &{&1.id, &1})
+        list -> Map.new(list, &{&1.id, &1})
       end
 
     whitelist = Application.get_env(:pincer, :enabled_channels)
@@ -186,6 +186,7 @@ defmodule Pincer.Channels.Factory do
         Logger.debug(
           "Channel '#{name}': config adapter (#{mod}) differs from manifest (#{manifest_mod}) — using config"
         )
+
         mod
 
       {mod, _} ->

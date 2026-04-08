@@ -865,6 +865,7 @@ defmodule Pincer.Core.Pairing do
   defp persist_pair_to_postgres({channel, sender_id}, pair_data) do
     channel_str = normalize_channel(channel)
     sender_str = normalize_sender(sender_id)
+
     agent_id =
       case Map.get(pair_data, :agent_id) || Map.get(pair_data, "agent_id") do
         nil -> nil
@@ -873,12 +874,20 @@ defmodule Pincer.Core.Pairing do
 
     raw_data =
       pair_data
-      |> Map.drop([:agent_id, "agent_id", :channel, "channel", :sender_id, "sender_id",
-                   :paired_at, "paired_at"])
+      |> Map.drop([
+        :agent_id,
+        "agent_id",
+        :channel,
+        "channel",
+        :sender_id,
+        "sender_id",
+        :paired_at,
+        "paired_at"
+      ])
       |> Map.new(fn
-            {k, v} when is_atom(k) -> {Atom.to_string(k), v}
-            pair -> pair
-          end)
+        {k, v} when is_atom(k) -> {Atom.to_string(k), v}
+        pair -> pair
+      end)
 
     Pincer.Ports.Storage.upsert_pairing_state(channel_str, sender_str, agent_id, raw_data)
     :ok
@@ -886,7 +895,10 @@ defmodule Pincer.Core.Pairing do
     _ ->
       # Fail silently — pairing still works via ETS, just no durability
       Logger.warning("[PAIRING] Could not persist pair to Postgres",
-        channel: normalize_channel(channel), sender_id: normalize_sender(sender_id))
+        channel: normalize_channel(channel),
+        sender_id: normalize_sender(sender_id)
+      )
+
       :ok
   end
 
@@ -898,10 +910,11 @@ defmodule Pincer.Core.Pairing do
 
       for pair <- Pincer.Ports.Storage.list_pairing_states_by_channel(channel_str) do
         key = {channel_str, pair.sender_id}
+
         pair_data =
           %{
             agent_id: pair.agent_id,
-            paired_at: pair.paired_at,
+            paired_at: pair.paired_at
           }
           |> Map.merge(pair.raw_data || %{})
 

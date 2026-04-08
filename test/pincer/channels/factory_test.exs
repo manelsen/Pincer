@@ -90,10 +90,12 @@ defmodule Pincer.Channels.Factory.Test do
       }
 
       specs = Factory.create_channel_specs(config)
-      modules = Enum.map(specs, fn
-        {m, _} -> m
-        m when is_atom(m) -> m
-      end)
+
+      modules =
+        Enum.map(specs, fn
+          {m, _} -> m
+          m when is_atom(m) -> m
+        end)
 
       assert MockChannelWithExtras in modules
       assert MockExtraChild in modules
@@ -158,8 +160,12 @@ defmodule Pincer.Channels.Factory.Test do
 
     test "config adapter tem precedência sobre manifest quando ambos existem" do
       config = %{
-        "mock" => %{"enabled" => true, "adapter" => "Pincer.Channels.Factory.Test.MockSignalChannel"}
+        "mock" => %{
+          "enabled" => true,
+          "adapter" => "Pincer.Channels.Factory.Test.MockSignalChannel"
+        }
       }
+
       manifests = [manifest("mock", MockTelegramChannel)]
 
       specs = Factory.create_channel_specs(config, manifests)
@@ -176,8 +182,12 @@ defmodule Pincer.Channels.Factory.Test do
 
     test "manifests de outros canais não interferem" do
       config = %{
-        "mock" => %{"enabled" => true, "adapter" => "Pincer.Channels.Factory.Test.MockTelegramChannel"}
+        "mock" => %{
+          "enabled" => true,
+          "adapter" => "Pincer.Channels.Factory.Test.MockTelegramChannel"
+        }
       }
+
       manifests = [manifest("discord", MockSignalChannel)]
 
       specs = Factory.create_channel_specs(config, manifests)

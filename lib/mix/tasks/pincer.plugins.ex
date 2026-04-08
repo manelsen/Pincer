@@ -36,7 +36,10 @@ defmodule Mix.Tasks.Pincer.Plugins do
     Enum.each(manifests, fn m ->
       enabled = get_in(config_channels, [m.id, "enabled"])
       state = if enabled == true, do: "✓ enabled", else: "✗ disabled"
-      Mix.shell().info(String.pad_trailing(m.id, 16) <> String.pad_trailing(to_string(m.kind), 10) <> state)
+
+      Mix.shell().info(
+        String.pad_trailing(m.id, 16) <> String.pad_trailing(to_string(m.kind), 10) <> state
+      )
     end)
 
     Mix.shell().info("")
