@@ -1,0 +1,21 @@
+defmodule PincerDiscord.MixProject do
+  use Mix.Project
+
+  def project do
+    [
+      app: :pincer_discord,
+      version: "0.1.0",
+      elixir: "~> 1.14",
+      start_permanent: false,
+      deps: [
+        {:pincer_ports, path: "../pincer_ports"},
+        {:nostrum, "~> 0.10", runtime: false},
+      {:req, "~> 0.5"}
+      ],
+      description: "Discord channel adapter for the Pincer AI agent framework",
+      package: [name: "pincer_discord", licenses: ["MIT"], maintainers: ["Micelio"], links: %{}]
+    ]
+  end
+
+  def application, do: [extra_applications: [:logger]]
+end

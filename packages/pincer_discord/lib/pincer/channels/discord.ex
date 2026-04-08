@@ -1,4 +1,19 @@
 defmodule Pincer.Channels.Discord do
+  @compile {:no_warn_undefined, [
+    Pincer.Core.Session.Server,
+    Pincer.Core.Session.Registry,
+    Pincer.Core.Session.Supervisor,
+    Pincer.Core.UX,
+    Pincer.Core.UX.MenuPolicy,
+    Pincer.Core.UX.ModelKeyboard,
+    Pincer.Core.Pairing,
+    Pincer.Core.Policy,
+    Pincer.Core.ProjectRouter,
+    Pincer.Core.SessionResolver,
+    Pincer.Core.ChannelInteractionPolicy,
+    Pincer.Ports.LLM,
+    Pincer.Utils.Text
+  ]}
   @moduledoc """
   Discord channel adapter using Nostrum.
 
@@ -227,6 +242,21 @@ defmodule Pincer.Channels.Discord do
   end
 
   defmodule Consumer do
+    @compile {:no_warn_undefined, [
+      Pincer.Core.Session.Server,
+      Pincer.Core.Session.Registry,
+      Pincer.Core.Session.Supervisor,
+      Pincer.Core.UX,
+      Pincer.Core.UX.MenuPolicy,
+      Pincer.Core.UX.ModelKeyboard,
+      Pincer.Core.Pairing,
+      Pincer.Core.Policy,
+      Pincer.Core.ProjectRouter,
+      Pincer.Core.SessionResolver,
+      Pincer.Core.ChannelInteractionPolicy,
+      Pincer.Ports.LLM
+    ]}
+
     @moduledoc """
     Consumes Discord events and routes messages to Pincer sessions.
     """
