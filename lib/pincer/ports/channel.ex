@@ -143,6 +143,23 @@ defmodule Pincer.Ports.Channel do
   """
   @callback on_approval_ui(call_id :: any(), command :: String.t(), state :: map()) :: map()
 
+  @doc """
+  Returns additional child specs to start alongside this channel.
+
+  Used when a channel is a `GenServer` (not a `Supervisor`) and needs sibling
+  processes — typically its own `SessionSupervisor`. The `Pincer.Channels.Factory`
+  calls this and appends the returned specs after the channel's own spec.
+
+  Channels implemented as `Supervisor` should instead start their
+  `SessionSupervisor` directly in `init/1` children (see `Pincer.Channels.Telegram`).
+
+  ## Examples
+
+      # In a GenServer-based channel:
+      def extra_child_specs, do: [Pincer.Channels.MyChannel.SessionSupervisor]
+  """
+  @callback extra_child_specs() :: [Supervisor.child_spec() | module()]
+
   @optional_callbacks send_message: 2,
                       update_message: 3,
                       handles_session?: 1,
@@ -153,7 +170,8 @@ defmodule Pincer.Ports.Channel do
                       on_agent_status: 2,
                       on_agent_thinking: 2,
                       on_subagent_progress: 2,
-                      on_approval_ui: 3
+                      on_approval_ui: 3,
+                      extra_child_specs: 0
 
   # ---------------------------------------------------------------------------
   # __using__ macro

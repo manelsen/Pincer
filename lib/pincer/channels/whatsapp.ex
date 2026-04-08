@@ -20,6 +20,9 @@ defmodule Pincer.Channels.WhatsApp do
   @max_outbound_chunk_chars 3500
 
   @impl Pincer.Ports.Channel
+  def extra_child_specs, do: [Pincer.Channels.WhatsApp.SessionSupervisor]
+
+  @impl Pincer.Ports.Channel
   def start_link(config) do
     normalized = normalize_map(config)
 

@@ -130,13 +130,18 @@ defmodule Pincer.Channels.Factory do
 
       result
     end)
-    |> Enum.map(fn {name, cfg} ->
+    |> Enum.flat_map(fn {name, cfg} ->
       module_name = cfg["adapter"]
       module = Module.concat([module_name])
 
       Logger.info("✅ CHANNEL ENABLED: #{name} (Adapter: #{module_name})")
 
-      {module, cfg}
+      extra =
+        if function_exported?(module, :extra_child_specs, 0),
+          do: module.extra_child_specs(),
+          else: []
+
+      [{module, cfg} | extra]
     end)
   end
 end

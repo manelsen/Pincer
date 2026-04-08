@@ -120,7 +120,10 @@ defmodule Pincer.Channels.Telegram do
       # We no longer cleanup/register synchronously in init/1 to avoid blocking the supervisor
       # especially during fast hot-reloads of multiple modules.
 
-      children = if Mix.env() == :test, do: [], else: [Pincer.Channels.Telegram.UpdatesProvider]
+      children =
+        if Mix.env() == :test,
+          do: [Pincer.Channels.Telegram.SessionSupervisor],
+          else: [Pincer.Channels.Telegram.SessionSupervisor, Pincer.Channels.Telegram.UpdatesProvider]
 
       Supervisor.init(children, strategy: :one_for_one)
     else

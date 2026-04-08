@@ -56,6 +56,7 @@ defmodule Pincer.Channels.Discord do
     Logger.info("Discord Channel Adapter Initialized.")
 
     children = [
+      Pincer.Channels.Discord.SessionSupervisor,
       {Pincer.Channels.Discord.Consumer, []}
     ]
 
