@@ -5,9 +5,10 @@ defmodule Mix.Tasks.Pincer.Plugins do
   ## Subcomandos
 
       mix pincer.plugins list                        # Lista plugins instalados
-      mix pincer.plugins enable <name>               # Habilita canal no config.yaml
-      mix pincer.plugins enable <name> --config path # Usa config alternativo
-      mix pincer.plugins install <name>              # Instala plugin (monorepo ou Hex)
+      mix pincer.plugins enable  <name>               # Habilita canal no config.yaml
+      mix pincer.plugins disable <name>               # Desabilita canal no config.yaml
+      mix pincer.plugins enable  <name> --config path # Usa config alternativo
+      mix pincer.plugins install <name>               # Instala plugin (monorepo ou Hex)
   """
 
   use Mix.Task
@@ -56,6 +57,30 @@ defmodule Mix.Tasks.Pincer.Plugins do
     end
   end
 
+  def run(["disable", name | rest]) do
+    {opts, _, _} = OptionParser.parse(rest, strict: @switches)
+    config_path = opts[:config] || "config.yaml"
+
+    case File.read(config_path) do
+      {:error, _} ->
+        Mix.shell().error("Config file not found: #{config_path}")
+
+      {:ok, content} ->
+        case set_channel_enabled(content, name, false) do
+          {:ok, updated} ->
+            File.write!(config_path, updated)
+            Mix.shell().info("🔴 Plugin '#{name}' disabled in #{config_path}")
+            Mix.shell().info("   Restart Pincer to apply changes.")
+
+          {:error, :channel_not_found} ->
+            Mix.shell().error(
+              "Channel '#{name}' not found in #{config_path}. " <>
+                "Add it under the `channels:` section first."
+            )
+        end
+    end
+  end
+
   def run(["install", name | _rest]) do
     Application.ensure_all_started(:yaml_elixir)
     manifests = Manifest.discover()
@@ -86,10 +111,10 @@ defmodule Mix.Tasks.Pincer.Plugins do
   def run(_args) do
     Mix.shell().info("""
     Usage:
-      mix pincer.plugins list                        # Lista plugins instalados
-      mix pincer.plugins enable <name>               # Habilita canal no config.yaml
-      mix pincer.plugins enable <name> --config path # Usa config alternativo
-      mix pincer.plugins install <name>              # Instala plugin
+      mix pincer.plugins list                         # Lista plugins instalados
+      mix pincer.plugins enable  <name> [--config p]  # Habilita canal no config.yaml
+      mix pincer.plugins disable <name> [--config p]  # Desabilita canal no config.yaml
+      mix pincer.plugins install <name>               # Instala plugin
     """)
   end
 

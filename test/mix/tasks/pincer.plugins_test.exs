@@ -93,6 +93,65 @@ defmodule Mix.Tasks.Pincer.PluginsTest do
     end
   end
 
+  @config_with_enabled """
+  channels:
+    telegram:
+      adapter: "Pincer.Channels.Telegram"
+      enabled: true
+      token_env: "TELEGRAM_BOT_TOKEN"
+    discord:
+      adapter: "Pincer.Channels.Discord"
+      enabled: true
+  other_section:
+    key: value
+  """
+
+  describe "pincer.plugins disable" do
+    test "desativa canal com enabled: true no config.yaml" do
+      path = write_tmp_config(@config_with_enabled)
+
+      ExUnit.CaptureIO.capture_io(fn ->
+        Plugins.run(["disable", "telegram", "--config", path])
+      end)
+
+      content = File.read!(path)
+      refute channel_enabled?(content, "telegram")
+    end
+
+    test "não altera outros canais ao desabilitar um" do
+      path = write_tmp_config(@config_with_enabled)
+
+      ExUnit.CaptureIO.capture_io(fn ->
+        Plugins.run(["disable", "telegram", "--config", path])
+      end)
+
+      content = File.read!(path)
+      assert channel_enabled?(content, "discord")
+    end
+
+    test "injeta enabled: false quando a chave está ausente" do
+      path = write_tmp_config(@config_without_enabled)
+
+      ExUnit.CaptureIO.capture_io(fn ->
+        Plugins.run(["disable", "discord", "--config", path])
+      end)
+
+      content = File.read!(path)
+      refute channel_enabled?(content, "discord")
+    end
+
+    test "retorna erro para canal não encontrado no config" do
+      path = write_tmp_config(@config_with_enabled)
+
+      output =
+        ExUnit.CaptureIO.capture_io(:stderr, fn ->
+          Plugins.run(["disable", "nonexistent", "--config", path])
+        end)
+
+      assert output =~ "not found" or output =~ "não encontrado"
+    end
+  end
+
   describe "pincer.plugins install" do
     test "informa que plugin bundled já está instalado" do
       output =
