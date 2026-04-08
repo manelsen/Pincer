@@ -1,4 +1,17 @@
 defmodule Pincer.Channels.WhatsApp do
+  @compile {:no_warn_undefined, [
+    Pincer.Core.Pairing,
+    Pincer.Core.Policy,
+    Pincer.Core.ProjectRouter,
+    Pincer.Core.Session.Registry,
+    Pincer.Core.Session.Server,
+    Pincer.Core.Session.Supervisor,
+    Pincer.Core.SessionResolver,
+    Pincer.Core.UX,
+    Pincer.Infra.PubSub,
+    Pincer.Ports.LLM
+  ]}
+
   @moduledoc """
   WhatsApp channel adapter backed by a Baileys bridge process.
 

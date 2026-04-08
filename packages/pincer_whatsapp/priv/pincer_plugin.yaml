@@ -1,0 +1,15 @@
+id: whatsapp
+name: Pincer WhatsApp
+version: "0.1.0"
+kind: channel
+adapter: "Pincer.Channels.WhatsApp"
+description: "WhatsApp Business API channel adapter"
+config_schema:
+  token_env:
+    type: string
+    required: true
+    description: "Env var with the WhatsApp API token"
+  phone_number_id_env:
+    type: string
+    required: true
+    description: "Env var with the WhatsApp phone number ID"
