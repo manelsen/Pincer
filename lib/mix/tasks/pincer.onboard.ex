@@ -372,6 +372,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
       {:ok, report} ->
         print_summary(report)
         check_db_connectivity(onboarding_config)
+        run_doctor_report(onboarding_config)
         :ok
 
       {:error, reason} ->
@@ -389,6 +390,54 @@ defmodule Mix.Tasks.Pincer.Onboard do
         Mix.shell().info("⚠  #{message}")
     end
   end
+
+  defp run_doctor_report(_config) do
+    config_path = "config.yaml"
+
+    if File.exists?(config_path) do
+      Mix.shell().info("")
+      Mix.shell().info("─── Relatório de saúde pós-configuração ─────────────────────")
+
+      report = Pincer.Core.Doctor.run(config_file: config_path)
+
+      Enum.each(report.checks, fn check ->
+        icon =
+          case check.severity do
+            :ok -> "✓"
+            :warn -> "⚠"
+            :error -> "✗"
+          end
+
+        Mix.shell().info("  [#{icon}] #{format_check_id(check.id)} — #{check.message}")
+      end)
+
+      Mix.shell().info("")
+
+      case report.status do
+        :ok ->
+          Mix.shell().info("✅ Pronto. Execute: mix pincer.chat")
+
+        :warn ->
+          Mix.shell().info(
+            "⚠  Configuração completa com avisos. Revise os itens acima antes de iniciar."
+          )
+
+          Mix.shell().info("   Execute: mix pincer.chat")
+
+        :error ->
+          Mix.shell().info(
+            "✗  Há erros de configuração. Corrija os itens acima antes de iniciar."
+          )
+
+          Mix.shell().info("   Re-execute: mix pincer.doctor para diagnóstico completo.")
+      end
+    else
+      Mix.shell().info("\n✅ Pronto. Execute: mix pincer.chat")
+    end
+  end
+
+  defp format_check_id({left, right}), do: "#{left}:#{right}"
+  defp format_check_id(id), do: to_string(id)
 
   defp run_remote_assisted!(onboarding_config, opts, capabilities) do
     remote_host = opts[:remote_host]
@@ -471,7 +520,9 @@ defmodule Mix.Tasks.Pincer.Onboard do
           System.put_env(env_key, key)
           Mix.shell().info("  ✓ #{env_key} escrito em .env")
         else
-          Mix.shell().info("  ⚠ Pulado. Lembre-se de definir #{env_key} no .env antes de iniciar.")
+          Mix.shell().info(
+            "  ⚠ Pulado. Lembre-se de definir #{env_key} no .env antes de iniciar."
+          )
         end
 
       true ->
@@ -506,7 +557,4 @@ defmodule Mix.Tasks.Pincer.Onboard do
 
     File.write!(path, updated)
   end
-
-  defp format_check_id({left, right}), do: "#{left}:#{right}"
-  defp format_check_id(id), do: to_string(id)
 end
