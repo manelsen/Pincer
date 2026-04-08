@@ -81,9 +81,9 @@ defmodule Pincer.MixProject do
       # Channel plugins (monorepo path deps)
       {:pincer_ports, path: "packages/pincer_ports"},
       {:pincer_cli, path: "packages/pincer_cli"},
+      {:pincer_telegram, path: "packages/pincer_telegram"},
 
       # Messaging
-      {:telegex, "~> 1.8"},
       {:nostrum, "~> 0.10", runtime: false},
       {:slack_elixir, "~> 1.2"},
       {:earmark, "~> 1.4"},

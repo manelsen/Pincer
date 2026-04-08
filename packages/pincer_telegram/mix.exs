@@ -30,8 +30,7 @@ defmodule PincerTelegram.MixProject do
 
   defp deps do
     [
-      # In monorepo mode pincer is the parent project — no path dep needed.
-      # When published to Hex, add: {:pincer, "~> 0.1"}
+      {:pincer_ports, path: "../pincer_ports"},
       {:telegex, "~> 1.8"},
       {:mox, "~> 1.0", only: :test}
     ]

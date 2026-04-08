@@ -1,4 +1,18 @@
 defmodule Pincer.Channels.Telegram.Session do
+  @compile {:no_warn_undefined, [
+    Pincer.Core.ChannelEventPolicy,
+    Pincer.Core.ChannelInteractionPolicy,
+    Pincer.Core.ProjectFlowDelivery,
+    Pincer.Core.ResponseEnvelope,
+    Pincer.Core.Session.Server,
+    Pincer.Core.StatusDelivery,
+    Pincer.Core.StatusMessagePolicy,
+    Pincer.Core.StreamDelivery,
+    Pincer.Core.StreamingPolicy,
+    Pincer.Core.SubAgentProgress,
+    Pincer.Infra.PubSub
+  ]}
+
   @moduledoc """
   Driven Adapter for Telegram.
   One process per active chat that listens to PubSub and sends to the Telegram API.

@@ -1,4 +1,27 @@
 defmodule Pincer.Channels.Telegram do
+  # All modules below live in the host pincer project and are available at
+  # runtime but not at pincer_telegram compile time.
+  @compile {:no_warn_undefined, [
+    Earmark,
+    Pincer.Core.ChannelInteractionPolicy,
+    Pincer.Core.Pairing,
+    Pincer.Core.Policy,
+    Pincer.Core.ProjectOrchestrator,
+    Pincer.Core.ProjectRouter,
+    Pincer.Core.SessionResolver,
+    Pincer.Core.Session.Server,
+    Pincer.Core.Session.Supervisor,
+    Pincer.Core.Structs.IncomingMessage,
+    Pincer.Core.Telemetry,
+    Pincer.Core.UX,
+    Pincer.Core.UX.MenuPolicy,
+    Pincer.Core.UX.ModelKeyboard,
+    Pincer.Infra.PubSub,
+    Pincer.Ports.LLM,
+    Pincer.Utils.Text,
+    Req
+  ]}
+
   @moduledoc """
   Telegram bot channel implementation using the Telegex library.
 
@@ -524,6 +547,25 @@ defmodule Pincer.Channels.Telegram do
 end
 
 defmodule Pincer.Channels.Telegram.UpdatesProvider do
+  @compile {:no_warn_undefined, [
+    Pincer.Core.ChannelInteractionPolicy,
+    Pincer.Core.Pairing,
+    Pincer.Core.Policy,
+    Pincer.Core.ProjectOrchestrator,
+    Pincer.Core.ProjectRouter,
+    Pincer.Core.SessionResolver,
+    Pincer.Core.Session.Server,
+    Pincer.Core.Session.Supervisor,
+    Pincer.Core.Structs.IncomingMessage,
+    Pincer.Core.Telemetry,
+    Pincer.Core.UX,
+    Pincer.Core.UX.MenuPolicy,
+    Pincer.Core.UX.ModelKeyboard,
+    Pincer.Infra.PubSub,
+    Pincer.Ports.LLM,
+    Req
+  ]}
+
   @moduledoc """
   GenServer that polls Telegram for updates using long polling.
 

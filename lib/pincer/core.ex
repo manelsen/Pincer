@@ -25,7 +25,6 @@ defmodule Pincer.Core do
       Policy,
       SessionScopePolicy,
       SessionResolver,
-      Session.Context,
       MemoryTypes,
       MemoryPipeline,
       MemoryDiagnostics,
