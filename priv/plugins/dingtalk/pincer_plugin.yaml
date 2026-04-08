@@ -1,0 +1,15 @@
+id: dingtalk
+name: Pincer DingTalk
+version: "0.1.0"
+kind: channel
+adapter: "Pincer.Channels.DingTalk"
+description: "DingTalk (Ding) channel adapter"
+config_schema:
+  client_id_env:
+    type: string
+    required: true
+    description: "Env var with the DingTalk client ID"
+  client_secret_env:
+    type: string
+    required: true
+    description: "Env var with the DingTalk client secret"
