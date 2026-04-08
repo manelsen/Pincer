@@ -1,0 +1,15 @@
+id: slack
+name: Pincer Slack
+version: "0.1.0"
+kind: channel
+adapter: "Pincer.Channels.Slack"
+description: "Slack channel adapter (Socket Mode)"
+config_schema:
+  app_token_env:
+    type: string
+    required: true
+    description: "Env var with the Slack app-level token (SLACK_APP_TOKEN)"
+  bot_token_env:
+    type: string
+    required: true
+    description: "Env var with the Slack bot token (SLACK_BOT_TOKEN)"

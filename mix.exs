@@ -87,6 +87,7 @@ defmodule Pincer.MixProject do
       {:pincer_line, path: "packages/pincer_line"},
       {:pincer_feishu, path: "packages/pincer_feishu"},
       {:pincer_dingtalk, path: "packages/pincer_dingtalk"},
+      {:pincer_slack, path: "packages/pincer_slack"},
 
       # Messaging
       {:nostrum, "~> 0.10", runtime: false},

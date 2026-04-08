@@ -1,4 +1,7 @@
 defmodule Pincer.Channels.Slack.Session do
+  @compile {:no_warn_undefined, [
+    Pincer.Infra.PubSub
+  ]}
   @moduledoc """
   Manages outgoing responses for a specific Slack channel.
   """

@@ -1,4 +1,10 @@
 defmodule Pincer.Channels.Slack do
+  @compile {:no_warn_undefined, [
+    Pincer.Core.Session.Server,
+    Pincer.Core.Session.Registry,
+    Pincer.Core.Session.Supervisor,
+    Pincer.Infra.PubSub
+  ]}
   @moduledoc """
   Slack channel implementation using Slack (Socket Mode).
   """
@@ -87,6 +93,11 @@ defmodule Pincer.Channels.Slack do
 end
 
 defmodule Pincer.Channels.Slack.Handler do
+  @compile {:no_warn_undefined, [
+    Pincer.Core.Session.Server,
+    Pincer.Core.Session.Registry,
+    Pincer.Core.Session.Supervisor
+  ]}
   @moduledoc """
   Handles Slack events using the Slack.Bot behaviour.
   """
