@@ -1,0 +1,7 @@
+id: cli
+name: Pincer CLI
+version: "0.1.0"
+kind: channel
+adapter: "Pincer.Channels.CLI"
+description: "Interactive command-line channel for local development and testing"
+config_schema: {}

@@ -11,7 +11,6 @@ defmodule Pincer.Ports do
       CapabilityDiscovery,
       Onboarding,
       UserMenu,
-      Channel,
       Tool,
       Cron,
       Hook
