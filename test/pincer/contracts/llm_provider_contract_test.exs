@@ -31,6 +31,7 @@ defmodule Pincer.Contracts.LLMProviderContractTest do
       assert match?({:ok, _, _}, chat_result) or match?({:error, _}, chat_result)
 
       stream_result = provider_module.stream_completion(@messages, "model", %{}, [])
+
       assert match?({:ok, _}, stream_result) or match?({:ok, _, _}, stream_result) or
                match?({:error, _}, stream_result)
     end)

@@ -35,7 +35,7 @@ defmodule Pincer.Storage.PairingState do
   @required [:channel, :sender_id]
   @optional [:agent_id, :raw_data]
 
-@type t :: %__MODULE__{} | %Pincer.Storage.PairingState{}
+  @type t :: %__MODULE__{} | %Pincer.Storage.PairingState{}
 
   @spec changeset(t() | %Pincer.Storage.PairingState{}, map()) :: Ecto.Changeset.t()
   def changeset(pairing_state \\ %__MODULE__{}, params) do

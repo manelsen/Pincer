@@ -120,7 +120,9 @@ defmodule Pincer.Core.MemoryRecall do
 
     {source_hits, hits, recall_stats} =
       if recall? do
-        Logger.info("[MEMORY-RECALL] Querying: \"#{String.slice(query, 0, 80)}\" (#{query_length} chars)")
+        Logger.info(
+          "[MEMORY-RECALL] Querying: \"#{String.slice(query, 0, 80)}\" (#{query_length} chars)"
+        )
 
         recall_hits(storage, embedding_fun, query, limit, telemetry,
           session_id: session_id,

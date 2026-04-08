@@ -1265,7 +1265,9 @@ defmodule Pincer.Storage.Adapters.Postgres do
     |> where([p], p.channel == ^to_string(channel) and p.sender_id == ^sender_id)
     |> Repo.one()
     |> case do
-      nil -> nil
+      nil ->
+        nil
+
       p ->
         %{
           channel: p.channel,

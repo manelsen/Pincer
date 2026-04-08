@@ -226,6 +226,7 @@ defmodule Mix.Tasks.Pincer.PluginsTest do
   defp channel_enabled?(content, channel_name) do
     # Find the channel block and check that enabled: true appears within it
     pattern = ~r/  #{channel_name}:[\s\S]*?(?=\n  \w|\z)/
+
     case Regex.run(pattern, content) do
       [block] -> block =~ ~r/enabled:\s*true/
       nil -> false

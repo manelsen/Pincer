@@ -79,14 +79,23 @@ defmodule Pincer.Plugin.ManifestTest do
 
   describe "from_file/1" do
     test "lê e parseia arquivo YAML existente" do
-      path = Path.join([Application.app_dir(:pincer, "priv"), "plugins", "telegram", "pincer_plugin.yaml"])
+      path =
+        Path.join([
+          Application.app_dir(:pincer, "priv"),
+          "plugins",
+          "telegram",
+          "pincer_plugin.yaml"
+        ])
+
       assert {:ok, manifest} = Manifest.from_file(path)
       assert manifest.id == "telegram"
       assert manifest.kind == :channel
     end
 
     test "retorna erro para arquivo inexistente" do
-      assert {:error, reason} = Manifest.from_file("/tmp/nao_existe_#{System.unique_integer()}.yaml")
+      assert {:error, reason} =
+               Manifest.from_file("/tmp/nao_existe_#{System.unique_integer()}.yaml")
+
       assert reason =~ "not found"
     end
   end

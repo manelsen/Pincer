@@ -132,7 +132,8 @@ defmodule Pincer.Plugin.Manifest do
         {:ok, String.to_atom(kind)}
 
       nil ->
-        {:error, "Missing required field: kind (must be one of: #{Enum.join(@valid_kinds, ", ")})"}
+        {:error,
+         "Missing required field: kind (must be one of: #{Enum.join(@valid_kinds, ", ")})"}
 
       other ->
         {:error,
