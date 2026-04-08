@@ -164,6 +164,112 @@ defmodule Pincer.Core.DoctorTest do
     end
   end
 
+  describe "llm_provider_checks" do
+    setup do
+      original_providers = Application.get_env(:pincer, :llm_providers)
+
+      on_exit(fn ->
+        if original_providers do
+          Application.put_env(:pincer, :llm_providers, original_providers)
+        else
+          Application.delete_env(:pincer, :llm_providers)
+        end
+      end)
+
+      Application.put_env(:pincer, :llm_providers, %{
+        "openrouter" => %{
+          adapter: Pincer.LLM.Providers.OpenAICompat,
+          env_key: "OPENROUTER_API_KEY",
+          default_model: "some-model"
+        }
+      })
+
+      :ok
+    end
+
+    test "reports error when active LLM provider env key is missing" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        llm:
+          provider: "openrouter"
+        """
+      )
+
+      report = Doctor.run(root: tmp, env_fetcher: fn _ -> nil end)
+
+      assert Enum.any?(report.checks, fn check ->
+               check.id == {:llm_provider, "openrouter"} and check.severity == :error
+             end)
+    end
+
+    test "reports ok when active LLM provider env key is present" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        llm:
+          provider: "openrouter"
+        """
+      )
+
+      report =
+        Doctor.run(
+          root: tmp,
+          env_fetcher: fn
+            "OPENROUTER_API_KEY" -> "sk-test-key"
+            _ -> nil
+          end
+        )
+
+      assert Enum.any?(report.checks, fn check ->
+               check.id == {:llm_provider, "openrouter"} and check.severity == :ok
+             end)
+    end
+
+    test "reports warning when LLM provider is not in registry" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        llm:
+          provider: "unknown_provider"
+        """
+      )
+
+      Application.put_env(:pincer, :llm_providers, %{})
+
+      report = Doctor.run(root: tmp, env_fetcher: fn _ -> nil end)
+
+      assert Enum.any?(report.checks, fn check ->
+               check.id == {:llm_provider, "unknown_provider"} and check.severity == :warn
+             end)
+    end
+
+    test "skips LLM check when no provider is configured in llm section" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        channels:
+          cli:
+            enabled: true
+        """
+      )
+
+      report = Doctor.run(root: tmp, env_fetcher: fn _ -> nil end)
+
+      refute Enum.any?(report.checks, fn check ->
+               match?({:llm_provider, _}, check.id)
+             end)
+    end
+  end
+
   defp tmp_dir! do
     tmp = Path.join(System.tmp_dir!(), "pincer_doctor_#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
