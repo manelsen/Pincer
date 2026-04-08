@@ -60,6 +60,7 @@ defmodule Pincer.Core.Doctor do
       checks ++
         channel_token_checks(config, env_fetcher) ++
         dm_policy_checks(config) ++
+        llm_provider_checks(config, env_fetcher) ++
         runtime_cohesion_checks() ++
         alignment_integrity_checks()
 
@@ -246,6 +247,63 @@ defmodule Pincer.Core.Doctor do
           []
       end
     end)
+  end
+
+  defp llm_provider_checks(config, env_fetcher) do
+    provider_id =
+      case read_field(config, :llm) do
+        llm when is_map(llm) -> read_field(llm, :provider)
+        _ -> nil
+      end
+
+    if is_binary(provider_id) and String.trim(provider_id) != "" do
+      provider_registry = Application.get_env(:pincer, :llm_providers, %{})
+
+      case Map.get(provider_registry, provider_id) do
+        nil ->
+          [
+            warn_check(
+              {:llm_provider, provider_id},
+              "Active LLM provider '#{provider_id}' is not registered in :llm_providers",
+              %{provider: provider_id}
+            )
+          ]
+
+        provider_config ->
+          env_key = provider_config[:env_key]
+
+          cond do
+            is_nil(env_key) or env_key == "" ->
+              [
+                ok_check(
+                  {:llm_provider, provider_id},
+                  "Provider '#{provider_id}' does not require an API key",
+                  %{provider: provider_id}
+                )
+              ]
+
+            env_fetcher.(env_key) |> present?() ->
+              [
+                ok_check(
+                  {:llm_provider, provider_id},
+                  "Provider '#{provider_id}' configurado (#{env_key} presente)",
+                  %{provider: provider_id, env_key: env_key}
+                )
+              ]
+
+            true ->
+              [
+                error_check(
+                  {:llm_provider, provider_id},
+                  "Provider '#{provider_id}' ativo mas #{env_key} nao esta definido",
+                  %{provider: provider_id, env_key: env_key}
+                )
+              ]
+          end
+      end
+    else
+      []
+    end
   end
 
   defp dm_policy_checks(config) do
