@@ -82,6 +82,7 @@ defmodule Pincer.MixProject do
       {:pincer_ports, path: "packages/pincer_ports"},
       {:pincer_cli, path: "packages/pincer_cli"},
       {:pincer_telegram, path: "packages/pincer_telegram"},
+      {:pincer_webhook, path: "packages/pincer_webhook"},
 
       # Messaging
       {:nostrum, "~> 0.10", runtime: false},
