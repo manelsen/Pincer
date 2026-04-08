@@ -115,6 +115,17 @@ defmodule Pincer.Application do
     Logger.configure(level: :info)
     Pincer.Infra.Config.load()
 
+    case Pincer.Core.StartupGuard.run() do
+      :ok ->
+        do_start()
+
+      {:error, _check, message} ->
+        IO.puts("\n❌ #{message}\n")
+        {:error, :startup_guard_failed}
+    end
+  end
+
+  defp do_start do
     repo_config = Pincer.Infra.Config.get(:repo)
 
     Logger.info("Starting Bot...")
