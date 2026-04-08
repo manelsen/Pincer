@@ -152,6 +152,46 @@ defmodule Mix.Tasks.Pincer.PluginsTest do
     end
   end
 
+  describe "pincer.plugins status" do
+    test "mostra todos os plugins instalados com estado enabled/disabled" do
+      path = write_tmp_config(@config_with_disabled)
+
+      output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          Plugins.run(["status", "--config", path])
+        end)
+
+      # telegram is installed (manifest exists) and disabled in config
+      assert output =~ "telegram"
+      assert output =~ ~r/disabled|✗|off/i or output =~ "false"
+    end
+
+    test "marca canal como enabled quando habilitado no config" do
+      path = write_tmp_config(@config_with_enabled)
+
+      output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          Plugins.run(["status", "--config", path])
+        end)
+
+      assert output =~ "telegram"
+      assert output =~ ~r/enabled|✓|on/i or output =~ "true"
+    end
+
+    test "lista todos os 9 canais bundled" do
+      path = write_tmp_config(@config_with_disabled)
+
+      output =
+        ExUnit.CaptureIO.capture_io(fn ->
+          Plugins.run(["status", "--config", path])
+        end)
+
+      for channel <- ~w(telegram discord cli webhook line feishu whatsapp dingtalk slack) do
+        assert output =~ channel, "Expected to find '#{channel}' in status output"
+      end
+    end
+  end
+
   describe "pincer.plugins install" do
     test "informa que plugin bundled já está instalado" do
       output =

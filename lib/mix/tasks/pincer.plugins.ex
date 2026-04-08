@@ -21,6 +21,27 @@ defmodule Mix.Tasks.Pincer.Plugins do
   @switches [config: :string]
 
   @impl Mix.Task
+  def run(["status" | rest]) do
+    Application.ensure_all_started(:yaml_elixir)
+    {opts, _, _} = OptionParser.parse(rest, strict: @switches)
+    config_path = opts[:config] || "config.yaml"
+
+    manifests = Manifest.discover()
+    config_channels = read_config_channels(config_path)
+
+    Mix.shell().info("Plugin status  (config: #{config_path})\n")
+    Mix.shell().info(String.pad_trailing("ID", 16) <> String.pad_trailing("KIND", 10) <> "STATE")
+    Mix.shell().info(String.duplicate("─", 40))
+
+    Enum.each(manifests, fn m ->
+      enabled = get_in(config_channels, [m.id, "enabled"])
+      state = if enabled == true, do: "✓ enabled", else: "✗ disabled"
+      Mix.shell().info(String.pad_trailing(m.id, 16) <> String.pad_trailing(to_string(m.kind), 10) <> state)
+    end)
+
+    Mix.shell().info("")
+  end
+
   def run(["list" | _rest]) do
     Application.ensure_all_started(:yaml_elixir)
     manifests = Manifest.discover()
@@ -111,10 +132,11 @@ defmodule Mix.Tasks.Pincer.Plugins do
   def run(_args) do
     Mix.shell().info("""
     Usage:
-      mix pincer.plugins list                         # Lista plugins instalados
-      mix pincer.plugins enable  <name> [--config p]  # Habilita canal no config.yaml
-      mix pincer.plugins disable <name> [--config p]  # Desabilita canal no config.yaml
-      mix pincer.plugins install <name>               # Instala plugin
+      mix pincer.plugins list                          # Lista plugins instalados
+      mix pincer.plugins status   [--config p]         # Estado de todos os plugins
+      mix pincer.plugins enable  <name> [--config p]   # Habilita canal no config.yaml
+      mix pincer.plugins disable <name> [--config p]   # Desabilita canal no config.yaml
+      mix pincer.plugins install <name>                # Instala plugin
     """)
   end
 
@@ -130,6 +152,19 @@ defmodule Mix.Tasks.Pincer.Plugins do
     end
 
     Mix.shell().info("")
+  end
+
+  defp read_config_channels(config_path) do
+    case File.read(config_path) do
+      {:ok, content} ->
+        case YamlElixir.read_from_string(content) do
+          {:ok, %{"channels" => channels}} when is_map(channels) -> channels
+          _ -> %{}
+        end
+
+      _ ->
+        %{}
+    end
   end
 
   # Modifies the `channels.<name>.enabled` value in a YAML text without

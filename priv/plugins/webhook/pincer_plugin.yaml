@@ -1,0 +1,20 @@
+id: webhook
+name: Pincer Webhook
+version: "0.1.0"
+kind: channel
+adapter: "Pincer.Channels.Webhook"
+description: "Generic HTTP webhook channel for external integrations"
+config_schema:
+  token_env:
+    type: string
+    required: true
+    description: "Env var with the webhook authentication token"
+  session_mode:
+    type: string
+    description: "Session scoping: per_sender or fixed"
+  default_session_id:
+    type: string
+    description: "Session ID when session_mode is fixed"
+  default_source:
+    type: string
+    description: "Source label attached to incoming messages"
