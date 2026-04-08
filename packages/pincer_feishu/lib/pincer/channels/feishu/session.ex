@@ -1,4 +1,8 @@
 defmodule Pincer.Channels.Feishu.Session do
+  @compile {:no_warn_undefined, [
+    Pincer.Core.Session.Registry,
+    Pincer.Infra.PubSub
+  ]}
   @moduledoc """
   Feishu channel session GenServer.
 
