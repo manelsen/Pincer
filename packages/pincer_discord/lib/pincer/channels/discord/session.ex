@@ -1,4 +1,17 @@
 defmodule Pincer.Channels.Discord.Session do
+  @compile {:no_warn_undefined, [
+    Pincer.Core.ChannelEventPolicy,
+    Pincer.Core.ChannelInteractionPolicy,
+    Pincer.Core.ProjectFlowDelivery,
+    Pincer.Core.Session.Registry,
+    Pincer.Core.StatusDelivery,
+    Pincer.Core.StatusMessagePolicy,
+    Pincer.Core.StreamDelivery,
+    Pincer.Core.StreamingPolicy,
+    Pincer.Core.SubAgentProgress,
+    Pincer.Infra.PubSub,
+    Pincer.Ports.LLM
+  ]}
   @moduledoc """
   Driven Adapter for Discord.
   One process per active Discord channel that listens to PubSub and sends messages via Nostrum.
