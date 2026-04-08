@@ -3,7 +3,6 @@ defmodule Pincer.Channels do
   use Boundary,
     deps: [Pincer.Core, Pincer.Infra, Pincer.Plugin, Pincer.Ports, Pincer.Utils],
     exports: [
-      CLI,
       Discord,
       Slack,
       Telegram,

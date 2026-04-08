@@ -78,6 +78,10 @@ defmodule Pincer.MixProject do
       {:postgrex, "~> 0.19"},
       {:pgvector, "~> 0.3"},
 
+      # Channel plugins (monorepo path deps)
+      {:pincer_ports, path: "packages/pincer_ports"},
+      {:pincer_cli, path: "packages/pincer_cli"},
+
       # Messaging
       {:telegex, "~> 1.8"},
       {:nostrum, "~> 0.10", runtime: false},
