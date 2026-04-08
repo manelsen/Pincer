@@ -1,4 +1,7 @@
 defmodule Pincer.Channels.Line do
+  @compile {:no_warn_undefined, [
+    Pincer.Channels.Shared.WebhookVerifier
+  ]}
   @moduledoc """
   LINE Messaging API channel adapter.
 

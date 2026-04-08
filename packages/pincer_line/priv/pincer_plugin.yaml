@@ -1,0 +1,15 @@
+id: line
+name: Pincer LINE
+version: "0.1.0"
+kind: channel
+adapter: "Pincer.Channels.Line"
+description: "LINE Messaging API channel adapter"
+config_schema:
+  token_env:
+    type: string
+    required: true
+    description: "Env var with the LINE channel access token (LINE_CHANNEL_ACCESS_TOKEN)"
+  secret_env:
+    type: string
+    required: false
+    description: "Env var with the LINE channel secret for webhook signature verification"
