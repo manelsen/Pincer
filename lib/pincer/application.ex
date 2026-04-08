@@ -144,10 +144,7 @@ defmodule Pincer.Application do
       Pincer.Core.Project.Registry,
       Pincer.Core.Project.Supervisor,
       Pincer.Adapters.Cron.Scheduler,
-      Pincer.Channels.Supervisor,
-      Pincer.Channels.Telegram.SessionSupervisor,
-      Pincer.Channels.Discord.SessionSupervisor,
-      Pincer.Channels.WhatsApp.SessionSupervisor
+      Pincer.Channels.Supervisor
     ]
 
     children =

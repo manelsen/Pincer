@@ -1,6 +1,8 @@
 defmodule Pincer.Channels.Factory.Test do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   doctest Pincer.Channels.Factory
+
+  alias Pincer.Channels.Factory
 
   # Mock de canais para teste
   defmodule MockTelegramChannel do
@@ -19,17 +21,32 @@ defmodule Pincer.Channels.Factory.Test do
     def init(_), do: {:ok, %{}}
   end
 
+  defmodule MockExtraChild do
+    use DynamicSupervisor
+    def start_link(_), do: DynamicSupervisor.start_link(__MODULE__, [], name: __MODULE__)
+    def init(_), do: DynamicSupervisor.init(strategy: :one_for_one)
+  end
+
+  defmodule MockChannelWithExtras do
+    @behaviour Pincer.Ports.Channel
+    def start_link(_), do: {:ok, self()}
+    def send_message(_, _), do: :ok
+    def extra_child_specs, do: [MockExtraChild]
+  end
+
+  defp clean_whitelist(ctx) do
+    old = Application.get_env(:pincer, :enabled_channels)
+    Application.delete_env(:pincer, :enabled_channels)
+
+    on_exit(fn ->
+      if old, do: Application.put_env(:pincer, :enabled_channels, old)
+    end)
+
+    ctx
+  end
+
   describe "create_channel_specs/1" do
-    setup do
-      old_whitelist = Application.get_env(:pincer, :enabled_channels)
-      Application.delete_env(:pincer, :enabled_channels)
-
-      on_exit(fn ->
-        if old_whitelist, do: Application.put_env(:pincer, :enabled_channels, old_whitelist)
-      end)
-
-      :ok
-    end
+    setup :clean_whitelist
 
     test "retorna specs apenas para canais habilitados na configuração" do
       config = %{
@@ -45,9 +62,8 @@ defmodule Pincer.Channels.Factory.Test do
         }
       }
 
-      specs = Pincer.Channels.Factory.create_channel_specs(config)
+      specs = Factory.create_channel_specs(config)
 
-      # Deve conter apenas o Telegram
       assert Enum.any?(specs, fn {m, _} -> m == MockTelegramChannel end)
       assert length(specs) == 1
     end
@@ -60,7 +76,60 @@ defmodule Pincer.Channels.Factory.Test do
         }
       }
 
-      assert Pincer.Channels.Factory.create_channel_specs(config) == []
+      assert Factory.create_channel_specs(config) == []
+    end
+
+    test "inclui extra_child_specs declarados pelo canal" do
+      config = %{
+        "channels" => %{
+          "mock" => %{
+            "enabled" => true,
+            "adapter" => "Pincer.Channels.Factory.Test.MockChannelWithExtras"
+          }
+        }
+      }
+
+      specs = Factory.create_channel_specs(config)
+      modules = Enum.map(specs, fn
+        {m, _} -> m
+        m when is_atom(m) -> m
+      end)
+
+      assert MockChannelWithExtras in modules
+      assert MockExtraChild in modules
+    end
+
+    test "canais sem extra_child_specs não quebram o factory" do
+      config = %{
+        "channels" => %{
+          "telegram" => %{
+            "enabled" => true,
+            "adapter" => "Pincer.Channels.Factory.Test.MockTelegramChannel"
+          }
+        }
+      }
+
+      specs = Factory.create_channel_specs(config)
+
+      assert length(specs) == 1
+      assert [{MockTelegramChannel, _}] = specs
+    end
+
+    test "extra_child_specs aparecem após o spec do canal" do
+      config = %{
+        "channels" => %{
+          "mock" => %{
+            "enabled" => true,
+            "adapter" => "Pincer.Channels.Factory.Test.MockChannelWithExtras"
+          }
+        }
+      }
+
+      specs = Factory.create_channel_specs(config)
+
+      [{first_module, _} | rest] = specs
+      assert first_module == MockChannelWithExtras
+      assert [MockExtraChild] == rest
     end
   end
 end
