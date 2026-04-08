@@ -1,4 +1,7 @@
 defmodule Pincer.Channels.Feishu do
+  @compile {:no_warn_undefined, [
+    Pincer.Channels.Shared.WebhookVerifier
+  ]}
   @moduledoc """
   Feishu (Lark) channel adapter.
 

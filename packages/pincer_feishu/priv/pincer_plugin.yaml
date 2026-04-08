@@ -1,0 +1,15 @@
+id: feishu
+name: Pincer Feishu
+version: "0.1.0"
+kind: channel
+adapter: "Pincer.Channels.Feishu"
+description: "Feishu (Lark) channel adapter"
+config_schema:
+  app_id_env:
+    type: string
+    required: true
+    description: "Env var with the Feishu app ID (FEISHU_APP_ID)"
+  app_secret_env:
+    type: string
+    required: true
+    description: "Env var with the Feishu app secret (FEISHU_APP_SECRET)"
