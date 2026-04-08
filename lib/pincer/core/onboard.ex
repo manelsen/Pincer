@@ -140,6 +140,14 @@ defmodule Pincer.Core.Onboard do
   def preflight(config) when is_map(config), do: Preflight.preflight(config)
 
   @doc """
+  Attempts a raw TCP connection to the configured PostgreSQL host/port.
+  Returns :ok or {:warn, message} — never blocks onboard, just warns.
+  """
+  @spec check_db_connectivity(map()) :: :ok | {:warn, String.t()}
+  def check_db_connectivity(config) when is_map(config),
+    do: Preflight.check_db_connectivity(config)
+
+  @doc """
   Runs an expanded environment checklist for assisted onboarding flows.
 
   This checklist is non-blocking and returns warnings with remediation hints.

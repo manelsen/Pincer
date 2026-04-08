@@ -1,6 +1,7 @@
 defmodule Mix.Tasks.Pincer.OnboardTest do
   use ExUnit.Case, async: false
   import ExUnit.CaptureIO
+  alias Pincer.Core.Onboard.Preflight
 
   @task "pincer.onboard"
 
@@ -200,5 +201,113 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     refute File.exists?("config.yaml")
     refute File.exists?("#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/MEMORY.md")
     refute File.exists?("#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/HISTORY.md")
+  end
+
+  describe "provider_env_key" do
+    test "returns correct env var for known providers" do
+      alias Pincer.Core.Onboard.Defaults
+
+      assert Defaults.provider_env_key("openrouter") == "OPENROUTER_API_KEY"
+      assert Defaults.provider_env_key("z_ai") == "Z_AI_API_KEY"
+      assert Defaults.provider_env_key("z_ai_coding") == "Z_AI_CODING_API_KEY"
+      assert Defaults.provider_env_key("opencode_zen") == "OPENCODE_ZEN_API_KEY"
+      assert Defaults.provider_env_key("google") == "GOOGLE_API_KEY"
+      assert Defaults.provider_env_key("moonshot") == "MOONSHOT_API_KEY"
+      assert Defaults.provider_env_key("groq") == "GROQ_API_KEY"
+      assert Defaults.provider_env_key("anthropic") == "ANTHROPIC_API_KEY"
+    end
+
+    test "returns nil for unknown provider" do
+      assert Pincer.Core.Onboard.Defaults.provider_env_key("unknown_provider") == nil
+      assert Pincer.Core.Onboard.Defaults.provider_env_key(nil) == nil
+    end
+  end
+
+  describe "write_env_key via --api-key flag" do
+    test "non-interactive with --api-key writes key to .env" do
+      capture_io(fn ->
+        Mix.Task.run(@task, [
+          "--non-interactive",
+          "--yes",
+          "--provider",
+          "openrouter",
+          "--api-key",
+          "test-key-abc123"
+        ])
+      end)
+
+      assert File.exists?(".env")
+      content = File.read!(".env")
+      assert content =~ "OPENROUTER_API_KEY=test-key-abc123"
+    end
+
+    test "non-interactive without --api-key does not create .env" do
+      capture_io(fn ->
+        Mix.Task.run(@task, [
+          "--non-interactive",
+          "--yes",
+          "--provider",
+          "openrouter"
+        ])
+      end)
+
+      refute File.exists?(".env")
+    end
+
+    test "--api-key replaces existing key without touching other keys" do
+      File.write!(".env", "OTHER_KEY=keep_me\nOPENROUTER_API_KEY=old_value\nANOTHER=also_keep\n")
+
+      capture_io(fn ->
+        Mix.Task.run(@task, [
+          "--non-interactive",
+          "--yes",
+          "--provider",
+          "openrouter",
+          "--api-key",
+          "new_value"
+        ])
+      end)
+
+      content = File.read!(".env")
+      assert content =~ "OPENROUTER_API_KEY=new_value"
+      refute content =~ "OPENROUTER_API_KEY=old_value"
+      assert content =~ "OTHER_KEY=keep_me"
+      assert content =~ "ANOTHER=also_keep"
+    end
+
+    test "--api-key appends to existing .env when key is absent" do
+      File.write!(".env", "TELEGRAM_BOT_TOKEN=tg_token\n")
+
+      capture_io(fn ->
+        Mix.Task.run(@task, [
+          "--non-interactive",
+          "--yes",
+          "--provider",
+          "openrouter",
+          "--api-key",
+          "appended_key"
+        ])
+      end)
+
+      content = File.read!(".env")
+      assert content =~ "TELEGRAM_BOT_TOKEN=tg_token"
+      assert content =~ "OPENROUTER_API_KEY=appended_key"
+    end
+  end
+
+  describe "check_db_connectivity" do
+    test "returns :ok when port is open" do
+      {:ok, listen} = :gen_tcp.listen(0, [])
+      {:ok, port} = :inet.port(listen)
+      config = %{"database" => %{"hostname" => "localhost", "port" => port}}
+      assert :ok = Preflight.check_db_connectivity(config)
+      :gen_tcp.close(listen)
+    end
+
+    test "returns {:warn, _} when port is closed" do
+      config = %{"database" => %{"hostname" => "localhost", "port" => 19999}}
+      assert {:warn, msg} = Preflight.check_db_connectivity(config)
+      assert msg =~ "inacessível"
+    end
   end
 end
