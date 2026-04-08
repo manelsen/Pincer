@@ -1,4 +1,7 @@
 defmodule Pincer.Channels.DingTalk do
+  @compile {:no_warn_undefined, [
+    Pincer.Channels.Shared.WebhookVerifier
+  ]}
   @moduledoc """
   DingTalk robot channel adapter.
 
