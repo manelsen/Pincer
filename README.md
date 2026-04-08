@@ -12,23 +12,35 @@ Autonomous AI agents on the BEAM — OTP supervision, multi-channel messaging, M
 
 ## Quickstart
 
+### Docker (recomendado)
+
 ```bash
 git clone https://github.com/micelio/pincer.git && cd pincer
 cp .env.example .env
-# Set at least one LLM provider key in .env
+# Defina ao menos uma chave de LLM em .env (ex: GROQ_API_KEY)
 docker compose up --build -d
 docker compose exec pincer-server mix pincer.chat
 ```
 
-That's it. You're talking to an agent. The Docker build starts PostgreSQL with pgvector, runs migrations, and boots the Pincer supervision tree.
+The Docker build starts PostgreSQL with pgvector, runs migrations, and boots the supervision tree.
 
-To run locally instead:
+### Local
 
 ```bash
-docker compose up -d postgres    # just the database
-mix deps.get
-mix ecto.create && mix ecto.migrate
-mix pincer.chat                   # interactive CLI agent
+git clone https://github.com/micelio/pincer.git && cd pincer
+docker compose up -d postgres   # or point to an existing PostgreSQL instance
+mix pincer.setup                # deps → DB → migrations → wizard → health check
+mix pincer.chat
+```
+
+`mix pincer.setup` guides you through the full first-run sequence interactively. Use `--yes` for a non-interactive run with defaults.
+
+### Reconfigurar / diagnosticar
+
+```bash
+mix pincer.onboard              # re-run configuration wizard
+mix pincer.doctor               # health check: config, tokens, LLM, migrations
+mix pincer.doctor --strict      # same, but fail on warnings
 ```
 
 ## Requirements
