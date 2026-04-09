@@ -1,0 +1,11 @@
+{application,pincer_ports,
+             [{modules,['Elixir.Pincer.Core.Session.Context',
+                        'Elixir.Pincer.Core.Structs.IncomingMessage',
+                        'Elixir.Pincer.LLM.Provider',
+                        'Elixir.Pincer.LLM.RawResponseLogger',
+                        'Elixir.Pincer.Ports.Channel','Elixir.PincerPorts']},
+              {optional_applications,[]},
+              {applications,[kernel,stdlib,elixir,logger]},
+              {description,"Port behaviours and contracts for the Pincer AI agent framework"},
+              {registered,[]},
+              {vsn,"0.1.0"}]}.
