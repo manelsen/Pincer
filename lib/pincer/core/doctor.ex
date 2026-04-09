@@ -61,6 +61,7 @@ defmodule Pincer.Core.Doctor do
         channel_token_checks(config, env_fetcher) ++
         dm_policy_checks(config) ++
         llm_provider_checks(config, env_fetcher) ++
+        native_binary_checks(config) ++
         runtime_cohesion_checks() ++
         alignment_integrity_checks()
 
@@ -76,6 +77,33 @@ defmodule Pincer.Core.Doctor do
       config_path: config_path,
       run_id: run_id
     }
+  end
+
+  defp native_binary_checks(config) do
+    channels(config)
+    |> Enum.filter(fn {name, channel_cfg} -> name == "whatsapp" and enabled?(channel_cfg) end)
+    |> Enum.flat_map(fn _ ->
+      case System.find_executable("go") do
+        nil ->
+          [
+            warn_check(
+              :go_binary,
+              "WhatsApp channel is enabled but `go` was not found in PATH — " <>
+                "the whatsapp_bridge sidecar requires Go 1.21+ to compile",
+              %{channel: "whatsapp", required_tool: "go"}
+            )
+          ]
+
+        path ->
+          [
+            ok_check(
+              :go_binary,
+              "Go compiler found at #{path} (required by whatsapp_bridge sidecar)",
+              %{channel: "whatsapp", go_path: path}
+            )
+          ]
+      end
+    end)
   end
 
   defp alignment_integrity_checks do
