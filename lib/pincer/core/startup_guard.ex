@@ -49,8 +49,7 @@ defmodule Pincer.Core.StartupGuard do
           :ok
 
         {:error, reason} ->
-          reason_str = if is_binary(reason), do: reason, else: inspect(reason)
-          {:error, :config_invalid, "config.yaml inválido: #{reason_str}"}
+          {:error, :config_invalid, "config.yaml inválido: #{format_reason(reason)}"}
       end
     else
       {:error, :config_missing, "config.yaml não encontrado. Execute: mix pincer.onboard"}
@@ -114,6 +113,9 @@ defmodule Pincer.Core.StartupGuard do
   end
 
   # Private
+
+  defp format_reason(reason) when is_binary(reason), do: reason
+  defp format_reason(reason), do: inspect(reason)
 
   defp maybe_check_database do
     if skip_guard?(), do: :ok, else: check_database()
