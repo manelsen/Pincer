@@ -14,34 +14,34 @@ defmodule Pincer.Core.WorkspaceGuard do
   # --- Path Confinement ---
 
   @spec confine_path(String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
-  def confine_path(path, opts \\ []) do
-    if not is_binary(path) do
-      {:error, "Invalid path"}
-    else
-      reject_parent_segments = Keyword.get(opts, :reject_parent_segments, true)
-      root = opts |> Keyword.get(:root, File.cwd!()) |> Path.expand()
-      candidate = String.trim(path)
+  def confine_path(path, opts \\ [])
 
-      cond do
-        candidate == "" ->
-          {:error, "Invalid path"}
+  def confine_path(path, _opts) when not is_binary(path), do: {:error, "Invalid path"}
 
-        String.contains?(candidate, "\0") ->
-          {:error, "Path contains null bytes"}
+  def confine_path(path, opts) do
+    reject_parent_segments = Keyword.get(opts, :reject_parent_segments, true)
+    root = opts |> Keyword.get(:root, File.cwd!()) |> Path.expand()
+    candidate = String.trim(path)
 
-        reject_parent_segments and parent_segment?(candidate) ->
-          {:error, "Path traversal (..) not allowed"}
+    cond do
+      candidate == "" ->
+        {:error, "Invalid path"}
 
-        true ->
-          full_path = Path.expand(candidate, root)
+      String.contains?(candidate, "\0") ->
+        {:error, "Path contains null bytes"}
 
-          with :ok <- ensure_inside_root(full_path, root),
-               :ok <- ensure_symlink_chain_inside_root(full_path, root) do
-            {:ok, full_path}
-          else
-            {:error, _reason} -> {:error, @outside_workspace_error}
-          end
-      end
+      reject_parent_segments and parent_segment?(candidate) ->
+        {:error, "Path traversal (..) not allowed"}
+
+      true ->
+        full_path = Path.expand(candidate, root)
+
+        with :ok <- ensure_inside_root(full_path, root),
+             :ok <- ensure_symlink_chain_inside_root(full_path, root) do
+          {:ok, full_path}
+        else
+          {:error, _reason} -> {:error, @outside_workspace_error}
+        end
     end
   end
 
@@ -112,26 +112,27 @@ defmodule Pincer.Core.WorkspaceGuard do
   # --- Command Security Policy ---
 
   @spec command_allowed?(String.t(), keyword()) :: :ok | {:error, String.t()}
-  def command_allowed?(command, opts \\ []) do
-    if not is_binary(command) do
-      {:error, "Invalid command"}
-    else
-      workspace_root = opts |> Keyword.get(:workspace_root, File.cwd!()) |> Path.expand()
-      command = String.slice(command, 0, @max_command_length)
+  def command_allowed?(command, opts \\ [])
 
-      cond do
-        String.match?(command, @multiline_or_line_continuation) ->
-          {:error, "Detected multiline or line-continuation shell payload"}
+  def command_allowed?(command, _opts) when not is_binary(command),
+    do: {:error, "Invalid command"}
 
-        String.match?(command, @dangerous_chars) ->
-          {:error, "Detected dangerous shell characters"}
+  def command_allowed?(command, opts) do
+    workspace_root = opts |> Keyword.get(:workspace_root, File.cwd!()) |> Path.expand()
+    command = String.slice(command, 0, @max_command_length)
 
-        true ->
-          case validate_command_structure(command, workspace_root) do
-            :ok -> :ok
-            {:error, reason} -> {:error, reason}
-          end
-      end
+    cond do
+      String.match?(command, @multiline_or_line_continuation) ->
+        {:error, "Detected multiline or line-continuation shell payload"}
+
+      String.match?(command, @dangerous_chars) ->
+        {:error, "Detected dangerous shell characters"}
+
+      true ->
+        case validate_command_structure(command, workspace_root) do
+          :ok -> :ok
+          {:error, reason} -> {:error, reason}
+        end
     end
   end
 
