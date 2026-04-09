@@ -22,6 +22,8 @@ defmodule Pincer.Core.LLM.SkillsSidecarPolicy do
           | :artifact_checksum_required
           | :invalid_artifact_checksum
 
+  alias Pincer.Utils.MapHelpers
+
   @sensitive_env_keys [
     "TELEGRAM_BOT_TOKEN",
     "DISCORD_BOT_TOKEN",
@@ -86,7 +88,7 @@ defmodule Pincer.Core.LLM.SkillsSidecarPolicy do
   def validate(_), do: {:error, :invalid_config}
 
   defp validate_command(cfg) do
-    case read_field(cfg, :command) do
+    case MapHelpers.read_field(cfg, :command) do
       command when is_binary(command) ->
         if String.downcase(Path.basename(command)) == "docker" do
           :ok
@@ -100,7 +102,7 @@ defmodule Pincer.Core.LLM.SkillsSidecarPolicy do
   end
 
   defp validate_args(cfg) do
-    case read_field(cfg, :args) do
+    case MapHelpers.read_field(cfg, :args) do
       args when is_list(args) ->
         {:ok, Enum.map(args, &to_string/1)}
 
@@ -277,8 +279,8 @@ defmodule Pincer.Core.LLM.SkillsSidecarPolicy do
 
   defp validate_artifact_checksum(cfg) do
     checksum =
-      read_field(cfg, :artifact_checksum) ||
-        read_field(cfg, :skill_artifact_checksum)
+      MapHelpers.read_field(cfg, :artifact_checksum) ||
+        MapHelpers.read_field(cfg, :skill_artifact_checksum)
 
     cond do
       is_nil(checksum) ->
@@ -626,7 +628,7 @@ defmodule Pincer.Core.LLM.SkillsSidecarPolicy do
   end
 
   defp env_keys_from_config(cfg) do
-    case read_field(cfg, :env) do
+    case MapHelpers.read_field(cfg, :env) do
       nil ->
         []
 
@@ -717,10 +719,4 @@ defmodule Pincer.Core.LLM.SkillsSidecarPolicy do
     |> String.trim()
     |> String.upcase()
   end
-
-  defp read_field(map, key) when is_map(map) and is_atom(key) do
-    Map.get(map, key) || Map.get(map, Atom.to_string(key))
-  end
-
-  defp read_field(_, _), do: nil
 end

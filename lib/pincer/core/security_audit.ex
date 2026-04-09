@@ -9,6 +9,7 @@ defmodule Pincer.Core.SecurityAudit do
   """
 
   alias Pincer.Core.LLM.SkillsSidecarPolicy
+  alias Pincer.Utils.MapHelpers
 
   @type severity :: :ok | :warn | :error
 
@@ -140,11 +141,11 @@ defmodule Pincer.Core.SecurityAudit do
     channels(config)
     |> Enum.filter(fn {_, cfg} -> enabled?(cfg) end)
     |> Enum.flat_map(fn {channel_name, cfg} ->
-      token_env = read_field(cfg, :token_env)
+      token_env = MapHelpers.read_field(cfg, :token_env)
 
       cond do
-        present?(token_env) ->
-          if present?(env_fetcher.(token_env)) do
+        MapHelpers.present?(token_env) ->
+          if MapHelpers.present?(env_fetcher.(token_env)) do
             [
               ok_check(
                 {:channel_auth, channel_name},
@@ -181,7 +182,7 @@ defmodule Pincer.Core.SecurityAudit do
     channels(config)
     |> Enum.filter(fn {name, cfg} -> enabled?(cfg) and dm_capable_channel?(name) end)
     |> Enum.map(fn {channel_name, cfg} ->
-      dm_policy = read_field(cfg, :dm_policy)
+      dm_policy = MapHelpers.read_field(cfg, :dm_policy)
       mode = normalize_dm_mode(dm_policy)
 
       case mode do
@@ -234,9 +235,9 @@ defmodule Pincer.Core.SecurityAudit do
     bind =
       read_nested_field(config, [:gateway, :bind]) ||
         read_nested_field(config, [:server, :bind]) ||
-        read_field(config, :bind)
+        MapHelpers.read_field(config, :bind)
 
-    if present?(bind) do
+    if MapHelpers.present?(bind) do
       normalized =
         bind
         |> to_string()
@@ -404,7 +405,7 @@ defmodule Pincer.Core.SecurityAudit do
   end
 
   defp channels(config) when is_map(config) do
-    case read_field(config, :channels) do
+    case MapHelpers.read_field(config, :channels) do
       channels when is_map(channels) ->
         channels
         |> Enum.map(fn {name, cfg} -> {normalize_channel_name(name), normalize_map(cfg)} end)
@@ -433,7 +434,7 @@ defmodule Pincer.Core.SecurityAudit do
 
   defp normalize_dm_mode(dm_policy) when is_map(dm_policy) do
     dm_policy
-    |> read_field(:mode)
+    |> MapHelpers.read_field(:mode)
     |> normalize_dm_mode_value()
   end
 
@@ -453,7 +454,7 @@ defmodule Pincer.Core.SecurityAudit do
   end
 
   defp enabled?(cfg) when is_map(cfg) do
-    case read_field(cfg, :enabled) do
+    case MapHelpers.read_field(cfg, :enabled) do
       true -> true
       "true" -> true
       _ -> false
@@ -474,27 +475,6 @@ defmodule Pincer.Core.SecurityAudit do
   defp status_from_counts(%{warn: warnings}) when warnings > 0, do: :warn
   defp status_from_counts(_), do: :ok
 
-  defp read_field(map, key) when is_map(map) and is_atom(key) do
-    Map.get(map, key) || Map.get(map, Atom.to_string(key))
-  end
-
-  defp read_field(map, key) when is_map(map) and is_binary(key) do
-    Map.get(map, key) ||
-      Enum.find_value(map, fn
-        {existing_key, value} when is_atom(existing_key) ->
-          if Atom.to_string(existing_key) == key, do: value
-
-        _ ->
-          nil
-      end)
-  end
-
-  defp read_field(map, key) when is_map(map) do
-    Map.get(map, key)
-  end
-
-  defp read_field(_, _), do: nil
-
   defp read_any_path(_map, []), do: nil
 
   defp read_any_path(map, [path | rest]) do
@@ -506,24 +486,21 @@ defmodule Pincer.Core.SecurityAudit do
 
   defp read_nested_path(map, path) when is_list(path) do
     Enum.reduce_while(path, map, fn key, current ->
-      case read_field(current, key) do
+      case MapHelpers.read_field(current, key) do
         nil -> {:halt, nil}
         value -> {:cont, value}
       end
     end)
   end
 
-  defp read_nested_field(map, [single]), do: read_field(map, single)
+  defp read_nested_field(map, [single]), do: MapHelpers.read_field(map, single)
 
   defp read_nested_field(map, [head | tail]) do
-    case read_field(map, head) do
+    case MapHelpers.read_field(map, head) do
       next when is_map(next) -> read_nested_field(next, tail)
       _ -> nil
     end
   end
-
-  defp present?(value) when is_binary(value), do: String.trim(value) != ""
-  defp present?(value), do: not is_nil(value)
 
   defp ok_check(id, message, meta), do: %{id: id, severity: :ok, message: message, meta: meta}
   defp warn_check(id, message, meta), do: %{id: id, severity: :warn, message: message, meta: meta}

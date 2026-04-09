@@ -8,6 +8,8 @@ defmodule Pincer.Adapters.Connectors.MCP.ConfigLoader do
 
   require Logger
 
+  alias Pincer.Utils.MapHelpers
+
   @type server_config :: map()
   @type servers_config :: %{optional(String.t()) => server_config()}
 
@@ -157,9 +159,6 @@ defmodule Pincer.Adapters.Connectors.MCP.ConfigLoader do
   end
 
   defp disabled?(cfg) when is_map(cfg) do
-    truthy?(Map.get(cfg, "disabled"))
+    MapHelpers.truthy?(Map.get(cfg, "disabled"))
   end
-
-  defp truthy?(value) when value in [true, 1, "1", "true", "TRUE", "True"], do: true
-  defp truthy?(_), do: false
 end

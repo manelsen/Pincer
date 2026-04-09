@@ -10,6 +10,7 @@ defmodule Pincer.Core.AuthProfiles do
 
   alias Pincer.Core.ErrorClass
   alias Pincer.Utils.ETSHelper
+  alias Pincer.Utils.MapHelpers
   alias Pincer.Utils.Time
   alias Pincer.Utils.Value
 
@@ -56,7 +57,9 @@ defmodule Pincer.Core.AuthProfiles do
             }
           end)
 
-        case Enum.find(evaluated, fn item -> present?(item.api_key) and not item.cooling end) do
+        case Enum.find(evaluated, fn item ->
+               MapHelpers.present?(item.api_key) and not item.cooling
+             end) do
           %{profile: profile, api_key: api_key} ->
             config =
               provider_config
@@ -68,7 +71,7 @@ defmodule Pincer.Core.AuthProfiles do
 
           nil ->
             cond do
-              Enum.any?(evaluated, &present?(&1.api_key)) ->
+              Enum.any?(evaluated, &MapHelpers.present?(&1.api_key)) ->
                 {:error, :all_profiles_cooling_down}
 
               true ->
@@ -161,7 +164,7 @@ defmodule Pincer.Core.AuthProfiles do
         |> Enum.map(&normalize_profile/1)
         |> Enum.reject(&is_nil/1)
 
-      present?(Value.fetch(config, :env_key, nil)) ->
+      MapHelpers.present?(Value.fetch(config, :env_key, nil)) ->
         [%{name: @default_profile, env_key: to_string(Value.fetch(config, :env_key, nil))}]
 
       true ->
@@ -199,7 +202,7 @@ defmodule Pincer.Core.AuthProfiles do
       |> Value.fetch(:env_key, nil)
       |> normalize_env_key()
 
-    if present?(name) and present?(env_key) do
+    if MapHelpers.present?(name) and MapHelpers.present?(env_key) do
       %{name: name, env_key: env_key}
     else
       nil
@@ -234,9 +237,6 @@ defmodule Pincer.Core.AuthProfiles do
   defp normalize_api_key(value) do
     Value.trim_string(value)
   end
-
-  defp present?(value) when is_binary(value), do: String.trim(value) != ""
-  defp present?(value), do: not is_nil(value)
 
   defp has_field?(map, key) when is_map(map) and is_atom(key) do
     Map.has_key?(map, key) or Map.has_key?(map, Atom.to_string(key))

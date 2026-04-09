@@ -9,6 +9,8 @@ defmodule Pincer.Core.SessionScopePolicy do
   Non-DM routes always remain channel-scoped.
   """
 
+  alias Pincer.Utils.MapHelpers
+
   @type channel :: :telegram | :discord | :whatsapp
   @type dm_scope :: :main | :per_peer
 
@@ -25,8 +27,8 @@ defmodule Pincer.Core.SessionScopePolicy do
 
   def resolve(:telegram, context, channel_config)
       when is_map(context) and is_map(channel_config) do
-    chat_id = stringify(read_field(context, :chat_id))
-    chat_type = normalize_chat_type(read_field(context, :chat_type))
+    chat_id = stringify(MapHelpers.read_field(context, :chat_id))
+    chat_type = normalize_chat_type(MapHelpers.read_field(context, :chat_type))
 
     if chat_type == "private" do
       case dm_scope(channel_config) do
@@ -40,8 +42,8 @@ defmodule Pincer.Core.SessionScopePolicy do
 
   def resolve(:discord, context, channel_config)
       when is_map(context) and is_map(channel_config) do
-    channel_id = stringify(read_field(context, :channel_id))
-    guild_id = read_field(context, :guild_id)
+    channel_id = stringify(MapHelpers.read_field(context, :channel_id))
+    guild_id = MapHelpers.read_field(context, :guild_id)
 
     if dm_event?(guild_id) do
       case dm_scope(channel_config) do
@@ -55,8 +57,8 @@ defmodule Pincer.Core.SessionScopePolicy do
 
   def resolve(:whatsapp, context, channel_config)
       when is_map(context) and is_map(channel_config) do
-    chat_id = stringify(read_field(context, :chat_id))
-    is_group = truthy?(read_field(context, :is_group))
+    chat_id = stringify(MapHelpers.read_field(context, :chat_id))
+    is_group = MapHelpers.truthy?(MapHelpers.read_field(context, :is_group))
 
     if is_group do
       scoped_id("whatsapp", chat_id)
@@ -70,8 +72,8 @@ defmodule Pincer.Core.SessionScopePolicy do
 
   def resolve(_channel, context, _channel_config) when is_map(context) do
     id =
-      read_field(context, :chat_id) ||
-        read_field(context, :channel_id) ||
+      MapHelpers.read_field(context, :chat_id) ||
+        MapHelpers.read_field(context, :channel_id) ||
         "unknown"
 
     scoped_id("unknown", stringify(id))
@@ -79,16 +81,16 @@ defmodule Pincer.Core.SessionScopePolicy do
 
   defp dm_scope(config) do
     raw =
-      read_field(config, :dm_session_scope) ||
-        read_field(config, :dm_scope) ||
+      MapHelpers.read_field(config, :dm_session_scope) ||
+        MapHelpers.read_field(config, :dm_scope) ||
         read_nested_dm_scope(config)
 
     normalize_dm_scope(raw)
   end
 
   defp read_nested_dm_scope(config) do
-    case read_field(config, :session_scope) do
-      scope_map when is_map(scope_map) -> read_field(scope_map, :dm)
+    case MapHelpers.read_field(config, :session_scope) do
+      scope_map when is_map(scope_map) -> MapHelpers.read_field(scope_map, :dm)
       _ -> nil
     end
   end
@@ -118,9 +120,6 @@ defmodule Pincer.Core.SessionScopePolicy do
   defp dm_event?(guild_id) when is_binary(guild_id), do: String.trim(guild_id) == ""
   defp dm_event?(_), do: false
 
-  defp truthy?(value) when value in [true, "true", 1, "1", true], do: true
-  defp truthy?(_), do: false
-
   defp scoped_id(prefix, ""), do: "#{prefix}_unknown"
   defp scoped_id(prefix, id), do: "#{prefix}_#{id}"
 
@@ -131,10 +130,4 @@ defmodule Pincer.Core.SessionScopePolicy do
 
   defp stringify(nil), do: ""
   defp stringify(value), do: value |> to_string() |> String.trim()
-
-  defp read_field(map, key) when is_map(map) and is_atom(key) do
-    Map.get(map, key) || Map.get(map, Atom.to_string(key))
-  end
-
-  defp read_field(_, _), do: nil
 end
