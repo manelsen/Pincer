@@ -170,27 +170,39 @@ defmodule Pincer.Channels.Factory do
         _ -> nil
       end
 
-    case {config_module, manifest_module} do
-      {nil, nil} ->
-        Logger.error("Channel '#{name}': no adapter in config or manifest — skipping")
-        nil
+    resolved =
+      case {config_module, manifest_module} do
+        {nil, nil} ->
+          Logger.error("Channel '#{name}': no adapter in config or manifest — skipping")
+          nil
 
-      {nil, mod} ->
-        Logger.debug("Channel '#{name}': adapter resolved from manifest (#{mod})")
-        mod
+        {nil, mod} ->
+          Logger.debug("Channel '#{name}': adapter resolved from manifest (#{mod})")
+          mod
 
-      {mod, nil} ->
-        mod
+        {mod, nil} ->
+          mod
 
-      {mod, manifest_mod} when mod != manifest_mod ->
-        Logger.debug(
-          "Channel '#{name}': config adapter (#{mod}) differs from manifest (#{manifest_mod}) — using config"
-        )
+        {mod, manifest_mod} when mod != manifest_mod ->
+          Logger.debug(
+            "Channel '#{name}': config adapter (#{mod}) differs from manifest (#{manifest_mod}) — using config"
+          )
 
-        mod
+          mod
 
-      {mod, _} ->
-        mod
+        {mod, _} ->
+          mod
+      end
+
+    if resolved && not Code.ensure_loaded?(resolved) do
+      Logger.warning(
+        "Channel '#{name}': adapter module #{resolved} is not loaded — " <>
+          "is the package installed? Skipping."
+      )
+
+      nil
+    else
+      resolved
     end
   end
 end
