@@ -172,6 +172,7 @@ defmodule Mix.Tasks.Pincer.Plugins do
             # 3. Clean compiled artifacts and unlock
             Mix.shell().info("  Running: mix deps.clean #{package_atom} --unlock")
             Mix.shell().cmd("mix deps.clean #{package_atom} --unlock")
+            clean_native_binaries(package_atom)
 
             # 4. Re-resolve lock (drops orphaned transitive deps automatically)
             Mix.shell().info("  Running: mix deps.get")
@@ -340,6 +341,25 @@ defmodule Mix.Tasks.Pincer.Plugins do
   # Returns {:ok, :removed}, {:ok, :not_found}, or {:error, reason}.
   @spec remove_dep_from_mix_exs(String.t(), atom()) ::
           {:ok, :removed | :not_found} | {:error, String.t()}
+  # Removes compiled native binaries left inside the package's priv/ directory.
+  # Currently handles the whatsapp_bridge Go sidecar; extend as new native deps arise.
+  defp clean_native_binaries(:pincer_whatsapp) do
+    pattern = Path.join(["_build", "**", "lib", "pincer_whatsapp", "priv", "whatsapp_bridge"])
+
+    case Path.wildcard(pattern) do
+      [] ->
+        :ok
+
+      paths ->
+        Enum.each(paths, fn path ->
+          File.rm(path)
+          Mix.shell().info("  ✓ Removed native binary: #{path}")
+        end)
+    end
+  end
+
+  defp clean_native_binaries(_package_atom), do: :ok
+
   defp remove_dep_from_mix_exs(mix_exs_path, package_atom) do
     dep_re = ~r/\{:#{Regex.escape(Atom.to_string(package_atom))}\b/
 
