@@ -4,6 +4,10 @@
 /deps/
 /doc/
 /.fetch
+packages/*/_build/
+packages/*/deps/
+packages/*/cover/
+packages/*/doc/
 erl_crash.dump
 *.ez
 pincer-*.tar

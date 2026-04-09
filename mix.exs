@@ -81,6 +81,22 @@ defmodule Pincer.MixProject do
       # Channel plugins (monorepo path deps)
       {:pincer_ports, path: "packages/pincer_ports"},
       {:pincer_cli, path: "packages/pincer_cli"},
+
+      # LLM provider plugins (monorepo path deps)
+      {:pincer_openai_compat, path: "packages/pincer_openai_compat"},
+      {:pincer_anthropic, path: "packages/pincer_anthropic"},
+      {:pincer_google, path: "packages/pincer_google"},
+      {:pincer_openai, path: "packages/pincer_openai"},
+      {:pincer_mistral, path: "packages/pincer_mistral"},
+      {:pincer_groq, path: "packages/pincer_groq"},
+      {:pincer_minimax, path: "packages/pincer_minimax"},
+      {:pincer_moonshot, path: "packages/pincer_moonshot"},
+      {:pincer_ollama, path: "packages/pincer_ollama"},
+      {:pincer_openrouter, path: "packages/pincer_openrouter"},
+      {:pincer_deepseek, path: "packages/pincer_deepseek"},
+      {:pincer_qwen, path: "packages/pincer_qwen"},
+      {:pincer_zhipu, path: "packages/pincer_zhipu"},
+      {:pincer_opencode_zen, path: "packages/pincer_opencode_zen"},
       {:pincer_telegram, path: "packages/pincer_telegram"},
       {:pincer_webhook, path: "packages/pincer_webhook"},
       {:pincer_whatsapp, path: "packages/pincer_whatsapp"},
