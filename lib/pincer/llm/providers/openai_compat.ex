@@ -365,10 +365,7 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
   defp clean_message(msg) when is_map(msg) do
     msg
     |> Enum.reject(fn
-      {"tool_calls", nil} -> true
-      {"tool_calls", []} -> true
-      {:tool_calls, nil} -> true
-      {:tool_calls, []} -> true
+      {k, []} when k in ["tool_calls", :tool_calls] -> true
       {_, nil} -> true
       _ -> false
     end)
