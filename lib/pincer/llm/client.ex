@@ -179,32 +179,35 @@ defmodule Pincer.LLM.Client do
     end
   end
 
+  defp fetch_models_from_provider("mock"),
+    do: ModelRegistry.list_models("mock", model_selection_registry())
+
   defp fetch_models_from_provider(provider_id) do
     registry = provider_registry()
     config = registry[provider_id]
+    do_fetch_models(provider_id, config)
+  end
 
-    if is_nil(config) or provider_id == "mock" do
-      ModelRegistry.list_models(provider_id, model_selection_registry())
-    else
-      adapter = config[:adapter]
-      # Default profile for listing
-      requested_profile = nil
+  defp do_fetch_models(provider_id, nil),
+    do: ModelRegistry.list_models(provider_id, model_selection_registry())
 
-      case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
-        {:ok, auth_selection} ->
-          config_with_auth = auth_selection.config
+  defp do_fetch_models(provider_id, config) do
+    adapter = config[:adapter]
 
-          case apply(adapter, :list_models, [config_with_auth]) do
-            {:ok, models} when is_list(models) and models != [] ->
-              models
+    case AuthProfiles.resolve(provider_id, config, requested_profile: nil) do
+      {:ok, auth_selection} ->
+        config_with_auth = auth_selection.config
 
-            _ ->
-              ModelRegistry.list_models(provider_id, model_selection_registry())
-          end
+        case apply(adapter, :list_models, [config_with_auth]) do
+          {:ok, models} when is_list(models) and models != [] ->
+            models
 
-        _ ->
-          ModelRegistry.list_models(provider_id, model_selection_registry())
-      end
+          _ ->
+            ModelRegistry.list_models(provider_id, model_selection_registry())
+        end
+
+      _ ->
+        ModelRegistry.list_models(provider_id, model_selection_registry())
     end
   end
 
