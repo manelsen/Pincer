@@ -64,56 +64,57 @@ defmodule Pincer.Core.ProjectFSM do
 
   defp enrich_state(state, :scope, attrs) do
     objective = Map.get(attrs, :objective) || Map.get(state, :objective)
-
-    if present_text?(objective) do
-      {:ok, %{state | phase: :scope, objective: objective}}
-    else
-      {:error, :objective_required}
-    end
+    enrich_with_text(state, :scope, :objective, objective, :objective_required)
   end
 
   defp enrich_state(state, :plan, attrs) do
     scope = Map.get(attrs, :scope) || Map.get(state, :scope)
-
-    if present_text?(scope) do
-      {:ok, %{state | phase: :plan, scope: scope}}
-    else
-      {:error, :scope_required}
-    end
+    enrich_with_text(state, :plan, :scope, scope, :scope_required)
   end
 
   defp enrich_state(state, :execution, attrs) do
-    plan = Map.get(attrs, :plan) || Map.get(state, :plan)
+    case Map.get(attrs, :plan) || Map.get(state, :plan) do
+      plan when is_map(plan) and map_size(plan) > 0 ->
+        {:ok, %{state | phase: :execution, plan: plan}}
 
-    if is_map(plan) and map_size(plan) > 0 do
-      {:ok, %{state | phase: :execution, plan: plan}}
-    else
-      {:error, :plan_required}
+      _ ->
+        {:error, :plan_required}
     end
   end
 
   defp enrich_state(state, :review, attrs) do
-    execution = Map.get(attrs, :execution) || Map.get(state, :execution)
+    case Map.get(attrs, :execution) || Map.get(state, :execution) do
+      execution when is_map(execution) and map_size(execution) > 0 ->
+        {:ok, %{state | phase: :review, execution: execution}}
 
-    if is_map(execution) and map_size(execution) > 0 do
-      {:ok, %{state | phase: :review, execution: execution}}
-    else
-      {:error, :execution_required}
+      _ ->
+        {:error, :execution_required}
     end
   end
 
   defp enrich_state(state, :delivery, attrs) do
-    review = Map.get(attrs, :review) || Map.get(state, :review)
     delivery = Map.get(attrs, :delivery) || Map.get(state, :delivery) || %{}
 
-    if is_map(review) and map_size(review) > 0 do
-      {:ok, %{state | phase: :delivery, review: review, delivery: delivery}}
-    else
-      {:error, :review_required}
+    case Map.get(attrs, :review) || Map.get(state, :review) do
+      review when is_map(review) and map_size(review) > 0 ->
+        {:ok, %{state | phase: :delivery, review: review, delivery: delivery}}
+
+      _ ->
+        {:error, :review_required}
     end
   end
 
   defp enrich_state(_state, _phase, _attrs), do: {:error, :unsupported_phase}
+
+  defp enrich_with_text(state, phase, field, value, error_tag) when is_binary(value) do
+    case String.trim(value) do
+      "" -> {:error, error_tag}
+      _ -> {:ok, state |> Map.put(:phase, phase) |> Map.put(field, value)}
+    end
+  end
+
+  defp enrich_with_text(_state, _phase, _field, _value, error_tag),
+    do: {:error, error_tag}
 
   defp persist_checkpoint(state, from_phase, to_phase, storage) do
     checkpoint = %{
@@ -135,7 +136,4 @@ defmodule Pincer.Core.ProjectFSM do
       other -> {:error, {:checkpoint_persist_failed, other}}
     end
   end
-
-  defp present_text?(value) when is_binary(value), do: String.trim(value) != ""
-  defp present_text?(_), do: false
 end

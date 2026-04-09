@@ -221,14 +221,7 @@ defmodule Pincer.Core.Session.Server do
     Introspection.Kernel.report_trace(state.root_agent_id, trace_meta)
 
     # Local lesson outcome feedback (depends on session-specific injected_lesson_ids)
-    if state.injected_lesson_ids != [] do
-      lesson_ids = state.injected_lesson_ids
-      outcome = trace_outcome(trace_meta)
-
-      Task.start(fn ->
-        update_lesson_outcomes(lesson_ids, outcome)
-      end)
-    end
+    maybe_update_lesson_outcomes(state.injected_lesson_ids, trace_meta)
 
     {:noreply, %{state | last_executor_trace: trace_meta, injected_lesson_ids: []}}
   end
@@ -515,7 +508,7 @@ defmodule Pincer.Core.Session.Server do
   def handle_call({:set_model, provider, model}, _from, state) do
     Logger.info("[SESSION] #{state.session_id} switching model to #{provider}:#{model}")
 
-    if is_pid(state.worker_pid) and Process.alive?(state.worker_pid) do
+    if worker_alive?(state) do
       send(state.worker_pid, {:model_changed, provider, model})
     end
 
@@ -576,7 +569,7 @@ defmodule Pincer.Core.Session.Server do
           end
 
         if decision do
-          if is_pid(state.worker_pid) and Process.alive?(state.worker_pid) do
+          if worker_alive?(state) do
             send(state.worker_pid, {:tool_approval_result, call_id, decision})
           end
 
@@ -596,7 +589,7 @@ defmodule Pincer.Core.Session.Server do
 
         # 1. Handle Interruption/Cancellation
         if normalized in ["para", "stop", "cancel", "cancela", "/stop", "/cancel"] do
-          if is_pid(state.worker_pid) and Process.alive?(state.worker_pid) do
+          if worker_alive?(state) do
             Process.exit(state.worker_pid, :kill)
             publish(state.session_id, {:agent_response, "🛑 Execução cancelada pelo usuário."})
 
@@ -704,7 +697,7 @@ defmodule Pincer.Core.Session.Server do
   end
 
   defp send_auto_approval(state, call_id) do
-    if is_pid(state.worker_pid) and Process.alive?(state.worker_pid) do
+    if worker_alive?(state) do
       send(state.worker_pid, {:tool_approval_result, call_id, :approved})
     end
   end
@@ -720,6 +713,9 @@ defmodule Pincer.Core.Session.Server do
       state
     end
   end
+
+  defp worker_alive?(%{worker_pid: pid}) when is_pid(pid), do: Process.alive?(pid)
+  defp worker_alive?(_state), do: false
 
   defp publish(session_id, event) do
     PubSub.broadcast("session:#{session_id}", event)
@@ -921,6 +917,14 @@ defmodule Pincer.Core.Session.Server do
       end)
 
     if has_error?, do: :failure, else: :success
+  end
+
+  defp maybe_update_lesson_outcomes([], _trace_meta), do: :ok
+
+  defp maybe_update_lesson_outcomes(lesson_ids, trace_meta) do
+    outcome = trace_outcome(trace_meta)
+    Task.start(fn -> update_lesson_outcomes(lesson_ids, outcome) end)
+    :ok
   end
 
   defp update_lesson_outcomes(lesson_ids, outcome) do

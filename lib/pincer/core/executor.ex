@@ -670,25 +670,11 @@ defmodule Pincer.Core.Executor do
         reasoning = delta["reasoning"] || delta["reasoning_content"] || ""
 
         {new_text, new_buffer, new_filtering} =
-          if is_binary(content) and content != "" do
-            handle_content_token(content, acc_text, buffer, filtering?, session_pid)
-          else
-            {acc_text, buffer, filtering?}
-          end
+          append_content_token(content, acc_text, buffer, filtering?, session_pid)
 
-        new_reasoning =
-          if is_binary(reasoning) and reasoning != "" do
-            acc_reasoning <> reasoning
-          else
-            acc_reasoning
-          end
+        new_reasoning = append_reasoning(reasoning, acc_reasoning)
 
-        new_tools =
-          if tool_deltas do
-            merge_tool_deltas(acc_tools, tool_deltas)
-          else
-            acc_tools
-          end
+        new_tools = merge_tool_deltas_if_present(tool_deltas, acc_tools)
 
         {new_text, new_reasoning, new_tools, new_buffer, new_filtering}
 
@@ -696,6 +682,25 @@ defmodule Pincer.Core.Executor do
         {acc_text, acc_reasoning, acc_tools, buffer, filtering?}
     end
   end
+
+  defp append_content_token(content, acc_text, buffer, filtering?, session_pid)
+       when is_binary(content) and content != "" do
+    handle_content_token(content, acc_text, buffer, filtering?, session_pid)
+  end
+
+  defp append_content_token(_content, acc_text, buffer, filtering?, _session_pid),
+    do: {acc_text, buffer, filtering?}
+
+  defp append_reasoning(reasoning, acc_reasoning)
+       when is_binary(reasoning) and reasoning != "",
+       do: acc_reasoning <> reasoning
+
+  defp append_reasoning(_reasoning, acc_reasoning), do: acc_reasoning
+
+  defp merge_tool_deltas_if_present(nil, acc_tools), do: acc_tools
+
+  defp merge_tool_deltas_if_present(tool_deltas, acc_tools),
+    do: merge_tool_deltas(acc_tools, tool_deltas)
 
   defp handle_content_token(token, acc_text, buffer, filtering?, session_pid) do
     new_buffer = buffer <> token
@@ -1148,12 +1153,7 @@ defmodule Pincer.Core.Executor do
 
     tool_class = Map.get(approval_data, :class) || Map.get(approval_data, "class") || :privileged
 
-    approval_prompt =
-      if is_binary(command) and String.trim(command) != "" do
-        command
-      else
-        "#{tool_name} (privileged tool requires approval)"
-      end
+    approval_prompt = build_approval_prompt(command, tool_name)
 
     Logger.warning("[EXECUTOR] Waiting for approval for: #{approval_prompt}")
 
@@ -1285,15 +1285,20 @@ defmodule Pincer.Core.Executor do
     end
   end
 
+  defp build_approval_prompt(command, _tool_name)
+       when is_binary(command) and command != "",
+       do: command
+
+  defp build_approval_prompt(_command, tool_name),
+    do: "#{tool_name} (privileged tool requires approval)"
+
+  defp format_tool_calls(full_tool_calls) when map_size(full_tool_calls) == 0, do: nil
+
   defp format_tool_calls(full_tool_calls) do
-    if map_size(full_tool_calls) > 0 do
-      full_tool_calls
-      |> Map.values()
-      |> Enum.sort_by(& &1["index"])
-      |> Enum.map(fn map -> Map.delete(map, "index") end)
-    else
-      nil
-    end
+    full_tool_calls
+    |> Map.values()
+    |> Enum.sort_by(& &1["index"])
+    |> Enum.map(fn map -> Map.delete(map, "index") end)
   end
 
   defp normalize_tool_call(%{"id" => id, "function" => %{"name" => name, "arguments" => args}}),
@@ -1459,14 +1464,12 @@ defmodule Pincer.Core.Executor do
 
   defp truncate_desc(val, max), do: val |> to_string() |> truncate_desc(max)
 
-  defp get_active_provider(model_override) do
-    if model_override do
-      model_override.provider
-    else
-      Application.get_env(:pincer, :default_llm_provider) ||
-        Pincer.Infra.Config.get(:llm)["provider"] ||
-        "openrouter"
-    end
+  defp get_active_provider(%{provider: provider}), do: provider
+
+  defp get_active_provider(nil) do
+    Application.get_env(:pincer, :default_llm_provider) ||
+      Pincer.Infra.Config.get(:llm)["provider"] ||
+      "openrouter"
   end
 
   defp clean_tools_spec(tools) when is_list(tools) do
@@ -1492,14 +1495,14 @@ defmodule Pincer.Core.Executor do
   defp clean_tool_value(v), do: v
 
   defp resolve_lazy_attachments(history, provider) do
-    Enum.map(history, fn msg ->
-      if is_list(msg["content"]) do
-        Map.put(msg, "content", Enum.map(msg["content"], &resolve_attachment_ref(&1, provider)))
-      else
-        msg
-      end
-    end)
+    Enum.map(history, &resolve_msg_attachments(&1, provider))
   end
+
+  defp resolve_msg_attachments(%{"content" => content} = msg, provider) when is_list(content) do
+    Map.put(msg, "content", Enum.map(content, &resolve_attachment_ref(&1, provider)))
+  end
+
+  defp resolve_msg_attachments(msg, _provider), do: msg
 
   defp resolve_attachment_ref(%{"type" => "attachment_ref"} = ref, provider) do
     url = ref["url"] || ""
