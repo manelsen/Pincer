@@ -19,7 +19,7 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     api_key = config[:api_key]
     base_url = config[:base_url]
 
-    if is_nil(api_key) or api_key == "" or is_nil(base_url) or base_url == "" do
+    if api_key in [nil, ""] or base_url in [nil, ""] do
       Logger.warning("Incomplete provider configuration for #{__MODULE__}. Using MOCK mode.")
       {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your API Key."}, nil}
     else
@@ -267,7 +267,7 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     api_key = config[:api_key]
     base_url = config[:base_url]
 
-    if is_nil(api_key) or api_key == "" or is_nil(base_url) or base_url == "" do
+    if api_key in [nil, ""] or base_url in [nil, ""] do
       {:ok, ["mock-model"]}
     else
       models_url = infer_models_url(base_url)

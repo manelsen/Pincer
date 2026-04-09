@@ -40,17 +40,17 @@ defmodule Pincer.Core.SubAgentProgress do
     entry = Map.get(tracker, agent_id, default_entry())
 
     next =
-      case Map.get(event, :kind) || Map.get(event, "kind") do
+      case get_field(event, :kind) do
         :started ->
           %{
             entry
-            | goal: normalize_text(Map.get(event, :goal) || Map.get(event, "goal")) || entry.goal,
+            | goal: normalize_text(get_field(event, :goal)) || entry.goal,
               started?: true,
               state: :running
           }
 
         :tool ->
-          tool = normalize_text(Map.get(event, :tool) || Map.get(event, "tool"))
+          tool = normalize_text(get_field(event, :tool))
 
           if tool do
             %{entry | last_tool: tool, started?: true, state: running_state(entry)}
@@ -59,7 +59,7 @@ defmodule Pincer.Core.SubAgentProgress do
           end
 
         :llm_status ->
-          status = normalize_text(Map.get(event, :status) || Map.get(event, "status"))
+          status = normalize_text(get_field(event, :status))
 
           if status do
             %{entry | last_status: status, started?: true, state: running_state(entry)}
@@ -73,7 +73,7 @@ defmodule Pincer.Core.SubAgentProgress do
             | started?: true,
               terminal?: true,
               state: :finished,
-              result: normalize_text(Map.get(event, :result) || Map.get(event, "result"))
+              result: normalize_text(get_field(event, :result))
           }
 
         :failed ->
@@ -82,10 +82,7 @@ defmodule Pincer.Core.SubAgentProgress do
             | started?: true,
               terminal?: true,
               state: :failed,
-              failure:
-                truncate_reason(
-                  normalize_text(Map.get(event, :reason) || Map.get(event, "reason")) || ""
-                )
+              failure: truncate_reason(normalize_text(get_field(event, :reason)) || "")
           }
 
         _ ->
@@ -300,6 +297,12 @@ defmodule Pincer.Core.SubAgentProgress do
   defp render_terminal_detail(_label, nil), do: ""
   defp render_terminal_detail(_label, ""), do: ""
   defp render_terminal_detail(label, value), do: "\n#{label}: #{value}"
+
+  defp get_field(map, atom_key) when is_map(map) do
+    Map.get(map, atom_key) || Map.get(map, Atom.to_string(atom_key))
+  end
+
+  defp get_field(_, _), do: nil
 
   defp normalize_text(value) when is_binary(value) do
     value

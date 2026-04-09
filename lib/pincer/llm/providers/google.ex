@@ -23,7 +23,7 @@ defmodule Pincer.LLM.Providers.Google do
       config[:base_url] ||
         "https://generativelanguage.googleapis.com/v1beta/models/#{model}:generateContent?key=#{api_key}"
 
-    if is_nil(api_key) or api_key == "" do
+    if api_key in [nil, ""] do
       Logger.warning("Incomplete provider configuration for Google. Using MOCK mode.")
 
       {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your Google API Key."},
@@ -125,9 +125,10 @@ defmodule Pincer.LLM.Providers.Google do
 
       text =
         parts
-        |> Enum.filter(&is_map_key(&1, "text"))
-        |> Enum.map(& &1["text"])
-        |> Enum.join("")
+        |> Enum.map_join("", fn
+          %{"text" => t} when is_binary(t) -> t
+          _ -> ""
+        end)
 
       {:ok, %{"role" => "assistant", "content" => text}, nil}
     else
@@ -140,7 +141,7 @@ defmodule Pincer.LLM.Providers.Google do
   def list_models(config) do
     api_key = config[:api_key]
 
-    if is_nil(api_key) or api_key == "" do
+    if api_key in [nil, ""] do
       {:ok, ["gemini-1.5-flash"]}
     else
       url = "https://generativelanguage.googleapis.com/v1beta/models"
