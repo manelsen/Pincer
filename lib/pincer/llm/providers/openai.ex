@@ -29,7 +29,7 @@ defmodule Pincer.LLM.Providers.OpenAI do
     config = normalize_config(config)
     api_key = config[:api_key]
 
-    if is_nil(api_key) or api_key == "" do
+    if api_key in [nil, ""] do
       Logger.warning("No OPENAI_API_KEY configured. Using MOCK stream mode.")
 
       {:ok,
@@ -63,7 +63,7 @@ defmodule Pincer.LLM.Providers.OpenAI do
     config = normalize_config(config)
     api_key = config[:api_key]
 
-    if is_nil(api_key) or api_key == "" do
+    if api_key in [nil, ""] do
       {:ok, ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]}
     else
       case Req.get(@models_url,

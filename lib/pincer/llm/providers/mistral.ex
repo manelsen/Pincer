@@ -28,7 +28,7 @@ defmodule Pincer.LLM.Providers.Mistral do
     config = normalize_config(config)
     api_key = config[:api_key]
 
-    if is_nil(api_key) or api_key == "" do
+    if api_key in [nil, ""] do
       Logger.warning("[Mistral] No API key configured. Falling back to single-shot completion.")
       fallback_stream(messages, model, config, tools)
     else
@@ -56,7 +56,7 @@ defmodule Pincer.LLM.Providers.Mistral do
     config = normalize_config(config)
     api_key = config[:api_key]
 
-    if is_nil(api_key) or api_key == "" do
+    if api_key in [nil, ""] do
       {:ok, ["mistral-large-latest", "mistral-small-latest", "open-mistral-7b"]}
     else
       case Req.get(@models_url,

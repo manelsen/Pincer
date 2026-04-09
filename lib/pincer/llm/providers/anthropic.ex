@@ -21,7 +21,7 @@ defmodule Pincer.LLM.Providers.Anthropic do
     base_url = config[:base_url] || "https://api.anthropic.com/v1/messages"
     version = config[:anthropic_version] || "2023-06-01"
 
-    if is_nil(api_key) or api_key == "" do
+    if api_key in [nil, ""] do
       Logger.warning("Incomplete provider configuration for Anthropic. Using MOCK mode.")
 
       {:ok,

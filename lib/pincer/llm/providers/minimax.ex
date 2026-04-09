@@ -33,7 +33,7 @@ defmodule Pincer.LLM.Providers.MiniMax do
     api_key = config[:api_key]
     group_id = config[:minimax_group_id]
 
-    if is_nil(api_key) or api_key == "" do
+    if api_key in [nil, ""] do
       {:ok,
        [
          "abab6.5s-chat",
