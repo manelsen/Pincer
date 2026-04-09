@@ -22,8 +22,11 @@ defmodule Pincer.Channels.WhatsApp.Bridge.Adapter do
   @behaviour Pincer.Channels.WhatsApp.Bridge
   require Logger
 
-  @default_command "./infrastructure/whatsapp/whatsapp_bridge"
   @default_args []
+
+  defp default_command do
+    Application.app_dir(:pincer_whatsapp, "priv/whatsapp_bridge")
+  end
 
   @impl true
   def start_link(opts) when is_list(opts) do
@@ -136,7 +139,7 @@ defmodule Pincer.Channels.WhatsApp.Bridge.Adapter do
 
   defp normalize_bridge_config(config) when is_map(config) do
     bridge_cfg = read_map(config, "bridge", %{})
-    command = read_map(bridge_cfg, "command", @default_command)
+    command = read_map(bridge_cfg, "command", default_command())
     args = normalize_args(read_map(bridge_cfg, "args", @default_args))
     cwd = read_map(bridge_cfg, "cwd", nil)
     auth_dir = read_map(bridge_cfg, "auth_dir", nil)
