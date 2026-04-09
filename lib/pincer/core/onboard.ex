@@ -10,6 +10,7 @@ defmodule Pincer.Core.Onboard do
   @behaviour Pincer.Ports.Onboarding
   alias Pincer.Core.Onboard.Defaults
   alias Pincer.Core.Onboard.Preflight
+  alias Pincer.Utils.MapHelpers
 
   @channels_requiring_token MapSet.new(["telegram", "discord", "slack"])
 
@@ -311,7 +312,7 @@ defmodule Pincer.Core.Onboard do
           token_env = channel_cfg |> read_map_field("token_env") |> normalize_string()
 
           cond do
-            token_env != nil and present?(env_fetcher.(token_env)) ->
+            token_env != nil and MapHelpers.present?(env_fetcher.(token_env)) ->
               [
                 assisted_ok(
                   {:channel_token, channel_name},
@@ -374,7 +375,7 @@ defmodule Pincer.Core.Onboard do
             )
           ]
 
-        present?(env_fetcher.(env_key)) ->
+        MapHelpers.present?(env_fetcher.(env_key)) ->
           [
             assisted_ok(
               {:provider_env, provider},
@@ -542,9 +543,6 @@ defmodule Pincer.Core.Onboard do
   defp token_required_channel?(channel_name) do
     MapSet.member?(@channels_requiring_token, channel_name)
   end
-
-  defp present?(value) when is_binary(value), do: String.trim(value) != ""
-  defp present?(value), do: not is_nil(value)
 
   defp assisted_ok(id, message, hint, meta) do
     %{id: id, severity: :ok, message: message, hint: hint, meta: meta}

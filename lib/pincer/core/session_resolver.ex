@@ -9,6 +9,7 @@ defmodule Pincer.Core.SessionResolver do
   alias Pincer.Core.Bindings
   alias Pincer.Core.Session.Context
   alias Pincer.Core.Policy
+  alias Pincer.Utils.MapHelpers
 
   @type channel :: :telegram | :discord | :whatsapp
 
@@ -19,8 +20,8 @@ defmodule Pincer.Core.SessionResolver do
   def resolve(channel, context, channel_config \\ %{})
 
   def resolve(:telegram, context, channel_config) do
-    chat_id = read_field(context, :chat_id)
-    chat_type = normalize_chat_type(read_field(context, :chat_type))
+    chat_id = MapHelpers.read_field(context, :chat_id)
+    chat_type = normalize_chat_type(MapHelpers.read_field(context, :chat_type))
 
     session_id =
       Policy.route(:session_scope, %{channel: :telegram, context: context, config: channel_config})
@@ -46,9 +47,9 @@ defmodule Pincer.Core.SessionResolver do
   end
 
   def resolve(:discord, context, channel_config) do
-    channel_id = read_field(context, :channel_id)
-    guild_id = read_field(context, :guild_id)
-    sender_id = read_field(context, :sender_id)
+    channel_id = MapHelpers.read_field(context, :channel_id)
+    guild_id = MapHelpers.read_field(context, :guild_id)
+    sender_id = MapHelpers.read_field(context, :sender_id)
 
     session_id =
       Policy.route(:session_scope, %{channel: :discord, context: context, config: channel_config})
@@ -74,9 +75,9 @@ defmodule Pincer.Core.SessionResolver do
   end
 
   def resolve(:whatsapp, context, channel_config) do
-    chat_id = read_field(context, :chat_id)
-    is_group = truthy?(read_field(context, :is_group))
-    sender_id = read_field(context, :sender_id) || chat_id
+    chat_id = MapHelpers.read_field(context, :chat_id)
+    is_group = MapHelpers.truthy?(MapHelpers.read_field(context, :is_group))
+    sender_id = MapHelpers.read_field(context, :sender_id) || chat_id
 
     session_id =
       Policy.route(:session_scope, %{channel: :whatsapp, context: context, config: channel_config})
@@ -146,7 +147,7 @@ defmodule Pincer.Core.SessionResolver do
   defp mapped_agent_id(config, external_id) do
     normalized_external_id = stringify(external_id)
 
-    case read_field(config, :agent_map) do
+    case MapHelpers.read_field(config, :agent_map) do
       agent_map when is_map(agent_map) ->
         agent_map
         |> Enum.find_value(fn {key, value} ->
@@ -188,15 +189,6 @@ defmodule Pincer.Core.SessionResolver do
   defp dm_event?(guild_id) when is_binary(guild_id), do: String.trim(guild_id) == ""
   defp dm_event?(_), do: false
 
-  defp truthy?(value) when value in [true, "true", 1, "1", true], do: true
-  defp truthy?(_), do: false
-
   defp stringify(nil), do: ""
   defp stringify(value), do: value |> to_string() |> String.trim()
-
-  defp read_field(map, key) when is_map(map) and is_atom(key) do
-    Map.get(map, key) || Map.get(map, Atom.to_string(key))
-  end
-
-  defp read_field(_, _), do: nil
 end

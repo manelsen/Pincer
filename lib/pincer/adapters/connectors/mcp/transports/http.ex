@@ -19,6 +19,8 @@ defmodule Pincer.Adapters.Connectors.MCP.Transports.HTTP do
   @behaviour Pincer.Adapters.Connectors.MCP.Transport
 
   @default_max_reconnect_attempts 3
+  alias Pincer.Utils.MapHelpers
+
   @default_initial_backoff_ms 200
   @default_max_backoff_ms 2_000
 
@@ -75,7 +77,7 @@ defmodule Pincer.Adapters.Connectors.MCP.Transports.HTTP do
   def connect(opts) do
     url = Keyword.get(opts, :url) || Keyword.get(opts, :base_url)
 
-    if present?(url) do
+    if MapHelpers.present?(url) do
       initial_backoff_ms =
         normalize_positive_integer(
           Keyword.get(opts, :initial_backoff_ms),
@@ -452,7 +454,4 @@ defmodule Pincer.Adapters.Connectors.MCP.Transports.HTTP do
 
   defp normalize_sleep_fn(fun) when is_function(fun, 1), do: fun
   defp normalize_sleep_fn(_), do: &Process.sleep/1
-
-  defp present?(value) when is_binary(value), do: String.trim(value) != ""
-  defp present?(_), do: false
 end

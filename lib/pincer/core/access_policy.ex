@@ -7,6 +7,7 @@ defmodule Pincer.Core.AccessPolicy do
   """
 
   alias Pincer.Core.Pairing
+  alias Pincer.Utils.MapHelpers
 
   @type channel :: :telegram | :discord | :whatsapp
   @type mode :: :open | :allowlist | :disabled | :pairing
@@ -32,7 +33,7 @@ defmodule Pincer.Core.AccessPolicy do
   @spec authorize_dm(channel(), String.t() | integer(), map()) :: result()
   def authorize_dm(channel, sender_id, config \\ %{}) when is_map(config) do
     policy = dm_policy(config)
-    mode = normalize_mode(read_field(policy, "mode"))
+    mode = normalize_mode(MapHelpers.read_field(policy, "mode"))
     sender = normalize_sender(sender_id)
 
     case mode do
@@ -40,7 +41,7 @@ defmodule Pincer.Core.AccessPolicy do
         {:allow, %{mode: :open}}
 
       :allowlist ->
-        allow_from = normalize_allow_from(read_field(policy, "allow_from"))
+        allow_from = normalize_allow_from(MapHelpers.read_field(policy, "allow_from"))
 
         if allowlisted?(sender, allow_from) do
           {:allow, %{mode: :allowlist}}
@@ -78,7 +79,7 @@ defmodule Pincer.Core.AccessPolicy do
   end
 
   defp dm_policy(config) do
-    case read_field(config, "dm_policy") do
+    case MapHelpers.read_field(config, "dm_policy") do
       map when is_map(map) -> map
       _ -> %{}
     end
@@ -160,10 +161,4 @@ defmodule Pincer.Core.AccessPolicy do
     """
     |> String.trim()
   end
-
-  defp read_field(map, key) when is_map(map) and is_binary(key) do
-    Map.get(map, key) || Map.get(map, String.to_atom(key))
-  end
-
-  defp read_field(_, _), do: nil
 end

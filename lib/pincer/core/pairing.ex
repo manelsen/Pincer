@@ -13,6 +13,7 @@ defmodule Pincer.Core.Pairing do
   alias Pincer.Core.AgentRegistry
   alias Pincer.Infra.PubSub
   alias Pincer.Utils.ETSHelper
+  alias Pincer.Utils.MapHelpers
   alias Pincer.Utils.Time
 
   @table_pending :pincer_pairing_pending
@@ -133,31 +134,17 @@ defmodule Pincer.Core.Pairing do
 
     case pending_entry(key) do
       :error ->
-        case redeem_invite(channel, sender_id, code, now, opts) do
-          {:ok, _pair} -> :ok
-          {:error, :expired} -> {:error, :expired}
-          {:error, :not_found} -> {:error, :not_pending}
-        end
+        redeem_invite_fallback(channel, sender_id, code, now, opts, :not_pending)
 
       {:ok, pending} ->
         cond do
           expired?(pending, now) ->
             delete_pending(key)
-
-            case redeem_invite(channel, sender_id, code, now, opts) do
-              {:ok, _pair} -> :ok
-              {:error, :expired} -> {:error, :expired}
-              {:error, :not_found} -> {:error, :expired}
-            end
+            redeem_invite_fallback(channel, sender_id, code, now, opts, :expired)
 
           attempts_exceeded?(pending) ->
             delete_pending(key)
-
-            case redeem_invite(channel, sender_id, code, now, opts) do
-              {:ok, _pair} -> :ok
-              {:error, :expired} -> {:error, :expired}
-              {:error, :not_found} -> {:error, :attempts_exceeded}
-            end
+            redeem_invite_fallback(channel, sender_id, code, now, opts, :attempts_exceeded)
 
           code_valid?(pending, code) ->
             delete_pending(key)
@@ -187,6 +174,16 @@ defmodule Pincer.Core.Pairing do
                 end
             end
         end
+    end
+  end
+
+  # Attempts an invite-code redeem and maps {:error, :not_found} to the
+  # caller-supplied `not_found_error` atom (varies per leg of approve_code/4).
+  defp redeem_invite_fallback(channel, sender_id, code, now, opts, not_found_error) do
+    case redeem_invite(channel, sender_id, code, now, opts) do
+      {:ok, _pair} -> :ok
+      {:error, :expired} -> {:error, :expired}
+      {:error, :not_found} -> {:error, not_found_error}
     end
   end
 
@@ -254,23 +251,22 @@ defmodule Pincer.Core.Pairing do
     ensure_tables()
     normalized_channel = normalize_channel(channel)
     normalized_agent_id = normalize_stored_agent_id(agent_id)
+    do_bound_agent_session?(normalized_channel, normalized_agent_id)
+  end
 
-    if is_nil(normalized_agent_id) do
-      false
-    else
-      normalized_channel
-      |> select_pair_data_for_channel()
-      |> Enum.any?(fn
-        pair_data when is_map(pair_data) ->
-          normalize_stored_agent_id(
-            Map.get(pair_data, :agent_id) || Map.get(pair_data, "agent_id")
-          ) ==
-            normalized_agent_id
+  defp do_bound_agent_session?(_channel, nil), do: false
 
-        _ ->
-          false
-      end)
-    end
+  defp do_bound_agent_session?(channel, normalized_agent_id) do
+    channel
+    |> select_pair_data_for_channel()
+    |> Enum.any?(fn
+      pair_data when is_map(pair_data) ->
+        normalize_stored_agent_id(Map.get(pair_data, :agent_id) || Map.get(pair_data, "agent_id")) ==
+          normalized_agent_id
+
+      _ ->
+        false
+    end)
   end
 
   @doc """
@@ -589,7 +585,7 @@ defmodule Pincer.Core.Pairing do
   defp persist_enabled? do
     case pairing_config() |> read_config_field("persist") do
       nil -> true
-      value -> truthy?(value)
+      value -> MapHelpers.truthy?(value)
     end
   end
 
@@ -646,21 +642,6 @@ defmodule Pincer.Core.Pairing do
   end
 
   defp read_config_field(_config, _key), do: nil
-
-  defp truthy?(value) when is_boolean(value), do: value
-  defp truthy?(value) when is_integer(value), do: value != 0
-
-  defp truthy?(value) when is_binary(value) do
-    case value |> String.trim() |> String.downcase() do
-      "0" -> false
-      "false" -> false
-      "no" -> false
-      "off" -> false
-      _ -> true
-    end
-  end
-
-  defp truthy?(_value), do: true
 
   defp announce_pairing_code(channel, sender_id, code, expires_at_ms, opts) do
     reused? = Keyword.get(opts, :reused, false)

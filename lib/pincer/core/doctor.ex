@@ -26,6 +26,8 @@ defmodule Pincer.Core.Doctor do
           run_id: String.t()
         }
 
+  alias Pincer.Utils.MapHelpers
+
   @default_config_file "config.yaml"
   @channels_requiring_token MapSet.new(["telegram", "discord", "slack"])
   @dm_capable_channels MapSet.new(["telegram", "discord", "whatsapp"])
@@ -238,13 +240,13 @@ defmodule Pincer.Core.Doctor do
     channels(config)
     |> Enum.filter(fn {_, channel_cfg} -> enabled?(channel_cfg) end)
     |> Enum.flat_map(fn {channel_name, channel_cfg} ->
-      token_env = read_field(channel_cfg, :token_env)
+      token_env = MapHelpers.read_field(channel_cfg, :token_env)
 
       cond do
-        present?(token_env) ->
+        MapHelpers.present?(token_env) ->
           env_value = env_fetcher.(token_env)
 
-          if present?(env_value) do
+          if MapHelpers.present?(env_value) do
             [
               ok_check(
                 {:channel_token, channel_name},
@@ -279,58 +281,68 @@ defmodule Pincer.Core.Doctor do
 
   defp llm_provider_checks(config, env_fetcher) do
     provider_id =
-      case read_field(config, :llm) do
-        llm when is_map(llm) -> read_field(llm, :provider)
+      case MapHelpers.read_field(config, :llm) do
+        llm when is_map(llm) -> MapHelpers.read_field(llm, :provider)
         _ -> nil
       end
 
-    if is_binary(provider_id) and String.trim(provider_id) != "" do
-      provider_registry = Application.get_env(:pincer, :llm_providers, %{})
+    do_llm_provider_checks(provider_id, env_fetcher)
+  end
 
-      case Map.get(provider_registry, provider_id) do
-        nil ->
-          [
-            warn_check(
-              {:llm_provider, provider_id},
-              "Active LLM provider '#{provider_id}' is not registered in :llm_providers",
-              %{provider: provider_id}
-            )
-          ]
+  defp do_llm_provider_checks(provider_id, env_fetcher)
+       when is_binary(provider_id) and provider_id != "" do
+    trimmed = String.trim(provider_id)
+    do_llm_provider_checks_trimmed(trimmed, env_fetcher)
+  end
 
-        provider_config ->
-          env_key = provider_config[:env_key]
+  defp do_llm_provider_checks(_provider_id, _env_fetcher), do: []
 
-          cond do
-            is_nil(env_key) or env_key == "" ->
-              [
-                ok_check(
-                  {:llm_provider, provider_id},
-                  "Provider '#{provider_id}' does not require an API key",
-                  %{provider: provider_id}
-                )
-              ]
+  defp do_llm_provider_checks_trimmed("", _env_fetcher), do: []
 
-            env_fetcher.(env_key) |> present?() ->
-              [
-                ok_check(
-                  {:llm_provider, provider_id},
-                  "Provider '#{provider_id}' configurado (#{env_key} presente)",
-                  %{provider: provider_id, env_key: env_key}
-                )
-              ]
+  defp do_llm_provider_checks_trimmed(provider_id, env_fetcher) do
+    provider_registry = Application.get_env(:pincer, :llm_providers, %{})
 
-            true ->
-              [
-                error_check(
-                  {:llm_provider, provider_id},
-                  "Provider '#{provider_id}' ativo mas #{env_key} nao esta definido",
-                  %{provider: provider_id, env_key: env_key}
-                )
-              ]
-          end
-      end
-    else
-      []
+    case Map.get(provider_registry, provider_id) do
+      nil ->
+        [
+          warn_check(
+            {:llm_provider, provider_id},
+            "Active LLM provider '#{provider_id}' is not registered in :llm_providers",
+            %{provider: provider_id}
+          )
+        ]
+
+      provider_config ->
+        env_key = provider_config[:env_key]
+
+        cond do
+          is_nil(env_key) or env_key == "" ->
+            [
+              ok_check(
+                {:llm_provider, provider_id},
+                "Provider '#{provider_id}' does not require an API key",
+                %{provider: provider_id}
+              )
+            ]
+
+          env_fetcher.(env_key) |> MapHelpers.present?() ->
+            [
+              ok_check(
+                {:llm_provider, provider_id},
+                "Provider '#{provider_id}' configurado (#{env_key} presente)",
+                %{provider: provider_id, env_key: env_key}
+              )
+            ]
+
+          true ->
+            [
+              error_check(
+                {:llm_provider, provider_id},
+                "Provider '#{provider_id}' ativo mas #{env_key} nao esta definido",
+                %{provider: provider_id, env_key: env_key}
+              )
+            ]
+        end
     end
   end
 
@@ -340,7 +352,7 @@ defmodule Pincer.Core.Doctor do
       enabled?(channel_cfg) and dm_capable_channel?(name)
     end)
     |> Enum.map(fn {channel_name, channel_cfg} ->
-      dm_policy = read_field(channel_cfg, :dm_policy)
+      dm_policy = MapHelpers.read_field(channel_cfg, :dm_policy)
       mode = normalize_dm_mode(dm_policy)
 
       case mode do
@@ -390,7 +402,7 @@ defmodule Pincer.Core.Doctor do
   end
 
   defp channels(config) when is_map(config) do
-    case read_field(config, :channels) do
+    case MapHelpers.read_field(config, :channels) do
       map when is_map(map) ->
         map
         |> Enum.map(fn {name, cfg} ->
@@ -411,7 +423,7 @@ defmodule Pincer.Core.Doctor do
   end
 
   defp enabled?(cfg) when is_map(cfg) do
-    case read_field(cfg, :enabled) do
+    case MapHelpers.read_field(cfg, :enabled) do
       true -> true
       "true" -> true
       _ -> false
@@ -424,7 +436,7 @@ defmodule Pincer.Core.Doctor do
 
   defp normalize_dm_mode(dm_policy) when is_map(dm_policy) do
     dm_policy
-    |> read_field(:mode)
+    |> MapHelpers.read_field(:mode)
     |> normalize_dm_mode_value()
   end
 
@@ -467,15 +479,6 @@ defmodule Pincer.Core.Doctor do
   defp status_from_counts(%{error: errors}) when errors > 0, do: :error
   defp status_from_counts(%{warn: warnings}) when warnings > 0, do: :warn
   defp status_from_counts(_), do: :ok
-
-  defp present?(value) when is_binary(value), do: String.trim(value) != ""
-  defp present?(value), do: not is_nil(value)
-
-  defp read_field(map, key) when is_map(map) and is_atom(key) do
-    Map.get(map, key) || Map.get(map, Atom.to_string(key))
-  end
-
-  defp read_field(_, _), do: nil
 
   defp ok_check(id, message, meta) do
     %{id: id, severity: :ok, message: message, meta: meta}
