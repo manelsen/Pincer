@@ -284,7 +284,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
     Mix.shell().info("2) Start with: mix pincer.chat")
 
     Mix.shell().info(
-      "3) WhatsApp bridge (optional): npm install --prefix infrastructure/whatsapp"
+      "3) WhatsApp bridge (optional): add {:pincer_whatsapp, \"~> 0.1\"} to mix.exs — the Go sidecar compiles automatically during `mix deps.compile` (requires Go 1.21+)"
     )
 
     Mix.shell().info("4) To enable WhatsApp, set channels.whatsapp.enabled=true in config.yaml")
