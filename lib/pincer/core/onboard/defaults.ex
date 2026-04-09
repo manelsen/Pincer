@@ -114,6 +114,29 @@ defmodule Pincer.Core.Onboard.Defaults do
 
   def normalize_remote_capabilities(_), do: []
 
+  @provider_env_keys %{
+    "openrouter" => "OPENROUTER_API_KEY",
+    "z_ai" => "Z_AI_API_KEY",
+    "z_ai_coding" => "Z_AI_CODING_API_KEY",
+    "opencode_zen" => "OPENCODE_ZEN_API_KEY",
+    "google" => "GOOGLE_API_KEY",
+    "moonshot" => "MOONSHOT_API_KEY",
+    "moonshot_coding" => "MOONSHOT_CODING_API_KEY",
+    "groq" => "GROQ_API_KEY",
+    "groq_whisper" => "GROQ_API_KEY",
+    "minimax" => "MINIMAX_API_KEY",
+    "anthropic" => "ANTHROPIC_API_KEY"
+  }
+
+  @doc """
+  Returns the environment variable name for the given provider ID, or nil if unknown.
+  """
+  @spec provider_env_key(String.t() | nil) :: String.t() | nil
+  def provider_env_key(provider) when is_binary(provider),
+    do: Map.get(@provider_env_keys, provider)
+
+  def provider_env_key(_), do: nil
+
   @spec capability_operations(String.t(), map()) :: [Pincer.Core.Onboard.operation()]
   def capability_operations("workspace_dirs", _config) do
     base = Pincer.Core.AgentPaths.base_dir()
