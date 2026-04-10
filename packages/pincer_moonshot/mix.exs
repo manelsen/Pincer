@@ -18,7 +18,7 @@ defmodule PincerMoonshot.MixProject do
         name: "pincer_moonshot",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end

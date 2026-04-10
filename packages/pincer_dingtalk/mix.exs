@@ -13,7 +13,7 @@ defmodule PincerDingTalk.MixProject do
         {:req, "~> 0.5"}
       ],
       description: "DingTalk channel adapter for the Pincer AI agent framework",
-      package: [name: "pincer_dingtalk", licenses: ["MIT"], maintainers: ["Micelio"], links: %{}]
+      package: [name: "pincer_dingtalk", licenses: ["MIT"], maintainers: ["Micelio"], links: %{"GitHub" => "https://github.com/manelsen/Pincer"}]
     ]
   end
 

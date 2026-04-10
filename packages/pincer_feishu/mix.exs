@@ -13,7 +13,7 @@ defmodule PincerFeishu.MixProject do
         {:req, "~> 0.5"}
       ],
       description: "Feishu (Lark) channel adapter for the Pincer AI agent framework",
-      package: [name: "pincer_feishu", licenses: ["MIT"], maintainers: ["Micelio"], links: %{}]
+      package: [name: "pincer_feishu", licenses: ["MIT"], maintainers: ["Micelio"], links: %{"GitHub" => "https://github.com/manelsen/Pincer"}]
     ]
   end
 

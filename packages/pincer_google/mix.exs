@@ -17,7 +17,7 @@ defmodule PincerGoogle.MixProject do
         name: "pincer_google",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end

@@ -18,7 +18,7 @@ defmodule PincerZhipu.MixProject do
         name: "pincer_zhipu",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end
