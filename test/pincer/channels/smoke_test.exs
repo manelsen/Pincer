@@ -76,6 +76,9 @@ defmodule Pincer.Channels.SmokeTest do
       else
         Application.put_env(:pincer, :default_llm_provider, original_default)
       end
+
+      # Ensure the application is running for subsequent tests that depend on it
+      Application.ensure_all_started(:pincer)
     end)
 
     verify_on_exit!()

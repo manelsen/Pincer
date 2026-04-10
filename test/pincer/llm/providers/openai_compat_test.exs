@@ -1,5 +1,6 @@
 defmodule Pincer.LLM.Providers.OpenAICompatTest do
-  use ExUnit.Case, async: true
+  # async: false because one test temporarily changes the global Logger level to :debug
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
@@ -102,6 +103,19 @@ defmodule Pincer.LLM.Providers.OpenAICompatTest do
   end
 
   describe "handle_response reasoning preservation" do
+    setup do
+      # The "logs raw provider payload" test uses Logger.debug; lower the level so
+      # capture_log can intercept debug messages without altering global state permanently.
+      original_level = Logger.level()
+      Logger.configure(level: :debug)
+
+      on_exit(fn ->
+        Logger.configure(level: original_level)
+      end)
+
+      :ok
+    end
+
     test "preserves reasoning_content in synthetic stream responses" do
       response = %Response{
         status: 200,

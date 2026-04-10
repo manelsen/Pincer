@@ -56,7 +56,11 @@ defmodule Pincer.LLM.ReactiveClientTest do
     System.put_env("K2", "v2")
 
     on_exit(fn ->
-      Application.put_env(:pincer, :llm_providers, orig_providers)
+      if orig_providers do
+        Application.put_env(:pincer, :llm_providers, orig_providers)
+      else
+        Application.delete_env(:pincer, :llm_providers)
+      end
     end)
 
     :ok

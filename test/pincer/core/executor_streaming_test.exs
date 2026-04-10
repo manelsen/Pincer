@@ -503,6 +503,12 @@ defmodule Pincer.Core.ExecutorStreamingTest do
 
   setup do
     Application.ensure_all_started(:pincer)
+
+    # Checkout a sandbox connection for this test process so that DB queries from
+    # the Executor (list_recent_learnings, etc.) can proceed even when other tests
+    # are holding connections in the pool.
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Pincer.Infra.Repo)
+
     old_stream_api_key = System.get_env("STREAM_API_KEY")
     System.put_env("STREAM_API_KEY", "test-stream-key")
 
