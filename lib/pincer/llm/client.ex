@@ -81,58 +81,62 @@ defmodule Pincer.LLM.Client do
         Keyword.has_key?(opts, :provider)
       )
 
-    if provider_id == "mock" or not is_map_key(registry, provider_id) do
-      Logger.warning("Provider '#{provider_id}' not found. Using MOCK mode.")
-      simulate_response(messages)
-    else
-      config = registry[provider_id]
-      requested_profile = Keyword.get(opts, :auth_profile)
+    cond do
+      provider_id == "mock" ->
+        simulate_response(messages)
 
-      case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
-        {:ok, auth_selection} ->
-          model = Keyword.get(opts, :model, config[:default_model])
-          tools = Keyword.get(opts, :tools, [])
-          adapter = config[:adapter]
-          config_with_auth = auth_selection.config
+      not is_map_key(registry, provider_id) ->
+        {:error, {:provider_not_found, provider_id}}
 
-          auth_context = %{
-            provider_id: provider_id,
-            profile: auth_selection.profile
-          }
+      true ->
+        config = registry[provider_id]
+        requested_profile = Keyword.get(opts, :auth_profile)
 
-          retry_policy = retry_policy()
+        case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
+          {:ok, auth_selection} ->
+            model = Keyword.get(opts, :model, config[:default_model])
+            tools = Keyword.get(opts, :tools, [])
+            adapter = config[:adapter]
+            config_with_auth = auth_selection.config
 
-          failover_state =
-            Keyword.get_lazy(opts, :failover_state, fn ->
-              FailoverPolicy.initial_state(
-                provider: provider_id,
-                model: model,
-                registry: registry
-              )
-            end)
+            auth_context = %{
+              provider_id: provider_id,
+              profile: auth_selection.profile
+            }
 
-          do_request_with_retry(
-            :chat_completion,
-            adapter,
-            messages,
-            model,
-            config_with_auth,
-            tools,
-            retry_policy.max_retries,
-            retry_policy.initial_backoff,
-            retry_policy,
-            System.monotonic_time(:millisecond),
-            failover_state,
-            auth_context
-          )
+            retry_policy = retry_policy()
 
-        {:error, :missing_credentials} ->
-          env_key = config[:env_key] || "API_KEY"
-          {:error, {:missing_credentials, env_key}}
+            failover_state =
+              Keyword.get_lazy(opts, :failover_state, fn ->
+                FailoverPolicy.initial_state(
+                  provider: provider_id,
+                  model: model,
+                  registry: registry
+                )
+              end)
 
-        {:error, :all_profiles_cooling_down} ->
-          {:error, :all_profiles_cooling_down}
-      end
+            do_request_with_retry(
+              :chat_completion,
+              adapter,
+              messages,
+              model,
+              config_with_auth,
+              tools,
+              retry_policy.max_retries,
+              retry_policy.initial_backoff,
+              retry_policy,
+              System.monotonic_time(:millisecond),
+              failover_state,
+              auth_context
+            )
+
+          {:error, :missing_credentials} ->
+            env_key = config[:env_key] || "API_KEY"
+            {:error, {:missing_credentials, env_key}}
+
+          {:error, :all_profiles_cooling_down} ->
+            {:error, :all_profiles_cooling_down}
+        end
     end
   end
 
@@ -275,58 +279,62 @@ defmodule Pincer.LLM.Client do
         Keyword.has_key?(opts, :provider)
       )
 
-    if provider_id == "mock" or not is_map_key(registry, provider_id) do
-      Logger.warning("Streaming provider '#{provider_id}' not found. Using MOCK mode.")
-      {:ok, [%{"choices" => [%{"delta" => %{"content" => "[MOCK STREAM] Hello!"}}]}]}
-    else
-      config = registry[provider_id]
-      requested_profile = Keyword.get(opts, :auth_profile)
+    cond do
+      provider_id == "mock" ->
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "[MOCK STREAM] Hello!"}}]}]}
 
-      case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
-        {:ok, auth_selection} ->
-          model = Keyword.get(opts, :model, config[:default_model])
-          tools = Keyword.get(opts, :tools, [])
-          adapter = config[:adapter]
-          config_with_auth = auth_selection.config
+      not is_map_key(registry, provider_id) ->
+        {:error, {:provider_not_found, provider_id}}
 
-          auth_context = %{
-            provider_id: provider_id,
-            profile: auth_selection.profile
-          }
+      true ->
+        config = registry[provider_id]
+        requested_profile = Keyword.get(opts, :auth_profile)
 
-          retry_policy = retry_policy()
+        case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
+          {:ok, auth_selection} ->
+            model = Keyword.get(opts, :model, config[:default_model])
+            tools = Keyword.get(opts, :tools, [])
+            adapter = config[:adapter]
+            config_with_auth = auth_selection.config
 
-          failover_state =
-            Keyword.get_lazy(opts, :failover_state, fn ->
-              FailoverPolicy.initial_state(
-                provider: provider_id,
-                model: model,
-                registry: registry
-              )
-            end)
+            auth_context = %{
+              provider_id: provider_id,
+              profile: auth_selection.profile
+            }
 
-          do_request_with_retry(
-            :stream_completion,
-            adapter,
-            messages,
-            model,
-            config_with_auth,
-            tools,
-            retry_policy.max_retries,
-            retry_policy.initial_backoff,
-            retry_policy,
-            System.monotonic_time(:millisecond),
-            failover_state,
-            auth_context
-          )
+            retry_policy = retry_policy()
 
-        {:error, :missing_credentials} ->
-          env_key = config[:env_key] || "API_KEY"
-          {:error, {:missing_credentials, env_key}}
+            failover_state =
+              Keyword.get_lazy(opts, :failover_state, fn ->
+                FailoverPolicy.initial_state(
+                  provider: provider_id,
+                  model: model,
+                  registry: registry
+                )
+              end)
 
-        {:error, :all_profiles_cooling_down} ->
-          {:error, :all_profiles_cooling_down}
-      end
+            do_request_with_retry(
+              :stream_completion,
+              adapter,
+              messages,
+              model,
+              config_with_auth,
+              tools,
+              retry_policy.max_retries,
+              retry_policy.initial_backoff,
+              retry_policy,
+              System.monotonic_time(:millisecond),
+              failover_state,
+              auth_context
+            )
+
+          {:error, :missing_credentials} ->
+            env_key = config[:env_key] || "API_KEY"
+            {:error, {:missing_credentials, env_key}}
+
+          {:error, :all_profiles_cooling_down} ->
+            {:error, :all_profiles_cooling_down}
+        end
     end
   end
 
