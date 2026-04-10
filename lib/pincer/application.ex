@@ -51,6 +51,9 @@ defmodule Pincer.Application do
       ├── Pincer.Channels.Telegram.SessionSupervisor
       │   Telegram-specific session management
       │
+      ├── Bandit (HTTP health server)
+      │   GET /health on port 4001 (configurable via :pincer, :health_port)
+      │
       └── Pincer.Core.Reloader (dev only)
           Hot code reloading in development
 
@@ -155,7 +158,11 @@ defmodule Pincer.Application do
       Pincer.Core.Project.Registry,
       Pincer.Core.Project.Supervisor,
       Pincer.Adapters.Cron.Scheduler,
-      Pincer.Channels.Supervisor
+      Pincer.Channels.Supervisor,
+      {Bandit,
+       plug: Pincer.Adapters.Health.Plug,
+       scheme: :http,
+       port: Application.get_env(:pincer, :health_port, 4001)}
     ]
 
     children =

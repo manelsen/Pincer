@@ -25,3 +25,4 @@ config :pincer, workspaces_dir: "tmp/test_workspaces"
 
 config :pincer, enable_graph_watcher: false
 config :pincer, enable_heartbeat_watchers: false
+config :pincer, health_port: 0

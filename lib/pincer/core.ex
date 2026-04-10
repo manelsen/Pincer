@@ -76,6 +76,7 @@ defmodule Pincer.Core do
       Graph.Watcher,
       Heartbeat.GitHubWatcher,
       HookDispatcher,
-      StartupGuard
+      StartupGuard,
+      CircuitBreaker
     ]
 end
