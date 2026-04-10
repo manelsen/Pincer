@@ -32,11 +32,7 @@ channels:
     app_secret_env: "FEISHU_APP_SECRET"
 
   whatsapp:
-  dingtalk:
     enabled: false
-    adapter: "Pincer.Channels.DingTalk"
-    client_id_env: "DINGTALK_CLIENT_ID"
-    client_secret_env: "DINGTALK_CLIENT_SECRET"
     adapter: "Pincer.Channels.WhatsApp"
     bridge:
       args: []
@@ -47,7 +43,11 @@ channels:
       qr_ascii_small: true
     dm_policy:
       mode: "pairing"
+  dingtalk:
     enabled: false
+    adapter: "Pincer.Channels.DingTalk"
+    client_id_env: "DINGTALK_CLIENT_ID"
+    client_secret_env: "DINGTALK_CLIENT_SECRET"
 database:
   adapter: "Ecto.Adapters.PostgreSQL"
   database: "pincer"
