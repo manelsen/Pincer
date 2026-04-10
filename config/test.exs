@@ -8,7 +8,7 @@ config :pincer, Pincer.Infra.Repo,
   port: String.to_integer(System.get_env("PINCER_DB_PORT", "5432")),
   database: System.get_env("PINCER_DB_NAME", "pincer_test"),
   pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: 10,
+  pool_size: 20,
   types: Pincer.Infra.PostgrexTypes,
   ssl: false
 

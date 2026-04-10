@@ -6,6 +6,10 @@ defmodule Pincer.Core.SelfImprovementTest do
     # Ensure Repo is started
     Application.ensure_all_started(:pincer)
 
+    # Checkout a sandbox connection for this test process so that queries from
+    # the test process are always served even when other tests are holding connections.
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Pincer.Infra.Repo)
+
     # Clean up test nodes
     Pincer.Infra.Repo.delete_all(Pincer.Storage.Graph.Node)
     :ok

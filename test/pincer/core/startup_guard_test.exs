@@ -1,5 +1,6 @@
 defmodule Pincer.Core.StartupGuardTest do
-  use ExUnit.Case, async: true
+  # async: false because tests modify global Application env (Pincer.Infra.Repo config)
+  use ExUnit.Case, async: false
 
   alias Pincer.Core.StartupGuard
 
@@ -8,9 +9,21 @@ defmodule Pincer.Core.StartupGuardTest do
     # does not block the test suite from starting.
     Application.put_env(:pincer, :skip_startup_guard, true)
 
+    # Snapshot the Repo config before each test so we can restore it afterward.
+    # The check_database/0 tests modify and then delete this key, which
+    # would leave the application unable to connect to the DB in subsequent tests.
+    original_repo_config = Application.get_env(:pincer, Pincer.Infra.Repo)
+
     on_exit(fn ->
       Application.delete_env(:pincer, :skip_startup_guard)
       Application.delete_env(:pincer, :config_path)
+
+      # Restore the Repo config to what it was before this test.
+      if original_repo_config do
+        Application.put_env(:pincer, Pincer.Infra.Repo, original_repo_config)
+      else
+        Application.delete_env(:pincer, Pincer.Infra.Repo)
+      end
     end)
 
     :ok

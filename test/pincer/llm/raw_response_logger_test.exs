@@ -1,9 +1,23 @@
 defmodule Pincer.LLM.RawResponseLoggerTest do
-  use ExUnit.Case, async: true
+  # async: false because we temporarily change the global Logger level to :debug
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
   alias Pincer.LLM.RawResponseLogger
+
+  setup do
+    # RawResponseLogger uses Logger.debug; the default level is :info so we must
+    # temporarily lower it to capture these messages.
+    original_level = Logger.level()
+    Logger.configure(level: :debug)
+
+    on_exit(fn ->
+      Logger.configure(level: original_level)
+    end)
+
+    :ok
+  end
 
   test "logs full response body with provider and status" do
     log =

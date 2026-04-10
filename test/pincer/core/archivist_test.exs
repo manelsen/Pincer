@@ -217,9 +217,24 @@ defmodule Pincer.Core.ArchivistTest do
     Application.put_env(:pincer, :default_llm_provider, "archivist")
 
     on_exit(fn ->
-      Application.put_env(:pincer, :storage_adapter, original_storage)
-      Application.put_env(:pincer, :llm_providers, original_providers)
-      Application.put_env(:pincer, :default_llm_provider, original_default)
+      if original_storage do
+        Application.put_env(:pincer, :storage_adapter, original_storage)
+      else
+        Application.delete_env(:pincer, :storage_adapter)
+      end
+
+      if original_providers do
+        Application.put_env(:pincer, :llm_providers, original_providers)
+      else
+        Application.delete_env(:pincer, :llm_providers)
+      end
+
+      if original_default do
+        Application.put_env(:pincer, :default_llm_provider, original_default)
+      else
+        Application.delete_env(:pincer, :default_llm_provider)
+      end
+
       Application.delete_env(:pincer, :archivist_test_agent)
       File.rm_rf!(tmp)
     end)
