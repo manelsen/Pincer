@@ -18,7 +18,7 @@ defmodule PincerOpenai.MixProject do
         name: "pincer_openai",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end

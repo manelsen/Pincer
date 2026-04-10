@@ -9,7 +9,7 @@ defmodule PincerWebhook.MixProject do
       start_permanent: false,
       deps: [{:pincer_ports, path: "../pincer_ports"}],
       description: "HTTP webhook channel adapter for the Pincer AI agent framework",
-      package: [name: "pincer_webhook", licenses: ["MIT"], maintainers: ["Micelio"], links: %{}]
+      package: [name: "pincer_webhook", licenses: ["MIT"], maintainers: ["Micelio"], links: %{"GitHub" => "https://github.com/manelsen/Pincer"}]
     ]
   end
 

@@ -18,7 +18,7 @@ defmodule PincerOpenrouter.MixProject do
         name: "pincer_openrouter",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end

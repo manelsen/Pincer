@@ -10,7 +10,7 @@ defmodule PincerWhatsApp.MixProject do
       compilers: [:whatsapp_bridge | Mix.compilers()],
       deps: [{:pincer_ports, path: "../pincer_ports"}, {:jason, "~> 1.4"}],
       description: "WhatsApp Business API channel adapter for the Pincer AI agent framework",
-      package: [name: "pincer_whatsapp", licenses: ["MIT"], maintainers: ["Micelio"], links: %{}]
+      package: [name: "pincer_whatsapp", licenses: ["MIT"], maintainers: ["Micelio"], links: %{"GitHub" => "https://github.com/manelsen/Pincer"}]
     ]
   end
 

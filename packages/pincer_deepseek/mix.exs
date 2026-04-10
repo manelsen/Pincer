@@ -18,7 +18,7 @@ defmodule PincerDeepseek.MixProject do
         name: "pincer_deepseek",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end

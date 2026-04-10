@@ -12,7 +12,7 @@ defmodule PincerSlack.MixProject do
         {:slack_elixir, "~> 1.2"}
       ],
       description: "Slack channel adapter for the Pincer AI agent framework",
-      package: [name: "pincer_slack", licenses: ["MIT"], maintainers: ["Micelio"], links: %{}]
+      package: [name: "pincer_slack", licenses: ["MIT"], maintainers: ["Micelio"], links: %{"GitHub" => "https://github.com/manelsen/Pincer"}]
     ]
   end
 

@@ -13,7 +13,7 @@ defmodule PincerLine.MixProject do
         {:req, "~> 0.5"}
       ],
       description: "LINE Messaging API channel adapter for the Pincer AI agent framework",
-      package: [name: "pincer_line", licenses: ["MIT"], maintainers: ["Micelio"], links: %{}]
+      package: [name: "pincer_line", licenses: ["MIT"], maintainers: ["Micelio"], links: %{"GitHub" => "https://github.com/manelsen/Pincer"}]
     ]
   end
 

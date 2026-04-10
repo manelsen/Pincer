@@ -18,7 +18,7 @@ defmodule PincerOpencodeZen.MixProject do
         name: "pincer_opencode_zen",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end

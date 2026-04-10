@@ -18,7 +18,7 @@ defmodule PincerGroq.MixProject do
         name: "pincer_groq",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end

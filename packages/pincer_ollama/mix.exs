@@ -17,7 +17,7 @@ defmodule PincerOllama.MixProject do
         name: "pincer_ollama",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end

@@ -19,7 +19,7 @@ defmodule PincerQwen.MixProject do
         name: "pincer_qwen",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end

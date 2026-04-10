@@ -17,7 +17,7 @@ defmodule PincerAnthropic.MixProject do
         name: "pincer_anthropic",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end

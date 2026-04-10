@@ -18,7 +18,7 @@ defmodule PincerMinimax.MixProject do
         name: "pincer_minimax",
         licenses: ["MIT"],
         maintainers: ["Micelio"],
-        links: %{}
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"}
       ]
     ]
   end
