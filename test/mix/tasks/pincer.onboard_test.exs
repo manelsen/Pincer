@@ -39,7 +39,7 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     {:ok, config} = YamlElixir.read_from_file("config.yaml")
     assert config["database"]["database"] == "pincer"
     assert config["database"]["hostname"] == "localhost"
-    assert output =~ "npm install --prefix infrastructure/whatsapp"
+    assert output =~ "add {:pincer_whatsapp"
     assert output =~ "channels.whatsapp.enabled=true"
   end
 
