@@ -70,6 +70,9 @@ defmodule Pincer.MixProject do
       {:hackney, "~> 1.20"},
       {:multipart, "~> 0.4"},
 
+      # HTTP server (health endpoint)
+      {:bandit, "~> 1.5"},
+
       # JSON
       {:jason, "~> 1.4"},
 
