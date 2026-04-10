@@ -9,21 +9,18 @@ defmodule Pincer.Adapters.Tools.CodeSkeleton do
   @impl true
   def spec do
     %{
-      "type" => "function",
-      "function" => %{
-        "name" => "get_code_skeleton",
-        "description" =>
-          "Reads a source code file and returns its structural skeleton (functions, classes, imports) while stripping out implementation details. Use this to quickly map the architecture of large files without consuming too many context tokens.",
-        "parameters" => %{
-          "type" => "object",
-          "properties" => %{
-            "file_path" => %{
-              "type" => "string",
-              "description" => "The path to the source code file to analyze."
-            }
-          },
-          "required" => ["file_path"]
-        }
+      name: "get_code_skeleton",
+      description:
+        "Reads a source code file and returns its structural skeleton (functions, classes, imports) while stripping out implementation details. Use this to quickly map the architecture of large files without consuming too many context tokens.",
+      parameters: %{
+        type: "object",
+        properties: %{
+          file_path: %{
+            type: "string",
+            description: "The path to the source code file to analyze."
+          }
+        },
+        required: ["file_path"]
       }
     }
   end
