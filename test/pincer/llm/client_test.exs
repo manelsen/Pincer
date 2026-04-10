@@ -114,11 +114,11 @@ defmodule Pincer.LLM.ClientTest do
       assert_received {:mock_called, ^messages, "custom-model", _config, []}
     end
 
-    test "falls back to mock response for unknown provider" do
+    test "returns error for unknown provider" do
       messages = [%{"role" => "user", "content" => "Hi"}]
 
-      assert {:ok, resp, _usage} = Client.chat_completion(messages, provider: "non_existent")
-      assert String.contains?(resp["content"], "[MOCK]")
+      assert {:error, {:provider_not_found, "non_existent"}} =
+               Client.chat_completion(messages, provider: "non_existent")
     end
   end
 

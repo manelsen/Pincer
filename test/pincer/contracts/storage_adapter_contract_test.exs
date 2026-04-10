@@ -27,6 +27,7 @@ defmodule Pincer.Contracts.StorageAdapterContractTest do
 
   test "storage adapters declare Pincer.Ports.Storage behaviour" do
     Enum.each(@storage_adapters, fn adapter_module ->
+      Code.ensure_loaded!(adapter_module)
       behaviours = adapter_module.module_info(:attributes)[:behaviour] || []
 
       assert Pincer.Ports.Storage in behaviours,
@@ -36,6 +37,8 @@ defmodule Pincer.Contracts.StorageAdapterContractTest do
 
   test "storage adapters export required callbacks" do
     Enum.each(@storage_adapters, fn adapter_module ->
+      Code.ensure_loaded!(adapter_module)
+
       Enum.each(@required_callbacks, fn {fun, arity} ->
         assert function_exported?(adapter_module, fun, arity),
                "#{inspect(adapter_module)} must export #{fun}/#{arity}"
