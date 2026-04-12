@@ -134,6 +134,10 @@ defmodule Pincer.MixProject do
       {:telemetry_poller, "~> 1.1"},
 
       # Dev & Hot Reload
+      # Distributed clustering
+      {:libcluster, "~> 3.3"},
+      {:horde, "~> 0.8"},
+
       {:mox, "~> 1.0", only: :test},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
       {:benchee, "~> 1.3", only: :bench},
