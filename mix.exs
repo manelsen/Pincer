@@ -82,11 +82,11 @@ defmodule Pincer.MixProject do
       {:pgvector, "~> 0.3"},
 
       # Channel plugins (monorepo path deps)
-      {:pincer_ports, path: "packages/pincer_ports"},
+      {:pincer_ports, path: "packages/pincer_ports", override: true},
       {:pincer_cli, path: "packages/pincer_cli"},
 
       # LLM provider plugins (monorepo path deps)
-      {:pincer_openai_compat, path: "packages/pincer_openai_compat"},
+      {:pincer_openai_compat, path: "packages/pincer_openai_compat", override: true},
       {:pincer_anthropic, path: "packages/pincer_anthropic"},
       {:pincer_google, path: "packages/pincer_google"},
       {:pincer_openai, path: "packages/pincer_openai"},
@@ -135,6 +135,7 @@ defmodule Pincer.MixProject do
 
       # Dev & Hot Reload
       {:mox, "~> 1.0", only: :test},
+      {:stream_data, "~> 1.1", only: [:test, :dev]},
       {:benchee, "~> 1.3", only: :bench},
       {:file_system, "~> 1.0"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
