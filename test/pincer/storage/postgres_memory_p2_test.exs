@@ -18,7 +18,7 @@ defmodule Pincer.Storage.PostgresMemoryP2Test do
   test "search_documents/3 ranks typed memory by importance and returns rich citations" do
     low_path = "session://s-low/snippet/1"
     high_path = "session://s-high/snippet/1"
-    vector = [1.0, 0.0]
+    vector = [1.0 | List.duplicate(0.0, 1023)]
 
     assert :ok =
              Postgres.index_memory(
@@ -69,7 +69,7 @@ defmodule Pincer.Storage.PostgresMemoryP2Test do
                path,
                "Webhook retries were fixed by raising timeout to 60 seconds.",
                "bug_solution",
-               [0.0, 1.0],
+               List.duplicate(0.0, 1023) ++ [1.0],
                importance: 8,
                session_id: "forget-session"
              )
@@ -124,7 +124,7 @@ defmodule Pincer.Storage.PostgresMemoryP2Test do
                deploy_path,
                content,
                "technical_fact",
-               [1.0, 0.0],
+               [1.0 | List.duplicate(0.0, 1023)],
                importance: 5
              )
 
@@ -133,7 +133,7 @@ defmodule Pincer.Storage.PostgresMemoryP2Test do
                notes_path,
                content,
                "technical_fact",
-               [1.0, 0.0],
+               [1.0 | List.duplicate(0.0, 1023)],
                importance: 5
              )
 

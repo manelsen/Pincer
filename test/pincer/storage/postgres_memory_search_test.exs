@@ -32,7 +32,7 @@ defmodule Pincer.Storage.PostgresMemorySearchTest do
   test "search_documents/2 and search_similar/3 return indexed snippets" do
     path = "session://postgres/snippet/#{System.unique_integer([:positive])}"
     content = "Retry storms usually point to webhook drift after deployments."
-    vector = [1.0, 0.0, 0.0]
+    vector = [1.0 | List.duplicate(0.0, 1023)]
 
     assert :ok = Postgres.index_document(path, content, vector)
     assert {:ok, text_results} = Postgres.search_documents("retry storms webhook", 5)

@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Pincer.MemoryReportTest do
                "session://report/snippet/1",
                "Deploy timeout fixed by increasing webhook timeout.",
                "technical_fact",
-               [1.0, 0.0],
+               [1.0 | List.duplicate(0.0, 1023)],
                importance: 9,
                access_count: 3,
                session_id: "session-report"
@@ -42,7 +42,7 @@ defmodule Mix.Tasks.Pincer.MemoryReportTest do
                "session://report/snippet/2",
                "User prefers concise postmortems.",
                "user_preference",
-               [0.0, 1.0],
+               List.duplicate(0.0, 1023) ++ [1.0],
                importance: 7,
                access_count: 1,
                session_id: "session-report"

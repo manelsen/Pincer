@@ -8,6 +8,17 @@ defmodule Pincer.Core.Project.ServerTest do
   setup :set_mox_from_context
 
   setup do
+    Application.put_env(:pincer, :llm_providers, %{
+      "test" => %{
+        adapter: Pincer.LLM.ClientMock,
+        base_url: "http://mock",
+        default_model: "test-model",
+        env_key: "MOCK_KEY"
+      }
+    })
+
+    Application.put_env(:pincer, :default_llm_provider, "test")
+
     # Inicia o Blackboard se não estiver rodando
     case Process.whereis(Blackboard) do
       nil -> Blackboard.start_link([])
@@ -19,12 +30,16 @@ defmodule Pincer.Core.Project.ServerTest do
 
   test "Project.Server starts and transitions to awaiting_approval" do
     Pincer.LLM.ClientMock
-    |> expect(:chat_completion, fn _msgs, _model, _config, _tools ->
+    |> stub(:chat_completion, fn _msgs, _model, _config, _tools ->
       {:ok, %{"content" => "Architect: Spec\nTester: Red"}}
     end)
+    |> stub(:stream_completion, fn _msgs, _model, _config, _tools ->
+      {:ok, [%{"choices" => [%{"delta" => %{"content" => "Tester: Red"}}]}]}
+    end)
 
-    id = "p-test-1"
-    {:ok, _pid} = Server.start_link(id: id, session_id: "s1", objective: "Objective 1")
+    id = "p-awaiting-#{System.unique_integer([:positive])}"
+    {:ok, pid} = Server.start_link(id: id, session_id: "s1", objective: "Objective 1")
+    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
 
     wait_for_status(id, :awaiting_approval)
 
@@ -37,9 +52,13 @@ defmodule Pincer.Core.Project.ServerTest do
     |> stub(:chat_completion, fn _msgs, _model, _config, _tools ->
       {:ok, %{"content" => "Tester: RED"}}
     end)
+    |> stub(:stream_completion, fn _msgs, _model, _config, _tools ->
+      {:ok, [%{"choices" => [%{"delta" => %{"content" => "Tester: RED"}}]}]}
+    end)
 
-    id = "p-test-2"
-    {:ok, _pid} = Server.start_link(id: id, session_id: "s2", objective: "Task Test")
+    id = "p-approval-#{System.unique_integer([:positive])}"
+    {:ok, pid} = Server.start_link(id: id, session_id: "s2", objective: "Task Test")
+    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
 
     wait_for_status(id, :awaiting_approval)
     Server.approve(id)

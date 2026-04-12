@@ -49,7 +49,7 @@ defmodule Pincer.Core.MemoryDiagnosticsTest do
                "session://ops/snippet/1",
                "Webhook timeout must stay at 60 seconds after deploys.",
                "architecture_decision",
-               [1.0, 0.0],
+               [1.0 | List.duplicate(0.0, 1023)],
                importance: 9,
                access_count: 7,
                session_id: "ops"
@@ -60,7 +60,7 @@ defmodule Pincer.Core.MemoryDiagnosticsTest do
                "session://ops/snippet/2",
                "Old workaround for webhook timeout drift.",
                "technical_fact",
-               [1.0, 0.0],
+               [1.0 | List.duplicate(0.0, 1023)],
                importance: 3,
                access_count: 1,
                session_id: "ops"
@@ -104,7 +104,7 @@ defmodule Pincer.Core.MemoryDiagnosticsTest do
                "session://explain/snippet/1",
                "Deploy timeout runbook says to inspect webhook retries first.",
                "technical_fact",
-               [1.0, 0.0],
+               [1.0 | List.duplicate(0.0, 1023)],
                importance: 8,
                session_id: "session-a"
              )

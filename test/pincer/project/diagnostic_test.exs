@@ -8,6 +8,17 @@ defmodule Pincer.Core.Project.DiagnosticTest do
   setup :set_mox_from_context
 
   setup do
+    Application.put_env(:pincer, :llm_providers, %{
+      "test" => %{
+        adapter: Pincer.LLM.ClientMock,
+        base_url: "http://mock",
+        default_model: "test-model",
+        env_key: "MOCK_KEY"
+      }
+    })
+
+    Application.put_env(:pincer, :default_llm_provider, "test")
+
     case Process.whereis(Blackboard) do
       nil -> Blackboard.start_link([])
       _ -> :ok
@@ -23,8 +34,11 @@ defmodule Pincer.Core.Project.DiagnosticTest do
     |> stub(:chat_completion, fn _msgs, _model, _config, _tools ->
       {:ok, %{"content" => "Coder: Fail this task"}}
     end)
+    |> stub(:stream_completion, fn _msgs, _model, _config, _tools ->
+      {:ok, [%{"choices" => [%{"delta" => %{"content" => "Coder: Fail this task"}}]}]}
+    end)
 
-    id = "p-fail-123"
+    id = "p-fail-#{System.unique_integer([:positive])}"
     # Iniciamos com max_retries: 1 para o teste ser rápido
     {:ok, _pid} =
       Server.start_link(

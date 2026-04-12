@@ -10,9 +10,23 @@ defmodule Pincer.Core.Project.HardeningTest do
   setup :set_mox_from_context
 
   setup do
+    Application.put_env(:pincer, :llm_providers, %{
+      "test" => %{
+        adapter: Pincer.LLM.ClientMock,
+        base_url: "http://mock",
+        default_model: "test-model",
+        env_key: "MOCK_KEY"
+      }
+    })
+
+    Application.put_env(:pincer, :default_llm_provider, "test")
+
     Pincer.LLM.ClientMock
     |> stub(:chat_completion, fn _msgs, _model, _config, _tools ->
       {:ok, %{"content" => "Architect: Spec\nTester: RED\nCoder: GREEN"}}
+    end)
+    |> stub(:stream_completion, fn _msgs, _model, _config, _tools ->
+      {:ok, [%{"choices" => [%{"delta" => %{"content" => "Coder: Done"}}]}]}
     end)
 
     case Process.whereis(Blackboard) do
@@ -25,8 +39,9 @@ defmodule Pincer.Core.Project.HardeningTest do
 
   @doc "BLINDAGEM 1: Stop deve matar o worker zumbi"
   test "stop/1 terminates the worker process immediately" do
-    id = "p-zombie-test"
+    id = "p-zombie-#{System.unique_integer([:positive])}"
     {:ok, pid} = Server.start_link(id: id, session_id: "s1", objective: "Heavy Task")
+    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
 
     wait_for_status(id, :awaiting_approval)
     Server.approve(id)
@@ -46,8 +61,9 @@ defmodule Pincer.Core.Project.HardeningTest do
 
   @doc "BLINDAGEM 3: Impedir execução sem aprovação"
   test "execution logic is ignored if status is not :running" do
-    id = "p-bypass-test"
+    id = "p-bypass-#{System.unique_integer([:positive])}"
     {:ok, pid} = Server.start_link(id: id, session_id: "s1", objective: "Forbidden task")
+    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
 
     wait_for_status(id, :awaiting_approval)
 
@@ -62,7 +78,7 @@ defmodule Pincer.Core.Project.HardeningTest do
 
   @doc "BLINDAGEM 5: Respeitar limite de retries"
   test "project enters :error state after max_retries" do
-    id = "p-retry-test"
+    id = "p-retry-#{System.unique_integer([:positive])}"
     # max_retries: 1 para o teste ser rápido
     {:ok, _pid} =
       Server.start_link(id: id, session_id: "s1", objective: "Fail task", max_retries: 1)
