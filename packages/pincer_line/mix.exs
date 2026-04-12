@@ -8,12 +8,15 @@ defmodule PincerLine.MixProject do
       elixir: "~> 1.14",
       start_permanent: false,
       deps: [
-        {:pincer_ports, path: "../pincer_ports"},
+        {:pincer_ports, "~> 0.1"},
         {:jason, "~> 1.4"},
         {:req, "~> 0.5"}
       ],
       description: "LINE Messaging API channel adapter for the Pincer AI agent framework",
-      package: [name: "pincer_line", licenses: ["MIT"], maintainers: ["Micelio"], links: %{"GitHub" => "https://github.com/manelsen/Pincer"}]
+      package: [
+        name: "pincer_line", licenses: ["MIT"], maintainers: ["Micelio"], links: %{"GitHub" => "https://github.com/manelsen/Pincer"},
+        files: ["lib", "mix.exs", "README.md", "LICENSE"]
+      ]
     ]
   end
 

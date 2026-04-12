@@ -30,7 +30,7 @@ defmodule PincerTelegram.MixProject do
 
   defp deps do
     [
-      {:pincer_ports, path: "../pincer_ports"},
+      {:pincer_ports, "~> 0.1"},
       {:telegex, "~> 1.8"},
       {:mox, "~> 1.0", only: :test}
     ]
@@ -41,7 +41,8 @@ defmodule PincerTelegram.MixProject do
       name: "pincer_telegram",
       licenses: ["MIT"],
       maintainers: ["Micelio"],
-      links: %{"GitHub" => @source_url}
+      links: %{"GitHub" => @source_url},
+      files: ["lib", "mix.exs", "README.md", "LICENSE"]
     ]
   end
 end

@@ -25,7 +25,8 @@ defmodule PincerPorts.MixProject do
       name: "pincer_ports",
       licenses: ["MIT"],
       maintainers: ["Micelio"],
-      links: %{"GitHub" => @source_url}
+      links: %{"GitHub" => @source_url},
+      files: ["lib", "mix.exs", "README.md", "LICENSE"]
     ]
   end
 end
