@@ -13,7 +13,8 @@ defmodule Pincer.Telemetry.PromEx do
       Plugins.Application,
       Plugins.Beam,
       Pincer.Telemetry.PromEx.LlmPlugin,
-      Pincer.Telemetry.PromEx.ChannelPlugin
+      Pincer.Telemetry.PromEx.ChannelPlugin,
+      Pincer.Telemetry.PromEx.ConversationPlugin
     ]
   end
 

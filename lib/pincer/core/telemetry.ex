@@ -9,6 +9,11 @@ defmodule Pincer.Core.Telemetry do
   @retry_event [:pincer, :retry]
   @memory_search_event [:pincer, :memory, :search]
   @memory_recall_event [:pincer, :memory, :recall]
+  @conversation_start_event [:pincer, :conversation, :session, :start]
+  @conversation_stop_event [:pincer, :conversation, :session, :stop]
+  @conversation_turn_start_event [:pincer, :conversation, :turn, :start]
+  @conversation_turn_stop_event [:pincer, :conversation, :turn, :stop]
+  @conversation_error_event [:pincer, :conversation, :turn, :error]
 
   @spec emit_error(term(), map() | keyword()) :: :ok
   def emit_error(reason, metadata \\ %{}) do
@@ -86,6 +91,69 @@ defmodule Pincer.Core.Telemetry do
       prompt_chars: parse_non_negative(Map.get(measurements, :prompt_chars, 0)),
       learnings_count: parse_non_negative(Map.get(measurements, :learnings_count, 0))
     }
+  end
+
+  @doc "Emits a conversation session start event."
+  @spec emit_conversation_start(String.t(), map()) :: :ok
+  def emit_conversation_start(session_id, metadata \\ %{}) when is_binary(session_id) do
+    :telemetry.execute(@conversation_start_event, %{count: 1},
+      Map.merge(normalize_metadata(metadata), %{session_id: session_id})
+    )
+    :ok
+  end
+
+  @doc "Emits a conversation session stop event."
+  @spec emit_conversation_stop(String.t(), map()) :: :ok
+  def emit_conversation_stop(session_id, metadata \\ %{}) when is_binary(session_id) do
+    :telemetry.execute(@conversation_stop_event, %{count: 1},
+      Map.merge(normalize_metadata(metadata), %{session_id: session_id})
+    )
+    :ok
+  end
+
+  @doc "Emits a conversation turn start event and returns monotonic start time."
+  @spec emit_conversation_turn_start(String.t(), map()) :: integer()
+  def emit_conversation_turn_start(session_id, metadata \\ %{}) when is_binary(session_id) do
+    start_ms = System.monotonic_time(:millisecond)
+    :telemetry.execute(@conversation_turn_start_event, %{count: 1},
+      Map.merge(normalize_metadata(metadata), %{session_id: session_id})
+    )
+    start_ms
+  end
+
+  @doc """
+  Emits a conversation turn stop event with duration, token counts, and tool_calls.
+  `start_ms` should be the value returned by `emit_conversation_turn_start/2`.
+  """
+  @spec emit_conversation_turn_stop(String.t(), integer(), map()) :: :ok
+  def emit_conversation_turn_stop(session_id, start_ms, metadata \\ %{})
+      when is_binary(session_id) and is_integer(start_ms) do
+    duration_ms = System.monotonic_time(:millisecond) - start_ms
+    meta = normalize_metadata(metadata)
+
+    measurements = %{
+      count: 1,
+      duration_ms: max(0, duration_ms),
+      prompt_tokens: parse_non_negative(Map.get(meta, :prompt_tokens, 0)),
+      completion_tokens: parse_non_negative(Map.get(meta, :completion_tokens, 0)),
+      tool_calls: parse_non_negative(Map.get(meta, :tool_calls, 0))
+    }
+
+    :telemetry.execute(@conversation_turn_stop_event, measurements,
+      Map.merge(meta, %{session_id: session_id})
+    )
+
+    :ok
+  end
+
+  @doc "Emits a conversation turn error event."
+  @spec emit_conversation_error(String.t(), term(), map()) :: :ok
+  def emit_conversation_error(session_id, reason, metadata \\ %{}) when is_binary(session_id) do
+    meta = normalize_metadata(metadata)
+    :telemetry.execute(@conversation_error_event, %{count: 1},
+      Map.merge(meta, %{session_id: session_id, reason: inspect(reason)})
+    )
+    :ok
   end
 
   defp parse_wait_ms(ms) when is_integer(ms) and ms >= 0, do: ms

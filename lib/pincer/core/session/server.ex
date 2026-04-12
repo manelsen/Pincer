@@ -12,6 +12,7 @@ defmodule Pincer.Core.Session.Server do
   alias Pincer.Ports.LLM
   alias Pincer.Ports.Storage
   alias Pincer.Core.AgentPaths
+  alias Pincer.Core.Telemetry
   alias Pincer.Core.ErrorUX
   alias Pincer.Core.Executor
   alias Pincer.Core.Introspection
@@ -80,7 +81,8 @@ defmodule Pincer.Core.Session.Server do
       auto_approve_until: nil,
       last_executor_trace: nil,
       self_state: self_state,
-      injected_lesson_ids: []
+      injected_lesson_ids: [],
+      turn_start_ms: nil
     }
 
     # 4. Start Graph Watcher for this workspace
@@ -112,6 +114,10 @@ defmodule Pincer.Core.Session.Server do
 
     # 7. Heartbeat for periodic Blackboard polling
     Process.send_after(self(), :heartbeat, 5000)
+
+    Telemetry.emit_conversation_start(session_id, %{
+      fresh: Enum.empty?(persisted)
+    })
 
     {:ok, state}
   end
@@ -202,12 +208,20 @@ defmodule Pincer.Core.Session.Server do
     publish(state.session_id, {:agent_response, response, usage})
     Introspection.Kernel.report_activity(state.root_agent_id, :idle)
 
+    if state.turn_start_ms do
+      Telemetry.emit_conversation_turn_stop(state.session_id, state.turn_start_ms, %{
+        prompt_tokens: prompt_tokens,
+        completion_tokens: completion_tokens
+      })
+    end
+
     new_state = %{
       state
       | history: maybe_prune_history(final_history, state.session_id),
         status: :idle,
         worker_pid: nil,
-        token_usage_total: new_totals
+        token_usage_total: new_totals,
+        turn_start_ms: nil
     }
 
     save_preferences(new_state)
@@ -330,10 +344,12 @@ defmodule Pincer.Core.Session.Server do
   def handle_info({:executor_failed, reason}, state) do
     Logger.error("[SESSION] #{state.session_id} Executor failed: #{inspect(reason)}")
 
+    Telemetry.emit_conversation_error(state.session_id, reason)
+
     error_msg = "❌ #{ErrorUX.friendly(reason, scope: :executor)}"
 
     publish(state.session_id, {:agent_response, error_msg})
-    {:noreply, %{state | status: :idle, worker_pid: nil}}
+    {:noreply, %{state | status: :idle, worker_pid: nil, turn_start_ms: nil}}
   end
 
   @impl true
@@ -661,6 +677,7 @@ defmodule Pincer.Core.Session.Server do
         if state.llm_client, do: Keyword.put(opts, :llm_client, state.llm_client), else: opts
       end)
 
+    turn_start_ms = Telemetry.emit_conversation_turn_start(state.session_id)
     {:ok, pid} = Executor.start(self(), state.session_id, new_history, executor_opts)
 
     lesson_ids = Introspection.Kernel.get_lesson_ids(state.root_agent_id)
@@ -672,7 +689,8 @@ defmodule Pincer.Core.Session.Server do
        | history: new_history,
          worker_pid: pid,
          status: :working,
-         injected_lesson_ids: lesson_ids
+         injected_lesson_ids: lesson_ids,
+         turn_start_ms: turn_start_ms
      }}
   end
 

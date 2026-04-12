@@ -78,6 +78,7 @@ defmodule Pincer.Core do
       HookDispatcher,
       StartupGuard,
       CircuitBreaker,
+      ConversationObservability,
       Cluster,
       Cluster.NodeObserver,
       Session.HordeSupervisor,

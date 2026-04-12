@@ -143,6 +143,7 @@ defmodule Pincer.Application do
       Pincer.Infra.PubSub,
       Pincer.Core.Orchestration.Blackboard,
       Pincer.Core.MemoryObservability,
+      Pincer.Core.ConversationObservability,
       {Finch, name: Pincer.Finch},
       {Pincer.Infra.Repo, repo_config},
       Pincer.Core.Heartbeat,
