@@ -453,6 +453,45 @@ defmodule Pincer.Core.Session.ServerTest do
     assert kernel_state.last_trace == trace
   end
 
+  test "history is pruned when it exceeds max_history_messages" do
+    tmp = Path.join(System.tmp_dir!(), "pincer_prune_#{System.unique_integer([:positive])}")
+    session_id = "session_prune_#{System.unique_integer([:positive])}"
+    workspace = Path.join(tmp, "workspaces/#{session_id}")
+
+    File.mkdir_p!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
+    Application.put_env(:pincer, :max_history_messages, 5)
+    on_exit(fn -> Application.delete_env(:pincer, :max_history_messages) end)
+
+    pid =
+      start_supervised!(
+        {Server, [session_id: session_id, workspace_path: workspace, bootstrap?: false]}
+      )
+
+    # Build a fake final_history with 20 non-system messages + 1 system message
+    system_msg = %{"role" => "system", "content" => "system prompt"}
+
+    large_history =
+      [system_msg] ++
+        Enum.map(1..20, &%{"role" => "user", "content" => "msg #{&1}"})
+
+    send(
+      pid,
+      {:executor_finished, large_history,
+       "ok", %{"prompt_tokens" => 10, "completion_tokens" => 5}}
+    )
+
+    Process.sleep(100)
+
+    {:ok, state} = Server.get_status(session_id)
+    non_system = Enum.reject(state.history, &(&1["role"] == "system"))
+    assert length(non_system) == 5
+    # Last 5 messages are kept
+    assert List.last(non_system)["content"] == "msg 20"
+  end
+
   test "session receives self_state updates from Kernel" do
     tmp = Path.join(System.tmp_dir!(), "pincer_kstate_#{System.unique_integer([:positive])}")
     session_id = "session_kstate_#{System.unique_integer([:positive])}"

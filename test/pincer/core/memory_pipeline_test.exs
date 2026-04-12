@@ -35,7 +35,7 @@ defmodule Pincer.Core.MemoryPipelineTest do
              )
 
     assert result.capture.session_id == "s-100"
-    assert result.classify.memory_type in ["user_preference", "technical_fact", "session_summary"]
+    assert result.classify.memory_type in Pincer.Core.MemoryTypes.all()
     assert result.store.status in [:stored, :skipped_budget]
     assert is_number(result.classify.confidence)
     assert is_number(result.classify.relevance)
@@ -65,6 +65,52 @@ defmodule Pincer.Core.MemoryPipelineTest do
 
     assert second.store.status == :skipped_budget
     assert second.store.reason == :session_budget_exceeded
+  end
+
+  describe "classify/1 keyword scoring" do
+    test "classifies user preference signals" do
+      {:ok, result} =
+        MemoryPipeline.run(
+          %{session_id: "s", project_id: "p", content: "User prefers concise output"},
+          storage: StorageStub,
+          embedding_fun: fn _ -> {:ok, [0.1]} end
+        )
+
+      assert result.classify.memory_type == "user_preference"
+    end
+
+    test "classifies bug solution signals" do
+      {:ok, result} =
+        MemoryPipeline.run(
+          %{session_id: "s", project_id: "p", content: "Fixed the webhook timeout by rollback"},
+          storage: StorageStub,
+          embedding_fun: fn _ -> {:ok, [0.1]} end
+        )
+
+      assert result.classify.memory_type == "bug_solution"
+    end
+
+    test "classifies technical fact signals" do
+      {:ok, result} =
+        MemoryPipeline.run(
+          %{session_id: "s", project_id: "p", content: "Deadlock occurs during concurrent writes"},
+          storage: StorageStub,
+          embedding_fun: fn _ -> {:ok, [0.1]} end
+        )
+
+      assert result.classify.memory_type == "technical_fact"
+    end
+
+    test "falls back to session_summary when no keywords match" do
+      {:ok, result} =
+        MemoryPipeline.run(
+          %{session_id: "s", project_id: "p", content: "We talked about the weather today"},
+          storage: StorageStub,
+          embedding_fun: fn _ -> {:ok, [0.1]} end
+        )
+
+      assert result.classify.memory_type == "session_summary"
+    end
   end
 
   test "compact window is based on monotonic milliseconds" do
