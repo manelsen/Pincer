@@ -151,6 +151,18 @@ defmodule Pincer.Core.ExecutorMemoryRecallTest do
 
     @impl true
     def load_checkpoint(_session_id, _opts), do: {:ok, nil}
+
+    @impl true
+    def upsert_pairing_state(_session_id, _channel, _state, _opts \\ []), do: :ok
+
+    @impl true
+    def get_pairing_state(_session_id, _channel), do: {:ok, nil}
+
+    @impl true
+    def delete_pairing_state(_session_id, _channel), do: :ok
+
+    @impl true
+    def list_pairing_states_by_channel(_channel), do: {:ok, []}
   end
 
   setup do

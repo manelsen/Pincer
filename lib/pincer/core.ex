@@ -77,6 +77,12 @@ defmodule Pincer.Core do
       Heartbeat.GitHubWatcher,
       HookDispatcher,
       StartupGuard,
-      CircuitBreaker
+      CircuitBreaker,
+      Cluster,
+      Cluster.NodeObserver,
+      Session.HordeSupervisor,
+      Session.HordeRegistry,
+      Project.HordeSupervisor,
+      Project.HordeRegistry
     ]
 end

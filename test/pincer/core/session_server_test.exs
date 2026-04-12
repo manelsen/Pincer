@@ -106,6 +106,18 @@ defmodule Pincer.Core.Session.ServerTest do
     def ingest_entity_relation(_from_name, _from_type, _relation, _to_name, _to_type),
       do: :ok
 
+    @impl true
+    def upsert_pairing_state(_session_id, _channel, _state, _opts \\ []), do: :ok
+
+    @impl true
+    def get_pairing_state(_session_id, _channel), do: {:ok, nil}
+
+    @impl true
+    def delete_pairing_state(_session_id, _channel), do: :ok
+
+    @impl true
+    def list_pairing_states_by_channel(_channel), do: {:ok, []}
+
     defp agent do
       Application.fetch_env!(:pincer, :session_server_test_agent)
     end

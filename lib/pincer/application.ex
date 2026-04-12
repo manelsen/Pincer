@@ -138,6 +138,7 @@ defmodule Pincer.Application do
     )
 
     children = [
+      {Cluster.Supervisor, [Pincer.Core.Cluster.topologies(), [name: Pincer.ClusterSupervisor]]},
       Pincer.Telemetry.PromEx,
       Pincer.Infra.PubSub,
       Pincer.Core.Orchestration.Blackboard,
@@ -151,6 +152,11 @@ defmodule Pincer.Application do
       {Registry, keys: :unique, name: Pincer.Core.Introspection.Kernel.Registry},
       Pincer.Core.Introspection.Kernel.Supervisor,
       {Registry, keys: :unique, name: Pincer.Core.Session.Registry},
+      Pincer.Core.Session.HordeRegistry,
+      Pincer.Core.Session.HordeSupervisor,
+      Pincer.Core.Project.HordeRegistry,
+      Pincer.Core.Project.HordeSupervisor,
+      Pincer.Core.Cluster.NodeObserver,
       Pincer.Core.CircuitBreaker,
       Pincer.Core.RateLimiter,
       Pincer.Core.HookDispatcher,
