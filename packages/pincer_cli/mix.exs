@@ -22,9 +22,7 @@ defmodule PincerCLI.MixProject do
 
   defp deps do
     [
-      # pincer_ports provides Pincer.Ports.Channel behaviour.
-      # In monorepo: path dep. When published to Hex: {:pincer_ports, "~> 0.1"}
-      {:pincer_ports, path: "../pincer_ports"}
+      {:pincer_ports, "~> 0.1"}
     ]
   end
 
@@ -33,7 +31,8 @@ defmodule PincerCLI.MixProject do
       name: "pincer_cli",
       licenses: ["MIT"],
       maintainers: ["Micelio"],
-      links: %{"GitHub" => @source_url}
+      links: %{"GitHub" => @source_url},
+      files: ["lib", "mix.exs", "README.md", "LICENSE"]
     ]
   end
 end
