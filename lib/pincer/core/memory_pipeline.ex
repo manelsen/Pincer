@@ -43,23 +43,46 @@ defmodule Pincer.Core.MemoryPipeline do
     }
   end
 
+  # Keyword signals per memory type. Uses whole-word matching (word-boundary regex).
+  # Ordered by specificity so the most descriptive type wins on ties.
+  @classification_signals [
+    {"bug_solution",
+     ~w(fixed resolved workaround hotfix rollback revert mitigated patched addressed)},
+    {"architecture_decision",
+     ~w(decided chosen architecture redesign tradeoff rationale selected adopted replaced)},
+    {"user_preference",
+     ~w(prefer prefers preferred always never dislike favorite favourite avoid want rather)},
+    {"technical_fact",
+     ~w(bug error timeout failure crash deadlock regression flaky intermittent broken)},
+    {"code",
+     ~w(function defmodule defp implements refactoring extract algorithm complexity)},
+    {"reference",
+     ~w(https http documentation readme wiki changelog changelog)},
+    {"decision",
+     ~w(agreed approved rejected choosing dropped switched delegated)},
+    {"action_item",
+     ~w(todo pending reminder investigate blocked follow-up verify backlog)},
+    {"session_summary", []}
+  ]
+
   defp classify(capture) do
     content = capture.content |> to_string() |> String.downcase()
     query = (capture.query || "") |> String.downcase()
     signal = "#{content} #{query}"
 
-    memory_type =
-      cond do
-        String.contains?(signal, "prefer") -> "user_preference"
-        String.contains?(signal, "bug") or String.contains?(signal, "timeout") -> "technical_fact"
-        true -> "session_summary"
-      end
+    memory_type = score_memory_type(signal)
 
     confidence =
-      cond do
-        memory_type == "user_preference" -> 0.88
-        memory_type == "technical_fact" -> 0.82
-        true -> 0.70
+      case memory_type do
+        "bug_solution" -> 0.91
+        "architecture_decision" -> 0.89
+        "reference" -> 0.87
+        "user_preference" -> 0.88
+        "technical_fact" -> 0.85
+        "decision" -> 0.84
+        "code" -> 0.83
+        "action_item" -> 0.82
+        _ -> 0.70
       end
 
     relevance =
@@ -74,6 +97,20 @@ defmodule Pincer.Core.MemoryPipeline do
       confidence: confidence,
       relevance: relevance
     }
+  end
+
+  defp score_memory_type(signal) do
+    words = Regex.scan(~r/\w[\w-]*/, signal) |> List.flatten() |> MapSet.new()
+
+    {type, score} =
+      @classification_signals
+      |> Enum.map(fn {type, keywords} ->
+        score = Enum.count(keywords, &MapSet.member?(words, &1))
+        {type, score}
+      end)
+      |> Enum.max_by(fn {_type, score} -> score end)
+
+    if score > 0, do: type, else: "session_summary"
   end
 
   defp store(capture, classify, opts) do

@@ -204,7 +204,7 @@ defmodule Pincer.Core.Session.Server do
 
     new_state = %{
       state
-      | history: final_history,
+      | history: maybe_prune_history(final_history, state.session_id),
         status: :idle,
         worker_pid: nil,
         token_usage_total: new_totals
@@ -969,6 +969,35 @@ defmodule Pincer.Core.Session.Server do
   @spec approve_all(String.t(), pos_integer()) :: :ok
   def approve_all(id, duration_seconds \\ 600),
     do: GenServer.call(via_tuple(id), {:approve_all, duration_seconds})
+
+  # Prunes history to a sliding window when it exceeds the configured limit.
+  # Always preserves the system message and retains the most recent exchanges.
+  # When pruning occurs, a synthetic summary is inserted so the LLM has context
+  # about the dropped history.
+  defp maybe_prune_history(history, session_id) do
+    max = Application.get_env(:pincer, :max_history_messages, 100)
+    non_system = Enum.reject(history, &(&1["role"] == "system"))
+
+    if length(non_system) <= max do
+      history
+    else
+      system_msg =
+        Enum.find(history, &(&1["role"] == "system")) ||
+          %{"role" => "system", "content" => ""}
+
+      kept = Enum.take(non_system, -max)
+      dropped = length(non_system) - length(kept)
+
+      notice = %{
+        "role" => "system",
+        "content" =>
+          "[Context window pruned: #{dropped} earlier messages removed to stay within the #{max}-message limit. Session: #{session_id}]"
+      }
+
+      Logger.debug("[SESSION] #{session_id} history pruned: dropped #{dropped} messages")
+      [system_msg, notice | kept]
+    end
+  end
 
   @impl true
   def terminate(reason, state) do
