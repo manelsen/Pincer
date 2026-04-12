@@ -10,6 +10,7 @@ PACKAGES_DIR="$(cd "$(dirname "$0")/.." && pwd)/packages"
 # Publication order: dependencies before dependents
 PUBLISH_ORDER=(
   pincer_ports
+  pincer_shared
   pincer_openai_compat
   pincer_anthropic
   pincer_google

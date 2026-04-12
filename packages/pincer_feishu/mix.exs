@@ -9,6 +9,7 @@ defmodule PincerFeishu.MixProject do
       start_permanent: false,
       deps: [
         {:pincer_ports, "~> 0.1"},
+        {:pincer_shared, "~> 0.1"},
         {:jason, "~> 1.4"},
         {:req, "~> 0.5"}
       ],

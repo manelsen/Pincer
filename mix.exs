@@ -83,6 +83,7 @@ defmodule Pincer.MixProject do
 
       # Channel plugins (monorepo path deps)
       {:pincer_ports, path: "packages/pincer_ports", override: true},
+      {:pincer_shared, path: "packages/pincer_shared", override: true},
       {:pincer_cli, path: "packages/pincer_cli"},
 
       # LLM provider plugins (monorepo path deps)
