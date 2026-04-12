@@ -14,14 +14,18 @@ defmodule Pincer.Core.MemoryTypes do
   def normalize(nil), do: "reference"
 
   def normalize(type) when is_binary(type) do
-    candidate =
-      type
-      |> String.trim()
-      |> String.downcase()
-      |> String.replace(~r/[^a-z0-9]+/u, "_")
-      |> String.trim("_")
+    if not String.valid?(type) do
+      "reference"
+    else
+      candidate =
+        type
+        |> String.trim()
+        |> String.downcase()
+        |> String.replace(~r/[^a-z0-9]+/u, "_")
+        |> String.trim("_")
 
-    if candidate in @types, do: candidate, else: "reference"
+      if candidate in @types, do: candidate, else: "reference"
+    end
   end
 
   def normalize(_), do: "reference"
@@ -34,14 +38,12 @@ defmodule Pincer.Core.MemoryTypes do
   def valid?(nil), do: false
 
   def valid?(type) when is_binary(type) do
-    candidate =
-      type
-      |> String.trim()
-      |> String.downcase()
-      |> String.replace(~r/[^a-z0-9]+/u, "_")
-      |> String.trim("_")
-
-    candidate in @types
+    String.valid?(type) and
+      (type
+       |> String.trim()
+       |> String.downcase()
+       |> String.replace(~r/[^a-z0-9]+/u, "_")
+       |> String.trim("_")) in @types
   end
 
   def valid?(_), do: false
