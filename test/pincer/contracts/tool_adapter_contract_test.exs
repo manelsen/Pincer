@@ -41,6 +41,7 @@ defmodule Pincer.Contracts.ToolAdapterContractTest do
   test "tool adapters export spec/0" do
     Enum.each(@tool_modules, fn tool_module ->
       Code.ensure_loaded!(tool_module)
+
       assert function_exported?(tool_module, :spec, 0),
              "#{inspect(tool_module)} must export spec/0"
     end)

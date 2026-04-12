@@ -58,7 +58,7 @@ defmodule Mix.Tasks.Pincer.MemoryExplainTest do
                "session://explain/snippet/1",
                "Deploy timeout runbook says to inspect webhook retries first.",
                "technical_fact",
-               [1.0, 0.0],
+               [1.0 | List.duplicate(0.0, 1023)],
                importance: 8,
                session_id: "session-a"
              )
