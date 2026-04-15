@@ -55,7 +55,9 @@ jobs:
         run: mix deps.get
 
       - name: Compile dependencies
-        run: mix deps.compile
+        run: |
+          mix deps.compile pincer_ports pincer_shared --force
+          mix deps.compile
 
       - name: Create and migrate database
         run: |
