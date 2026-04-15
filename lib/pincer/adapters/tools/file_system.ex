@@ -66,7 +66,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
           action: %{
             type: "string",
             description:
-              "Action to execute: 'list', 'read', 'write', 'append', 'mkdir', 'copy', 'move', 'search', 'find', 'stat', 'anchored_edit', 'patch', or 'delete_to_trash'",
+              "Action to execute: 'list', 'read', 'write', 'append', 'mkdir', 'copy', 'move', 'search', 'find', 'stat', 'anchored_edit', 'patch', 'delete_to_trash', 'zip', 'unzip', or 'send_to_channel'",
             enum: [
               "list",
               "read",
@@ -80,7 +80,10 @@ defmodule Pincer.Adapters.Tools.FileSystem do
               "stat",
               "anchored_edit",
               "patch",
-              "delete_to_trash"
+              "delete_to_trash",
+              "zip",
+              "unzip",
+              "send_to_channel"
             ]
           },
           path: %{
@@ -94,7 +97,12 @@ defmodule Pincer.Adapters.Tools.FileSystem do
           },
           destination: %{
             type: "string",
-            description: "Target path for the 'copy' and 'move' actions."
+            description:
+              "Target path for 'copy', 'move', and 'zip' actions. For 'unzip', optional extraction directory (defaults to same directory as the archive)."
+          },
+          caption: %{
+            type: "string",
+            description: "Optional caption text to accompany a file sent via 'send_to_channel'."
           },
           overwrite: %{
             type: "boolean",
@@ -145,7 +153,19 @@ defmodule Pincer.Adapters.Tools.FileSystem do
           edits: %{
             type: "array",
             description:
-              "Anchored edits for the 'anchored_edit' action using replace, insert_after, or insert_before."
+              "Anchored edits for the 'anchored_edit' action using replace, insert_after, or insert_before.",
+            items: %{
+              type: "object",
+              properties: %{
+                anchor: %{type: "string", description: "Line reference token from hashline output, e.g. '49#WHHXK' (the part before the '|' separator). Do NOT add any prefix."},
+                op: %{
+                  type: "string",
+                  enum: ["replace", "insert_after", "insert_before"]
+                },
+                content: %{type: "string", description: "New content for the operation."}
+              },
+              required: ["anchor", "op", "content"]
+            }
           },
           case_sensitive: %{
             type: "boolean",
@@ -183,6 +203,9 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     workspace_root =
       Map.get(context, "workspace_path") || Map.get(context, :workspace_path) ||
         get_workspace_root()
+
+    session_id = Map.get(context, "session_id") || Map.get(context, :session_id)
+    args = if is_binary(session_id), do: Map.put(args, "_session_id", session_id), else: args
 
     with {:ok, safe_path} <- validate_action_path(action, raw_path, workspace_root),
          {:ok, normalized_args} <- normalize_args_for_action(action, args, workspace_root) do
@@ -232,7 +255,10 @@ defmodule Pincer.Adapters.Tools.FileSystem do
               "stat",
               "anchored_edit",
               "patch",
-              "delete_to_trash"
+              "delete_to_trash",
+              "zip",
+              "unzip",
+              "send_to_channel"
             ] do
     validate_path(path, root)
   end
@@ -243,6 +269,25 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     with {:ok, destination} <- fetch_required_string(args, "destination"),
          {:ok, safe_destination} <- validate_path(destination, workspace_root) do
       {:ok, Map.put(args, "_destination_path", safe_destination)}
+    end
+  end
+
+  defp normalize_args_for_action("zip", args, workspace_root) do
+    with {:ok, destination} <- fetch_required_string(args, "destination"),
+         {:ok, safe_destination} <- validate_path(destination, workspace_root) do
+      {:ok, Map.put(args, "_destination_path", safe_destination)}
+    end
+  end
+
+  defp normalize_args_for_action("unzip", args, workspace_root) do
+    case get_arg(args, "destination") do
+      dest when is_binary(dest) and dest != "" ->
+        with {:ok, safe_dest} <- validate_path(dest, workspace_root) do
+          {:ok, Map.put(args, "_destination_path", safe_dest)}
+        end
+
+      _ ->
+        {:ok, args}
     end
   end
 
@@ -511,6 +556,98 @@ defmodule Pincer.Adapters.Tools.FileSystem do
           {:error, reason} ->
             {:error, "File not found or inaccessible: #{inspect(reason)}"}
         end
+    end
+  end
+
+  defp perform_action("zip", path, args, workspace_root) do
+    destination = get_arg(args, "_destination_path")
+
+    destination =
+      if is_binary(destination) and destination != "" do
+        destination
+      else
+        path <> ".zip"
+      end
+
+    destination =
+      if String.ends_with?(destination, ".zip"),
+        do: destination,
+        else: destination <> ".zip"
+
+    case File.stat(path) do
+      {:error, _} ->
+        {:error, "Path not found: #{relative_to_workspace(path, workspace_root)}"}
+
+      {:ok, _} ->
+        files_to_zip = collect_zip_entries(path)
+
+        # Use relative paths from workspace root so the archive has a clean structure
+        relative_files =
+          Enum.map(files_to_zip, fn abs_path ->
+            abs_path |> Path.relative_to(workspace_root) |> String.to_charlist()
+          end)
+
+        zip_result =
+          :zip.create(
+            String.to_charlist(destination),
+            relative_files,
+            cwd: String.to_charlist(workspace_root)
+          )
+
+        case zip_result do
+          {:ok, _} ->
+            {:ok,
+             "Created archive '#{relative_to_workspace(destination, workspace_root)}' with #{length(files_to_zip)} file(s)."}
+
+          {:error, reason} ->
+            {:error, "Failed to create zip: #{inspect(reason)}"}
+        end
+    end
+  end
+
+  defp perform_action("unzip", path, args, workspace_root) do
+    dest_dir =
+      case get_arg(args, "_destination_path") do
+        d when is_binary(d) -> d
+        _ -> Path.dirname(path)
+      end
+
+    :ok = File.mkdir_p(dest_dir)
+
+    case :zip.extract(
+           String.to_charlist(path),
+           [{:cwd, String.to_charlist(dest_dir)}]
+         ) do
+      {:ok, files} ->
+        rel_dest = relative_to_workspace(dest_dir, workspace_root)
+        {:ok, "Extracted #{length(files)} file(s) to '#{rel_dest}'."}
+
+      {:error, reason} ->
+        {:error, "Failed to extract zip: #{inspect(reason)}"}
+    end
+  end
+
+  defp perform_action("send_to_channel", path, args, workspace_root) do
+    session_id = get_arg(args, "session_id") || get_arg(args, "_session_id")
+    caption = get_arg(args, "caption")
+
+    if is_nil(session_id) or session_id == "" do
+      {:error, "send_to_channel requires a session context — run from within an active session."}
+    else
+      rel_path = relative_to_workspace(path, workspace_root)
+
+      case File.stat(path) do
+        {:error, _} ->
+          {:error, "File not found: #{rel_path}"}
+
+        {:ok, %{type: :directory}} ->
+          {:error, "Cannot send a directory. Zip it first with the 'zip' action."}
+
+        {:ok, _} ->
+          opts = if is_binary(caption) and caption != "", do: %{caption: caption}, else: %{}
+          Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:agent_file, path, opts})
+          {:ok, "Sending '#{rel_path}' to the channel..."}
+      end
     end
   end
 
@@ -922,6 +1059,23 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     end
   end
 
+  defp collect_zip_entries(path) do
+    case File.stat(path) do
+      {:ok, %{type: :directory}} ->
+        path
+        |> File.ls!()
+        |> Enum.flat_map(fn entry ->
+          collect_zip_entries(Path.join(path, entry))
+        end)
+
+      {:ok, %{type: :regular}} ->
+        [path]
+
+      _ ->
+        []
+    end
+  end
+
   defp relative_to_workspace(path, workspace_root) do
     Path.relative_to(path, workspace_root)
   end
@@ -1228,7 +1382,9 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp parse_line_ref(ref) when is_binary(ref) do
-    case Regex.run(@line_ref_regex, String.trim(ref)) do
+    normalized = ref |> String.trim() |> String.replace_prefix("LINE#", "")
+
+    case Regex.run(@line_ref_regex, normalized) do
       [_, line, hash] ->
         {:ok, %{line: String.to_integer(line), hash: hash}}
 

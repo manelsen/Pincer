@@ -1,14 +1,7 @@
-FROM golang:1.25 AS whatsapp-builder
-
-WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential && \
-    rm -rf /var/lib/apt/lists/*
-COPY infrastructure/whatsapp ./infrastructure/whatsapp
-RUN cd infrastructure/whatsapp && go build -o whatsapp_bridge main.go
-
 FROM elixir:1.18-slim AS builder
 
 ENV MIX_ENV=prod \
+    MIX_BUILD_PATH=/app/_build \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
@@ -22,14 +15,15 @@ RUN mix local.hex --force && mix local.rebar --force
 
 COPY mix.exs mix.lock ./
 COPY config ./config
+COPY packages ./packages
 
-RUN mix deps.get --only prod
-RUN mix deps.compile
+RUN mix deps.get --only prod && \
+    for pkg in packages/*/; do ln -sfn /app/deps "${pkg}deps"; done && \
+    mix deps.compile pincer_ports pincer_shared --force && \
+    mix deps.compile --force
 
 COPY lib ./lib
 COPY priv ./priv
-COPY infrastructure/whatsapp ./infrastructure/whatsapp
-COPY --from=whatsapp-builder /app/infrastructure/whatsapp/whatsapp_bridge ./infrastructure/whatsapp/whatsapp_bridge
 COPY config.yaml ./config.yaml
 COPY README.md ./README.md
 COPY LICENSE ./LICENSE
@@ -63,10 +57,10 @@ RUN mkdir -p /app/infrastructure/mcp && \
 
 COPY --from=builder /app/_build /app/_build
 COPY --from=builder /app/deps /app/deps
+COPY --from=builder /app/packages /app/packages
 COPY --from=builder /app/lib /app/lib
 COPY --from=builder /app/priv /app/priv
 COPY --from=builder /app/config /app/config
-COPY --from=builder /app/infrastructure/whatsapp /app/infrastructure/whatsapp
 COPY infrastructure/mcp/shell_server.py /app/infrastructure/mcp/shell_server.py
 COPY --from=builder /app/mix.exs /app/mix.exs
 COPY --from=builder /app/mix.lock /app/mix.lock

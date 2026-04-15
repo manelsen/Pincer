@@ -267,12 +267,17 @@ defmodule Pincer.Core.Executor do
     Logger.info("[EXECUTOR] do_run_loop (Depth: #{depth})")
 
     client_opts =
-      if model_override,
-        do: [provider: model_override.provider, model: model_override.model],
-        else: []
+      case {model_override_field(model_override, :provider),
+            model_override_field(model_override, :model)} do
+        {provider, model} when is_binary(provider) and is_binary(model) ->
+          [provider: provider, model: model]
+
+        _ ->
+          []
+      end
 
     client_opts =
-      if thinking = Map.get(model_override || %{}, :thinking_level) do
+      if thinking = model_override_field(model_override, :thinking_level) do
         Keyword.put(client_opts, :thinking_level, thinking)
       else
         client_opts
@@ -472,11 +477,24 @@ defmodule Pincer.Core.Executor do
          deps,
          client_opts
        ) do
-    if depth == 0 do
-      Logger.warning("[EXECUTOR] Empty streaming response. Retrying lightweight chat completion.")
+    if true do
+      Logger.warning(
+        "[EXECUTOR] Empty streaming response at depth=#{depth}. Retrying lightweight chat completion."
+      )
+
       emit_trace_step(:policy, "empty_response_recovery", %{depth: depth})
 
-      retry_history = Policy.recover(:empty_response_history, %{history: prompt_history})
+      # At depth > 0 the prompt_history already contains large tool results that may have
+      # overflowed the context. Re-prepare from logical_history with default scale so the
+      # history manager can truncate tool messages before appending the recovery prompt.
+      base_history =
+        if depth == 0 do
+          prompt_history
+        else
+          prepare_prompt_history(logical_history, model_override)
+        end
+
+      retry_history = Policy.recover(:empty_response_history, %{history: base_history})
 
       case deps.llm_client.chat_completion(retry_history, client_opts) do
         {:ok, assistant_msg, usage} ->
@@ -502,8 +520,6 @@ defmodule Pincer.Core.Executor do
           emit_trace_step(:error, "empty_response_recovery_failed", %{reason: inspect(reason)})
           {:error, :empty_response}
       end
-    else
-      {:error, :empty_response}
     end
   end
 
@@ -594,14 +610,14 @@ defmodule Pincer.Core.Executor do
     extra = ToolAnswerPatternPolicy.build(tool_results)
 
     %{
-      "role" => "system",
+      "role" => "user",
       "content" =>
         if(
           extra == "",
           do:
-            "Ground yourself strictly in the tool outputs above. Do not invent files, results, success, or side effects. If a tool failed, found nothing, or returned limited data, say that plainly.",
+            "[system] Ground yourself strictly in the tool outputs above. Do not invent files, results, success, or side effects. If a tool failed, found nothing, or returned limited data, say that plainly.",
           else:
-            "Ground yourself strictly in the tool outputs above. Do not invent files, results, success, or side effects. If a tool failed, found nothing, or returned limited data, say that plainly.\n\n#{extra}"
+            "[system] Ground yourself strictly in the tool outputs above. Do not invent files, results, success, or side effects. If a tool failed, found nothing, or returned limited data, say that plainly.\n\n#{extra}"
         )
     }
   end
@@ -1130,7 +1146,7 @@ defmodule Pincer.Core.Executor do
       summary: ToolRuntime.sanitize_summary(name, content)
     })
 
-    %{"role" => "tool", "tool_call_id" => call_id, "name" => name, "content" => content}
+    %{"role" => "tool", "tool_call_id" => call_id, "content" => content}
   end
 
   defp execute_tool_via_registry(_invalid_call, _session_pid, _session_id, _registry) do
@@ -1321,16 +1337,155 @@ defmodule Pincer.Core.Executor do
         args
 
       {:error, reason} ->
+        salvaged = salvage_tool_arguments(json)
+
         Logger.warning(
-          "[EXECUTOR] Malformed tool arguments JSON (falling back to empty args): #{inspect(reason)} — raw: #{inspect(json)}"
+          "[EXECUTOR] Malformed tool arguments JSON#{if(salvaged == %{}, do: " (falling back to empty args)", else: " (salvaged partial args)")}: #{inspect(reason)} — raw: #{inspect(json)}"
         )
 
-        %{}
+        salvaged
     end
   end
 
   defp parse_tool_arguments(args) when is_map(args), do: args
   defp parse_tool_arguments(_), do: %{}
+
+  defp salvage_tool_arguments(json) when is_binary(json) do
+    trimmed = String.trim(json)
+
+    if String.starts_with?(trimmed, "{") do
+      case parse_loose_json_object(trimmed) do
+        {:ok, args} when map_size(args) > 0 -> args
+        _ -> %{}
+      end
+    else
+      %{}
+    end
+  end
+
+  defp parse_loose_json_object("{" <> rest), do: parse_loose_json_members(rest, %{})
+  defp parse_loose_json_object(_), do: :error
+
+  defp parse_loose_json_members(binary, acc) do
+    binary = String.trim_leading(binary)
+
+    cond do
+      binary == "" ->
+        {:ok, acc}
+
+      String.starts_with?(binary, "}") ->
+        {:ok, acc}
+
+      true ->
+        with {:ok, key, after_key} <- parse_loose_json_string(binary),
+             after_key <- String.trim_leading(after_key),
+             true <- String.starts_with?(after_key, ":"),
+             {:ok, value, after_value} <-
+               parse_loose_json_value(String.trim_leading(String.slice(after_key, 1..-1//1))),
+             {:ok, next} <- parse_loose_json_separator(after_value) do
+          parse_loose_json_members(next, Map.put(acc, key, value))
+        else
+          _ -> if(map_size(acc) > 0, do: {:ok, acc}, else: :error)
+        end
+    end
+  end
+
+  defp parse_loose_json_separator(binary) do
+    binary = String.trim_leading(binary)
+
+    cond do
+      binary == "" -> {:ok, ""}
+      String.starts_with?(binary, ",") -> {:ok, String.slice(binary, 1..-1//1)}
+      String.starts_with?(binary, "}") -> {:ok, ""}
+      true -> :error
+    end
+  end
+
+  defp parse_loose_json_value("\"" <> _ = binary), do: parse_loose_json_string(binary)
+
+  defp parse_loose_json_value(binary) do
+    literal =
+      binary
+      |> String.split(~r/\s*(?:,|})/, parts: 2, trim: false)
+      |> List.first()
+      |> to_string()
+      |> String.trim()
+
+    cond do
+      literal == "" ->
+        :error
+
+      literal == "true" ->
+        {:ok, true, String.slice(binary, byte_size(literal)..-1//1)}
+
+      literal == "false" ->
+        {:ok, false, String.slice(binary, byte_size(literal)..-1//1)}
+
+      literal == "null" ->
+        {:ok, nil, String.slice(binary, byte_size(literal)..-1//1)}
+
+      Regex.match?(~r/^-?\d+$/, literal) ->
+        {:ok, String.to_integer(literal), String.slice(binary, byte_size(literal)..-1//1)}
+
+      Regex.match?(~r/^-?\d+\.\d+$/, literal) ->
+        {:ok, String.to_float(literal), String.slice(binary, byte_size(literal)..-1//1)}
+
+      true ->
+        :error
+    end
+  end
+
+  defp parse_loose_json_string("\"" <> rest), do: parse_loose_json_string_chars(rest, [], false)
+  defp parse_loose_json_string(_), do: :error
+
+  defp parse_loose_json_string_chars(<<>>, acc, _escaped?),
+    do: {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary(), ""}
+
+  defp parse_loose_json_string_chars(<<"\"", rest::binary>>, acc, false),
+    do: {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary(), rest}
+
+  defp parse_loose_json_string_chars(<<"\\", rest::binary>>, acc, false),
+    do: parse_loose_json_string_escape(rest, acc)
+
+  defp parse_loose_json_string_chars(<<char::utf8, rest::binary>>, acc, _escaped?),
+    do: parse_loose_json_string_chars(rest, [<<char::utf8>> | acc], false)
+
+  defp parse_loose_json_string_escape(<<>>, acc),
+    do: {:ok, acc |> Enum.reverse() |> IO.iodata_to_binary(), ""}
+
+  defp parse_loose_json_string_escape(<<"\"", rest::binary>>, acc),
+    do: parse_loose_json_string_chars(rest, ["\"" | acc], false)
+
+  defp parse_loose_json_string_escape(<<"\\", rest::binary>>, acc),
+    do: parse_loose_json_string_chars(rest, ["\\" | acc], false)
+
+  defp parse_loose_json_string_escape(<<"/", rest::binary>>, acc),
+    do: parse_loose_json_string_chars(rest, ["/" | acc], false)
+
+  defp parse_loose_json_string_escape(<<"b", rest::binary>>, acc),
+    do: parse_loose_json_string_chars(rest, ["\b" | acc], false)
+
+  defp parse_loose_json_string_escape(<<"f", rest::binary>>, acc),
+    do: parse_loose_json_string_chars(rest, ["\f" | acc], false)
+
+  defp parse_loose_json_string_escape(<<"n", rest::binary>>, acc),
+    do: parse_loose_json_string_chars(rest, ["\n" | acc], false)
+
+  defp parse_loose_json_string_escape(<<"r", rest::binary>>, acc),
+    do: parse_loose_json_string_chars(rest, ["\r" | acc], false)
+
+  defp parse_loose_json_string_escape(<<"t", rest::binary>>, acc),
+    do: parse_loose_json_string_chars(rest, ["\t" | acc], false)
+
+  defp parse_loose_json_string_escape(<<"u", hex::binary-size(4), rest::binary>>, acc) do
+    case Integer.parse(hex, 16) do
+      {codepoint, ""} -> parse_loose_json_string_chars(rest, [<<codepoint::utf8>> | acc], false)
+      _ -> parse_loose_json_string_chars(rest, ["u", hex | acc], false)
+    end
+  end
+
+  defp parse_loose_json_string_escape(<<char::utf8, rest::binary>>, acc),
+    do: parse_loose_json_string_chars(rest, [<<char::utf8>> | acc], false)
 
   defp ensure_tool_call_type(call) do
     call |> Map.put_new("type", "function")
@@ -1464,13 +1619,28 @@ defmodule Pincer.Core.Executor do
 
   defp truncate_desc(val, max), do: val |> to_string() |> truncate_desc(max)
 
-  defp get_active_provider(%{provider: provider}), do: provider
+  defp get_active_provider(%{provider: provider}) when is_binary(provider), do: provider
+  defp get_active_provider(%{"provider" => provider}) when is_binary(provider), do: provider
 
   defp get_active_provider(nil) do
     Application.get_env(:pincer, :default_llm_provider) ||
       Pincer.Infra.Config.get(:llm)["provider"] ||
       "openrouter"
   end
+
+  defp get_active_provider(_model_override) do
+    Application.get_env(:pincer, :default_llm_provider) ||
+      Pincer.Infra.Config.get(:llm)["provider"] ||
+      "openrouter"
+  end
+
+  defp model_override_field(nil, _key), do: nil
+
+  defp model_override_field(model_override, key) when is_map(model_override) do
+    Map.get(model_override, key) || Map.get(model_override, Atom.to_string(key))
+  end
+
+  defp model_override_field(_model_override, _key), do: nil
 
   defp clean_tools_spec(tools) when is_list(tools) do
     Enum.map(tools, &clean_tool_map/1)

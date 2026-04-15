@@ -170,7 +170,8 @@ defmodule Pincer.Core.ProjectRouter do
         # Resolve active model/provider
         {active_provider, active_model} =
           if state.model_override do
-            {state.model_override.provider, state.model_override.model}
+            {state.model_override["provider"] || state.model_override[:provider],
+             state.model_override["model"] || state.model_override[:model]}
           else
             llm_config = Application.get_env(:pincer, :llm, %{})
 

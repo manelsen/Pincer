@@ -7,6 +7,11 @@ defmodule Pincer.Channels.Telegram.API do
   @callback get_file(file_id :: String.t()) :: {:ok, map()} | {:error, any()}
   @callback send_message(chat_id :: integer() | String.t(), text :: String.t(), opts :: keyword()) ::
               {:ok, any()} | {:error, any()}
+  @callback send_document(
+              chat_id :: integer() | String.t(),
+              document :: Telegex.Type.InputFile.t() | String.t(),
+              opts :: keyword()
+            ) :: {:ok, any()} | {:error, any()}
   @callback edit_message_text(
               chat_id :: integer() | String.t(),
               message_id :: integer(),
@@ -34,6 +39,10 @@ defmodule Pincer.Channels.Telegram.API.Adapter do
 
   @impl true
   def send_message(chat_id, text, opts), do: Telegex.send_message(chat_id, text, opts)
+
+  @impl true
+  def send_document(chat_id, document, opts),
+    do: Telegex.send_document(chat_id, document, opts)
 
   @impl true
   def edit_message_text(chat_id, message_id, text, opts) do

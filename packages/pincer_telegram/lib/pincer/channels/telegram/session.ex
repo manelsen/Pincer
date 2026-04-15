@@ -194,6 +194,22 @@ defmodule Pincer.Channels.Telegram.Session do
   end
 
   @impl true
+  def on_agent_file(path, opts, state) do
+    caption_opts = if is_binary(opts[:caption]), do: [caption: opts[:caption]], else: []
+
+    case Pincer.Channels.Telegram.send_document(state.chat_id, path, caption_opts) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("[Telegram] Failed to send document: #{inspect(reason)}")
+        Pincer.Channels.Telegram.send_message(state.chat_id, "⚠️ Failed to send file: #{Path.basename(path)}")
+    end
+
+    state
+  end
+
+  @impl true
   def on_approval_ui(_call_id, command, state) do
     text = ChannelEventPolicy.approval_message(:telegram, command)
 

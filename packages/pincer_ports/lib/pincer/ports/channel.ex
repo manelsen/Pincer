@@ -53,6 +53,7 @@ defmodule Pincer.Ports.Channel do
   | `on_agent_thinking/2` | LLM reasoning phase |
   | `on_subagent_progress/2` | Sub-agent progress event |
   | `on_approval_ui/3` | Tool approval request |
+  | `on_agent_file/3` | Agent wants to send a file to the user |
 
   All callbacks are optional — the default implementation is a no-op that
   returns the state unchanged.
@@ -144,6 +145,13 @@ defmodule Pincer.Ports.Channel do
   @callback on_approval_ui(call_id :: any(), command :: String.t(), state :: map()) :: map()
 
   @doc """
+  Called when the agent wants to send a file to the user. Return the updated state.
+  `path` is the absolute path to the file on disk.
+  `opts` is a map that may contain `:caption`.
+  """
+  @callback on_agent_file(path :: String.t(), opts :: map(), state :: map()) :: map()
+
+  @doc """
   Returns additional child specs to start alongside this channel.
 
   Used when a channel is a `GenServer` (not a `Supervisor`) and needs sibling
@@ -171,6 +179,7 @@ defmodule Pincer.Ports.Channel do
                       on_agent_thinking: 2,
                       on_subagent_progress: 2,
                       on_approval_ui: 3,
+                      on_agent_file: 3,
                       extra_child_specs: 0
 
   # ---------------------------------------------------------------------------
@@ -245,6 +254,10 @@ defmodule Pincer.Ports.Channel do
         do: {:noreply, on_approval_ui(call_id, command, state)}
 
       @impl GenServer
+      def handle_info({:agent_file, path, opts}, state),
+        do: {:noreply, on_agent_file(path, opts, state)}
+
+      @impl GenServer
       def handle_info(_other, state), do: {:noreply, state}
 
       # --- Default no-op callback implementations ---
@@ -256,6 +269,7 @@ defmodule Pincer.Ports.Channel do
       def on_agent_thinking(_text, state), do: state
       def on_subagent_progress(_event, state), do: state
       def on_approval_ui(_call_id, _command, state), do: state
+      def on_agent_file(_path, _opts, state), do: state
 
       # --- Default routing helpers ---
 
@@ -287,7 +301,8 @@ defmodule Pincer.Ports.Channel do
                      on_agent_status: 2,
                      on_agent_thinking: 2,
                      on_subagent_progress: 2,
-                     on_approval_ui: 3
+                     on_approval_ui: 3,
+                     on_agent_file: 3
     end
   end
 end
