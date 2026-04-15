@@ -105,6 +105,33 @@ defmodule Pincer.Channels.Telegram.Renderer do
     "• " <> String.trim(render(children)) <> "\n"
   end
 
+  # Tables: reconstruct markdown pipe syntax and display in <pre>
+  defp render_node({"table", _attrs, sections, _meta}) do
+    rows = Enum.flat_map(sections, &extract_table_rows/1)
+
+    markdown =
+      rows
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {cells, idx} ->
+        row = "| " <> Enum.join(cells, " | ") <> " |"
+
+        if idx == 0 do
+          sep =
+            "| " <>
+              Enum.map_join(cells, " | ", fn c ->
+                String.duplicate("-", max(String.length(c), 3))
+              end) <> " |"
+
+          [row, sep]
+        else
+          [row]
+        end
+      end)
+      |> Enum.join("\n")
+
+    "\n<pre>" <> escape_html(markdown) <> "</pre>\n"
+  end
+
   # Fallback: Just render children or text
   defp render_node({_tag, _attrs, children, _m13}) when is_list(children) do
     render(children)
@@ -113,6 +140,25 @@ defmodule Pincer.Channels.Telegram.Renderer do
   defp render_node(_other), do: ""
 
   # --- Helpers ---
+
+  defp extract_table_rows({tag, _attrs, children, _meta}) when tag in ~w(thead tbody tfoot) do
+    Enum.flat_map(children, &extract_table_rows/1)
+  end
+
+  defp extract_table_rows({"tr", _attrs, children, _meta}) do
+    cells =
+      Enum.map(children, fn
+        {tag, _a, cell_children, _m} when tag in ~w(td th) ->
+          cell_children |> Enum.map(&render_node/1) |> Enum.join("") |> String.trim()
+
+        other ->
+          render([other]) |> String.trim()
+      end)
+
+    [cells]
+  end
+
+  defp extract_table_rows(_), do: []
 
   defp render_list(items, type) do
     items

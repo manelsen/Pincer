@@ -54,6 +54,12 @@ defmodule Pincer.Core.Session.Server do
     # 3. Initial state
     prefs = Pincer.Core.Session.Preferences.load(workspace_path)
 
+    if prefs.model_override do
+      Logger.info(
+        "[SESSION] #{session_id} loaded model preference: #{prefs.model_override["provider"] || prefs.model_override[:provider]}:#{prefs.model_override["model"] || prefs.model_override[:model]}"
+      )
+    end
+
     state = %{
       mode: :normal,
       session_id: session_id,
@@ -273,6 +279,12 @@ defmodule Pincer.Core.Session.Server do
 
   @impl true
   def handle_info({:agent_response, _content}, state) do
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info({:agent_file, _path, _opts}, state) do
+    # Ignore self-broadcast — channel sessions handle file delivery
     {:noreply, state}
   end
 
@@ -656,8 +668,11 @@ defmodule Pincer.Core.Session.Server do
       workspace_path: state.workspace_path
     )
 
+    # Download any workspace file refs (non-multimodal documents sent by the user)
+    {input, file_notes} = resolve_workspace_file_refs(input, state.workspace_path)
+
     # Map to LLM history format
-    user_msg = map_input_to_history(input)
+    user_msg = map_input_to_history(input, file_notes)
     new_history = state.history ++ [user_msg]
 
     model_override_with_thinking =
@@ -694,19 +709,87 @@ defmodule Pincer.Core.Session.Server do
      }}
   end
 
-  defp map_input_to_history(%IncomingMessage{text: text, attachments: []}),
-    do: %{"role" => "user", "content" => text}
+  defp map_input_to_history(%IncomingMessage{text: text, attachments: []}, file_notes) do
+    full_text = prepend_file_notes(text, file_notes)
+    %{"role" => "user", "content" => full_text}
+  end
 
-  defp map_input_to_history(%IncomingMessage{text: text, attachments: atts}) do
+  defp map_input_to_history(%IncomingMessage{text: text, attachments: atts}, file_notes) do
+    full_text = prepend_file_notes(text, file_notes)
+
     content =
-      [%{"type" => "text", "text" => text}] ++
+      [%{"type" => "text", "text" => full_text}] ++
         Enum.map(atts, fn a -> %{"type" => "attachment", "attachment" => a} end)
 
     %{"role" => "user", "content" => content}
   end
 
-  defp map_input_to_history(input) when is_binary(input),
+  defp map_input_to_history(input, _file_notes) when is_binary(input),
     do: %{"role" => "user", "content" => input}
+
+  defp prepend_file_notes(text, []), do: text
+
+  defp prepend_file_notes(text, notes) do
+    note_block = Enum.map_join(notes, "\n", fn n -> "[File received] #{n}" end)
+    if text == "" or text == nil, do: note_block, else: "#{note_block}\n#{text}"
+  end
+
+  defp resolve_workspace_file_refs(%IncomingMessage{attachments: []} = input, _workspace_path),
+    do: {input, []}
+
+  defp resolve_workspace_file_refs(%IncomingMessage{attachments: atts} = input, workspace_path) do
+    {remaining_atts, notes} =
+      Enum.reduce(atts, {[], []}, fn att, {kept, downloaded} ->
+        if att["type"] == "workspace_file_ref" do
+          filename = att["filename"] || "file"
+          url = att["url"]
+
+          case download_workspace_file(url, filename, workspace_path) do
+            {:ok, rel_path} ->
+              {kept, downloaded ++ ["#{filename} saved to workspace at `#{rel_path}`"]}
+
+            {:error, reason} ->
+              Logger.warning(
+                "[Session] Failed to download workspace file '#{filename}': #{inspect(reason)}"
+              )
+
+              {kept, downloaded ++ ["#{filename} (download failed: #{inspect(reason)})"]}
+          end
+        else
+          {kept ++ [att], downloaded}
+        end
+      end)
+
+    updated_input = %{input | attachments: remaining_atts}
+    {updated_input, notes}
+  end
+
+  defp resolve_workspace_file_refs(input, _workspace_path), do: {input, []}
+
+  defp download_workspace_file("telegram://file/" <> file_path, filename, workspace_path) do
+    token = Application.get_env(:telegex, :token, "")
+    url = "https://api.telegram.org/file/bot#{token}/#{file_path}"
+    incoming_dir = Path.join(workspace_path, "incoming")
+    :ok = File.mkdir_p(incoming_dir)
+    dest_path = Path.join(incoming_dir, filename)
+
+    case Req.get(url, receive_timeout: 300_000) do
+      {:ok, %{status: 200, body: body}} when is_binary(body) ->
+        case File.write(dest_path, body) do
+          :ok -> {:ok, Path.relative_to(dest_path, workspace_path)}
+          {:error, reason} -> {:error, reason}
+        end
+
+      {:ok, %{status: status}} ->
+        {:error, {:http_error, status}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp download_workspace_file(_url, _filename, _workspace_path),
+    do: {:error, :unsupported_url}
 
   defp auto_approve_active?(%{auto_approve_until: nil}), do: false
 
@@ -740,14 +823,29 @@ defmodule Pincer.Core.Session.Server do
   end
 
   defp save_preferences(state) do
-    if workspace = state.workspace_path do
-      Pincer.Core.Session.Preferences.save(workspace, %{
-        model_override: state.model_override,
-        thinking_level: state.thinking_level,
-        reasoning_visible: state.reasoning_visible,
-        usage_display: state.usage_display,
-        token_usage_total: state.token_usage_total
-      })
+    case state.workspace_path do
+      nil ->
+        Logger.warning("[SESSION] #{state.session_id} save_preferences skipped: workspace_path is nil")
+
+      workspace ->
+        result =
+          Pincer.Core.Session.Preferences.save(workspace, %{
+            model_override: state.model_override,
+            thinking_level: state.thinking_level,
+            reasoning_visible: state.reasoning_visible,
+            usage_display: state.usage_display,
+            token_usage_total: state.token_usage_total
+          })
+
+        case result do
+          :ok ->
+            :ok
+
+          {:error, reason} ->
+            Logger.error(
+              "[SESSION] #{state.session_id} save_preferences failed (workspace=#{workspace}): #{inspect(reason)}"
+            )
+        end
     end
   end
 

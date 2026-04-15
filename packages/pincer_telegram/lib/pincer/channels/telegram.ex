@@ -263,6 +263,25 @@ defmodule Pincer.Channels.Telegram do
     end
   end
 
+  @doc """
+  Sends a local file as a document to a Telegram chat.
+  """
+  def send_document(chat_id, file_path, opts \\ []) do
+    caption_opts =
+      case Keyword.get(opts, :caption) do
+        caption when is_binary(caption) and caption != "" ->
+          [caption: caption]
+
+        _ ->
+          []
+      end
+
+    case api_client().send_document(chat_id, file_path, caption_opts) do
+      {:ok, _} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   defp do_send_message(chat_id, text, opts) do
     case Pincer.Channels.Telegram.api_client().send_message(chat_id, text, opts) do
       {:ok, %{message_id: mid}} ->
@@ -1135,8 +1154,21 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
             {text, refs_acc}
 
           not multimodal_extension?(ext, mime) ->
-            text = append_text_meta(text_acc, filename, size, " (formato nao suportado)")
-            {text, refs_acc}
+            # Non-multimodal documents (zip, csv, json, etc.) — expose as workspace file ref
+            # for the session server to download into the workspace incoming/ directory.
+            case build_attachment_ref(document, filename, size, mime, api_client) do
+              {:ok, ref} ->
+                workspace_ref = Map.put(ref, "type", "workspace_file_ref")
+                {text_acc, refs_acc ++ [workspace_ref]}
+
+              {:error, reason} ->
+                Logger.warning(
+                  "[TELEGRAM] Failed to resolve non-multimodal document '#{filename}': #{inspect(reason)}"
+                )
+
+                text = append_text_meta(text_acc, filename, size, " (erro ao resolver arquivo)")
+                {text, refs_acc}
+            end
 
           true ->
             case build_attachment_ref(document, filename, size, mime, api_client) do

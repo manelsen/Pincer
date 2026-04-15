@@ -17,6 +17,9 @@ defmodule Pincer.Test.Stubs.Telegram do
   def send_message(_chat_id, _text, _opts), do: {:ok, %{message_id: 123}}
 
   @impl true
+  def send_document(_chat_id, _document, _opts), do: {:ok, %{message_id: 456}}
+
+  @impl true
   def edit_message_text(_chat_id, _msg_id, _text, _opts), do: {:ok, %{message_id: 123}}
 
   @impl true
