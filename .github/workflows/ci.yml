@@ -56,6 +56,8 @@ jobs:
 
       - name: Compile dependencies
         run: |
+          MIX_ENV=prod mix deps.compile pincer_ports pincer_shared --force
+          MIX_ENV=prod mix deps.compile
           mix deps.compile pincer_ports pincer_shared --force
           mix deps.compile
 
