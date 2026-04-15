@@ -58,6 +58,7 @@ jobs:
         run: |
           mix deps.compile pincer_ports pincer_shared --force
           mix deps.compile
+          MIX_ENV=prod mix deps.compile
 
       - name: Create and migrate database
         run: |
