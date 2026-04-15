@@ -103,10 +103,10 @@ defmodule Pincer.MixProject do
       {:pincer_opencode_zen, path: "packages/pincer_opencode_zen"},
       {:pincer_telegram, path: "packages/pincer_telegram"},
       {:pincer_webhook, path: "packages/pincer_webhook"},
-      {:pincer_whatsapp, path: "packages/pincer_whatsapp"},
-      {:pincer_line, path: "packages/pincer_line"},
-      {:pincer_feishu, path: "packages/pincer_feishu"},
-      {:pincer_dingtalk, path: "packages/pincer_dingtalk"},
+      {:pincer_whatsapp, path: "packages/pincer_whatsapp", only: [:dev, :test]},
+      {:pincer_line, path: "packages/pincer_line", only: [:dev, :test]},
+      {:pincer_feishu, path: "packages/pincer_feishu", only: [:dev, :test]},
+      {:pincer_dingtalk, path: "packages/pincer_dingtalk", only: [:dev, :test]},
       {:pincer_slack, path: "packages/pincer_slack"},
       {:pincer_discord, path: "packages/pincer_discord"},
 
@@ -130,7 +130,7 @@ defmodule Pincer.MixProject do
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_api, "~> 1.4"},
       {:opentelemetry_exporter, "~> 1.8"},
-      {:opentelemetry_phoenix, "~> 1.2"},
+      {:opentelemetry_phoenix, "~> 2.0"},
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.1"},
 
@@ -138,7 +138,6 @@ defmodule Pincer.MixProject do
       # Distributed clustering
       {:libcluster, "~> 3.3"},
       {:horde, "~> 0.8"},
-
       {:mox, "~> 1.0", only: :test},
       {:stream_data, "~> 1.1", only: [:test, :dev]},
       {:benchee, "~> 1.3", only: :bench},
