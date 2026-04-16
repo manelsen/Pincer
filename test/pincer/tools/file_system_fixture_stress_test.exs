@@ -42,7 +42,9 @@ defmodule Pincer.Adapters.Tools.FileSystemFixtureStressTest do
                context
              )
 
-    assert search_output =~ "docs/runbook.md:5"
+    search_decoded = Jason.decode!(search_output)
+    paths_lines = Enum.map(search_decoded["matches"], &{&1["path"], &1["line"]})
+    assert {"docs/runbook.md", 5} in paths_lines
 
     assert {:ok, stat_output} =
              FileSystem.execute(
@@ -50,8 +52,7 @@ defmodule Pincer.Adapters.Tools.FileSystemFixtureStressTest do
                context
              )
 
-    assert stat_output =~ "path: config/runtime.exs"
-    assert stat_output =~ "type: regular"
+    assert %{"path" => "config/runtime.exs", "type" => "regular"} = Jason.decode!(stat_output)
 
     assert {:ok, read_output} =
              FileSystem.execute(

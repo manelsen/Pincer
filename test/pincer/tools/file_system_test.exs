@@ -91,9 +91,11 @@ defmodule Pincer.Adapters.Tools.FileSystemTest do
                context
              )
 
-    assert result =~ "Found 2 matches"
-    assert result =~ "lib/app.txt:2"
-    assert result =~ "lib/nested/runbook.txt:2"
+    decoded = Jason.decode!(result)
+    assert decoded["total"] == 2
+    paths_lines = Enum.map(decoded["matches"], &{&1["path"], &1["line"]})
+    assert {"lib/app.txt", 2} in paths_lines
+    assert {"lib/nested/runbook.txt", 2} in paths_lines
   end
 
   test "patch replaces a unique occurrence and writes the file back", %{
@@ -321,9 +323,12 @@ defmodule Pincer.Adapters.Tools.FileSystemTest do
                context
              )
 
-    assert output =~ "path: meta/info.txt"
-    assert output =~ "type: regular"
-    assert output =~ "size: 5"
+    assert %{
+             "action" => "stat",
+             "path" => "meta/info.txt",
+             "type" => "regular",
+             "size" => 5
+           } = Jason.decode!(output)
   end
 
   test "read can return a specific line range", %{root: root, context: context} do
@@ -361,8 +366,10 @@ defmodule Pincer.Adapters.Tools.FileSystemTest do
                context
              )
 
-    assert output =~ "docs/guide.md:1"
-    refute output =~ "docs/guide.txt:1"
+    decoded = Jason.decode!(output)
+    paths = Enum.map(decoded["matches"], & &1["path"])
+    assert "docs/guide.md" in paths
+    refute "docs/guide.txt" in paths
   end
 
   test "list can traverse directories recursively", %{context: context} do
