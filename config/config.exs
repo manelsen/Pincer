@@ -92,4 +92,33 @@ config :nostrum,
   token: System.get_env("DISCORD_BOT_TOKEN") || "DISCORD_TOKEN_REQUIRED_FOR_CHANNEL",
   gateway_intents: [:guild_messages, :message_content, :direct_messages]
 
+# ---------------------------------------------------------------------------
+# Runtime tunables — override in config/runtime.exs or env-specific files
+# ---------------------------------------------------------------------------
+
+# Executor
+config :pincer, :approval_timeout_ms, 600_000
+config :pincer, :max_recursion_depth, 100
+config :pincer, :tool_result_max_chars, 32_000
+config :pincer, :max_inline_bytes, 6_291_456
+
+# File system tool
+config :pincer, :fs_max_file_size, 52_428_800
+config :pincer, :fs_max_search_results, 100
+config :pincer, :fs_snippet_limit, 160
+
+# Session
+config :pincer, :max_history_messages, 100
+
+# LLM retry policy
+config :pincer, :llm_retry,
+  max_retries: 5,
+  initial_backoff: 2000,
+  max_backoff: 30_000,
+  max_elapsed_ms: 120_000
+
+# Circuit breaker
+config :pincer, :circuit_breaker_threshold, 5
+config :pincer, :circuit_breaker_recovery_ms, 30_000
+
 import_config "#{config_env()}.exs"
