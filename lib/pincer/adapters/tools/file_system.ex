@@ -695,7 +695,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   defp normalize_max_results(value) when is_integer(value),
     do: value |> min(@max_search_results) |> max(1)
 
-  defp normalize_max_results(_value), do: 20
+  defp normalize_max_results(_value), do: 200
 
   defp normalize_search_opts(args) do
     extension =
