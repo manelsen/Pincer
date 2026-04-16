@@ -1,5 +1,9 @@
 defmodule Pincer.Channels.WhatsAppTest do
   use ExUnit.Case, async: false
+
+  # pincer_whatsapp is compiled only when PINCER_WHATSAPP=1 (see mix.exs).
+  # When absent, skip this module entirely so the umbrella test suite compiles.
+  if Code.ensure_loaded?(Pincer.Channels.WhatsApp) do
   import ExUnit.CaptureLog
 
   alias Pincer.Channels.WhatsApp
@@ -300,5 +304,6 @@ defmodule Pincer.Channels.WhatsAppTest do
       "is_group" => false,
       "text" => text
     }
+  end
   end
 end

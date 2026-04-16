@@ -1,6 +1,8 @@
 defmodule Pincer.Channels.WhatsAppSessionTest do
   use ExUnit.Case, async: false
 
+  # pincer_whatsapp is compiled only when PINCER_WHATSAPP=1 (see mix.exs).
+  if Code.ensure_loaded?(Pincer.Channels.WhatsApp) do
   alias Pincer.Channels.WhatsApp
   alias Pincer.Channels.WhatsApp.Session
   alias Pincer.Core.ProjectOrchestrator
@@ -150,5 +152,6 @@ defmodule Pincer.Channels.WhatsAppSessionTest do
           :ok
         end
     end
+  end
   end
 end
