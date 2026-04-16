@@ -182,7 +182,7 @@ defmodule Pincer.Core.CircuitBreaker do
       Application.get_env(:pincer, :circuit_breaker_recovery_ms, @default_recovery_timeout)
 
     try do
-      snapshots = Repo.all(from s in CircuitBreakerSnapshot, where: s.state != "closed")
+      snapshots = Repo.all(from(s in CircuitBreakerSnapshot, where: s.state != "closed"))
 
       Enum.each(snapshots, fn snap ->
         elapsed_since_open =
@@ -226,7 +226,8 @@ defmodule Pincer.Core.CircuitBreaker do
       %CircuitBreakerSnapshot{}
       |> CircuitBreakerSnapshot.changeset(attrs)
       |> Repo.insert(
-        on_conflict: {:replace, [:state, :failure_count, :last_failure_at, :opened_at, :updated_at]},
+        on_conflict:
+          {:replace, [:state, :failure_count, :last_failure_at, :opened_at, :updated_at]},
         conflict_target: :name
       )
     rescue
@@ -236,7 +237,7 @@ defmodule Pincer.Core.CircuitBreaker do
 
   defp delete_snapshot(name) do
     try do
-      Repo.delete_all(from s in CircuitBreakerSnapshot, where: s.name == ^name)
+      Repo.delete_all(from(s in CircuitBreakerSnapshot, where: s.name == ^name))
     rescue
       e -> Logger.warning("CircuitBreaker: could not delete snapshot for #{name}: #{inspect(e)}")
     end

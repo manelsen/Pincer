@@ -28,6 +28,7 @@ defmodule Pincer.Core.PropertyTest do
     property "always returns a member of all()" do
       check all(input <- safe_term()) do
         result = MemoryTypes.normalize(input)
+
         assert result in MemoryTypes.all(),
                "normalize(#{inspect(input)}) = #{inspect(result)} not in all()"
       end
@@ -71,6 +72,7 @@ defmodule Pincer.Core.PropertyTest do
     property "valid? is true iff normalize returns the same value as input" do
       check all(type <- string(:alphanumeric, min_length: 1)) do
         normalized = MemoryTypes.normalize(type)
+
         if type in MemoryTypes.all() do
           assert MemoryTypes.valid?(type) == true
         else
@@ -116,6 +118,7 @@ defmodule Pincer.Core.PropertyTest do
     property "retryable? and fail_fast? are mutually exclusive for HTTP errors" do
       check all(status <- integer(400..599)) do
         reason = {:http_error, status, "msg"}
+
         refute RetryPolicy.retryable?(reason) and RetryPolicy.fail_fast?(reason),
                "status #{status} is both retryable and fail_fast"
       end
@@ -137,8 +140,10 @@ defmodule Pincer.Core.PropertyTest do
     end
 
     property "parse_retry_after returns nil for non-numeric, non-date binary strings" do
-      check all(s <- string(:alphanumeric, min_length: 3),
-                !String.match?(s, ~r/^\d+$/)) do
+      check all(
+              s <- string(:alphanumeric, min_length: 3),
+              !String.match?(s, ~r/^\d+$/)
+            ) do
         result = RetryPolicy.parse_retry_after(s)
         # Result is either nil (unparseable) or a non-negative integer (if it's a valid HTTP date)
         assert is_nil(result) or (is_integer(result) and result >= 0)

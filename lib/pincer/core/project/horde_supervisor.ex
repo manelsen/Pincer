@@ -15,7 +15,8 @@ defmodule Pincer.Core.Project.HordeSupervisor do
   @impl true
   def init(opts) do
     Horde.DynamicSupervisor.init(
-      Keyword.merge([strategy: :one_for_one, distribution_strategy: Horde.UniformDistribution],
+      Keyword.merge(
+        [strategy: :one_for_one, distribution_strategy: Horde.UniformDistribution],
         opts
       )
     )

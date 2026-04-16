@@ -16,10 +16,10 @@ defmodule Pincer.Infra.CircuitBreakerSnapshot do
   @timestamps_opts [type: :utc_datetime_usec, inserted_at: false]
 
   schema "circuit_breaker_snapshots" do
-    field :state, :string, default: "closed"
-    field :failure_count, :integer, default: 0
-    field :last_failure_at, :utc_datetime_usec
-    field :opened_at, :utc_datetime_usec
+    field(:state, :string, default: "closed")
+    field(:failure_count, :integer, default: 0)
+    field(:last_failure_at, :utc_datetime_usec)
+    field(:opened_at, :utc_datetime_usec)
 
     timestamps()
   end

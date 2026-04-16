@@ -18,7 +18,7 @@ defmodule Pincer.Core.CircuitBreakerTest do
 
     name = "test_provider_#{System.unique_integer()}"
     CircuitBreaker.reset(name)
-    Repo.delete_all(from s in CircuitBreakerSnapshot, where: s.name == ^name)
+    Repo.delete_all(from(s in CircuitBreakerSnapshot, where: s.name == ^name))
     {:ok, name: name}
   end
 

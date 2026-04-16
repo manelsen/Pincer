@@ -93,7 +93,11 @@ defmodule Pincer.Core.MemoryPipelineTest do
     test "classifies technical fact signals" do
       {:ok, result} =
         MemoryPipeline.run(
-          %{session_id: "s", project_id: "p", content: "Deadlock occurs during concurrent writes"},
+          %{
+            session_id: "s",
+            project_id: "p",
+            content: "Deadlock occurs during concurrent writes"
+          },
           storage: StorageStub,
           embedding_fun: fn _ -> {:ok, [0.1]} end
         )

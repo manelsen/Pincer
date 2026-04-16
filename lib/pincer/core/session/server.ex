@@ -825,7 +825,9 @@ defmodule Pincer.Core.Session.Server do
   defp save_preferences(state) do
     case state.workspace_path do
       nil ->
-        Logger.warning("[SESSION] #{state.session_id} save_preferences skipped: workspace_path is nil")
+        Logger.warning(
+          "[SESSION] #{state.session_id} save_preferences skipped: workspace_path is nil"
+        )
 
       workspace ->
         result =

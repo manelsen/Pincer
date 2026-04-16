@@ -491,8 +491,8 @@ defmodule Pincer.Core.Session.ServerTest do
 
     send(
       pid,
-      {:executor_finished, large_history,
-       "ok", %{"prompt_tokens" => 10, "completion_tokens" => 5}}
+      {:executor_finished, large_history, "ok",
+       %{"prompt_tokens" => 10, "completion_tokens" => 5}}
     )
 
     Process.sleep(100)
