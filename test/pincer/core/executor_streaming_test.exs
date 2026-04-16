@@ -153,7 +153,7 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     @impl true
     def stream_completion(history, _opts) do
       if Enum.any?(history, &(&1["role"] == "tool")) do
-        assert List.last(history)["role"] == "system"
+        assert List.last(history)["role"] == "user"
         assert List.last(history)["content"] =~ "Ground yourself strictly"
         refute List.last(history)["content"] =~ "For Git inspection tools"
 
@@ -280,7 +280,7 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     @impl true
     def stream_completion(history, _opts) do
       if Enum.any?(history, &(&1["role"] == "tool")) do
-        assert List.last(history)["role"] == "system"
+        assert List.last(history)["role"] == "user"
         assert List.last(history)["content"] =~ "For Git inspection tools"
         {:ok, [%{"choices" => [%{"delta" => %{"content" => "Resumo do git"}}]}]}
       else
