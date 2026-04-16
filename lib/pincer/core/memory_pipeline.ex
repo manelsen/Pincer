@@ -54,14 +54,10 @@ defmodule Pincer.Core.MemoryPipeline do
      ~w(prefer prefers preferred always never dislike favorite favourite avoid want rather)},
     {"technical_fact",
      ~w(bug error timeout failure crash deadlock regression flaky intermittent broken)},
-    {"code",
-     ~w(function defmodule defp implements refactoring extract algorithm complexity)},
-    {"reference",
-     ~w(https http documentation readme wiki changelog changelog)},
-    {"decision",
-     ~w(agreed approved rejected choosing dropped switched delegated)},
-    {"action_item",
-     ~w(todo pending reminder investigate blocked follow-up verify backlog)},
+    {"code", ~w(function defmodule defp implements refactoring extract algorithm complexity)},
+    {"reference", ~w(https http documentation readme wiki changelog changelog)},
+    {"decision", ~w(agreed approved rejected choosing dropped switched delegated)},
+    {"action_item", ~w(todo pending reminder investigate blocked follow-up verify backlog)},
     {"session_summary", []}
   ]
 

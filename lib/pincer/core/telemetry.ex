@@ -96,18 +96,24 @@ defmodule Pincer.Core.Telemetry do
   @doc "Emits a conversation session start event."
   @spec emit_conversation_start(String.t(), map()) :: :ok
   def emit_conversation_start(session_id, metadata \\ %{}) when is_binary(session_id) do
-    :telemetry.execute(@conversation_start_event, %{count: 1},
+    :telemetry.execute(
+      @conversation_start_event,
+      %{count: 1},
       Map.merge(normalize_metadata(metadata), %{session_id: session_id})
     )
+
     :ok
   end
 
   @doc "Emits a conversation session stop event."
   @spec emit_conversation_stop(String.t(), map()) :: :ok
   def emit_conversation_stop(session_id, metadata \\ %{}) when is_binary(session_id) do
-    :telemetry.execute(@conversation_stop_event, %{count: 1},
+    :telemetry.execute(
+      @conversation_stop_event,
+      %{count: 1},
       Map.merge(normalize_metadata(metadata), %{session_id: session_id})
     )
+
     :ok
   end
 
@@ -115,9 +121,13 @@ defmodule Pincer.Core.Telemetry do
   @spec emit_conversation_turn_start(String.t(), map()) :: integer()
   def emit_conversation_turn_start(session_id, metadata \\ %{}) when is_binary(session_id) do
     start_ms = System.monotonic_time(:millisecond)
-    :telemetry.execute(@conversation_turn_start_event, %{count: 1},
+
+    :telemetry.execute(
+      @conversation_turn_start_event,
+      %{count: 1},
       Map.merge(normalize_metadata(metadata), %{session_id: session_id})
     )
+
     start_ms
   end
 
@@ -139,7 +149,9 @@ defmodule Pincer.Core.Telemetry do
       tool_calls: parse_non_negative(Map.get(meta, :tool_calls, 0))
     }
 
-    :telemetry.execute(@conversation_turn_stop_event, measurements,
+    :telemetry.execute(
+      @conversation_turn_stop_event,
+      measurements,
       Map.merge(meta, %{session_id: session_id})
     )
 
@@ -150,9 +162,13 @@ defmodule Pincer.Core.Telemetry do
   @spec emit_conversation_error(String.t(), term(), map()) :: :ok
   def emit_conversation_error(session_id, reason, metadata \\ %{}) when is_binary(session_id) do
     meta = normalize_metadata(metadata)
-    :telemetry.execute(@conversation_error_event, %{count: 1},
+
+    :telemetry.execute(
+      @conversation_error_event,
+      %{count: 1},
       Map.merge(meta, %{session_id: session_id, reason: inspect(reason)})
     )
+
     :ok
   end
 

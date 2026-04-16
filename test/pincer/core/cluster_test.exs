@@ -13,7 +13,8 @@ defmodule Pincer.Core.ClusterTest do
       original = Application.get_env(:pincer, :cluster_config)
 
       on_exit(fn ->
-        if original, do: Application.put_env(:pincer, :cluster_config, original),
+        if original,
+          do: Application.put_env(:pincer, :cluster_config, original),
           else: Application.delete_env(:pincer, :cluster_config)
       end)
 

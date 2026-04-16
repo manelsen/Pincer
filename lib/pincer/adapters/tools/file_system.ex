@@ -157,7 +157,11 @@ defmodule Pincer.Adapters.Tools.FileSystem do
             items: %{
               type: "object",
               properties: %{
-                anchor: %{type: "string", description: "Line reference token from hashline output, e.g. '49#WHHXK' (the part before the '|' separator). Do NOT add any prefix."},
+                anchor: %{
+                  type: "string",
+                  description:
+                    "Line reference token from hashline output, e.g. '49#WHHXK' (the part before the '|' separator). Do NOT add any prefix."
+                },
                 op: %{
                   type: "string",
                   enum: ["replace", "insert_after", "insert_before"]
