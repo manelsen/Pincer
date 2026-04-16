@@ -56,12 +56,10 @@ jobs:
 
       - name: Compile dependencies
         run: |
-          # 1. Compile all deps in test (fails at pincer_whatsapp cross-env check — expected)
-          mix deps.compile --force || true
-          # 2. Compile all deps in prod (refreshes jason/decimal prod manifests)
+          # Compile prod first so prod artifacts exist before test's cross-env check runs
           MIX_ENV=prod mix deps.compile --force
-          # 3. Compile pincer_whatsapp in test now that prod manifests are fresh
-          mix deps.compile pincer_whatsapp --force
+          # Then compile test (pincer_whatsapp cross-env check finds fresh prod artifacts)
+          mix deps.compile --force
 
       - name: Create and migrate database
         run: |
