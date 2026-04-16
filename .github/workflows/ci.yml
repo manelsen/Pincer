@@ -42,6 +42,7 @@ jobs:
           otp-version: "27.2"
 
       - name: Cache dependencies
+        id: cache-deps
         uses: actions/cache@v4
         with:
           path: |
@@ -51,15 +52,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-mix-otp27-elixir1.18-
 
+      - name: Clear stale build artifacts on cache miss
+        if: steps.cache-deps.outputs.cache-hit != 'true'
+        run: rm -rf _build
+
       - name: Install dependencies
         run: mix deps.get
 
       - name: Compile dependencies
         run: |
-          # Compile prod first so prod artifacts exist before test's cross-env check runs
-          MIX_ENV=prod mix deps.compile --force
-          # Then compile test (pincer_whatsapp cross-env check finds fresh prod artifacts)
-          mix deps.compile --force
+          # 1. Compile all test deps (fails at pincer_whatsapp cross-env check — expected)
+          mix deps.compile --force || true
+          # 2. Compile jason/decimal in prod AFTER test so prod manifests are newest
+          MIX_ENV=prod mix deps.compile jason decimal --force
+          # 3. Both envs have fresh manifests — pincer_whatsapp cross-env check passes
+          mix deps.compile pincer_whatsapp --force
 
       - name: Create and migrate database
         run: |
