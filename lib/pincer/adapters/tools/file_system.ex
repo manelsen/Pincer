@@ -303,20 +303,39 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp perform_action("list", path, args, workspace_root) do
+    rel = relative_to_workspace(path, workspace_root)
+
     if get_arg(args, "recursive") == true do
       case list_recursive(path, workspace_root) do
         {:ok, entries} ->
           {:ok,
-           "Files in '#{relative_to_workspace(path, workspace_root)}':\n" <>
-             Enum.join(entries, "\n")}
+           Jason.encode!(%{
+             action: "list",
+             path: rel,
+             recursive: true,
+             total: length(entries),
+             entries: entries
+           })}
 
         {:error, reason} ->
           {:error, reason}
       end
     else
       case File.ls(path) do
-        {:ok, files} -> {:ok, "Files in '#{path}':\n" <> Enum.join(files, "\n")}
-        {:error, reason} -> {:error, "Error listing: #{inspect(reason)}"}
+        {:ok, files} ->
+          sorted = Enum.sort(files)
+
+          {:ok,
+           Jason.encode!(%{
+             action: "list",
+             path: rel,
+             recursive: false,
+             total: length(sorted),
+             entries: sorted
+           })}
+
+        {:error, reason} ->
+          {:error, "Error listing: #{inspect(reason)}"}
       end
     end
   end
@@ -433,23 +452,19 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp perform_action("find", path, args, workspace_root) do
-    with {:ok, find_opts} <- normalize_find_opts(args),
-         {:ok, entries} <-
-           find_paths(
-             path,
-             workspace_root,
-             normalize_max_results(get_arg(args, "max_results")),
-             find_opts
-           ) do
-      case entries do
-        [] ->
-          {:ok, "No paths found in '#{relative_to_workspace(path, workspace_root)}'."}
+    limit = normalize_max_results(get_arg(args, "max_results"))
 
-        _ ->
-          {:ok,
-           "Found #{length(entries)} paths in '#{relative_to_workspace(path, workspace_root)}':\n" <>
-             Enum.join(entries, "\n")}
-      end
+    with {:ok, find_opts} <- normalize_find_opts(args),
+         {:ok, entries} <- find_paths(path, workspace_root, limit, find_opts) do
+      {:ok,
+       Jason.encode!(%{
+         action: "find",
+         path: relative_to_workspace(path, workspace_root),
+         total: length(entries),
+         truncated: length(entries) >= limit,
+         limit: limit,
+         entries: entries
+       })}
     end
   end
 
@@ -466,29 +481,25 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp perform_action("search", path, args, workspace_root) do
+    limit = normalize_max_results(get_arg(args, "max_results"))
+
     with {:ok, query} <- fetch_required_string(args, "query"),
          {:ok, search_opts} <- normalize_search_opts(args),
-         {:ok, matches} <-
-           search_path(
-             path,
-             workspace_root,
-             query,
-             normalize_max_results(get_arg(args, "max_results")),
-             search_opts
-           ) do
-      case matches do
-        [] ->
-          {:ok, "No matches found for '#{query}'."}
+         {:ok, matches} <- search_path(path, workspace_root, query, limit, search_opts) do
+      entries =
+        Enum.map(matches, fn %{path: rel_path, line: line, snippet: snippet} ->
+          %{path: rel_path, line: line, snippet: snippet}
+        end)
 
-        entries ->
-          rendered =
-            entries
-            |> Enum.map_join("\n", fn %{path: rel_path, line: line, snippet: snippet} ->
-              "- #{rel_path}:#{line} #{snippet}"
-            end)
-
-          {:ok, "Found #{length(entries)} matches for '#{query}':\n#{rendered}"}
-      end
+      {:ok,
+       Jason.encode!(%{
+         action: "search",
+         query: query,
+         total: length(entries),
+         truncated: length(entries) >= limit,
+         limit: limit,
+         matches: entries
+       })}
     end
   end
 
@@ -496,13 +507,13 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     case File.lstat(path) do
       {:ok, stat} ->
         {:ok,
-         [
-           "path: #{relative_to_workspace(path, workspace_root)}",
-           "type: #{stat.type}",
-           "size: #{stat.size}",
-           "mtime: #{format_mtime(stat.mtime)}"
-         ]
-         |> Enum.join("\n")}
+         Jason.encode!(%{
+           action: "stat",
+           path: relative_to_workspace(path, workspace_root),
+           type: stat.type,
+           size: stat.size,
+           mtime: format_mtime(stat.mtime)
+         })}
 
       {:error, reason} ->
         {:error, "File not found or inaccessible: #{inspect(reason)}"}
