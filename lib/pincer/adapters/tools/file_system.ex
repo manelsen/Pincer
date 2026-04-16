@@ -45,10 +45,10 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   # 50 MB file-read limit. The practical ceiling is the LLM context window
   # (~500 KB of useful text), but we allow up to 50 MB so the agent can
   # handle large logs, datasets, and dumps without hitting an artificial wall.
-  @max_file_size 52_428_800
-  @max_search_results 100
+  @max_file_size Application.compile_env(:pincer, :fs_max_file_size, 52_428_800)
+  @max_search_results Application.compile_env(:pincer, :fs_max_search_results, 100)
   @search_skip_dirs [".git", "_build", "deps", "node_modules"]
-  @snippet_limit 160
+  @snippet_limit Application.compile_env(:pincer, :fs_snippet_limit, 160)
   @hashline_dict "ZPMQVRWSNKTXJBYH" |> String.graphemes() |> List.to_tuple()
   @line_ref_regex ~r/^(\d+)#([A-Z]{5})$/
   # Determine workspace root at runtime

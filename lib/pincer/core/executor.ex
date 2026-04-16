@@ -20,12 +20,10 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.TurnOutcomePolicy
   alias Pincer.Utils.Text
 
-  @max_recursion_depth 100
+  @max_recursion_depth Application.compile_env(:pincer, :max_recursion_depth, 100)
   @approval_timeout_ms Application.compile_env(:pincer, :approval_timeout_ms, 600_000)
   @tool_result_max_chars Application.compile_env(:pincer, :tool_result_max_chars, 32_000)
-
-  # Maximum size for inline data (6MB default for Gemini/Google)
-  @max_inline_bytes 6_291_456
+  @max_inline_bytes Application.compile_env(:pincer, :max_inline_bytes, 6_291_456)
 
   @type executor_dependency :: %{
           llm_client: module(),
