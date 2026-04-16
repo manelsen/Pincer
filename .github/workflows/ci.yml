@@ -54,12 +54,11 @@ jobs:
       - name: Install dependencies
         run: mix deps.get
 
-      - name: Compile dependencies
-        run: |
-          MIX_ENV=prod mix deps.compile pincer_ports pincer_shared --force
-          MIX_ENV=prod mix deps.compile --force
-          mix deps.compile pincer_ports pincer_shared --force
-          mix deps.compile
+      - name: Compile dependencies (prod)
+        run: MIX_ENV=prod mix deps.compile --force
+
+      - name: Compile dependencies (test)
+        run: mix deps.compile --force
 
       - name: Create and migrate database
         run: |

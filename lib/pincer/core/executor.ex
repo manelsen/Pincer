@@ -489,7 +489,9 @@ defmodule Pincer.Core.Executor do
         if depth == 0 do
           prompt_history
         else
-          prepare_prompt_history(logical_history, model_override)
+          # Reduce context window aggressively on recovery — large tool results at
+          # depth > 0 are the most common cause of empty streaming responses.
+          prepare_prompt_history(logical_history, model_override, safe_limit_scale: 0.4)
         end
 
       retry_history = Policy.recover(:empty_response_history, %{history: base_history})
@@ -900,7 +902,7 @@ defmodule Pincer.Core.Executor do
                 execute_tool_via_registry(call, session_pid, session_id, deps.tool_registry)
               end,
               max_concurrency: 10,
-              timeout: 300_000
+              timeout: @approval_timeout_ms
             )
             |> Enum.map(fn
               {:ok, result} ->
