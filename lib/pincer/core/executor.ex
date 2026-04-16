@@ -1146,7 +1146,7 @@ defmodule Pincer.Core.Executor do
       summary: ToolRuntime.sanitize_summary(name, content)
     })
 
-    %{"role" => "tool", "tool_call_id" => call_id, "content" => content}
+    %{"role" => "tool", "tool_call_id" => call_id, "name" => name, "content" => content}
   end
 
   defp execute_tool_via_registry(_invalid_call, _session_pid, _session_id, _registry) do
