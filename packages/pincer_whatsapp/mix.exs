@@ -7,7 +7,7 @@ defmodule PincerWhatsApp.MixProject do
       version: "0.1.0",
       elixir: "~> 1.14",
       start_permanent: false,
-      compilers: [:whatsapp_bridge | Mix.compilers()],
+      compilers: Mix.compilers() ++ [:whatsapp_bridge],
       deps: [{:pincer_ports, "~> 0.1"}, {:jason, "~> 1.4"}],
       description: "WhatsApp Business API channel adapter for the Pincer AI agent framework",
       package: [

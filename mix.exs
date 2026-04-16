@@ -45,6 +45,15 @@ defmodule Pincer.MixProject do
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
+  # pincer_whatsapp ships a custom Mix compiler that shells out to `go build`.
+  # Its cross-env manifest check is incompatible with the default CI path, so
+  # we gate the dep on PINCER_WHATSAPP=1 and run it in a dedicated job.
+  defp whatsapp_envs do
+    if System.get_env("PINCER_WHATSAPP") == "1",
+      do: [:dev, :test, :prod],
+      else: [:dev, :prod]
+  end
+
   defp aliases do
     [
       qa: [
@@ -103,7 +112,7 @@ defmodule Pincer.MixProject do
       {:pincer_opencode_zen, path: "packages/pincer_opencode_zen"},
       {:pincer_telegram, path: "packages/pincer_telegram"},
       {:pincer_webhook, path: "packages/pincer_webhook"},
-      {:pincer_whatsapp, path: "packages/pincer_whatsapp"},
+      {:pincer_whatsapp, path: "packages/pincer_whatsapp", only: whatsapp_envs()},
       {:pincer_line, path: "packages/pincer_line"},
       {:pincer_feishu, path: "packages/pincer_feishu"},
       {:pincer_dingtalk, path: "packages/pincer_dingtalk"},

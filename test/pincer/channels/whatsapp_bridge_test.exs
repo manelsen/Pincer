@@ -1,6 +1,8 @@
 defmodule Pincer.Channels.WhatsAppBridgeTest do
   use ExUnit.Case, async: true
 
+  # pincer_whatsapp is compiled only when PINCER_WHATSAPP=1 (see mix.exs).
+  if Code.ensure_loaded?(Pincer.Channels.WhatsApp.Bridge.Adapter) do
   alias Pincer.Channels.WhatsApp.Bridge.Adapter
 
   describe "decode_events/2" do
@@ -43,5 +45,6 @@ defmodule Pincer.Channels.WhatsAppBridgeTest do
                {~c"WA_QR_ASCII_SMALL", ~c"true"}
              ]
     end
+  end
   end
 end
