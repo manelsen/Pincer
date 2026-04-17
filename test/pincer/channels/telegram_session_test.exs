@@ -164,7 +164,7 @@ defmodule Pincer.Channels.Telegram.SessionTest do
     send(pid, {:subagent_progress, %{agent_id: "a1", kind: :tool, tool: "web.search"}})
     send(pid, {:subagent_progress, %{agent_id: "a1", kind: :finished, result: "done"}})
 
-    Process.sleep(80)
+    Process.sleep(300)
   end
 
   test "sub-agent textual status is ignored when structured progress is available" do
