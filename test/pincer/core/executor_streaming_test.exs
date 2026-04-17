@@ -259,6 +259,58 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     end
   end
 
+  defmodule MockEmptyStreamRecoversViaChatLLM do
+    @behaviour Pincer.Ports.LLM
+
+    @impl true
+    def list_providers, do: []
+
+    @impl true
+    def list_models(_provider_id), do: []
+
+    @impl true
+    def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def provider_config(_provider_id), do: nil
+
+    @impl true
+    def chat_completion(history, _opts) do
+      if Enum.any?(history, &(&1["role"] == "tool")) do
+        {:ok, %{"role" => "assistant", "content" => "Resposta recuperada"}, nil}
+      else
+        {:error, :unexpected_chat_call}
+      end
+    end
+
+    @impl true
+    def stream_completion(history, _opts) do
+      if Enum.any?(history, &(&1["role"] == "tool")) do
+        {:ok, [%{"choices" => [%{"delta" => %{}}]}]}
+      else
+        {:ok,
+         [
+           %{
+             "choices" => [
+               %{
+                 "delta" => %{
+                   "tool_calls" => [
+                     %{
+                       "index" => 0,
+                       "id" => "call_1",
+                       "function" => %{"name" => "my_tool", "arguments" => "{\"arg\": \"val\"}"}
+                     }
+                   ]
+                 }
+               }
+             ]
+           },
+           %{"choices" => [%{"delta" => %{}}]}
+         ]}
+      end
+    end
+  end
+
   defmodule MockGitToolGroundingLLM do
     @behaviour Pincer.Ports.LLM
 
@@ -600,6 +652,21 @@ defmodule Pincer.Core.ExecutorStreamingTest do
                    2_000
 
     refute_receive {:agent_stream_token, "segredo interno"}, 200
+  end
+
+  test "executor recovers via chat_completion when post-tool stream is empty" do
+    history = [%{"role" => "user", "content" => "Run tool"}]
+
+    Executor.run(self(), "test_empty_stream_recovered_session", history,
+      llm_client: MockEmptyStreamRecoversViaChatLLM,
+      tool_registry: ToolRegistryStub
+    )
+
+    assert_receive {:sme_tool_use, payload}, 2_000
+    assert payload == "my_tool" or payload == ["my_tool: val"]
+    assert_receive {:executor_finished, _history, response, _usage}, 2_000
+    assert response == "Resposta recuperada"
+    refute response =~ "Nao consegui fechar uma resposta final"
   end
 
   test "executor synthesizes tool-only response when post-tool turn is fully empty" do
