@@ -44,6 +44,34 @@ defmodule Pincer.Core.ExecutorHexTest do
       assert_receive {:executor_finished, _new_history, "Hello from Mock LLM", _usage}, 5000
     end
 
+    test "accepts model_override maps with string keys" do
+      session_pid = self()
+      session_id = "hex_test_string_override_session"
+      history = [%{"role" => "user", "content" => "Hello"}]
+
+      Pincer.MockToolRegistry
+      |> expect(:list_tools, fn ->
+        []
+      end)
+
+      Pincer.MockLLMClient
+      |> expect(:stream_completion, fn _history, opts ->
+        assert Keyword.get(opts, :provider) == "z_ai_coding"
+        assert Keyword.get(opts, :model) == "glm-5.1"
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "Hello from string override"}}]}]}
+      end)
+
+      {:ok, _pid} =
+        Pincer.Core.Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MockToolRegistry,
+          llm_client: Pincer.MockLLMClient,
+          model_override: %{"provider" => "z_ai_coding", "model" => "glm-5.1"}
+        )
+
+      assert_receive {:executor_finished, _new_history, "Hello from string override", _usage},
+                     5000
+    end
+
     test "executes tools via registry" do
       session_pid = self()
       session_id = "tool_exec_session"
@@ -102,6 +130,105 @@ defmodule Pincer.Core.ExecutorHexTest do
 
       assert_receive {:sme_tool_use, payload}, 5000
       assert payload == "my_tool" or payload == ["my_tool: val"]
+      assert_receive {:executor_finished, _, "Done", _usage}, 5000
+    end
+
+    test "salvages malformed file_system tool arguments instead of dropping them" do
+      session_pid = self()
+      session_id = "tool_exec_malformed_file_system_args"
+      history = [%{"role" => "user", "content" => "Write the file"}]
+
+      malformed_args =
+        ~s({"action":"write","path":"notes/todo.txt","content":"line one\\nline two)
+
+      Pincer.MockToolRegistry
+      |> stub(:list_tools, fn -> [] end)
+      |> expect(:execute_tool, fn "file_system", args, _ctx ->
+        assert args["action"] == "write"
+        assert args["path"] == "notes/todo.txt"
+        assert args["content"] == "line one\nline two"
+        {:ok, "Wrote notes/todo.txt"}
+      end)
+
+      Pincer.MockLLMClient
+      |> expect(:stream_completion, fn _history, _opts ->
+        chunk1 = %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [
+                  %{
+                    "index" => 0,
+                    "id" => "call_bad_fs_1",
+                    "function" => %{"name" => "file_system", "arguments" => malformed_args}
+                  }
+                ]
+              }
+            }
+          ]
+        }
+
+        chunk2 = %{"choices" => [%{"delta" => %{}}]}
+        {:ok, [chunk1, chunk2]}
+      end)
+      |> expect(:stream_completion, fn history, _opts ->
+        tool_msg = Enum.find(Enum.reverse(history), &(&1["role"] == "tool"))
+        assert tool_msg["content"] == "Wrote notes/todo.txt"
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "Done"}}]}]}
+      end)
+
+      {:ok, _pid} =
+        Pincer.Core.Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MockToolRegistry,
+          llm_client: Pincer.MockLLMClient
+        )
+
+      assert_receive {:executor_finished, _, "Done", _usage}, 5000
+    end
+
+    test "keeps returning empty args when malformed payload is not recoverable" do
+      session_pid = self()
+      session_id = "tool_exec_unrecoverable_args"
+      history = [%{"role" => "user", "content" => "Run tool"}]
+
+      Pincer.MockToolRegistry
+      |> stub(:list_tools, fn -> [] end)
+      |> expect(:execute_tool, fn "my_tool", args, _ctx ->
+        assert args == %{}
+        {:ok, "Tool Result"}
+      end)
+
+      Pincer.MockLLMClient
+      |> expect(:stream_completion, fn _history, _opts ->
+        chunk1 = %{
+          "choices" => [
+            %{
+              "delta" => %{
+                "tool_calls" => [
+                  %{
+                    "index" => 0,
+                    "id" => "call_bad_args_1",
+                    "function" => %{"name" => "my_tool", "arguments" => "{\"arg\""}
+                  }
+                ]
+              }
+            }
+          ]
+        }
+
+        chunk2 = %{"choices" => [%{"delta" => %{}}]}
+        {:ok, [chunk1, chunk2]}
+      end)
+      |> expect(:stream_completion, fn _history, _opts ->
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "Done"}}]}]}
+      end)
+
+      {:ok, _pid} =
+        Pincer.Core.Executor.start(session_pid, session_id, history,
+          tool_registry: Pincer.MockToolRegistry,
+          llm_client: Pincer.MockLLMClient
+        )
+
       assert_receive {:executor_finished, _, "Done", _usage}, 5000
     end
 
