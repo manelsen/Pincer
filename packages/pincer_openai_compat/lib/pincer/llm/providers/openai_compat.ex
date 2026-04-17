@@ -365,11 +365,17 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
 
   defp infer_models_url(_), do: ""
 
+  @internal_fields ~w(streamed_text)
+
   defp clean_message(msg) when is_map(msg) do
     msg
     |> Enum.reject(fn
       {k, []} when k in ["tool_calls", :tool_calls] -> true
+      # Never strip "content" — some providers (e.g. GLM-4) require explicit null
+      # when tool_calls are present, and stripping it causes 1210 "invalid parameter".
+      {"content", _} -> false
       {_, nil} -> true
+      {k, _} when k in @internal_fields -> true
       _ -> false
     end)
     |> Map.new()
