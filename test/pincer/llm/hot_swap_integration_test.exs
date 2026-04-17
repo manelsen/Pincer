@@ -125,11 +125,10 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
                "Do something complex that is definitely long enough"
              )
 
-    # 3. Wait for the signal from the DirectLLMClient that it is in "failing" state
+    # 3. Wait for the signal from the DirectLLMClient that it is in "failing" state.
+    # BEAM guarantees {:model_changed, ...} sent after this point will be queued
+    # in the executor task's mailbox and observed when it reaches the receive block.
     assert_receive :entered_backoff, 5000
-
-    # Give it a tiny bit more time to actually enter the receive/after block
-    Process.sleep(200)
 
     # 4. Change model while it's in backoff — this sends {:model_changed, "pass", "new-model"}
     #    to the executor task process, which is waiting inside DirectLLMClient.do_stream/1

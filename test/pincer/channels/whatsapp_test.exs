@@ -212,7 +212,8 @@ defmodule Pincer.Channels.WhatsAppTest do
               "ascii" => "██\n██"
             })
 
-            Process.sleep(40)
+            # Drain the channel mailbox so the emit log runs inside capture_log.
+            _ = :sys.get_state(channel_pid)
           end)
 
         assert log =~ "Aparelhos conectados"
@@ -237,7 +238,7 @@ defmodule Pincer.Channels.WhatsAppTest do
               "code" => "ABCD-EFGH"
             })
 
-            Process.sleep(40)
+            _ = :sys.get_state(channel_pid)
           end)
 
         assert log =~ "Pairing code ready"
@@ -265,7 +266,7 @@ defmodule Pincer.Channels.WhatsAppTest do
               }
             })
 
-            Process.sleep(40)
+            _ = :sys.get_state(channel_pid)
           end)
 
         assert log =~ "Pairing code failed for 55****5154"

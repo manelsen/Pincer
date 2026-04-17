@@ -286,7 +286,8 @@ defmodule Pincer.Core.Session.ServerTest do
       {:executor_finished, [%{"role" => "assistant", "content" => "final"}], "final", %{}}
     )
 
-    Process.sleep(50)
+    # Drain the Server mailbox so both sends are processed before asserting on StorageStub.
+    _ = :sys.get_state(pid)
 
     assert StorageStub.saved_messages(session_id) == [
              %{role: "assistant", content: "hello"},
@@ -349,13 +350,37 @@ defmodule Pincer.Core.Session.ServerTest do
       {Server, [session_id: session_id, root_agent_id: root_agent_id, workspace_path: workspace]}
     )
 
-    Process.sleep(80)
-
-    assert {:ok, state} = Server.get_status(session_id)
-    combined = Enum.map_join(state.history, "\n", &Map.get(&1, "content", ""))
+    # Blackboard ingest runs inside a spawned Task that replies via :recovery_catch_up_done.
+    # Poll get_status until the scoped update lands in history (or fail fast after 500ms).
+    combined =
+      wait_until(500, fn ->
+        {:ok, state} = Server.get_status(session_id)
+        text = Enum.map_join(state.history, "\n", &Map.get(&1, "content", ""))
+        if text =~ "Annie private update", do: text
+      end)
 
     assert combined =~ "Annie private update"
     refute combined =~ "Lucie private update"
+  end
+
+  defp wait_until(timeout_ms, fun, interval_ms \\ 10) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    wait_until_loop(deadline, interval_ms, fun)
+  end
+
+  defp wait_until_loop(deadline, interval_ms, fun) do
+    case fun.() do
+      nil ->
+        if System.monotonic_time(:millisecond) < deadline do
+          Process.sleep(interval_ms)
+          wait_until_loop(deadline, interval_ms, fun)
+        else
+          flunk("wait_until/2 timed out")
+        end
+
+      value ->
+        value
+    end
   end
 
   test "session server loads workspace from root_agent_id instead of session_id" do
@@ -453,13 +478,13 @@ defmodule Pincer.Core.Session.ServerTest do
 
     trace = %{"steps" => [%{"kind" => "memory"}, %{"kind" => "error"}]}
     send(pid, {:executor_trace, trace})
-    Process.sleep(50)
 
-    # Verify Session stored the trace locally
+    # get_status drains the Server mailbox (processing the trace + forwarding to kernel).
     assert {:ok, state} = Server.get_status(session_id)
     assert state.last_executor_trace == trace
 
-    # Verify Kernel received the trace (session_id is used as root_agent_id by default)
+    # Verify Kernel received the trace (session_id is used as root_agent_id by default).
+    # :sys.get_state on the kernel syncs with its mailbox.
     [{kernel_pid, _}] = Registry.lookup(Pincer.Core.Introspection.Kernel.Registry, session_id)
     kernel_state = :sys.get_state(kernel_pid)
     assert kernel_state.last_trace == trace
@@ -495,8 +520,7 @@ defmodule Pincer.Core.Session.ServerTest do
        %{"prompt_tokens" => 10, "completion_tokens" => 5}}
     )
 
-    Process.sleep(100)
-
+    # get_status is a GenServer.call — the prior send is drained before it returns.
     {:ok, state} = Server.get_status(session_id)
     non_system = Enum.reject(state.history, &(&1["role"] == "system"))
     assert length(non_system) == 5
@@ -522,8 +546,8 @@ defmodule Pincer.Core.Session.ServerTest do
     # Simulate a kernel broadcast
     mock_state = %{agent_id: session_id, focus: "testing"}
     send(pid, {:kernel_self_state_updated, mock_state})
-    Process.sleep(20)
 
+    # get_status drains the mailbox — the prior send is processed before it returns.
     assert {:ok, state} = Server.get_status(session_id)
     assert state.self_state == mock_state
   end
