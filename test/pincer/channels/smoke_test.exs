@@ -91,6 +91,10 @@ defmodule Pincer.Channels.SmokeTest do
     # Session supervisors are now owned by their channel and only start when
     # the channel is enabled. Start them explicitly here for channels under test
     # that are disabled in config.yaml (e.g. Discord in CI).
+    unless Process.whereis(Pincer.Channels.Telegram.SessionSupervisor) do
+      start_supervised!(Pincer.Channels.Telegram.SessionSupervisor)
+    end
+
     unless Process.whereis(Pincer.Channels.Discord.SessionSupervisor) do
       start_supervised!(Pincer.Channels.Discord.SessionSupervisor)
     end
