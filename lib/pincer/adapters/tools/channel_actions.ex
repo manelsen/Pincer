@@ -107,9 +107,10 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
          {:ok, {channel, recipient}} <- resolve_destination(args, context) do
       filename = Path.basename(abs_path)
       caption = Map.get(args, "caption", "")
-      files = [%{name: filename, body: binary}]
+      files = [%{name: filename, body: binary, path: abs_path}]
 
       case dispatch_file(channel, recipient, files, caption) do
+        :ok -> {:ok, "File '#{filename}' sent via #{channel} to #{recipient}."}
         {:ok, _} -> {:ok, "File '#{filename}' sent via #{channel} to #{recipient}."}
         {:error, reason} when is_binary(reason) -> {:error, reason}
         {:error, reason} -> {:error, inspect(reason)}
@@ -204,7 +205,22 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
   end
 
   defp dispatch_file(:telegram, recipient, files, caption) do
-    telegram_adapter().send_message(recipient, caption, files: files)
+    case files do
+      [%{name: _name, path: path}] when is_binary(path) ->
+        telegram_adapter().send_document(recipient, path, caption: caption)
+
+      [%{name: name, body: body}] when is_binary(name) and is_binary(body) ->
+        tmp_path = write_temp_file!(name, body)
+
+        try do
+          telegram_adapter().send_document(recipient, tmp_path, caption: caption)
+        after
+          File.rm(tmp_path)
+        end
+
+      _ ->
+        {:error, "Telegram file payload is invalid."}
+    end
   end
 
   defp dispatch_file(:discord, recipient, files, caption) do
@@ -266,5 +282,12 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
 
   defp session_server do
     Application.get_env(:pincer, :channel_actions_session_server, Server)
+  end
+
+  defp write_temp_file!(name, body) do
+    filename = "#{System.unique_integer([:positive])}_#{Path.basename(name)}"
+    path = Path.join(System.tmp_dir!(), filename)
+    File.write!(path, body)
+    path
   end
 end
