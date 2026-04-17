@@ -9,6 +9,11 @@ defmodule Pincer.Adapters.Tools.ChannelActionsTest do
       {:ok, 101}
     end
 
+    def send_document(recipient, path, opts \\ []) do
+      send(test_pid(), {:telegram_send_document, recipient, path, opts})
+      :ok
+    end
+
     defp test_pid do
       Application.fetch_env!(:pincer, :channel_actions_test_pid)
     end
@@ -166,7 +171,9 @@ defmodule Pincer.Adapters.Tools.ChannelActionsTest do
       %{"workspace_path" => tmp}
     )
 
-    assert_receive {:telegram_send, "123", "my caption", _opts}
+    assert_receive {:telegram_send_document, "123", sent_path, opts}
+    assert sent_path == Path.join(tmp, basename)
+    assert opts[:caption] == "my caption"
   end
 
   test "send_file for non-existent file returns error" do
