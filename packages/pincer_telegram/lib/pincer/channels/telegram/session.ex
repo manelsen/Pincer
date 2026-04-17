@@ -260,14 +260,30 @@ defmodule Pincer.Channels.Telegram.Session do
   end
 
   @tool_prefix "🛠️ Usando ferramentas:"
+  @orchestration_prefix "⚡ **Orquestração Paralela**"
   @tool_window_size 8
 
   defp deliver_status(state, @tool_prefix <> _ = text) do
     new_names = extract_tool_names(text)
     updated_calls = append_tool_calls(state.tool_calls, new_names, @tool_window_size)
-    rendered = render_tool_window(updated_calls)
+    rendered = render_tool_window(state.orchestration_note, updated_calls)
 
     %{state | tool_calls: updated_calls}
+    |> StatusDelivery.deliver(
+      rendered,
+      send: fn content -> Pincer.Channels.Telegram.send_message(state.chat_id, content) end,
+      edit: fn message_id, content ->
+        Pincer.Channels.Telegram.update_message(state.chat_id, message_id, content)
+      end
+    )
+  end
+
+  defp deliver_status(state, @orchestration_prefix <> _ = text) do
+    note = String.replace(text, ~r/\*\*/u, "") |> String.trim()
+    updated = %{state | orchestration_note: note}
+    rendered = render_tool_window(note, updated.tool_calls)
+
+    updated
     |> StatusDelivery.deliver(
       rendered,
       send: fn content -> Pincer.Channels.Telegram.send_message(state.chat_id, content) end,
@@ -294,10 +310,10 @@ defmodule Pincer.Channels.Telegram.Session do
     (calls ++ new_names) |> Enum.take(-window_size)
   end
 
-  defp render_tool_window([]), do: ""
+  defp render_tool_window(_note, []), do: ""
 
-  defp render_tool_window(calls) do
-    lines =
+  defp render_tool_window(note, calls) do
+    tool_lines =
       calls
       |> Enum.chunk_by(& &1)
       |> Enum.map(fn
@@ -306,12 +322,20 @@ defmodule Pincer.Channels.Telegram.Session do
       end)
       |> Enum.map_join("\n→ ", & &1)
 
-    "<blockquote>⚙️ #{lines}</blockquote>"
+    body =
+      if note do
+        "#{note}\n─────────────────────\n⚙️ #{tool_lines}"
+      else
+        "⚙️ #{tool_lines}"
+      end
+
+    "Aguarde…\n<blockquote>#{body}</blockquote>"
   end
 
   defp reset_tool_state(state) do
     state
     |> Map.put(:tool_calls, [])
+    |> Map.put(:orchestration_note, nil)
     |> Map.merge(StatusMessagePolicy.initial_state())
   end
 
@@ -362,7 +386,8 @@ defmodule Pincer.Channels.Telegram.Session do
           session_id: session_id,
           preview_suppressed: false,
           subagent_progress_tracker: %{},
-          tool_calls: []
+          tool_calls: [],
+          orchestration_note: nil
         },
         StatusMessagePolicy.initial_state()
       ),
