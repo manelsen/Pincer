@@ -380,13 +380,61 @@ defmodule Pincer.LLM.Client do
               if provider_id == "openrouter", do: "baai/bge-m3", else: config[:default_model]
 
           config_with_auth = auth_selection.config
-          apply(adapter, :generate_embedding, [text, model, config_with_auth])
+
+          generate_embedding_with_fallback(
+            adapter,
+            text,
+            model,
+            config_with_auth,
+            provider_id,
+            opts
+          )
 
         {:error, reason} ->
           {:error, reason}
       end
     end
   end
+
+  defp generate_embedding_with_fallback(adapter, text, model, config, provider_id, opts) do
+    case apply(adapter, :generate_embedding, [text, model, config]) do
+      {:error, reason} = error ->
+        maybe_retry_embedding(adapter, text, model, config, provider_id, opts, reason, error)
+
+      other ->
+        other
+    end
+  end
+
+  defp maybe_retry_embedding(adapter, text, model, config, provider_id, opts, reason, error) do
+    with true <- provider_id == "openrouter",
+         false <- Keyword.has_key?(opts, :model),
+         true <- retryable_openrouter_embedding_error?(reason),
+         fallback_model when is_binary(fallback_model) <- fallback_embedding_model(model, config) do
+      Logger.warning(
+        "[LLM] Embedding model #{model} failed via #{provider_id} router. Retrying with #{fallback_model}."
+      )
+
+      apply(adapter, :generate_embedding, [text, fallback_model, config])
+    else
+      _ -> error
+    end
+  end
+
+  defp retryable_openrouter_embedding_error?(
+         {:http_error, status, %{"error" => %{"message" => message}}}
+       )
+       when status in [200, 404] and is_binary(message) do
+    String.contains?(message, "No successful provider responses")
+  end
+
+  defp retryable_openrouter_embedding_error?(_), do: false
+
+  defp fallback_embedding_model("baai/bge-m3", config) do
+    config[:embedding_fallback_model] || "baai/bge-large-en-v1.5"
+  end
+
+  defp fallback_embedding_model(_model, config), do: config[:embedding_fallback_model]
 
   defp do_request_with_retry(
          action,

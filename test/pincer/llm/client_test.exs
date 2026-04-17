@@ -49,6 +49,51 @@ defmodule Pincer.LLM.ClientTest do
     def transcribe_audio(_path, _model, _config), do: {:ok, "mock transcript"}
   end
 
+  defmodule FallbackEmbeddingAdapter do
+    use Pincer.Test.Support.LLMProviderDefaults
+
+    @routing_error {:error,
+                    {:http_error, 200,
+                     %{
+                       "error" => %{
+                         "code" => 404,
+                         "message" => "No successful provider responses."
+                       }
+                     }}}
+
+    @impl true
+    def chat_completion(_messages, _model, _config, _tools) do
+      {:ok, %{"role" => "assistant", "content" => "fallback-chat"}, nil}
+    end
+
+    @impl true
+    def stream_completion(_messages, _model, _config, _tools) do
+      {:ok, [%{"choices" => [%{"delta" => %{"content" => "fallback-chat"}}]}]}
+    end
+
+    @impl true
+    def list_models(_config), do: {:ok, []}
+
+    @impl true
+    def transcribe_audio(_path, _model, _config), do: {:ok, "mock transcript"}
+
+    @impl true
+    def generate_embedding(_text, model, _config) do
+      send(self(), {:embedding_called, model})
+
+      case model do
+        "baai/bge-m3" ->
+          @routing_error
+
+        "baai/bge-large-en-v1.5" ->
+          {:ok, [0.1, 0.2, 0.3]}
+
+        other ->
+          {:error, {:unexpected_model, other}}
+      end
+    end
+  end
+
   setup do
     # Save original env
     orig_providers = Application.get_env(:pincer, :llm_providers)
@@ -209,6 +254,43 @@ defmodule Pincer.LLM.ClientTest do
       assert Enum.any?(chunks, fn chunk ->
                get_in(chunk, ["choices", Access.at(0), "delta", "content"]) == "fallback-chat"
              end)
+    end
+  end
+
+  describe "embedding fallback" do
+    test "retries openrouter embeddings with the 1024d fallback model on router miss" do
+      Application.put_env(:pincer, :llm_providers, %{
+        "openrouter" => %{
+          adapter: FallbackEmbeddingAdapter,
+          env_key: "TEST_API_KEY",
+          default_model: "google/gemini-2.0-flash-exp:free"
+        }
+      })
+
+      assert {:ok, [0.1, 0.2, 0.3]} =
+               Client.generate_embedding("graph sync probe", provider: "openrouter")
+
+      assert_received {:embedding_called, "baai/bge-m3"}
+      assert_received {:embedding_called, "baai/bge-large-en-v1.5"}
+    end
+
+    test "does not override an explicit embedding model from the caller" do
+      Application.put_env(:pincer, :llm_providers, %{
+        "openrouter" => %{
+          adapter: FallbackEmbeddingAdapter,
+          env_key: "TEST_API_KEY",
+          default_model: "google/gemini-2.0-flash-exp:free"
+        }
+      })
+
+      assert {:error, {:unexpected_model, "custom/embed-model"}} =
+               Client.generate_embedding("graph sync probe",
+                 provider: "openrouter",
+                 model: "custom/embed-model"
+               )
+
+      assert_received {:embedding_called, "custom/embed-model"}
+      refute_received {:embedding_called, "baai/bge-large-en-v1.5"}
     end
   end
 end

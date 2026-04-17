@@ -308,6 +308,7 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
   def generate_embedding(text, model, config) do
     url = infer_embeddings_url(config[:base_url])
     api_key = config[:api_key]
+    headers = config[:headers] || []
 
     body = %{
       "model" => model,
@@ -317,7 +318,9 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
     case Req.post(url,
            json: body,
            auth: {:bearer, api_key},
-           receive_timeout: 60_000
+           headers: headers,
+           receive_timeout: 60_000,
+           retry: :safe_transient
          ) do
       {:ok, %{status: 200, body: %{"data" => [%{"embedding" => vector} | _]}}} ->
         {:ok, vector}
