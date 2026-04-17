@@ -224,6 +224,22 @@ defmodule Pincer.Channels.Telegram do
         {:error, %Telegex.Error{description: "Bad Request: message is not modified"}} ->
           :ok
 
+        {:error, %Telegex.Error{description: desc}}
+        when desc in ["Bad Request: message is too long", "Bad Request: text is too long"] ->
+          # Text grew too large to fit in one message — truncate with a note and retry
+          truncated = String.slice(html_text, 0, 3900) <> "\n…<i>(truncated)</i>"
+
+          case Pincer.Channels.Telegram.api_client().edit_message_text(
+                 chat_id,
+                 message_id,
+                 truncated,
+                 parse_mode: "HTML"
+               ) do
+            {:ok, _} -> :ok
+            {:error, %Telegex.Error{description: "Bad Request: message is not modified"}} -> :ok
+            {:error, reason} -> {:error, reason}
+          end
+
         {:error, %Telegex.Error{description: desc}} ->
           is_parse_error =
             String.contains?(desc, "can't parse entities") or
