@@ -264,22 +264,7 @@ defmodule Pincer.Core.Executor do
        ) do
     Logger.info("[EXECUTOR] do_run_loop (Depth: #{depth})")
 
-    client_opts =
-      case {model_override_field(model_override, :provider),
-            model_override_field(model_override, :model)} do
-        {provider, model} when is_binary(provider) and is_binary(model) ->
-          [provider: provider, model: model]
-
-        _ ->
-          []
-      end
-
-    client_opts =
-      if thinking = model_override_field(model_override, :thinking_level) do
-        Keyword.put(client_opts, :thinking_level, thinking)
-      else
-        client_opts
-      end
+    client_opts = client_opts_from_override(model_override)
 
     tools_spec =
       deps.tool_registry.list_tools()
@@ -475,51 +460,73 @@ defmodule Pincer.Core.Executor do
          deps,
          client_opts
        ) do
-    if true do
-      Logger.warning(
-        "[EXECUTOR] Empty streaming response at depth=#{depth}. Retrying lightweight chat completion."
-      )
+    Logger.warning(
+      "[EXECUTOR] Empty streaming response at depth=#{depth}. Retrying lightweight chat completion."
+    )
 
-      emit_trace_step(:policy, "empty_response_recovery", %{depth: depth})
+    emit_trace_step(:policy, "empty_response_recovery", %{depth: depth})
 
-      # At depth > 0 the prompt_history already contains large tool results that may have
-      # overflowed the context. Re-prepare from logical_history with default scale so the
-      # history manager can truncate tool messages before appending the recovery prompt.
-      base_history =
-        if depth == 0 do
-          prompt_history
-        else
-          # Reduce context window aggressively on recovery — large tool results at
-          # depth > 0 are the most common cause of empty streaming responses.
-          prepare_prompt_history(logical_history, model_override, safe_limit_scale: 0.4)
+    # At depth > 0 the prompt_history already contains large tool results that may have
+    # overflowed the context. Re-prepare from logical_history with an aggressive safe
+    # limit so the history manager truncates tool messages before appending the recovery
+    # prompt.
+    base_history =
+      if depth == 0 do
+        prompt_history
+      else
+        prepare_prompt_history(logical_history, model_override, safe_limit_scale: 0.4)
+      end
+
+    retry_history = Policy.recover(:empty_response_history, %{history: base_history})
+
+    case deps.llm_client.chat_completion(retry_history, client_opts) do
+      {:ok, assistant_msg, usage} ->
+        emit_trace_step(:llm, "chat_completion_invoked", %{fallback: false, recovery: true})
+
+        case finalize_assistant_message(
+               assistant_msg,
+               logical_history,
+               retry_history,
+               session_id,
+               session_pid,
+               depth,
+               model_override,
+               deps,
+               usage,
+               recovery_attempted?: true
+             ) do
+          {:error, :empty_response} -> {:error, :empty_response}
+          other -> other
         end
 
-      retry_history = Policy.recover(:empty_response_history, %{history: base_history})
+      {:error, reason} ->
+        Logger.error("[EXECUTOR] Empty-response recovery failed: #{inspect(reason)}")
+        emit_trace_step(:error, "empty_response_recovery_failed", %{reason: inspect(reason)})
+        {:error, :empty_response}
+    end
+  end
 
-      case deps.llm_client.chat_completion(retry_history, client_opts) do
-        {:ok, assistant_msg, usage} ->
-          emit_trace_step(:llm, "chat_completion_invoked", %{fallback: false, recovery: true})
+  defp degrade_to_tool_only(assistant_msg, logical_history, tool_messages, usage) do
+    final_content = ToolOnlyOutcomeFormatter.format(tool_messages)
+    assistant_msg = Map.put(assistant_msg, "content", final_content)
+    {:ok, logical_history ++ [assistant_msg], final_content, usage}
+  end
 
-          case finalize_assistant_message(
-                 assistant_msg,
-                 logical_history,
-                 retry_history,
-                 session_id,
-                 session_pid,
-                 depth,
-                 model_override,
-                 deps,
-                 usage
-               ) do
-            {:error, :empty_response} -> {:error, :empty_response}
-            other -> other
-          end
+  defp client_opts_from_override(model_override) do
+    base =
+      case {model_override_field(model_override, :provider),
+            model_override_field(model_override, :model)} do
+        {provider, model} when is_binary(provider) and is_binary(model) ->
+          [provider: provider, model: model]
 
-        {:error, reason} ->
-          Logger.error("[EXECUTOR] Empty-response recovery failed: #{inspect(reason)}")
-          emit_trace_step(:error, "empty_response_recovery_failed", %{reason: inspect(reason)})
-          {:error, :empty_response}
+        _ ->
+          []
       end
+
+    if thinking = model_override_field(model_override, :thinking_level) do
+      Keyword.put(base, :thinking_level, thinking)
+    else
+      base
     end
   end
 
@@ -804,7 +811,8 @@ defmodule Pincer.Core.Executor do
          depth,
          model_override,
          deps,
-         usage
+         usage,
+         opts \\ []
        ) do
     content = assistant_msg["content"]
 
@@ -954,9 +962,28 @@ defmodule Pincer.Core.Executor do
             {:ok, logical_history ++ [assistant_msg], final_content, usage}
 
           {:tool_only, tool_messages} ->
-            final_content = ToolOnlyOutcomeFormatter.format(tool_messages)
-            assistant_msg = Map.put(assistant_msg, "content", final_content)
-            {:ok, logical_history ++ [assistant_msg], final_content, usage}
+            recovery_attempted? = Keyword.get(opts, :recovery_attempted?, false)
+
+            if not recovery_attempted? and depth > 0 do
+              case recover_empty_response(
+                     logical_history,
+                     prompt_history,
+                     session_id,
+                     session_pid,
+                     depth,
+                     model_override,
+                     deps,
+                     client_opts_from_override(model_override)
+                   ) do
+                {:ok, _, _, _} = ok ->
+                  ok
+
+                _ ->
+                  degrade_to_tool_only(assistant_msg, logical_history, tool_messages, usage)
+              end
+            else
+              degrade_to_tool_only(assistant_msg, logical_history, tool_messages, usage)
+            end
 
           {:error, reason} ->
             {:error, reason}
