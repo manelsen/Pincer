@@ -153,3 +153,15 @@ New agents start without IDENTITY/SOUL files. The bootstrap ritual is triggered
 on first interaction via `BOOTSTRAP.md`, which drives an LLM conversation to
 form the agent's personality. Previously these files were pre-seeded, preventing
 the ritual from ever firing.
+
+### 8. Embedding Generation
+
+Semantic memory and graph indexing use `Pincer.LLM.Client.generate_embedding/2`.
+
+- If the caller does not pass `:model`, the client resolves `config[:embedding_model]`
+  first.
+- For `openrouter`, the default embedding model remains `baai/bge-m3`.
+- If OpenRouter returns the router-side error `No successful provider responses.`
+  for `baai/bge-m3`, the client retries once with `baai/bge-large-en-v1.5`.
+- Both default and fallback models are 1024-dimensional, preserving pgvector
+  column compatibility for the current HNSW indexes.
