@@ -267,7 +267,7 @@ defmodule Pincer.Core.SubAgentProgress do
     lines =
       [
         "`#{agent_id}`",
-        "Goal: #{entry.goal || "pending"}",
+        "Goal: #{render_goal(entry.goal)}",
         "☑ Started",
         render_tool(entry),
         render_runtime_status(entry),
@@ -276,6 +276,20 @@ defmodule Pincer.Core.SubAgentProgress do
       |> Enum.filter(&is_binary/1)
 
     Enum.join(lines, "\n")
+  end
+
+  defp render_goal(nil), do: "pending"
+
+  defp render_goal(goal) do
+    goal
+    |> String.split("\n")
+    |> List.first("")
+    |> String.trim()
+    |> case do
+      "" -> String.slice(goal, 0, 80)
+      first_line when byte_size(first_line) > 80 -> String.slice(first_line, 0, 77) <> "…"
+      first_line -> first_line
+    end
   end
 
   defp render_tool(%{last_tool: nil}), do: "☐ Last tool: pending"
