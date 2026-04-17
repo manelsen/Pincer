@@ -117,6 +117,7 @@ defmodule Pincer.Channels.SmokeTest do
     chat_id = 12345
     session_id = "telegram_#{chat_id}"
     mid = 777
+    test_pid = self()
 
     # Intercept API calls
     # 1. First token creates the message
@@ -124,8 +125,9 @@ defmodule Pincer.Channels.SmokeTest do
     |> expect(:send_message, fn ^chat_id, "Hello ▌", _opts ->
       {:ok, %{message_id: mid}}
     end)
-    # 2. Subsequent tokens might be debounced or final
-    |> stub(:edit_message_text, fn ^chat_id, ^mid, _text, _opts ->
+    # 2. Subsequent tokens might be debounced or final — signal when the final text lands
+    |> stub(:edit_message_text, fn ^chat_id, ^mid, text, _opts ->
+      if text == "Hello world!", do: send(test_pid, :smoke_finalized)
       {:ok, %{}}
     end)
 
@@ -149,21 +151,23 @@ defmodule Pincer.Channels.SmokeTest do
     assert_receive {:agent_partial, "!"}, 5000
     assert_receive {:agent_response, "Hello world!", _usage}, 5000
 
-    # Wait for debounced UI updates to finish
-    Process.sleep(1200)
+    # Wait for debounced UI updates to flush the final edit
+    assert_receive :smoke_finalized, 5_000
   end
 
   test "Discord integrated smoke test (Streaming + PubSub + API)" do
     channel_id = 999
     session_id = "discord_#{channel_id}"
     mid = 888
+    test_pid = self()
 
     # Intercept API calls
     DiscordAPIMock
     |> expect(:create_message, fn ^channel_id, "Hello ▌", _opts ->
       {:ok, %{id: mid}}
     end)
-    |> stub(:edit_message, fn ^channel_id, ^mid, _opts ->
+    |> stub(:edit_message, fn ^channel_id, ^mid, opts ->
+      if opts[:content] == "Hello world!", do: send(test_pid, :smoke_finalized)
       {:ok, %{}}
     end)
 
@@ -179,6 +183,6 @@ defmodule Pincer.Channels.SmokeTest do
     assert_receive {:agent_partial, "Hello"}, 5000
     assert_receive {:agent_response, "Hello world!", _usage}, 5000
 
-    Process.sleep(1200)
+    assert_receive :smoke_finalized, 5_000
   end
 end

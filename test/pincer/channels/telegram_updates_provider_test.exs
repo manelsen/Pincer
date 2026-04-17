@@ -42,8 +42,8 @@ defmodule Pincer.Channels.Telegram.UpdatesProviderTest do
     assert %{offset: 42} = :sys.get_state(pid)
 
     send(pid, :poll)
-    Process.sleep(50)
 
+    # :sys.get_state/1 is synchronous and drains the mailbox (processing :poll first).
     assert %{offset: 45} = :sys.get_state(pid)
     assert File.read!(offset_path) == "45\n"
   end
@@ -70,7 +70,8 @@ defmodule Pincer.Channels.Telegram.UpdatesProviderTest do
     log =
       capture_log(fn ->
         send(pid, :poll)
-        Process.sleep(200)
+        # Drain the mailbox synchronously so the log emits inside capture_log.
+        _ = :sys.get_state(pid)
       end)
 
     assert Process.alive?(pid), "UpdatesProvider must remain alive after malformed callbacks"
@@ -91,11 +92,9 @@ defmodule Pincer.Channels.Telegram.UpdatesProviderTest do
     allow(APIMock, self(), pid)
 
     send(pid, :poll)
-    Process.sleep(100)
     assert %{failures: 1} = :sys.get_state(pid)
 
     send(pid, :poll)
-    Process.sleep(100)
     assert %{failures: 0} = :sys.get_state(pid)
   end
 
@@ -110,7 +109,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProviderTest do
     allow(APIMock, self(), pid)
 
     send(pid, :poll)
-    Process.sleep(100)
 
     assert %{offset: 10} = :sys.get_state(pid)
   end

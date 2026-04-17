@@ -24,8 +24,7 @@ defmodule Pincer.Core.Session.SupervisorTest do
                bootstrap?: false
              )
 
-    Process.sleep(80)
-
+    # Server.get_status/1 is a GenServer.call, which drains any self-sends from init.
     assert {:ok, _state} = Server.get_status(session_id)
     refute File.exists?(AgentPaths.identity_path(workspace))
     refute File.exists?(AgentPaths.soul_path(workspace))

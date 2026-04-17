@@ -18,13 +18,16 @@ defmodule Pincer.Channels.Telegram.SessionTest do
 
   test "partial + final finalizes in-place without extra final send" do
     chat_id = 42
+    test_pid = self()
 
     APIMock
     |> expect(:send_message, fn ^chat_id, "Hello ▌", _opts ->
+      send(test_pid, :preview_sent)
       {:ok, %{message_id: 321}}
     end)
     |> expect(:edit_message_text, fn ^chat_id, 321, "Hello world!", opts ->
       assert opts[:parse_mode] == "HTML"
+      send(test_pid, :final_edited)
       {:ok, %{}}
     end)
 
@@ -34,7 +37,8 @@ defmodule Pincer.Channels.Telegram.SessionTest do
     send(pid, {:agent_partial, "Hello"})
     send(pid, {:agent_response, "Hello world!", nil})
 
-    Process.sleep(200)
+    assert_receive :preview_sent, 1_000
+    assert_receive :final_edited, 1_000
   end
 
   test "final-only path sends one final message without cursor" do

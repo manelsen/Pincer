@@ -95,7 +95,8 @@ defmodule Pincer.Channels.WhatsAppSessionTest do
       assert {:error, {:already_started, ^pid}} =
                Session.ensure_started(chat_id, "whatsapp_main")
 
-      Process.sleep(50)
+      # Drain any pending bind casts before broadcasting.
+      _ = :sys.get_state(pid)
 
       Pincer.Infra.PubSub.broadcast(
         "session:whatsapp_main",

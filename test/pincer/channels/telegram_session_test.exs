@@ -18,13 +18,16 @@ defmodule Pincer.Channels.Telegram.SessionTest do
 
   test "partial + final finalizes in-place without extra final send" do
     chat_id = 42
+    test_pid = self()
 
     APIMock
     |> expect(:send_message, fn ^chat_id, "Hello ▌", _opts ->
+      send(test_pid, :preview_sent)
       {:ok, %{message_id: 321}}
     end)
     |> expect(:edit_message_text, fn ^chat_id, 321, "Hello world!", opts ->
       assert opts[:parse_mode] == "HTML"
+      send(test_pid, :final_edited)
       {:ok, %{}}
     end)
 
@@ -34,14 +37,17 @@ defmodule Pincer.Channels.Telegram.SessionTest do
     send(pid, {:agent_partial, "Hello"})
     send(pid, {:agent_response, "Hello world!", nil})
 
-    Process.sleep(200)
+    assert_receive :preview_sent, 1_000
+    assert_receive :final_edited, 1_000
   end
 
   test "final-only path sends one final message without cursor" do
     chat_id = 43
+    test_pid = self()
 
     APIMock
     |> expect(:send_message, fn ^chat_id, "Only final", _opts ->
+      send(test_pid, :final_sent)
       {:ok, %{message_id: 500}}
     end)
 
@@ -50,7 +56,7 @@ defmodule Pincer.Channels.Telegram.SessionTest do
 
     send(pid, {:agent_response, "Only final", nil})
 
-    Process.sleep(80)
+    assert_receive :final_sent, 1_000
   end
 
   test "large single-token partial waits for final and avoids preview duplication" do
@@ -94,9 +100,11 @@ defmodule Pincer.Channels.Telegram.SessionTest do
 
   test "worker rebinds to session scope topic and delivers response from new topic" do
     chat_id = 44
+    test_pid = self()
 
     APIMock
     |> expect(:send_message, fn ^chat_id, "Main scope reply", _opts ->
+      send(test_pid, :rebound_response_sent)
       {:ok, %{message_id: 700}}
     end)
 
@@ -106,21 +114,24 @@ defmodule Pincer.Channels.Telegram.SessionTest do
     assert {:error, {:already_started, ^pid}} =
              Session.ensure_started(chat_id, "telegram_main")
 
-    Process.sleep(50)
+    # Force any pending bind casts to be processed before broadcasting.
+    _ = :sys.get_state(pid)
 
     Pincer.Infra.PubSub.broadcast(
       "session:telegram_main",
       {:agent_response, "Main scope reply", nil}
     )
 
-    Process.sleep(80)
+    assert_receive :rebound_response_sent, 1_000
   end
 
   test "non sub-agent status is delivered as user-visible telegram message" do
     chat_id = 45
+    test_pid = self()
 
     APIMock
     |> expect(:send_message, fn ^chat_id, "Status update", _opts ->
+      send(test_pid, :status_sent)
       {:ok, %{message_id: 900}}
     end)
 
@@ -129,11 +140,12 @@ defmodule Pincer.Channels.Telegram.SessionTest do
 
     send(pid, {:agent_status, "Status update"})
 
-    Process.sleep(80)
+    assert_receive :status_sent, 1_000
   end
 
   test "sub-agent progress creates and updates a single telegram checklist message" do
     chat_id = 46
+    test_pid = self()
 
     APIMock
     |> expect(:send_message, fn ^chat_id, text, _opts ->
@@ -142,18 +154,21 @@ defmodule Pincer.Channels.Telegram.SessionTest do
       assert text =~ "Goal: review repo"
       assert text =~ "☑ Started"
       assert text =~ "☐ Finished"
+      send(test_pid, :checklist_started)
       {:ok, %{message_id: 910}}
     end)
     |> expect(:edit_message_text, fn ^chat_id, 910, text, opts ->
       assert text =~ "Last tool: <code>web.search</code>"
       assert text =~ "☐ Finished"
       assert opts[:parse_mode] == "HTML"
+      send(test_pid, :checklist_tool)
       {:ok, %{}}
     end)
     |> expect(:edit_message_text, fn ^chat_id, 910, text, opts ->
       assert text =~ "☑ Finished"
       assert text =~ "Result: done"
       assert opts[:parse_mode] == "HTML"
+      send(test_pid, :checklist_finished)
       {:ok, %{}}
     end)
 
@@ -164,7 +179,9 @@ defmodule Pincer.Channels.Telegram.SessionTest do
     send(pid, {:subagent_progress, %{agent_id: "a1", kind: :tool, tool: "web.search"}})
     send(pid, {:subagent_progress, %{agent_id: "a1", kind: :finished, result: "done"}})
 
-    Process.sleep(300)
+    assert_receive :checklist_started, 1_000
+    assert_receive :checklist_tool, 1_000
+    assert_receive :checklist_finished, 1_000
   end
 
   test "sub-agent textual status is ignored when structured progress is available" do
