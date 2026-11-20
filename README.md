@@ -2,7 +2,7 @@
 
 Autonomous AI agents on the BEAM — OTP supervision, multi-channel messaging, MCP tool integration, and provider-agnostic LLM access with automatic failover.
 
-**What it does**: Pincer is an Elixir/OTP framework that runs persistent AI agents. Each agent gets a supervised GenServer session, can use 80+ tool actions across 21 built-in tool modules, talks to humans through Telegram/Discord/CLI/webhook, and remembers conversations across restarts using a tiered memory system backed by PostgreSQL + pgvector.
+**What it does**: Pincer is an Elixir/OTP framework that runs persistent AI agents. Each agent gets a supervised GenServer session, can use 80+ tool actions across 18 native tool modules, talks to humans through Telegram/Discord/CLI/webhook, and remembers conversations across restarts using a tiered memory system backed by PostgreSQL + pgvector or embedded SQLite3 (FTS5).
 
 **Who it's for**: Developers building long-running AI assistants that need fault tolerance, multi-channel presence, and structured memory — without babysitting.
 
@@ -12,12 +12,12 @@ Autonomous AI agents on the BEAM — OTP supervision, multi-channel messaging, M
 
 ## Quickstart
 
-### Docker (recomendado)
+### Docker (recommended)
 
 ```bash
-git clone https://github.com/micelio/pincer.git && cd pincer
+git clone https://github.com/manelsen/Pincer.git && cd Pincer
 cp .env.example .env
-# Defina ao menos uma chave de LLM em .env (ex: GROQ_API_KEY)
+# Set at least one LLM API key in .env (e.g., GROQ_API_KEY)
 docker compose up --build -d
 docker compose exec pincer-server mix pincer.chat
 ```
@@ -27,25 +27,25 @@ The Docker build starts PostgreSQL with pgvector, runs migrations, and boots the
 ### Local (PostgreSQL + pgvector)
 
 ```bash
-git clone https://github.com/micelio/pincer.git && cd pincer
+git clone https://github.com/manelsen/Pincer.git && cd Pincer
 docker compose up -d postgres   # or point to an existing PostgreSQL instance
 mix pincer.setup                # deps → DB → migrations → wizard → health check
 mix pincer.chat
 ```
 
-### Zero-Infra / SQLite (Local sem Docker)
+### Zero-Infra / SQLite (Local without Docker)
 
-Sem PostgreSQL e sem Docker — usa SQLite3 + FTS5 + WAL embutidos (`exqlite`):
+No PostgreSQL or Docker required — uses embedded SQLite3 + FTS5 + WAL (`exqlite`):
 
 ```bash
-git clone https://github.com/micelio/pincer.git && cd pincer
-mix pincer.setup --storage sqlite --yes   # deps → onboard SQLite → inicializa data/pincer.db
+git clone https://github.com/manelsen/Pincer.git && cd Pincer
+mix pincer.setup --storage sqlite --yes   # deps → SQLite onboard → initializes data/pincer.db
 PINCER_STORAGE=sqlite mix pincer.chat
 ```
 
 `mix pincer.setup` guides you through the full first-run sequence interactively. Use `--yes` for a non-interactive run with defaults, `--storage sqlite|postgres` to pick the backend explicitly, and `--sqlite-path <path>` to customize the SQLite file location.
 
-### Reconfigurar / diagnosticar
+### Reconfigure / Diagnose
 
 ```bash
 mix pincer.onboard              # re-run configuration wizard
@@ -259,7 +259,7 @@ Each agent gets an isolated workspace at `workspaces/<agent_id>/.pincer/`. Dynam
 
 ## Built-in Tools
 
-21 tool modules with ~80 actions, all implementing the `Pincer.Ports.Tool` behaviour (`spec/0` + `execute/1` or `execute/2`). MCP-discovered tools merge into the same surface at runtime.
+18 registered native tool modules with ~80 tool actions, all implementing the `Pincer.Ports.Tool` behaviour (`spec/0` + `execute/1` or `execute/2`). MCP-discovered tools merge into the same surface at runtime.
 
 | Tool | Capabilities |
 |---|---|
@@ -354,9 +354,17 @@ The `boundary` compiler plugin enforces dependency direction at compile time:
 
 ## Stats
 
-- 214 source modules, 163 test files
-- 14 LLM provider adapters, 6 channel adapters, 21 tool modules
+- 247 root Elixir source files (`lib/`) + 72 package source files across 25 subpackages (`packages/`)
+- 250 test files (`*_test.exs`)
+- 14 LLM provider adapters, 9 channel packages (plus built-in Matrix), 18 native tool modules
 - ~80 tool actions available to agents
+
+## Governance & Security
+
+- Security policy & private vulnerability reporting: [SECURITY.md](SECURITY.md)
+- Contributing guide: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Release history: [CHANGELOG.md](CHANGELOG.md)
+- Code of conduct: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)
 
 ## License
 
