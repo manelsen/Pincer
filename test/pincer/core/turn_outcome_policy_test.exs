@@ -47,4 +47,17 @@ defmodule Pincer.Core.TurnOutcomePolicyTest do
                tool_call_count: 0
              })
   end
+
+  test "merge_reasoning_and_content hides reasoning-only text and preserves visible content" do
+    assert TurnOutcomePolicy.merge_reasoning_and_content("", "") == ""
+    assert TurnOutcomePolicy.merge_reasoning_and_content("Final", "") == "Final"
+    assert TurnOutcomePolicy.merge_reasoning_and_content("Final", "thought") == "Final"
+    assert TurnOutcomePolicy.merge_reasoning_and_content("   ", "thought") == ""
+  end
+
+  test "reasoning_only?/1 identifies messages with no text outside reasoning tags" do
+    assert TurnOutcomePolicy.reasoning_only?("<thinking>secret</thinking>")
+    refute TurnOutcomePolicy.reasoning_only?("<thinking>secret</thinking>Visible answer")
+    refute TurnOutcomePolicy.reasoning_only?(nil)
+  end
 end

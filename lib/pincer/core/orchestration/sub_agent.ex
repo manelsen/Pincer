@@ -66,10 +66,12 @@ defmodule Pincer.Core.Orchestration.SubAgent do
 
   ## Message Flow
 
-  The SubAgent receives the following messages from its Executor:
+  The SubAgent supervises its Executor via `Task.Supervisor.async_nolink/2` and
+  correlates its monitor `ref` on completion, error, or unexpected task exit:
 
-  - `{:executor_finished, history, response}` - Successful completion
-  - `{:executor_failed, reason}` - Execution failure
+  - `{ref, {:ok, history, response, usage}}` - Successful completion
+  - `{ref, {:error, reason}}` - Execution failure
+  - `{:DOWN, ref, :process, _pid, reason}` - Unexpected worker task crash
   - `{:sme_tool_use, tools}` - Tool usage notification (forwarded to Blackboard)
   """
 
@@ -87,13 +89,18 @@ defmodule Pincer.Core.Orchestration.SubAgent do
           | {:parent_workspace_path, String.t()}
           | {:scope, String.t()}
           | {:workspace_path, String.t()}
+          | {:llm_client, module()}
+          | {:tool_registry, module()}
+          | {:storage, module()}
 
   @type state :: %{
           id: String.t(),
           goal: String.t(),
           parent_session_id: String.t() | nil,
           scope: String.t(),
-          workspace_path: String.t()
+          workspace_path: String.t(),
+          worker_pid: pid() | nil,
+          worker_ref: reference() | nil
         }
 
   @doc """
@@ -156,9 +163,6 @@ defmodule Pincer.Core.Orchestration.SubAgent do
     notify_parent_progress(parent_session_id, %{agent_id: id, kind: :started, goal: goal})
     notify_parent(parent_session_id, "🤖 Sub-Agent [#{id}] started working on: #{goal}")
 
-    # Start the Executor, passing *self()* as the session_pid
-    # The Executor will send {:executor_finished, ...} to us.
-    # We construct a history with the goal as the user prompt.
     history = [
       %{
         "role" => "system",
@@ -168,7 +172,18 @@ defmodule Pincer.Core.Orchestration.SubAgent do
       %{"role" => "user", "content" => goal}
     ]
 
-    Executor.start(self(), id, history, workspace_path: workspace_path)
+    executor_opts =
+      [workspace_path: workspace_path, notify?: false]
+      |> maybe_put_opt(:llm_client, Keyword.get(opts, :llm_client))
+      |> maybe_put_opt(:tool_registry, Keyword.get(opts, :tool_registry))
+      |> maybe_put_opt(:storage, Keyword.get(opts, :storage))
+
+    parent = self()
+
+    task =
+      Task.Supervisor.async_nolink(Pincer.Core.TaskSupervisor, fn ->
+        Executor.run(parent, id, history, executor_opts)
+      end)
 
     {:ok,
      %{
@@ -176,7 +191,9 @@ defmodule Pincer.Core.Orchestration.SubAgent do
        goal: goal,
        parent_session_id: parent_session_id,
        scope: scope,
-       workspace_path: workspace_path
+       workspace_path: workspace_path,
+       worker_pid: task.pid,
+       worker_ref: task.ref
      }}
   end
 
@@ -184,7 +201,9 @@ defmodule Pincer.Core.Orchestration.SubAgent do
 
   @doc false
   @impl GenServer
-  def handle_info({:executor_finished, _history, response, _usage}, state) do
+  def handle_info({ref, {:ok, _history, response, _usage}}, %{worker_ref: ref} = state)
+      when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
     Logger.info("[SubAgent #{state.id}] Finished. Posting result.")
     Blackboard.post(state.id, "FINISHED: #{response}", nil, scope: state.scope)
 
@@ -195,23 +214,22 @@ defmodule Pincer.Core.Orchestration.SubAgent do
     })
 
     notify_parent(state.parent_session_id, "✅ Sub-Agent [#{state.id}] finished: #{response}")
-    {:stop, :normal, state}
+    {:stop, :normal, %{state | worker_pid: nil, worker_ref: nil}}
   end
 
   @doc false
   @impl GenServer
-  def handle_info({:executor_failed, reason}, state) do
-    Logger.error("[SubAgent #{state.id}] Failed: #{inspect(reason)}")
-    Blackboard.post(state.id, "FAILED: #{inspect(reason)}", nil, scope: state.scope)
+  def handle_info({ref, {:error, reason}}, %{worker_ref: ref} = state)
+      when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    handle_worker_failure(reason, state)
+  end
 
-    notify_parent_progress(state.parent_session_id, %{
-      agent_id: state.id,
-      kind: :failed,
-      reason: inspect(reason)
-    })
-
-    notify_parent(state.parent_session_id, "❌ Sub-Agent [#{state.id}] failed: #{inspect(reason)}")
-    {:stop, :normal, state}
+  @doc false
+  @impl GenServer
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{worker_ref: ref} = state)
+      when is_reference(ref) do
+    handle_worker_failure(reason, state)
   end
 
   @doc false
@@ -250,6 +268,40 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   def handle_info(_msg, state) do
     {:noreply, state}
   end
+
+  @doc false
+  @impl GenServer
+  def terminate(_reason, state) do
+    if is_reference(state.worker_ref) do
+      Process.demonitor(state.worker_ref, [:flush])
+    end
+
+    if is_pid(state.worker_pid) and Process.alive?(state.worker_pid) do
+      case Task.Supervisor.terminate_child(Pincer.Core.TaskSupervisor, state.worker_pid) do
+        :ok -> :ok
+        {:error, :not_found} -> Process.exit(state.worker_pid, :kill)
+      end
+    end
+
+    :ok
+  end
+
+  defp handle_worker_failure(reason, state) do
+    Logger.error("[SubAgent #{state.id}] Failed: #{inspect(reason)}")
+    Blackboard.post(state.id, "FAILED: #{inspect(reason)}", nil, scope: state.scope)
+
+    notify_parent_progress(state.parent_session_id, %{
+      agent_id: state.id,
+      kind: :failed,
+      reason: inspect(reason)
+    })
+
+    notify_parent(state.parent_session_id, "❌ Sub-Agent [#{state.id}] failed: #{inspect(reason)}")
+    {:stop, :normal, %{state | worker_pid: nil, worker_ref: nil}}
+  end
+
+  defp maybe_put_opt(opts, _key, nil), do: opts
+  defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp notify_parent(nil, _msg), do: :ok
 

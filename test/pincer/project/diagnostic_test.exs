@@ -2,12 +2,16 @@ defmodule Pincer.Core.Project.DiagnosticTest do
   use ExUnit.Case, async: false
   import Mox
 
-  alias Pincer.Core.Project.Server
+  alias Pincer.Core.LLM.CooldownStore
   alias Pincer.Core.Orchestration.Blackboard
+  alias Pincer.Core.Project.Server
 
   setup :set_mox_from_context
 
   setup do
+    original_providers = Application.get_env(:pincer, :llm_providers)
+    original_default = Application.get_env(:pincer, :default_llm_provider)
+
     Application.put_env(:pincer, :llm_providers, %{
       "test" => %{
         adapter: Pincer.LLM.ClientMock,
@@ -25,22 +29,36 @@ defmodule Pincer.Core.Project.DiagnosticTest do
     end
 
     Blackboard.reset()
+    CooldownStore.reset()
+
+    on_exit(fn ->
+      Application.put_env(:pincer, :llm_providers, original_providers)
+      Application.put_env(:pincer, :default_llm_provider, original_default)
+      CooldownStore.reset()
+    end)
+
     :ok
   end
 
   test "Generates ERROR_DIAGNOSTIC when max_retries is reached" do
-    # 1. Mock do Arquiteto
     Pincer.LLM.ClientMock
-    |> stub(:chat_completion, fn _msgs, _model, _config, _tools ->
-      {:ok, %{"content" => "Coder: Fail this task"}}
+    |> stub(:chat_completion, fn
+      [%{"role" => "system", "content" => "You are the Pincer PROJECT ARCHITECT" <> _}],
+      _model,
+      _config,
+      _tools ->
+        {:ok, %{"content" => "Coder: Fail this task"}}
+
+      _msgs, _model, _config, _tools ->
+        {:error, :rate_limit_exceeded}
     end)
     |> stub(:stream_completion, fn _msgs, _model, _config, _tools ->
-      {:ok, [%{"choices" => [%{"delta" => %{"content" => "Coder: Fail this task"}}]}]}
+      {:error, :rate_limit_exceeded}
     end)
 
     id = "p-fail-#{System.unique_integer([:positive])}"
-    # Iniciamos com max_retries: 1 para o teste ser rápido
-    {:ok, _pid} =
+
+    {:ok, pid} =
       Server.start_link(
         id: id,
         session_id: "s-diag",
@@ -48,19 +66,11 @@ defmodule Pincer.Core.Project.DiagnosticTest do
         max_retries: 1
       )
 
-    # 2. Aguarda planejamento e aprova
+    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
+
     wait_for_status(id, :awaiting_approval)
     Server.approve(id)
 
-    # 3. Forçamos a falha do Executor enviando a mensagem de erro diretamente
-    # Espera o worker subir
-    Process.sleep(100)
-
-    # Resolvemos o PID da tupla :via antes de dar o send
-    target_pid = GenServer.whereis(Pincer.Core.Project.Registry.via_tuple(id))
-    send(target_pid, {:executor_failed, :rate_limit_exceeded})
-
-    # 4. Verificamos se o Blackboard recebeu o diagnóstico
     wait_for_status(id, :error)
 
     {messages, _} = Blackboard.fetch_new(0, scope: :all)
@@ -70,10 +80,39 @@ defmodule Pincer.Core.Project.DiagnosticTest do
 
     assert diagnostic_msg != nil
     assert diagnostic_msg.project_id == id
-    # Verificamos que o diagnóstico contém o motivo da falha (seja o forçado ou o real do Mox)
     assert String.contains?(diagnostic_msg.content, "Task failed after")
+    assert String.contains?(diagnostic_msg.content, ":rate_limit_exceeded")
+  end
 
-    IO.puts("\n✅ Diagnóstico gerado com sucesso:\n#{diagnostic_msg.content}")
+  test "ignores stale ref error messages without transitioning status" do
+    Pincer.LLM.ClientMock
+    |> stub(:chat_completion, fn _msgs, _model, _config, _tools ->
+      {:ok, %{"content" => "Coder: Succeed later"}}
+    end)
+
+    id = "p-stale-#{System.unique_integer([:positive])}"
+
+    {:ok, pid} =
+      Server.start_link(
+        id: id,
+        session_id: "s-stale",
+        objective: "Stale ref test",
+        max_retries: 1
+      )
+
+    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
+
+    wait_for_status(id, :awaiting_approval)
+
+    stale_ref = make_ref()
+    send(pid, {stale_ref, {:error, :stale_reason}})
+    send(pid, {:executor_failed, :legacy_reason})
+    send(pid, {:DOWN, stale_ref, :process, self(), :killed})
+
+    {:ok, state} = Server.get_status(id)
+    assert state.status == :awaiting_approval
+    assert state.retry_count == 0
+    assert state.last_error == nil
   end
 
   defp wait_for_status(id, target_status, attempts \\ 20) do

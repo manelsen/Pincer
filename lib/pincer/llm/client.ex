@@ -36,6 +36,7 @@ defmodule Pincer.LLM.Client do
   alias Pincer.Core.Models.Registry, as: ModelRegistry
   alias Pincer.Core.Policy
   alias Pincer.Core.RetryPolicy
+  alias Pincer.Core.Structs.Usage
   alias Pincer.Core.Telemetry, as: CoreTelemetry
 
   @default_max_retries 5
@@ -457,7 +458,7 @@ defmodule Pincer.LLM.Client do
       {:ok, message, usage} when action == :chat_completion ->
         maybe_clear_provider_cooldown(failover_state)
         maybe_clear_auth_profile_cooldown(auth_context)
-        {:ok, Pincer.LLM.ToolParser.parse(message), usage}
+        {:ok, Pincer.LLM.ToolParser.parse(message), Usage.normalize_optional(usage)}
 
       {:ok, stream, usage} when action == :stream_completion ->
         maybe_clear_provider_cooldown(failover_state)
@@ -465,7 +466,7 @@ defmodule Pincer.LLM.Client do
 
         case normalize_success(action, stream) do
           {:ok, normalized} ->
-            {:ok, normalized, usage}
+            {:ok, normalized, Usage.normalize_optional(usage)}
 
           {:error, stream_reason} ->
             maybe_fallback_stream_to_chat(

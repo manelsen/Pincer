@@ -97,6 +97,53 @@ defmodule Pincer.Infra.Config do
   @config_file "config.yaml"
 
   @doc """
+  Recursively normalizes configuration keys to canonical `snake_case` string keys.
+
+  Preserves structs intact and leaves uppercase environment-variable keys
+  (e.g., `"TELEGRAM_BOT_TOKEN"`) untouched. When both a camelCase alias and a
+  canonical `snake_case` key exist in the same map, the canonical key wins.
+  """
+  @spec normalize_keys(term()) :: term()
+  def normalize_keys(%_{} = struct), do: struct
+
+  def normalize_keys(map) when is_map(map) do
+    map
+    |> Enum.map(fn {key, value} ->
+      normalized_key = normalize_key(key)
+      {key_priority(key, normalized_key), normalized_key, normalize_keys(value)}
+    end)
+    |> Enum.sort_by(fn {priority, _key, _value} -> priority end)
+    |> Enum.reduce(%{}, fn {_priority, key, value}, acc ->
+      Map.put(acc, key, value)
+    end)
+  end
+
+  def normalize_keys(list) when is_list(list), do: Enum.map(list, &normalize_keys/1)
+  def normalize_keys(other), do: other
+
+  @doc """
+  Reads and normalizes a YAML configuration file at the boundary.
+  """
+  @spec load_file(String.t()) ::
+          {:ok, map()} | {:error, :enoent | :invalid_root | {:yaml_error, term()}}
+  def load_file(path) when is_binary(path) do
+    if File.exists?(path) do
+      case YamlElixir.read_from_file(path) do
+        {:ok, config} when is_map(config) ->
+          {:ok, normalize_keys(config)}
+
+        {:ok, _other} ->
+          {:error, :invalid_root}
+
+        {:error, reason} ->
+          {:error, {:yaml_error, reason}}
+      end
+    else
+      {:error, :enoent}
+    end
+  end
+
+  @doc """
   Loads configuration from `.env` and `config.yaml` into application environment.
 
   This function should be called once at application startup. It performs
@@ -147,7 +194,9 @@ defmodule Pincer.Infra.Config do
         Logger.warning(".env file not found.")
     end
 
-    case YamlElixir.read_from_file(@config_file) do
+    previous_llm = Application.get_env(:pincer, :llm, %{}) |> normalize_keys()
+
+    case load_file(@config_file) do
       {:ok, config} ->
         Enum.each(config, fn {key, value} ->
           Application.put_env(:pincer, String.to_atom(key), value)
@@ -180,12 +229,11 @@ defmodule Pincer.Infra.Config do
         Application.put_env(:pincer, :tokens, final_tokens)
 
         if llm_config = config["llm"] do
-          # Merge YAML config into existing Application env (from config.exs)
-          current_llm = Application.get_env(:pincer, :llm, %{})
-          merged_llm = Map.merge(current_llm, llm_config)
+          # Merge normalized YAML config into existing Application env
+          merged_llm = Map.merge(previous_llm, llm_config)
           Application.put_env(:pincer, :llm, merged_llm)
 
-          provider = merged_llm["provider"] || merged_llm[:provider] || "openrouter"
+          provider = merged_llm["provider"] || "openrouter"
           Application.put_env(:pincer, :default_llm_provider, provider)
           Logger.info("LLM Provider: #{provider}")
         end
@@ -408,4 +456,26 @@ defmodule Pincer.Infra.Config do
 
     File.write(path, content)
   end
+
+  defp normalize_key(key) when is_atom(key), do: key |> Atom.to_string() |> normalize_key()
+
+  defp normalize_key(key) when is_binary(key) do
+    if Regex.match?(~r/\A[A-Z0-9_]+\z/, key) do
+      key
+    else
+      Macro.underscore(key)
+    end
+  end
+
+  defp normalize_key(key), do: to_string(key)
+
+  defp key_priority(key, normalized_key) when is_binary(key) do
+    if key == normalized_key, do: 2, else: 0
+  end
+
+  defp key_priority(key, normalized_key) when is_atom(key) do
+    if Atom.to_string(key) == normalized_key, do: 1, else: 0
+  end
+
+  defp key_priority(_key, _normalized_key), do: 0
 end

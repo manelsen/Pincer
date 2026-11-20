@@ -9,6 +9,7 @@ defmodule Pincer.Core.SecurityAudit do
   """
 
   alias Pincer.Core.LLM.SkillsSidecarPolicy
+  alias Pincer.Infra.Config
   alias Pincer.Utils.MapHelpers
 
   @type severity :: :ok | :warn | :error
@@ -34,25 +35,13 @@ defmodule Pincer.Core.SecurityAudit do
   @risky_binds MapSet.new(["0.0.0.0", "::", "[::]"])
   @dangerous_flag_paths [
     {"gateway.control_ui.allow_insecure_auth", true,
-     [
-       [:gateway, :control_ui, :allow_insecure_auth],
-       [:gateway, :controlUi, :allowInsecureAuth]
-     ]},
+     ["gateway", "control_ui", "allow_insecure_auth"]},
     {"gateway.control_ui.dangerously_disable_device_auth", true,
-     [
-       [:gateway, :control_ui, :dangerously_disable_device_auth],
-       [:gateway, :controlUi, :dangerouslyDisableDeviceAuth]
-     ]},
+     ["gateway", "control_ui", "dangerously_disable_device_auth"]},
     {"hooks.gmail.allow_unsafe_external_content", true,
-     [
-       [:hooks, :gmail, :allow_unsafe_external_content],
-       [:hooks, :gmail, :allowUnsafeExternalContent]
-     ]},
+     ["hooks", "gmail", "allow_unsafe_external_content"]},
     {"tools.exec.apply_patch.workspace_only", false,
-     [
-       [:tools, :exec, :apply_patch, :workspace_only],
-       [:tools, :exec, :applyPatch, :workspaceOnly]
-     ]}
+     ["tools", "exec", "apply_patch", "workspace_only"]}
   ]
 
   @spec run(keyword()) :: report()
@@ -103,34 +92,33 @@ defmodule Pincer.Core.SecurityAudit do
   end
 
   defp load_config(path) do
-    if File.exists?(path) do
-      case YamlElixir.read_from_file(path) do
-        {:ok, config} when is_map(config) ->
-          {:ok, config, ok_check(:config_yaml, "Config file loaded successfully", %{path: path})}
+    case Config.load_file(path) do
+      {:ok, config} ->
+        {:ok, config, ok_check(:config_yaml, "Config file loaded successfully", %{path: path})}
 
-        {:ok, _other} ->
-          {:error,
-           error_check(
-             :config_yaml,
-             "Config root must be a map/object",
-             %{path: path, reason: :invalid_root}
-           )}
+      {:error, :enoent} ->
+        {:error,
+         error_check(
+           :config_yaml,
+           "Config file not found at #{path}",
+           %{path: path, reason: :enoent}
+         )}
 
-        {:error, reason} ->
-          {:error,
-           error_check(
-             :config_yaml,
-             "Config file is invalid YAML",
-             %{path: path, reason: inspect(reason)}
-           )}
-      end
-    else
-      {:error,
-       error_check(
-         :config_yaml,
-         "Config file not found at #{path}",
-         %{path: path, reason: :enoent}
-       )}
+      {:error, :invalid_root} ->
+        {:error,
+         error_check(
+           :config_yaml,
+           "Config root must be a map/object",
+           %{path: path, reason: :invalid_root}
+         )}
+
+      {:error, {:yaml_error, reason}} ->
+        {:error,
+         error_check(
+           :config_yaml,
+           "Config file is invalid YAML",
+           %{path: path, reason: inspect(reason)}
+         )}
     end
   end
 
@@ -230,9 +218,9 @@ defmodule Pincer.Core.SecurityAudit do
 
   defp gateway_bind_checks(config) do
     bind =
-      read_nested_field(config, [:gateway, :bind]) ||
-        read_nested_field(config, [:server, :bind]) ||
-        MapHelpers.read_field(config, :bind)
+      get_in_path(config, ["gateway", "bind"]) ||
+        get_in_path(config, ["server", "bind"]) ||
+        Map.get(config, "bind")
 
     if MapHelpers.present?(bind) do
       normalized =
@@ -259,10 +247,8 @@ defmodule Pincer.Core.SecurityAudit do
 
   defp dangerous_flag_checks(config) do
     direct_flags =
-      Enum.reduce(@dangerous_flag_paths, [], fn {name, expected_value, candidate_paths}, acc ->
-        value = read_any_path(config, candidate_paths)
-
-        if value == expected_value do
+      Enum.reduce(@dangerous_flag_paths, [], fn {name, expected_value, path}, acc ->
+        if get_in_path(config, path) == expected_value do
           [name | acc]
         else
           acc
@@ -271,19 +257,13 @@ defmodule Pincer.Core.SecurityAudit do
 
     mapping_flags =
       config
-      |> read_any_path([[:hooks, :mappings]])
+      |> get_in_path(["hooks", "mappings"])
       |> case do
         mappings when is_list(mappings) ->
           mappings
           |> Enum.with_index()
           |> Enum.flat_map(fn {mapping, index} ->
-            flag =
-              read_any_path(mapping, [
-                [:allow_unsafe_external_content],
-                [:allowUnsafeExternalContent]
-              ])
-
-            if flag == true do
+            if get_in_path(mapping, ["allow_unsafe_external_content"]) == true do
               ["hooks.mappings[#{index}].allow_unsafe_external_content"]
             else
               []
@@ -307,11 +287,7 @@ defmodule Pincer.Core.SecurityAudit do
   end
 
   defp workspace_restriction_checks(config) do
-    value =
-      read_any_path(config, [
-        [:tools, :restrict_to_workspace],
-        [:tools, :restrictToWorkspace]
-      ])
+    value = get_in_path(config, ["tools", "restrict_to_workspace"])
 
     case value do
       false ->
@@ -353,11 +329,7 @@ defmodule Pincer.Core.SecurityAudit do
   end
 
   defp sidecar_isolation_checks(config) do
-    sidecar_cfg =
-      read_any_path(config, [
-        [:mcp, :servers, :skills_sidecar],
-        [:mcp, :servers, :skillsSidecar]
-      ])
+    sidecar_cfg = get_in_path(config, ["mcp", "servers", "skills_sidecar"])
 
     case sidecar_cfg do
       nil ->
@@ -472,32 +444,16 @@ defmodule Pincer.Core.SecurityAudit do
   defp status_from_counts(%{warn: warnings}) when warnings > 0, do: :warn
   defp status_from_counts(_), do: :ok
 
-  defp read_any_path(_map, []), do: nil
+  defp get_in_path(map, []), do: map
 
-  defp read_any_path(map, [path | rest]) do
-    case read_nested_path(map, path) do
-      nil -> read_any_path(map, rest)
-      value -> value
+  defp get_in_path(map, [key | rest]) when is_map(map) do
+    case Map.get(map, key) do
+      nil -> nil
+      value -> get_in_path(value, rest)
     end
   end
 
-  defp read_nested_path(map, path) when is_list(path) do
-    Enum.reduce_while(path, map, fn key, current ->
-      case MapHelpers.read_field(current, key) do
-        nil -> {:halt, nil}
-        value -> {:cont, value}
-      end
-    end)
-  end
-
-  defp read_nested_field(map, [single]), do: MapHelpers.read_field(map, single)
-
-  defp read_nested_field(map, [head | tail]) do
-    case MapHelpers.read_field(map, head) do
-      next when is_map(next) -> read_nested_field(next, tail)
-      _ -> nil
-    end
-  end
+  defp get_in_path(_other, _path), do: nil
 
   defp ok_check(id, message, meta), do: %{id: id, severity: :ok, message: message, meta: meta}
   defp warn_check(id, message, meta), do: %{id: id, severity: :warn, message: message, meta: meta}

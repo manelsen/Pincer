@@ -20,4 +20,13 @@ defmodule Pincer.Core.EmptyResponseRecoveryPolicyTest do
     assert List.last(retry_history)["role"] == "user"
     assert List.last(retry_history)["content"] =~ "previous reply was empty"
   end
+
+  test "should_retry_tool_only?/2 and safe_limit_scale/1 encode depth recovery gates" do
+    refute EmptyResponseRecoveryPolicy.should_retry_tool_only?(0, false)
+    assert EmptyResponseRecoveryPolicy.should_retry_tool_only?(1, false)
+    refute EmptyResponseRecoveryPolicy.should_retry_tool_only?(1, true)
+
+    assert EmptyResponseRecoveryPolicy.safe_limit_scale(0) == nil
+    assert EmptyResponseRecoveryPolicy.safe_limit_scale(1) == 0.4
+  end
 end

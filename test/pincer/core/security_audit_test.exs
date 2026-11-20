@@ -222,6 +222,48 @@ defmodule Pincer.Core.SecurityAuditTest do
              end)
     end
 
+    test "normalizes camelCase config keys at boundary and detects dangerous flags" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        gateway:
+          controlUi:
+            allowInsecureAuth: true
+        tools:
+          restrictToWorkspace: false
+        channels:
+          telegram:
+            enabled: true
+            token_env: "TELEGRAM_BOT_TOKEN"
+            dm_policy:
+              mode: "allowlist"
+              allow_from: ["123"]
+        """
+      )
+
+      report =
+        SecurityAudit.run(
+          root: tmp,
+          env_fetcher: fn
+            "TELEGRAM_BOT_TOKEN" -> "token"
+            _ -> nil
+          end
+        )
+
+      assert report.status == :error
+
+      assert Enum.any?(report.checks, fn check ->
+               check.id == {:dangerous_flag, "gateway.control_ui.allow_insecure_auth"} and
+                 check.severity == :warn
+             end)
+
+      assert Enum.any?(report.checks, fn check ->
+               check.id == :tools_restrict_workspace and check.severity == :error
+             end)
+    end
+
     test "errors when tools.restrict_to_workspace is disabled" do
       tmp = tmp_dir!()
 

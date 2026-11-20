@@ -98,5 +98,26 @@ defmodule Pincer.Core.PolicyTest do
       assert recovery.reason == :user_denied
       assert recovery.retryable == true
     end
+
+    test "computes stream_fallback plan for overflow, unsupported tools, and normal errors" do
+      assert {:rebuild_prompt, %{safe_limit_scale: 0.15, drop_tools?: true}} =
+               Policy.recover(:stream_fallback, %{
+                 reason: {:http_error, 400, "maximum context length exceeded"},
+                 tools_present?: true
+               })
+
+      assert :drop_tools =
+               Policy.recover(:stream_fallback, %{
+                 reason:
+                   {:http_error, 400, ~s({"error":{"message":"`tool calling` is not supported"}})},
+                 tools_present?: true
+               })
+
+      assert :keep_tools =
+               Policy.recover(:stream_fallback, %{
+                 reason: :unexpected_response_format,
+                 tools_present?: true
+               })
+    end
   end
 end

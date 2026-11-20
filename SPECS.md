@@ -165,3 +165,58 @@ Semantic memory and graph indexing use `Pincer.LLM.Client.generate_embedding/2`.
   for `baai/bge-m3`, the client retries once with `baai/bge-large-en-v1.5`.
 - Both default and fallback models are 1024-dimensional, preserving pgvector
   column compatibility for the current HNSW indexes.
+
+### 9. Execution Context & Correlated Outcomes (`Pincer.Core.Executor.Ctx`, `Pincer.Core.TaskSupervisor`)
+
+`Pincer.Core.Executor` threads an explicit immutable `%Pincer.Core.Executor.Ctx{}`
+struct across every step (loop guard, prompt assembly, stream accumulation,
+tool execution, trace emission), removing process-dictionary dependency injection.
+
+- `Executor.run/4` executes the loop without side-channel duplicate emissions,
+  normalizes `Usage`, emits the trace checkpoint/snapshot once, optionally notifies
+  `session_pid` once (`notify?: true` default, tagged with `ref` when provided),
+  and returns `{:ok, final_history, final_content, usage}` or `{:error, reason}`
+  directly to its caller.
+- Callers (`Session.Server`, `Project.Server`, `Orchestration.SubAgent`, and
+  unsolicited Blackboard/bootstrap evaluations) spawn supervised tasks via
+  `Task.Supervisor.async_nolink(Pincer.Core.TaskSupervisor, ...)` with
+  `notify?: false` and correlate `{ref, result}` and `{:DOWN, ref, ...}` messages
+  strictly by monitor reference.
+
+### 10. Session Decomposition (`Session.History`, `Session.Approval`, `Session.Blackboard`, `PromptAssembly`)
+
+`Pincer.Core.Session.Server` delegates non-GenServer concerns to focused modules:
+
+- `Pincer.Core.PromptAssembly` builds the base system prompt (`build_system_prompt/1`,
+  `bootstrap_active?/2`) and prepares/prunes LLM prompt histories (`prepare/3`).
+- `Pincer.Core.Session.History` owns transcript loading, user/assistant persistence,
+  reset snapshots, sliding-window pruning, system prompt hot-swap, and workspace
+  file reference resolution.
+- `Pincer.Core.Session.Approval` owns approval parsing, TTL auto-approval, and
+  pending approval state transitions.
+- `Pincer.Core.Session.Blackboard` owns Blackboard progress ingestion, journal
+  formatting, and pure LLM evaluation of unsolicited updates (`evaluate_update/3`).
+
+### 11. Parameterized Registry (`Pincer.Core.Registry`)
+
+`Pincer.Core.Registry` is a single parameterized registry wrapper supporting both
+`:horde` (default, cluster-wide via `Horde.Registry`) and `:local` (via Elixir
+`Registry`) backends with `keys: :unique`, replacing per-domain registry wrappers.
+
+### 12. Boundary Normalization (`Pincer.Infra.Config`, `Pincer.Core.Structs.Usage`)
+
+External payloads are normalized once at ingestion boundaries:
+
+- `Pincer.Infra.Config.load_file/1` and `normalize_keys/1` convert YAML and merged
+  configuration keys to canonical `snake_case` strings at load time (preserving
+  structs and uppercase env-var keys), eliminating camelCase/snake_case dual lookups.
+- `Pincer.Core.Structs.Usage` defines `%Usage{prompt_tokens, completion_tokens, total_tokens}`
+  normalized once at `Pincer.LLM.Client`, `Executor`, and `Session.Preferences` boundaries.
+- `model_override` is normalized to atom-keyed maps (`%{provider: ..., model: ...}`).
+
+### 13. Channel-Owned Formatting (`Pincer.Channels.Telegram.ResponseEnvelope`)
+
+Telegram HTML usage-footer formatting and reasoning delivery options reside in
+`Pincer.Channels.Telegram.ResponseEnvelope` inside `packages/pincer_telegram`,
+keeping `Pincer.Core` transport-agnostic (plain text + structured `%Usage{}`).
+

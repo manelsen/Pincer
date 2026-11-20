@@ -16,7 +16,9 @@ defmodule Pincer.Core.Policy do
 
   alias Pincer.Core.AccessPolicy
   alias Pincer.Core.ChannelEventPolicy
+  alias Pincer.Core.ContextOverflowRecovery
   alias Pincer.Core.EmptyResponseRecoveryPolicy
+  alias Pincer.Core.ErrorClass
   alias Pincer.Core.RetryPolicy
   alias Pincer.Core.SessionScopePolicy
   alias Pincer.Core.StatusMessagePolicy
@@ -112,6 +114,22 @@ defmodule Pincer.Core.Policy do
       retryable: true,
       suggested_action: "request_approval_and_retry"
     }
+  end
+
+  def recover(:stream_fallback, %{reason: reason} = attrs) do
+    tools_present? = Map.get(attrs, :tools_present?, false)
+
+    case ContextOverflowRecovery.plan(reason, tools_present?: tools_present?) do
+      {:retry, plan} ->
+        {:rebuild_prompt, plan}
+
+      :noop ->
+        if ErrorClass.classify(reason) == :tool_calling_unsupported do
+          :drop_tools
+        else
+          :keep_tools
+        end
+    end
   end
 
   def recover(_kind, _attrs), do: {:error, :unsupported_recovery_policy}

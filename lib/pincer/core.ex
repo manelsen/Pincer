@@ -38,7 +38,6 @@ defmodule Pincer.Core do
       ToolResultSummary,
       ToolOnlyOutcomeFormatter,
       ToolAnswerPatternPolicy,
-      ResponseEnvelope,
       StatusMessagePolicy,
       StatusDelivery,
       RetryPolicy,
@@ -69,9 +68,6 @@ defmodule Pincer.Core do
       Orchestration.Blackboard,
       Orchestration.SubAgent,
       Orchestration.Scheduler,
-      Graph.State,
-      Graph.Nodes,
-      Graph.Runner,
       Graph.Sync,
       Graph.Watcher,
       Heartbeat.GitHubWatcher,
@@ -81,9 +77,8 @@ defmodule Pincer.Core do
       ConversationObservability,
       Cluster,
       Cluster.NodeObserver,
+      Registry,
       Session.HordeSupervisor,
-      Session.HordeRegistry,
-      Project.HordeSupervisor,
-      Project.HordeRegistry
+      Project.HordeSupervisor
     ]
 end

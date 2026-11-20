@@ -6,10 +6,41 @@ defmodule Pincer.Core.TurnOutcomePolicy do
   tool execution, and channel transport concerns.
   """
 
+  alias Pincer.Utils.Text
+
   @type outcome ::
           {:final_text, String.t()}
           | {:tool_only, [map()]}
           | {:error, :empty_response}
+
+  @doc """
+  Merges streamed content and reasoning without leaking reasoning-only output.
+  """
+  @spec merge_reasoning_and_content(String.t(), String.t()) :: String.t()
+  def merge_reasoning_and_content("", ""), do: ""
+  def merge_reasoning_and_content(content, "") when is_binary(content), do: content
+
+  def merge_reasoning_and_content(content, reasoning)
+      when is_binary(content) and is_binary(reasoning) do
+    cond do
+      String.trim(reasoning) == "" -> content
+      String.trim(content) != "" -> content
+      true -> ""
+    end
+  end
+
+  @doc """
+  Returns `true` when `text` contains no visible characters outside reasoning tags.
+  """
+  @spec reasoning_only?(term()) :: boolean()
+  def reasoning_only?(text) when is_binary(text) do
+    text
+    |> Text.strip_reasoning()
+    |> to_string()
+    |> String.trim() == ""
+  end
+
+  def reasoning_only?(_text), do: false
 
   @spec resolve(map()) :: outcome()
   def resolve(attrs) when is_map(attrs) do

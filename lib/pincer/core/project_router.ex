@@ -6,6 +6,7 @@ defmodule Pincer.Core.ProjectRouter do
   require Logger
   alias Pincer.Core.Project.Server, as: ProjectServer
   alias Pincer.Core.ProjectOrchestrator
+  alias Pincer.Core.Structs.Usage
 
   @doc """
   Parses a textual command into a structured `{:ok, command, args}` tuple.
@@ -169,30 +170,31 @@ defmodule Pincer.Core.ProjectRouter do
       {:ok, state} ->
         # Resolve active model/provider
         {active_provider, active_model} =
-          if state.model_override do
-            {state.model_override["provider"] || state.model_override[:provider],
-             state.model_override["model"] || state.model_override[:model]}
-          else
-            llm_config = Application.get_env(:pincer, :llm, %{})
+          case state.model_override do
+            %{provider: provider, model: model} ->
+              {provider, model}
 
-            provider =
-              llm_config["provider"] ||
-                Application.get_env(:pincer, :default_llm_provider, "openrouter")
+            _ ->
+              llm_config = Application.get_env(:pincer, :llm, %{})
 
-            # Get default model for this provider from registry/config
-            model =
-              case llm_config[provider] do
-                %{"default_model" => m} -> m
-                _ -> "default"
-              end
+              provider =
+                llm_config["provider"] ||
+                  Application.get_env(:pincer, :default_llm_provider, "openrouter")
 
-            {provider, model}
+              # Get default model for this provider from registry/config
+              model =
+                case llm_config[provider] do
+                  %{"default_model" => m} -> m
+                  _ -> "default"
+                end
+
+              {provider, model}
           end
 
         status = if state.status == :working, do: "working", else: "idle"
 
-        in_t = Map.get(state.token_usage_total || %{}, "prompt_tokens", 0)
-        out_t = Map.get(state.token_usage_total || %{}, "completion_tokens", 0)
+        %Usage{prompt_tokens: in_t, completion_tokens: out_t} =
+          Usage.normalize(state.token_usage_total)
 
         thinking = state.thinking_level || "off"
         reasoning = if state.reasoning_visible, do: "visible", else: "hidden"

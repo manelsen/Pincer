@@ -39,7 +39,7 @@ defmodule Pincer.Core.Session.HordeSupervisor do
   @doc "Terminate a session cluster-wide."
   @spec stop_session(String.t()) :: :ok | {:error, :not_found}
   def stop_session(session_id) do
-    case Horde.Registry.lookup(Pincer.Core.Session.HordeRegistry, session_id) do
+    case Pincer.Core.Registry.lookup(Pincer.Core.Session.HordeRegistry, session_id, :horde) do
       [{pid, _}] -> Horde.DynamicSupervisor.terminate_child(__MODULE__, pid)
       [] -> {:error, :not_found}
     end

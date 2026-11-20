@@ -7,6 +7,22 @@ defmodule Pincer.Core.ToolAnswerPatternPolicy do
   @github_tool_names ~w(github get_issue get_pr list_issues list_prs list_commits search_code)
   @git_tool_names ~w(git_inspect)
 
+  @base_grounding_prompt "[system] Ground yourself strictly in the tool outputs above. Do not invent files, results, success, or side effects. If a tool failed, found nothing, or returned limited data, say that plainly."
+
+  @doc """
+  Builds the post-tool grounding user message injected after tool results.
+  """
+  @spec grounding_message([map()]) :: map()
+  def grounding_message(tool_results) when is_list(tool_results) do
+    content =
+      case build(tool_results) do
+        "" -> @base_grounding_prompt
+        extra -> "#{@base_grounding_prompt}\n\n#{extra}"
+      end
+
+    %{"role" => "user", "content" => content}
+  end
+
   @doc """
   Returns extra grounding text for the given tool messages.
   """

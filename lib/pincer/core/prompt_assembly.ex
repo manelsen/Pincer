@@ -14,6 +14,92 @@ defmodule Pincer.Core.PromptAssembly do
   @max_recent_messages 15
 
   @doc """
+  Returns `true` when the workspace bootstrap ritual is still active.
+
+  Once both `IDENTITY.md` and `SOUL.md` exist inside `.pincer/`, bootstrap is
+  considered complete even if `BOOTSTRAP.md` remains on disk.
+  """
+  @spec bootstrap_active?(String.t(), keyword()) :: boolean()
+  def bootstrap_active?(workspace_path, opts \\ []) when is_binary(workspace_path) do
+    has_identity? = File.exists?(AgentPaths.identity_path(workspace_path))
+    has_soul? = File.exists?(AgentPaths.soul_path(workspace_path))
+
+    if has_identity? and has_soul? do
+      false
+    else
+      AgentPaths.bootstrap_active?(workspace_path, opts)
+    end
+  end
+
+  @doc """
+  Builds the initial system prompt from workspace persona files, introspective
+  `self_state`, and active learned lessons.
+  """
+  @spec build_system_prompt(keyword()) :: String.t()
+  def build_system_prompt(opts) when is_list(opts) do
+    workspace = Keyword.get(opts, :workspace_path, File.cwd!())
+    root_agent_id = Keyword.get(opts, :root_agent_id, "default")
+    self_state = Keyword.get(opts, :self_state)
+    lesson_store = Keyword.get(opts, :lesson_store, Pincer.Core.Introspection.LessonStore)
+
+    identity = AgentPaths.read_file(AgentPaths.identity_path(workspace))
+    soul = AgentPaths.read_file(AgentPaths.soul_path(workspace))
+    user = AgentPaths.read_file(AgentPaths.user_path(workspace))
+    style = AgentPaths.read_file(AgentPaths.style_path(workspace))
+    history = AgentPaths.read_file(AgentPaths.history_path(workspace))
+
+    bootstrap =
+      if bootstrap_active?(workspace) do
+        AgentPaths.read_file(AgentPaths.bootstrap_path(workspace))
+      else
+        ""
+      end
+
+    prompt =
+      """
+      #{if bootstrap != "", do: "!!! BOOTSTRAP MODE ACTIVE !!!\n#{bootstrap}\n", else: ""}
+
+      # YOUR CURRENT IDENTITY
+      #{identity}
+
+      ## SOUL:
+      #{soul}
+
+      ## USER:
+      #{user}
+
+      #{if style != "", do: "## COMMUNICATION STYLE:\n#{style}\n", else: ""}
+      #{if history != "", do: "## SESSION HISTORY:\n#{history}\n", else: ""}
+      #{self_state_section(self_state)}
+      #{lessons_section(root_agent_id, lesson_store)}
+      ## CAPABILITIES & TOOLS:
+      You are a technical agent with access to multiple tools through the Model Context Protocol (MCP) and native Elixir integrations.
+      You can read and write files, execute shell commands, manage projects, and more.
+      Never claim you don't have tools; if a task requires technical action, you must use the available tools to perform it.
+
+      **CRITICAL RULE - ALWAYS RESPOND**: After using any tool, you MUST provide a final textual response to the user summarizing what you did and showing relevant results. NEVER finish with an empty message if you performed actions.
+
+      **Example of correct behavior:**
+      - User asks: "Leia o arquivo config.txt"
+      - You use: file_system tool to read config.txt
+      - You MUST respond: "✅ Li o arquivo config.txt. Ele contém: [conteúdo resumido]"
+
+      **WRONG behavior (NEVER do this):**
+      - Use file_system tool
+      - Return empty response ❌
+
+      **CHAT POLICY**:
+      - To talk to the current user in this session, just write plain text normally.
+      - NEVER use `channel_actions` to talk to the user you are currently chatting with. That tool is only for sending messages to DIFFERENT channels or users.
+      - **NEVER** return empty content after using tools. Always explain what you did.
+      """
+      |> String.trim()
+
+    Logger.debug("[SESSION] GENERATED SYSTEM PROMPT:\n#{prompt}")
+    prompt
+  end
+
+  @doc """
   Prunes and augments prompt history before the executor sends it to the model.
 
   The returned history preserves the latest relevant conversation plus injected
@@ -22,7 +108,7 @@ defmodule Pincer.Core.PromptAssembly do
   """
   @spec prepare([map()], map() | nil, keyword()) :: [map()]
   def prepare(history, model_override, opts \\ []) do
-    long_term_memory = Keyword.get(opts, :long_term_memory, Process.get(:long_term_memory, ""))
+    long_term_memory = Keyword.get(opts, :long_term_memory, "")
     current_time = Keyword.get(opts, :current_time, DateTime.utc_now() |> DateTime.to_string())
     llm_client = Keyword.get(opts, :llm_client, Pincer.Ports.LLM)
     active_provider = get_active_provider(model_override)
@@ -61,8 +147,7 @@ defmodule Pincer.Core.PromptAssembly do
   defp augment_history(history, memory, time, opts) do
     case history do
       [%{"role" => "system", "content" => content} = sys | rest] ->
-        workspace_path =
-          Keyword.get(opts, :workspace_path, Process.get(:workspace_path, File.cwd!()))
+        workspace_path = Keyword.get(opts, :workspace_path, File.cwd!())
 
         runtime_memory =
           if memory != "" do
@@ -78,7 +163,8 @@ defmodule Pincer.Core.PromptAssembly do
         recall =
           memory_recall.build(history,
             workspace_path: workspace_path,
-            learnings_count: learnings_count
+            learnings_count: learnings_count,
+            telemetry_session_id: Keyword.get(opts, :session_id)
           ).prompt_block
 
         new_content =
@@ -124,49 +210,29 @@ defmodule Pincer.Core.PromptAssembly do
   defp prune_history([], _safe_limit, _opts), do: []
 
   defp prune_history([%{"role" => "system"} = system_msg | rest], safe_limit, opts) do
-    if Keyword.get(opts, :context_strategy) == :conversation_summary and
-         length(rest) > 30 do
+    if Keyword.get(opts, :context_strategy) == :conversation_summary and length(rest) > 30 do
       summarize_and_prune(system_msg, rest, safe_limit, opts)
     else
-      recent_messages =
-        if length(rest) > @max_recent_messages do
-          Enum.drop(rest, length(rest) - @max_recent_messages)
-        else
-          rest
-        end
-
-      reversed_recent = Enum.reverse(recent_messages)
-
-      {kept_messages, _tokens} =
-        Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
-          msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
-          new_total = acc_tokens + msg_tokens
-
-          if new_total <= safe_limit or acc_msgs == [] do
-            {:cont, {[msg | acc_msgs], new_total}}
-          else
-            {:halt, {acc_msgs, acc_tokens}}
-          end
-        end)
-
-      [system_msg | kept_messages]
+      [system_msg | take_recent_within_budget(rest, safe_limit)]
     end
   end
 
   defp prune_history(history, safe_limit, _opts) do
-    recent_messages =
-      if length(history) > @max_recent_messages do
-        Enum.drop(history, length(history) - @max_recent_messages)
-      else
-        history
-      end
+    take_recent_within_budget(history, safe_limit)
+  end
 
-    reversed_recent = Enum.reverse(recent_messages)
+  defp take_recent_within_budget(messages, safe_limit) do
+    messages
+    |> Enum.take(-@max_recent_messages)
+    |> take_within_budget(safe_limit)
+  end
 
+  defp take_within_budget(messages, safe_limit) do
     {kept_messages, _tokens} =
-      Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
-        msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
-        new_total = acc_tokens + msg_tokens
+      messages
+      |> Enum.reverse()
+      |> Enum.reduce_while({[], 0}, fn msg, {acc_msgs, acc_tokens} ->
+        new_total = acc_tokens + Pincer.Utils.Tokenizer.estimate(msg)
 
         if new_total <= safe_limit or acc_msgs == [] do
           {:cont, {[msg | acc_msgs], new_total}}
@@ -180,7 +246,7 @@ defmodule Pincer.Core.PromptAssembly do
 
   defp summarize_and_prune(system_msg, rest, safe_limit, opts) do
     recent_count = min(@max_recent_messages, length(rest))
-    recent_messages = Enum.drop(rest, length(rest) - recent_count)
+    recent_messages = Enum.take(rest, -recent_count)
     to_summarize = Enum.drop(rest, recent_count)
 
     messages_text =
@@ -209,21 +275,7 @@ defmodule Pincer.Core.PromptAssembly do
         "content" => "## Previous Conversation Summary\n\n#{summary}"
       }
 
-      reversed_recent = Enum.reverse(recent_messages)
-
-      {kept_messages, _tokens} =
-        Enum.reduce_while(reversed_recent, {[], 0}, fn msg, {acc_msgs, acc_tokens} ->
-          msg_tokens = Pincer.Utils.Tokenizer.estimate(msg)
-          new_total = acc_tokens + msg_tokens
-
-          if new_total <= safe_limit or acc_msgs == [] do
-            {:cont, {[msg | acc_msgs], new_total}}
-          else
-            {:halt, {acc_msgs, acc_tokens}}
-          end
-        end)
-
-      [system_msg, summary_msg | kept_messages]
+      [system_msg, summary_msg | take_within_budget(recent_messages, safe_limit)]
     else
       prune_history([system_msg | rest], safe_limit, [])
     end
@@ -244,5 +296,37 @@ defmodule Pincer.Core.PromptAssembly do
       {:ok, %{"content" => content}, _usage} when is_binary(content) -> {:ok, content}
       _ -> {:error, :summary_failed}
     end
+  end
+
+  defp self_state_section(nil), do: ""
+
+  defp self_state_section(self_state) do
+    context = Pincer.Core.Introspection.SelfState.to_prompt_context(self_state)
+
+    if context == "" do
+      ""
+    else
+      """
+      ## INTERNAL STATE:
+      #{context}
+      """
+    end
+  end
+
+  defp lessons_section(agent_id, lesson_store) do
+    case lesson_store.top_lessons(agent_id, 5, min_confidence: 0.4) do
+      [] ->
+        ""
+
+      lessons ->
+        items = Enum.map_join(lessons, "\n", fn l -> "- #{l.content}" end)
+
+        """
+        ## LESSONS FROM EXPERIENCE:
+        #{items}
+        """
+    end
+  rescue
+    _ -> ""
   end
 end

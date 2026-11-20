@@ -141,7 +141,7 @@ defmodule Pincer.Core.Session.Supervisor do
   """
   @spec stop_session(session_id()) :: :ok | {:error, :not_found}
   def stop_session(session_id) do
-    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
+    case Pincer.Core.Registry.lookup(Pincer.Core.Session.Registry, session_id, :local) do
       [{pid, _}] -> DynamicSupervisor.terminate_child(__MODULE__, pid)
       [] -> {:error, :not_found}
     end

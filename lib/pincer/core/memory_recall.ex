@@ -103,13 +103,14 @@ defmodule Pincer.Core.MemoryRecall do
   """
   @spec explain([map()], keyword()) :: explain_result()
   def explain(history, opts \\ []) do
-    workspace_path = Keyword.get(opts, :workspace_path, Process.get(:workspace_path, File.cwd!()))
+    workspace_path = Keyword.get(opts, :workspace_path, File.cwd!())
     storage = Keyword.get(opts, :storage, Pincer.Ports.Storage)
     embedding_fun = Keyword.get(opts, :embedding_fun, &default_embedding/1)
     telemetry = Keyword.get(opts, :telemetry, Telemetry)
     limit = Keyword.get(opts, :limit, @default_limit)
     learnings_count = Keyword.get(opts, :learnings_count, 0)
-    session_id = Keyword.get(opts, :session_id, Process.get(:session_id))
+    session_id_filter = Keyword.get(opts, :session_id)
+    telemetry_session_id = Keyword.get(opts, :telemetry_session_id, session_id_filter)
     emit_telemetry? = Keyword.get(opts, :emit_telemetry?, true)
 
     query = last_user_query(history)
@@ -125,10 +126,10 @@ defmodule Pincer.Core.MemoryRecall do
         )
 
         recall_hits(storage, embedding_fun, query, limit, telemetry,
-          session_id: session_id,
+          session_id: telemetry_session_id,
           query_length: query_length,
           emit_telemetry?: emit_telemetry?,
-          session_id_filter: Keyword.get(opts, :session_id),
+          session_id_filter: session_id_filter,
           memory_type: Keyword.get(opts, :memory_type),
           include_forgotten: Keyword.get(opts, :include_forgotten, false)
         )
@@ -167,7 +168,7 @@ defmodule Pincer.Core.MemoryRecall do
         },
         %{
           eligible: recall?,
-          session_id: session_id,
+          session_id: telemetry_session_id,
           query_length: query_length
         }
       )
@@ -340,8 +341,12 @@ defmodule Pincer.Core.MemoryRecall do
   end
 
   defp document_search_opts(opts) do
-    opts
-    |> Keyword.take([:memory_type, :session_id, :include_forgotten])
+    base = Keyword.take(opts, [:memory_type, :include_forgotten])
+
+    case Keyword.get(opts, :session_id_filter) do
+      nil -> base
+      sid -> Keyword.put(base, :session_id, sid)
+    end
   end
 
   defp filter_message_hits(hits, opts) do

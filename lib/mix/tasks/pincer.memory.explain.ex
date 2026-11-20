@@ -41,7 +41,7 @@ defmodule Mix.Tasks.Pincer.Memory.Explain do
     end
 
     [
-      workspace_path: opts[:workspace_path] || Process.get(:workspace_path, File.cwd!()),
+      workspace_path: opts[:workspace_path] || File.cwd!(),
       limit: opts[:limit] || 5,
       session_id: opts[:session_id]
     ]

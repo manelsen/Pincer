@@ -26,6 +26,7 @@ defmodule Pincer.Core.Doctor do
           run_id: String.t()
         }
 
+  alias Pincer.Infra.Config
   alias Pincer.Utils.MapHelpers
 
   @default_config_file "config.yaml"
@@ -202,8 +203,11 @@ defmodule Pincer.Core.Doctor do
   end
 
   defp load_config(path) do
-    cond do
-      not File.exists?(path) ->
+    case Config.load_file(path) do
+      {:ok, config} ->
+        {:ok, config, ok_check(:config_yaml, "Config file loaded successfully", %{path: path})}
+
+      {:error, :enoent} ->
         {:error,
          error_check(
            :config_yaml,
@@ -211,28 +215,21 @@ defmodule Pincer.Core.Doctor do
            %{path: path, reason: :enoent}
          )}
 
-      true ->
-        case YamlElixir.read_from_file(path) do
-          {:ok, config} when is_map(config) ->
-            {:ok, config,
-             ok_check(:config_yaml, "Config file loaded successfully", %{path: path})}
+      {:error, :invalid_root} ->
+        {:error,
+         error_check(
+           :config_yaml,
+           "Config root must be a map/object",
+           %{path: path, reason: :invalid_root}
+         )}
 
-          {:ok, _config} ->
-            {:error,
-             error_check(
-               :config_yaml,
-               "Config root must be a map/object",
-               %{path: path, reason: :invalid_root}
-             )}
-
-          {:error, reason} ->
-            {:error,
-             error_check(
-               :config_yaml,
-               "Config file is invalid YAML",
-               %{path: path, reason: inspect(reason)}
-             )}
-        end
+      {:error, {:yaml_error, reason}} ->
+        {:error,
+         error_check(
+           :config_yaml,
+           "Config file is invalid YAML",
+           %{path: path, reason: inspect(reason)}
+         )}
     end
   end
 

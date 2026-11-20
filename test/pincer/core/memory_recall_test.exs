@@ -264,4 +264,53 @@ defmodule Pincer.Core.MemoryRecallTest do
     assert result.prompt_block =~ "graph lib/pincer/deploy.ex"
     assert result.prompt_block =~ "Raise timeout to 60 seconds"
   end
+
+  defmodule TelemetrySpy do
+    def emit_memory_search(_m, _meta), do: :ok
+
+    def emit_memory_recall(_measurements, metadata) do
+      send(self(), {:recall_telemetry_meta, metadata})
+      :ok
+    end
+  end
+
+  test "explain/2 ignores process dictionary workspace_path and session_id fallbacks", %{
+    workspace: workspace
+  } do
+    Process.put(:workspace_path, workspace)
+    Process.put(:session_id, "pd_session_leak")
+
+    on_exit(fn ->
+      Process.delete(:workspace_path)
+      Process.delete(:session_id)
+    end)
+
+    result =
+      MemoryRecall.explain(
+        [%{role: "user", content: "What do we remember about deploy failures?"}],
+        storage: StorageStub,
+        embedding_fun: fn _query -> {:ok, [1.0, 0.0]} end,
+        telemetry: TelemetrySpy
+      )
+
+    refute result.user_memory =~ "Prefers short answers."
+    assert_received {:recall_telemetry_meta, %{session_id: nil}}
+  end
+
+  test "explain/2 tags telemetry_session_id without filtering cross-session message hits", %{
+    workspace: workspace
+  } do
+    result =
+      MemoryRecall.explain(
+        [%{role: "user", content: "What do we remember about deploy failures?"}],
+        workspace_path: workspace,
+        storage: StorageStub,
+        embedding_fun: fn _query -> {:ok, [1.0, 0.0]} end,
+        telemetry: TelemetrySpy,
+        telemetry_session_id: "active_session"
+      )
+
+    assert Enum.any?(result.source_hits.messages, &(&1.source == "session:s-1:message:42"))
+    assert_received {:recall_telemetry_meta, %{session_id: "active_session"}}
+  end
 end

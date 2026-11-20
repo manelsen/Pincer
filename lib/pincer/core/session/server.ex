@@ -2,24 +2,108 @@ defmodule Pincer.Core.Session.Server do
   @moduledoc """
   Core session GenServer implementing the Pincer Brain (The Maestro).
 
-  The Maestro orchestrates conversation, manages sub-agents via the Blackboard,
-  and delegates long-running projects to dedicated Project.Server processes.
-  It is designed to be 100% responsive and resilient to hot-reloads.
+  The Maestro orchestrates conversation lifecycle, manages supervised executor
+  and unsolicited-evaluation tasks via `Task.Supervisor.async_nolink/2` with
+  reference correlation, and delegates persistence, prompt rendering, tool
+  approvals, and Blackboard ingestion to focused `Session.*` / `PromptAssembly`
+  modules.
   """
   use GenServer, restart: :transient
   require Logger
 
-  alias Pincer.Ports.LLM
-  alias Pincer.Ports.Storage
   alias Pincer.Core.AgentPaths
-  alias Pincer.Core.Telemetry
+  alias Pincer.Core.AlignmentIntegrity
   alias Pincer.Core.ErrorUX
   alias Pincer.Core.Executor
   alias Pincer.Core.Introspection
-  alias Pincer.Core.SubAgentProgress
-  alias Pincer.Infra.PubSub
-  alias Pincer.Core.Orchestration.Blackboard
   alias Pincer.Core.Orchestration.Archivist
+  alias Pincer.Core.Orchestration.Blackboard
+  alias Pincer.Core.ProjectRouter
+  alias Pincer.Core.PromptAssembly
+  alias Pincer.Core.Registry, as: CoreRegistry
+  alias Pincer.Core.Session.Approval, as: SessionApproval
+  alias Pincer.Core.Session.Blackboard, as: SessionBlackboard
+  alias Pincer.Core.Session.History, as: SessionHistory
+  alias Pincer.Core.Session.Preferences
+  alias Pincer.Core.Structs.IncomingMessage
+  alias Pincer.Core.Structs.Usage
+  alias Pincer.Core.Telemetry
+  alias Pincer.Infra.PubSub
+  alias Pincer.Ports.Storage
+
+  @task_supervisor Pincer.Core.TaskSupervisor
+
+  @doc false
+  defdelegate bootstrap_active?(workspace_path, opts \\ []), to: PromptAssembly
+
+  # --- Public API ---
+
+  @doc """
+  Starts a supervised session GenServer registered locally by `opts[:session_id]`.
+  """
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(opts),
+    do: GenServer.start_link(__MODULE__, opts, name: via_tuple(opts[:session_id]))
+
+  @doc """
+  Queues or processes an incoming user message or approval response for `id`.
+  """
+  @spec process_input(String.t(), IncomingMessage.t() | String.t()) :: term()
+  def process_input(id, input), do: GenServer.call(via_tuple(id), {:process_input, input})
+
+  @doc """
+  Returns the current `{:ok, state}` snapshot for session `id`.
+  """
+  @spec get_status(String.t()) :: {:ok, map()}
+  def get_status(id), do: GenServer.call(via_tuple(id), :get_status)
+
+  @doc """
+  Resets persisted and in-memory conversation history for session `id`.
+  """
+  @spec reset(String.t()) :: :ok
+  def reset(id), do: GenServer.call(via_tuple(id), :reset)
+
+  @doc """
+  Updates the session's active LLM `provider` and `model` override, notifying any running worker.
+  """
+  @spec set_model(String.t(), String.t(), String.t()) :: :ok
+  def set_model(id, provider, model),
+    do: GenServer.call(via_tuple(id), {:set_model, provider, model}, 15_000)
+
+  @doc """
+  Sets the session thinking level preference.
+  """
+  @spec set_thinking(String.t(), String.t() | nil) :: :ok
+  def set_thinking(id, level), do: GenServer.call(via_tuple(id), {:set_thinking, level})
+
+  @doc """
+  Toggles visibility of model reasoning tokens for session `id`.
+  """
+  @spec set_reasoning_visible(String.t(), boolean()) :: :ok
+  def set_reasoning_visible(id, visible),
+    do: GenServer.call(via_tuple(id), {:set_reasoning_visible, visible})
+
+  @doc """
+  Toggles verbose runtime notifications (such as failover notices) for session `id`.
+  """
+  @spec set_verbose(String.t(), boolean()) :: :ok
+  def set_verbose(id, verbose), do: GenServer.call(via_tuple(id), {:set_verbose, verbose})
+
+  @doc """
+  Sets token usage footer display mode for session `id`.
+  """
+  @spec set_usage(String.t(), term()) :: :ok
+  def set_usage(id, level), do: GenServer.call(via_tuple(id), {:set_usage, level})
+
+  @doc """
+  Enables auto-approval for privileged tools for `duration_seconds`.
+  """
+  @spec approve_all(String.t(), pos_integer()) :: :ok
+  def approve_all(id, duration_seconds \\ 600),
+    do: GenServer.call(via_tuple(id), {:approve_all, duration_seconds})
+
+  # --- Server Callbacks ---
+
   @impl true
   def init(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
@@ -27,50 +111,51 @@ defmodule Pincer.Core.Session.Server do
     Logger.metadata(session_id: session_id)
     workspace_path = Keyword.get(opts, :workspace_path, AgentPaths.workspace_root(root_agent_id))
     bootstrap? = Keyword.get(opts, :bootstrap?, true)
-    principal_ref = Keyword.get(opts, :principal_ref)
-    conversation_ref = Keyword.get(opts, :conversation_ref)
     blackboard_scope = Keyword.get(opts, :blackboard_scope, root_agent_id)
-    llm_client = Keyword.get(opts, :llm_client)
 
-    ensure_opts = [bootstrap?: bootstrap?]
+    AgentPaths.ensure_workspace!(workspace_path, bootstrap?: bootstrap?)
 
-    AgentPaths.ensure_workspace!(workspace_path, ensure_opts)
-
-    # 1. Retrieve persisted messages
-    persisted = Storage.get_messages(session_id)
-
-    # 1b. Start Consciousness Kernel and register this session
     Introspection.Kernel.ensure_started(root_agent_id)
     Introspection.Kernel.register_session(root_agent_id, self())
     self_state = Introspection.Kernel.get_self_state(root_agent_id)
 
-    # 1c. Verify alignment integrity (non-blocking)
     verify_alignment_integrity(workspace_path, session_id)
 
-    # 2. Subscribe to PubSub topics
     PubSub.subscribe("session:#{session_id}")
     PubSub.subscribe("system:updates")
 
-    # 3. Initial state
-    prefs = Pincer.Core.Session.Preferences.load(workspace_path)
+    prefs = Preferences.load(workspace_path)
 
     if prefs.model_override do
       Logger.info(
-        "[SESSION] #{session_id} loaded model preference: #{prefs.model_override["provider"] || prefs.model_override[:provider]}:#{prefs.model_override["model"] || prefs.model_override[:model]}"
+        "[SESSION] #{session_id} loaded model preference: #{prefs.model_override.provider}:#{prefs.model_override.model}"
       )
     end
+
+    watcher_pid = maybe_start_graph_watcher(workspace_path)
+
+    system_prompt =
+      PromptAssembly.build_system_prompt(
+        workspace_path: workspace_path,
+        root_agent_id: root_agent_id,
+        self_state: self_state
+      )
+
+    {history, fresh?} = SessionHistory.load(session_id, system_prompt)
 
     state = %{
       mode: :normal,
       session_id: session_id,
       root_agent_id: root_agent_id,
-      principal_ref: principal_ref,
-      conversation_ref: conversation_ref,
+      principal_ref: Keyword.get(opts, :principal_ref),
+      conversation_ref: Keyword.get(opts, :conversation_ref),
       workspace_path: workspace_path,
       blackboard_scope: blackboard_scope,
-      history: [],
+      history: history,
       status: :idle,
       worker_pid: nil,
+      worker_ref: nil,
+      pending_evals: %{},
       last_blackboard_id: 0,
       subagent_progress_tracker: %{},
       model_override: prefs.model_override,
@@ -81,8 +166,8 @@ defmodule Pincer.Core.Session.Server do
       token_usage_total: prefs.token_usage_total,
       input_buffer: [],
       debounce_timer: nil,
-      llm_client: llm_client,
-      watcher_pid: nil,
+      llm_client: Keyword.get(opts, :llm_client),
+      watcher_pid: watcher_pid,
       pending_approval: nil,
       auto_approve_until: nil,
       last_executor_trace: nil,
@@ -91,55 +176,128 @@ defmodule Pincer.Core.Session.Server do
       turn_start_ms: nil
     }
 
-    # 4. Start Graph Watcher for this workspace
-    state =
-      if Application.get_env(:pincer, :enable_graph_watcher, true) do
-        case Pincer.Core.Graph.Watcher.start_link(workspace_root: workspace_path) do
-          {:ok, pid} -> %{state | watcher_pid: pid}
-          _ -> state
-        end
-      else
-        state
-      end
-
-    # 5. Build final history
-    history =
-      if Enum.empty?(persisted),
-        do: [%{"role" => "system", "content" => get_system_prompt(state)}],
-        else: [%{"role" => "system", "content" => get_system_prompt(state)} | persisted]
-
-    state = %{state | history: history}
-
-    # 5. Asynchronous catch-up to avoid blocking boot
     send(self(), :recovery_catch_up)
 
-    # 6. Bootstrap Handshake (first-time session or BOOTSTRAP.md still active)
-    if Enum.empty?(persisted) and bootstrap_active?(workspace_path) do
+    if fresh? and PromptAssembly.bootstrap_active?(workspace_path) do
       send(self(), :trigger_bootstrap)
     end
 
-    # 7. Heartbeat for periodic Blackboard polling
     Process.send_after(self(), :heartbeat, 5000)
-
-    Telemetry.emit_conversation_start(session_id, %{
-      fresh: Enum.empty?(persisted)
-    })
+    Telemetry.emit_conversation_start(session_id, %{fresh: fresh?})
 
     {:ok, state}
   end
 
-  # --- Callbacks ---
+  # --- Supervised Task & Correlated Outcomes ---
+
+  @impl true
+  def handle_info({ref, {:ok, final_history, response, usage}}, %{worker_ref: ref} = state)
+      when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    SessionHistory.persist_assistant_response(state.session_id, response)
+
+    normalized_usage = Usage.normalize(usage)
+    new_totals = Usage.add(state.token_usage_total, normalized_usage)
+
+    publish(state.session_id, {:agent_response, response, usage})
+    Introspection.Kernel.report_activity(state.root_agent_id, :idle)
+
+    if state.turn_start_ms do
+      Telemetry.emit_conversation_turn_stop(state.session_id, state.turn_start_ms, %{
+        prompt_tokens: normalized_usage.prompt_tokens,
+        completion_tokens: normalized_usage.completion_tokens
+      })
+    end
+
+    new_state = %{
+      state
+      | history: SessionHistory.prune(final_history, state.session_id),
+        status: :idle,
+        worker_pid: nil,
+        worker_ref: nil,
+        token_usage_total: new_totals,
+        turn_start_ms: nil
+    }
+
+    save_preferences(new_state)
+    {:noreply, new_state}
+  end
+
+  @impl true
+  def handle_info({ref, {:error, reason}}, %{worker_ref: ref} = state)
+      when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    handle_executor_failure(reason, state)
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{worker_ref: ref} = state)
+      when is_reference(ref) do
+    handle_executor_failure(reason, state)
+  end
+
+  @impl true
+  def handle_info({ref, {:reply, response, usage}}, state)
+      when is_reference(ref) and is_map_key(state.pending_evals, ref) do
+    Process.demonitor(ref, [:flush])
+    SessionHistory.persist_assistant_response(state.session_id, response)
+
+    normalized_usage = Usage.normalize(usage)
+    new_totals = Usage.add(state.token_usage_total, normalized_usage)
+    new_history = state.history ++ [%{"role" => "assistant", "content" => response}]
+
+    new_state = %{
+      state
+      | history: new_history,
+        token_usage_total: new_totals,
+        pending_evals: Map.delete(state.pending_evals, ref)
+    }
+
+    save_preferences(new_state)
+    publish(state.session_id, {:agent_response, response, usage})
+    {:noreply, new_state}
+  end
+
+  @impl true
+  def handle_info({ref, :ignore}, state)
+      when is_reference(ref) and is_map_key(state.pending_evals, ref) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, %{state | pending_evals: Map.delete(state.pending_evals, ref)}}
+  end
+
+  @impl true
+  def handle_info({ref, {:error, reason}}, state)
+      when is_reference(ref) and is_map_key(state.pending_evals, ref) do
+    Process.demonitor(ref, [:flush])
+
+    Logger.error(
+      "[SESSION] #{state.session_id} evaluate_blackboard_update failed: #{inspect(reason)}"
+    )
+
+    {:noreply, %{state | pending_evals: Map.delete(state.pending_evals, ref)}}
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state)
+      when is_reference(ref) and is_map_key(state.pending_evals, ref) do
+    Logger.error(
+      "[SESSION] #{state.session_id} evaluate_blackboard_update crashed: #{inspect(reason)}"
+    )
+
+    {:noreply, %{state | pending_evals: Map.delete(state.pending_evals, ref)}}
+  end
+
+  # --- Session Lifecycle & Scheduling ---
 
   @impl true
   def handle_info(:recovery_catch_up, state) do
     Logger.info("[SESSION] #{state.session_id} Maestro performing recovery catch-up...")
 
-    # Fetch asynchronously so the GenServer stays responsive to calls during the O(n) journal scan.
     parent = self()
     since_id = state.last_blackboard_id
     scope = state.blackboard_scope
 
-    Task.start(fn ->
+    Task.Supervisor.start_child(@task_supervisor, fn ->
       case Blackboard.fetch_new(since_id, scope: scope) do
         {[], _} -> :ok
         {messages, new_last_id} -> send(parent, {:recovery_catch_up_done, messages, new_last_id})
@@ -155,32 +313,18 @@ defmodule Pincer.Core.Session.Server do
       "[SESSION] #{state.session_id} Caught up with #{length(messages)} missed messages."
     )
 
-    # During boot, process silently without broadcasting to external channels
     process_blackboard_messages(messages, new_last_id, state, broadcast?: false)
   end
 
   @impl true
   def handle_info(:trigger_bootstrap, state) do
-    # Let the LLM decide how to introduce itself based on BOOTSTRAP.md;
-    # force a start if the history is empty
-    history_with_prompt = [%{"role" => "system", "content" => get_system_prompt(state)}]
-    session_pid = self()
-
-    Task.start(fn ->
-      evaluate_blackboard_update(
-        session_pid,
-        state.session_id,
-        history_with_prompt,
-        state.model_override
-      )
-    end)
-
-    {:noreply, state}
+    history_with_prompt = [%{"role" => "system", "content" => system_prompt(state)}]
+    {:noreply, start_unsolicited_eval(state, history_with_prompt, :bootstrap)}
   end
 
   @impl true
   def handle_info(:heartbeat, state) do
-    Process.send_after(self(), :heartbeat, 10000)
+    Process.send_after(self(), :heartbeat, 10_000)
 
     case Blackboard.fetch_new(state.last_blackboard_id, scope: state.blackboard_scope) do
       {[], _} ->
@@ -192,58 +336,62 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
-  def handle_info({:assistant_reply_finished, response}, state) do
-    persist_assistant_response(state.session_id, response)
-    new_history = state.history ++ [%{"role" => "assistant", "content" => response}]
+  def handle_info({:system_update_prompt}, state) do
+    Logger.info("[SESSION] #{state.session_id} hot-swapping system prompt...")
+    new_history = SessionHistory.swap_system_prompt(state.history, system_prompt(state))
     {:noreply, %{state | history: new_history}}
   end
 
   @impl true
-  def handle_info({:executor_finished, final_history, response, usage}, state) do
-    usage = usage || %{}
-    persist_assistant_response(state.session_id, response)
+  def handle_info(:flush_input, state) do
+    combined_input =
+      state.input_buffer
+      |> Enum.map_join("\n", &SessionHistory.content_to_text/1)
 
-    # Normalize usage keys (may arrive as strings or atoms depending on provider/mock)
-    prompt_tokens = usage["prompt_tokens"] || usage[:prompt_tokens] || 0
-    completion_tokens = usage["completion_tokens"] || usage[:completion_tokens] || 0
+    state = %{state | input_buffer: [], debounce_timer: nil}
 
-    new_totals = %{
-      "prompt_tokens" => state.token_usage_total["prompt_tokens"] + prompt_tokens,
-      "completion_tokens" => state.token_usage_total["completion_tokens"] + completion_tokens
-    }
+    case ProjectRouter.parse(combined_input) do
+      {:ok, cmd, args} ->
+        session_id = state.session_id
 
-    publish(state.session_id, {:agent_response, response, usage})
-    Introspection.Kernel.report_activity(state.root_agent_id, :idle)
+        Task.Supervisor.start_child(@task_supervisor, fn ->
+          case ProjectRouter.handle_command(cmd, args, session_id) do
+            {:ok, id} ->
+              publish(session_id, {:agent_response, "🚀 Project started with ID: `#{id}`"})
 
-    if state.turn_start_ms do
-      Telemetry.emit_conversation_turn_stop(state.session_id, state.turn_start_ms, %{
-        prompt_tokens: prompt_tokens,
-        completion_tokens: completion_tokens
-      })
+            _ ->
+              publish(session_id, {:agent_response, "✅ Command #{cmd} executed."})
+          end
+        end)
+
+        {:noreply, state}
+
+      :error ->
+        {:reply, _reply, new_state} = process_standard_input(combined_input, state)
+        {:noreply, new_state}
     end
+  end
 
-    new_state = %{
-      state
-      | history: maybe_prune_history(final_history, state.session_id),
-        status: :idle,
-        worker_pid: nil,
-        token_usage_total: new_totals,
-        turn_start_ms: nil
-    }
-
-    save_preferences(new_state)
-
+  @impl true
+  def handle_info({:cron_trigger, prompt}, state) when is_binary(prompt) do
+    Logger.info("[SESSION] #{state.session_id} cron trigger: #{String.slice(prompt, 0, 80)}")
+    {:reply, _, new_state} = process_standard_input(prompt, state)
     {:noreply, new_state}
   end
 
   @impl true
+  def handle_info({:scheduler_trigger, prompt}, state) when is_binary(prompt) do
+    Logger.info("[SESSION] #{state.session_id} scheduler trigger: #{String.slice(prompt, 0, 80)}")
+    {:reply, _, new_state} = process_standard_input(prompt, state)
+    {:noreply, new_state}
+  end
+
+  # --- Runtime Forwarding & Telemetry ---
+
+  @impl true
   def handle_info({:executor_trace, trace_meta}, state) when is_map(trace_meta) do
-    # Delegate trace to Consciousness Kernel (reflection + lesson extraction)
     Introspection.Kernel.report_trace(state.root_agent_id, trace_meta)
-
-    # Local lesson outcome feedback (depends on session-specific injected_lesson_ids)
     maybe_update_lesson_outcomes(state.injected_lesson_ids, trace_meta)
-
     {:noreply, %{state | last_executor_trace: trace_meta, injected_lesson_ids: []}}
   end
 
@@ -254,88 +402,9 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
-  def handle_info({:agent_partial, _token}, state) do
-    # Ignore self-broadcast tokens (intended for external channels)
-    {:noreply, state}
-  end
-
-  @impl true
   def handle_info({:executor_status, status}, state) do
-    # Broadcast to PubSub so external channels (Telegram, etc) see it
     publish(state.session_id, {:agent_status, status})
     {:noreply, state}
-  end
-
-  @impl true
-  def handle_info({:agent_status, _status}, state) do
-    # Ignore PubSub self-broadcast
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_info({:agent_response, _content, _usage}, state) do
-    # Ignore self-broadcast response (history handled via executor_finished)
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_info({:agent_response, _content}, state) do
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_info({:agent_file, _path, _opts}, state) do
-    # Ignore self-broadcast — channel sessions handle file delivery
-    {:noreply, state}
-  end
-
-  @impl true
-  def handle_info(:flush_input, state) do
-    combined_input =
-      state.input_buffer
-      |> Enum.map(&content_to_text/1)
-      |> Enum.join("\n")
-
-    # Reset buffer and timer
-    state = %{state | input_buffer: [], debounce_timer: nil}
-
-    case Pincer.Core.ProjectRouter.parse(combined_input) do
-      {:ok, cmd, args} ->
-        Task.start(fn ->
-          case Pincer.Core.ProjectRouter.handle_command(cmd, args, state.session_id) do
-            {:ok, id} ->
-              publish(state.session_id, {:agent_response, "🚀 Project started with ID: `#{id}`"})
-
-            _ ->
-              publish(state.session_id, {:agent_response, "✅ Command #{cmd} executed."})
-          end
-        end)
-
-        {:noreply, state}
-
-      :error ->
-        # Standard chat logic (Butler or Executor)
-        case process_standard_input(combined_input, state) do
-          {:reply, _reply, new_state} -> {:noreply, new_state}
-          _ -> {:noreply, state}
-        end
-    end
-  end
-
-  @impl true
-  def handle_info({:system_update_prompt}, state) do
-    Logger.info("[SESSION] #{state.session_id} hot-swapping system prompt...")
-
-    new_history =
-      case state.history do
-        [%{"role" => "system"} | rest] ->
-          [%{"role" => "system", "content" => get_system_prompt(state)} | rest]
-
-        other ->
-          other
-      end
-
-    {:noreply, %{state | history: new_history}}
   end
 
   @impl true
@@ -349,21 +418,22 @@ defmodule Pincer.Core.Session.Server do
   end
 
   @impl true
-  def handle_info({:llm_runtime_status, _meta}, state) do
-    {:noreply, state}
-  end
+  def handle_info({:llm_runtime_status, _meta}, state), do: {:noreply, state}
 
   @impl true
-  def handle_info({:executor_failed, reason}, state) do
-    Logger.error("[SESSION] #{state.session_id} Executor failed: #{inspect(reason)}")
+  def handle_info({:agent_partial, _token}, state), do: {:noreply, state}
 
-    Telemetry.emit_conversation_error(state.session_id, reason)
+  @impl true
+  def handle_info({:agent_status, _status}, state), do: {:noreply, state}
 
-    error_msg = "❌ #{ErrorUX.friendly(reason, scope: :executor)}"
+  @impl true
+  def handle_info({:agent_response, _content, _usage}, state), do: {:noreply, state}
 
-    publish(state.session_id, {:agent_response, error_msg})
-    {:noreply, %{state | status: :idle, worker_pid: nil, turn_start_ms: nil}}
-  end
+  @impl true
+  def handle_info({:agent_response, _content}, state), do: {:noreply, state}
+
+  @impl true
+  def handle_info({:agent_file, _path, _opts}, state), do: {:noreply, state}
 
   @impl true
   def handle_info({:sme_status, _sme_name, msg}, state) do
@@ -388,44 +458,22 @@ defmodule Pincer.Core.Session.Server do
   def handle_info({:approval_required, call_id, command}, state) do
     Logger.info("[SESSION] #{state.session_id} Approval required for #{call_id}: #{command}")
 
-    if auto_approve_active?(state) do
-      Logger.info("[SESSION] #{state.session_id} Auto-approved: #{command}")
-      send_auto_approval(state, call_id)
-      {:noreply, state}
-    else
-      publish(state.session_id, {:approval_ui, call_id, command})
-      {:noreply, %{state | pending_approval: {call_id, command}}}
+    case SessionApproval.handle_request(call_id, command, state.auto_approve_until) do
+      {:auto_approved, approved_call_id} ->
+        Logger.info("[SESSION] #{state.session_id} Auto-approved: #{command}")
+        send_approval_decision(state, approved_call_id, :approved)
+        {:noreply, state}
+
+      {:pending, pending} ->
+        publish(state.session_id, {:approval_ui, call_id, command})
+        {:noreply, %{state | pending_approval: pending}}
     end
   end
-
-  @impl true
-  def handle_info({:cron_trigger, prompt}, state) when is_binary(prompt) do
-    Logger.info("[SESSION] #{state.session_id} cron trigger: #{String.slice(prompt, 0, 80)}")
-
-    case process_standard_input(prompt, state) do
-      {:reply, _, new_state} -> {:noreply, new_state}
-      _ -> {:noreply, state}
-    end
-  end
-
-  @impl true
-  def handle_info({:scheduler_trigger, prompt}, state) when is_binary(prompt) do
-    Logger.info("[SESSION] #{state.session_id} scheduler trigger: #{String.slice(prompt, 0, 80)}")
-
-    case process_standard_input(prompt, state) do
-      {:reply, _, new_state} -> {:noreply, new_state}
-      _ -> {:noreply, state}
-    end
-  end
-
-  # --- Consciousness Kernel callbacks ---
 
   @impl true
   def handle_info({:kernel_self_state_updated, self_state}, state) do
     {:noreply, %{state | self_state: self_state}}
   end
-
-  # --- Catch-all ---
 
   @impl true
   def handle_info(msg, state) do
@@ -433,63 +481,10 @@ defmodule Pincer.Core.Session.Server do
     {:noreply, state}
   end
 
-  # --- Maestro Logic: Processing Blackboard ---
-
-  defp process_blackboard_messages(messages, new_last_id, state, opts) do
-    broadcast? = Keyword.get(opts, :broadcast?, true)
-
-    {progress_notifications, progress_tracker, needs_review?} =
-      SubAgentProgress.notifications(messages, state.subagent_progress_tracker)
-
-    # Notify the user about sub-agent progress (only when broadcasting is enabled)
-    if broadcast? do
-      Enum.each(progress_notifications, fn message ->
-        publish(state.session_id, {:agent_status, message})
-      end)
-    end
-
-    updates =
-      messages
-      |> Enum.map(&format_blackboard_message/1)
-      |> Enum.join("\n\n")
-
-    system_msg = %{
-      "role" => "system",
-      "content" => "SYSTEM UPDATE (Blackboard):\n#{updates}"
-    }
-
-    new_history = state.history ++ [system_msg]
-
-    # If idle and something important happened, the Maestro evaluates whether to speak up
-    # Only when broadcasting (prevents the bot from talking unprompted during boot)
-    if broadcast? and state.status == :idle and needs_review? do
-      session_pid = self()
-
-      Task.start(fn ->
-        evaluate_blackboard_update(
-          session_pid,
-          state.session_id,
-          new_history,
-          state.model_override
-        )
-      end)
-    end
-
-    {:noreply,
-     %{
-       state
-       | history: new_history,
-         last_blackboard_id: new_last_id,
-         subagent_progress_tracker: progress_tracker
-     }}
-  end
-
-  # --- Input Handling ---
+  # --- GenServer Call Handlers ---
 
   @impl true
-  def handle_call(:get_status, _from, state) do
-    {:reply, {:ok, state}, state}
-  end
+  def handle_call(:get_status, _from, state), do: {:reply, {:ok, state}, state}
 
   @impl true
   def handle_call(:reset, _from, state) do
@@ -498,31 +493,19 @@ defmodule Pincer.Core.Session.Server do
     history = state.history
     session_id = state.session_id
 
-    Task.start(fn ->
-      message_count = history |> Enum.reject(&(&1["role"] == "system")) |> length()
-      reset_at = DateTime.utc_now()
-
-      snapshot_content =
-        "session_id=#{session_id} message_count=#{message_count} reset_at=#{DateTime.to_iso8601(reset_at)}"
-
-      case Pincer.Core.Memory.record_session(snapshot_content, session_id: session_id) do
-        {:ok, _} -> :ok
-        {:error, reason} -> Logger.info("[SESSION] reset snapshot skipped: #{inspect(reason)}")
-      end
+    Task.Supervisor.start_child(@task_supervisor, fn ->
+      SessionHistory.record_reset_snapshot(session_id, history)
     end)
 
-    # 1. Clear persisted transcripts in Postgres
-    Pincer.Ports.Storage.delete_messages(state.session_id)
+    state = state |> stop_worker() |> clear_pending_evals()
+    Storage.delete_messages(state.session_id)
+    new_history = [%{"role" => "system", "content" => system_prompt(state)}]
 
-    # 2. Reset RAM (keep only the initial system prompt)
-    new_history = [%{"role" => "system", "content" => get_system_prompt(state)}]
-
-    # 3. Re-trigger Bootstrap only if identity files do not exist yet
-    if bootstrap_active?(state.workspace_path) do
+    if PromptAssembly.bootstrap_active?(state.workspace_path) do
       send(self(), :trigger_bootstrap)
     end
 
-    {:reply, :ok, %{state | history: new_history, status: :idle, worker_pid: nil}}
+    {:reply, :ok, %{state | history: new_history, status: :idle, turn_start_ms: nil}}
   end
 
   @impl true
@@ -566,127 +549,141 @@ defmodule Pincer.Core.Session.Server do
 
   @impl true
   def handle_call({:approve_all, seconds}, _from, state) do
-    until = DateTime.add(DateTime.utc_now(), seconds, :second)
-    Logger.info("[SESSION] #{state.session_id} Auto-approve enabled until #{until}")
-    # If there's a pending approval, auto-approve it immediately
-    state = maybe_auto_approve_pending(%{state | auto_approve_until: until})
-    {:reply, :ok, state}
-  end
+    {until, pending_approval, effect} =
+      SessionApproval.enable_auto_approve(state.pending_approval, seconds)
 
-  alias Pincer.Core.Structs.IncomingMessage
+    Logger.info("[SESSION] #{state.session_id} Auto-approve enabled until #{until}")
+
+    case effect do
+      {:auto_approve, call_id} ->
+        Logger.info("[SESSION] #{state.session_id} Auto-approved pending: #{call_id}")
+        send_approval_decision(state, call_id, :approved)
+
+      :noop ->
+        :ok
+    end
+
+    {:reply, :ok, %{state | auto_approve_until: until, pending_approval: pending_approval}}
+  end
 
   @impl true
   def handle_call({:process_input, %IncomingMessage{} = input}, _from, state) do
+    text = SessionHistory.content_to_text(input)
+
     case state.pending_approval do
-      {call_id, _command} ->
-        text = content_to_text(input)
-        normalized = text |> String.downcase() |> String.trim()
-
-        decision =
-          cond do
-            normalized in ["aprovo", "sim", "yes", "approve", "ok", "s", "y"] -> :approved
-            normalized in ["rejeito", "não", "nao", "no", "reject", "n"] -> :rejected
-            true -> nil
-          end
-
-        if decision do
-          if worker_alive?(state) do
-            send(state.worker_pid, {:tool_approval_result, call_id, decision})
-          end
-
-          {:reply, {:ok, :approval_sent}, %{state | pending_approval: nil}}
-        else
-          publish(
-            state.session_id,
-            {:agent_status, "⚠️ Aprovação pendente. Responda **Aprovo** ou **Rejeito**."}
-          )
-
-          {:reply, {:ok, :buffered}, state}
-        end
-
       nil ->
-        text = content_to_text(input)
-        normalized = text |> String.downcase() |> String.trim()
+        handle_standard_process_input(input, text, state)
 
-        # 1. Handle Interruption/Cancellation
-        if normalized in ["para", "stop", "cancel", "cancela", "/stop", "/cancel"] do
-          if worker_alive?(state) do
-            Process.exit(state.worker_pid, :kill)
-            publish(state.session_id, {:agent_response, "🛑 Execução cancelada pelo usuário."})
+      pending ->
+        case SessionApproval.resolve_pending(pending, text) do
+          {:decided, call_id, decision} ->
+            send_approval_decision(state, call_id, decision)
+            {:reply, {:ok, :approval_sent}, %{state | pending_approval: nil}}
 
-            if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
-
-            {:reply, {:ok, :stopped},
-             %{state | status: :idle, worker_pid: nil, input_buffer: [], debounce_timer: nil}}
-          else
-            {:reply, {:ok, :idle}, state}
-          end
-        else
-          # 2. Non-blocking Maestro Feedback
-          if state.status == :working do
+          {:prompt_again, ^pending} ->
             publish(
               state.session_id,
-              {:agent_status, "⏳ Mensagem recebida. Vou processar após concluir o passo atual..."}
+              {:agent_status, "⚠️ Aprovação pendente. Responda **Aprovo** ou **Rejeito**."}
             )
-          end
 
-          # 3. Standard Buffering
-          if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
-          new_buffer = state.input_buffer ++ [input.text]
-          new_timer = Process.send_after(self(), :flush_input, 1200)
-
-          {:reply, {:ok, :buffered},
-           %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
+            {:reply, {:ok, :buffered}, state}
         end
     end
   end
 
   def handle_call({:process_input, input}, from, state) when is_binary(input) do
-    # Legacy support: convert string to IncomingMessage
     msg = IncomingMessage.new(state.session_id, input)
     handle_call({:process_input, msg}, from, state)
   end
 
-  # --- Boilerplate & Standard Flow ---
+  @impl true
+  def terminate(reason, state) do
+    Logger.info("[SERVER] Session #{state.session_id} terminating: #{inspect(reason)}")
+    _ = state |> stop_worker() |> clear_pending_evals()
+    Archivist.start_consolidation(state.session_id, [], workspace_path: state.workspace_path)
+    :ok
+  end
+
+  # --- Internal Helpers ---
+
+  defp process_blackboard_messages(messages, new_last_id, state, opts) do
+    broadcast? = Keyword.get(opts, :broadcast?, true)
+
+    %{
+      history: new_history,
+      tracker: tracker,
+      notifications: notifications,
+      needs_review?: review?
+    } =
+      SessionBlackboard.ingest(state.history, state.subagent_progress_tracker, messages)
+
+    if broadcast? do
+      Enum.each(notifications, &publish(state.session_id, {:agent_status, &1}))
+    end
+
+    next_state = %{
+      state
+      | history: new_history,
+        last_blackboard_id: new_last_id,
+        subagent_progress_tracker: tracker
+    }
+
+    if broadcast? and state.status == :idle and review? do
+      {:noreply, start_unsolicited_eval(next_state, new_history, :blackboard)}
+    else
+      {:noreply, next_state}
+    end
+  end
+
+  defp handle_standard_process_input(input, text, state) do
+    if SessionApproval.cancel_command?(text) do
+      if worker_alive?(state) do
+        new_state = stop_worker(state)
+        publish(state.session_id, {:agent_response, "🛑 Execução cancelada pelo usuário."})
+        if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
+
+        {:reply, {:ok, :stopped},
+         %{new_state | status: :idle, input_buffer: [], debounce_timer: nil, turn_start_ms: nil}}
+      else
+        {:reply, {:ok, :idle}, state}
+      end
+    else
+      if state.status == :working do
+        publish(
+          state.session_id,
+          {:agent_status, "⏳ Mensagem recebida. Vou processar após concluir o passo atual..."}
+        )
+      end
+
+      if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
+      new_buffer = state.input_buffer ++ [input.text]
+      new_timer = Process.send_after(self(), :flush_input, 1200)
+
+      {:reply, {:ok, :buffered}, %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
+    end
+  end
 
   defp process_standard_input(input, state) do
-    # input can be binary (from legacy) or IncomingMessage (from new flow)
-    text_for_storage = content_to_text(input)
-    Storage.save_message(state.session_id, "user", text_for_storage)
-
-    Pincer.Core.Session.Logger.log(
-      state.session_id,
-      "user",
-      text_for_storage,
-      workspace_path: state.workspace_path
-    )
-
-    # Download any workspace file refs (non-multimodal documents sent by the user)
-    {input, file_notes} = resolve_workspace_file_refs(input, state.workspace_path)
-
-    # Map to LLM history format
-    user_msg = map_input_to_history(input, file_notes)
+    SessionHistory.persist_user_input(state.session_id, input, state.workspace_path)
+    user_msg = SessionHistory.build_user_message(input, state.workspace_path)
     new_history = state.history ++ [user_msg]
-
-    model_override_with_thinking =
-      if state.thinking_level != nil and is_map(state.model_override) do
-        Map.put(state.model_override, :thinking_level, state.thinking_level)
-      else
-        state.model_override
-      end
 
     executor_opts =
       [
-        model_override: model_override_with_thinking,
+        model_override: model_override_with_thinking(state),
         workspace_path: state.workspace_path,
-        trace_events?: true
+        trace_events?: true,
+        notify?: false
       ]
-      |> then(fn opts ->
-        if state.llm_client, do: Keyword.put(opts, :llm_client, state.llm_client), else: opts
-      end)
+      |> maybe_put_opt(:llm_client, state.llm_client)
 
     turn_start_ms = Telemetry.emit_conversation_turn_start(state.session_id)
-    {:ok, pid} = Executor.start(self(), state.session_id, new_history, executor_opts)
+    parent = self()
+
+    task =
+      Task.Supervisor.async_nolink(@task_supervisor, fn ->
+        Executor.run(parent, state.session_id, new_history, executor_opts)
+      end)
 
     lesson_ids = Introspection.Kernel.get_lesson_ids(state.root_agent_id)
     Introspection.Kernel.report_activity(state.root_agent_id, :working)
@@ -695,350 +692,133 @@ defmodule Pincer.Core.Session.Server do
      %{
        state
        | history: new_history,
-         worker_pid: pid,
+         worker_pid: task.pid,
+         worker_ref: task.ref,
          status: :working,
          injected_lesson_ids: lesson_ids,
          turn_start_ms: turn_start_ms
      }}
   end
 
-  defp map_input_to_history(%IncomingMessage{text: text, attachments: []}, file_notes) do
-    full_text = prepend_file_notes(text, file_notes)
-    %{"role" => "user", "content" => full_text}
-  end
+  defp start_unsolicited_eval(state, history, kind) do
+    eval_opts = maybe_put_opt([], :llm_client, state.llm_client)
+    model_override = state.model_override
 
-  defp map_input_to_history(%IncomingMessage{text: text, attachments: atts}, file_notes) do
-    full_text = prepend_file_notes(text, file_notes)
-
-    content =
-      [%{"type" => "text", "text" => full_text}] ++
-        Enum.map(atts, fn a -> %{"type" => "attachment", "attachment" => a} end)
-
-    %{"role" => "user", "content" => content}
-  end
-
-  defp map_input_to_history(input, _file_notes) when is_binary(input),
-    do: %{"role" => "user", "content" => input}
-
-  defp prepend_file_notes(text, []), do: text
-
-  defp prepend_file_notes(text, notes) do
-    note_block = Enum.map_join(notes, "\n", fn n -> "[File received] #{n}" end)
-    if text == "" or text == nil, do: note_block, else: "#{note_block}\n#{text}"
-  end
-
-  defp resolve_workspace_file_refs(%IncomingMessage{attachments: []} = input, _workspace_path),
-    do: {input, []}
-
-  defp resolve_workspace_file_refs(%IncomingMessage{attachments: atts} = input, workspace_path) do
-    {remaining_atts, notes} =
-      Enum.reduce(atts, {[], []}, fn att, {kept, downloaded} ->
-        if att["type"] == "workspace_file_ref" do
-          filename = att["filename"] || "file"
-          url = att["url"]
-
-          case download_workspace_file(url, filename, workspace_path) do
-            {:ok, rel_path} ->
-              {kept, downloaded ++ ["#{filename} saved to workspace at `#{rel_path}`"]}
-
-            {:error, reason} ->
-              Logger.warning(
-                "[Session] Failed to download workspace file '#{filename}': #{inspect(reason)}"
-              )
-
-              {kept, downloaded ++ ["#{filename} (download failed: #{inspect(reason)})"]}
-          end
-        else
-          {kept ++ [att], downloaded}
-        end
+    task =
+      Task.Supervisor.async_nolink(@task_supervisor, fn ->
+        SessionBlackboard.evaluate_update(history, model_override, eval_opts)
       end)
 
-    updated_input = %{input | attachments: remaining_atts}
-    {updated_input, notes}
+    %{state | pending_evals: Map.put(state.pending_evals, task.ref, kind)}
   end
 
-  defp resolve_workspace_file_refs(input, _workspace_path), do: {input, []}
+  defp handle_executor_failure(reason, state) do
+    Logger.error("[SESSION] #{state.session_id} Executor failed: #{inspect(reason)}")
+    Telemetry.emit_conversation_error(state.session_id, reason)
+    Introspection.Kernel.report_activity(state.root_agent_id, :idle)
 
-  defp download_workspace_file("telegram://file/" <> file_path, filename, workspace_path) do
-    token = Application.get_env(:telegex, :token, "")
-    url = "https://api.telegram.org/file/bot#{token}/#{file_path}"
-    incoming_dir = Path.join(workspace_path, "incoming")
-    :ok = File.mkdir_p(incoming_dir)
-    dest_path = Path.join(incoming_dir, filename)
+    error_msg = "❌ #{ErrorUX.friendly(reason, scope: :executor)}"
+    publish(state.session_id, {:agent_response, error_msg})
 
-    case Req.get(url, receive_timeout: 300_000) do
-      {:ok, %{status: 200, body: body}} when is_binary(body) ->
-        case File.write(dest_path, body) do
-          :ok -> {:ok, Path.relative_to(dest_path, workspace_path)}
-          {:error, reason} -> {:error, reason}
-        end
+    {:noreply, %{state | status: :idle, worker_pid: nil, worker_ref: nil, turn_start_ms: nil}}
+  end
 
-      {:ok, %{status: status}} ->
-        {:error, {:http_error, status}}
-
-      {:error, reason} ->
-        {:error, reason}
+  defp stop_worker(state) do
+    if is_reference(state.worker_ref) do
+      Process.demonitor(state.worker_ref, [:flush])
     end
-  end
 
-  defp download_workspace_file(_url, _filename, _workspace_path),
-    do: {:error, :unsupported_url}
-
-  defp auto_approve_active?(%{auto_approve_until: nil}), do: false
-
-  defp auto_approve_active?(%{auto_approve_until: until}) do
-    DateTime.compare(until, DateTime.utc_now()) == :gt
-  end
-
-  defp send_auto_approval(state, call_id) do
     if worker_alive?(state) do
-      send(state.worker_pid, {:tool_approval_result, call_id, :approved})
+      case Task.Supervisor.terminate_child(@task_supervisor, state.worker_pid) do
+        :ok -> :ok
+        {:error, :not_found} -> Process.exit(state.worker_pid, :kill)
+      end
     end
+
+    %{state | worker_pid: nil, worker_ref: nil}
   end
 
-  defp maybe_auto_approve_pending(%{pending_approval: nil} = state), do: state
+  defp clear_pending_evals(state) do
+    Enum.each(state.pending_evals, fn {ref, _kind} ->
+      if is_reference(ref), do: Process.demonitor(ref, [:flush])
+    end)
 
-  defp maybe_auto_approve_pending(%{pending_approval: {call_id, _}} = state) do
-    if auto_approve_active?(state) do
-      Logger.info("[SESSION] #{state.session_id} Auto-approved pending: #{call_id}")
-      send_auto_approval(state, call_id)
-      %{state | pending_approval: nil}
-    else
-      state
+    %{state | pending_evals: %{}}
+  end
+
+  defp send_approval_decision(state, call_id, decision) do
+    if worker_alive?(state) do
+      send(state.worker_pid, {:tool_approval_result, call_id, decision})
     end
   end
 
   defp worker_alive?(%{worker_pid: pid}) when is_pid(pid), do: Process.alive?(pid)
   defp worker_alive?(_state), do: false
 
-  defp publish(session_id, event) do
-    PubSub.broadcast("session:#{session_id}", event)
+  defp system_prompt(state) do
+    PromptAssembly.build_system_prompt(
+      workspace_path: state.workspace_path,
+      root_agent_id: state.root_agent_id,
+      self_state: state.self_state
+    )
+  end
+
+  defp model_override_with_thinking(%{thinking_level: level, model_override: override})
+       when not is_nil(level) and is_map(override) do
+    Map.put(override, :thinking_level, level)
+  end
+
+  defp model_override_with_thinking(%{model_override: override}), do: override
+
+  defp maybe_put_opt(opts, _key, nil), do: opts
+  defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp publish(session_id, event), do: PubSub.broadcast("session:#{session_id}", event)
+
+  defp maybe_start_graph_watcher(workspace_path) do
+    if Application.get_env(:pincer, :enable_graph_watcher, true) do
+      case Pincer.Core.Graph.Watcher.start_link(workspace_root: workspace_path) do
+        {:ok, pid} -> pid
+        _ -> nil
+      end
+    end
+  end
+
+  defp save_preferences(%{workspace_path: nil, session_id: session_id}) do
+    Logger.warning("[SESSION] #{session_id} save_preferences skipped: workspace_path is nil")
   end
 
   defp save_preferences(state) do
-    case state.workspace_path do
-      nil ->
-        Logger.warning(
-          "[SESSION] #{state.session_id} save_preferences skipped: workspace_path is nil"
-        )
+    result =
+      Preferences.save(state.workspace_path, %{
+        model_override: state.model_override,
+        thinking_level: state.thinking_level,
+        reasoning_visible: state.reasoning_visible,
+        usage_display: state.usage_display,
+        token_usage_total: state.token_usage_total
+      })
 
-      workspace ->
-        result =
-          Pincer.Core.Session.Preferences.save(workspace, %{
-            model_override: state.model_override,
-            thinking_level: state.thinking_level,
-            reasoning_visible: state.reasoning_visible,
-            usage_display: state.usage_display,
-            token_usage_total: state.token_usage_total
-          })
-
-        case result do
-          :ok ->
-            :ok
-
-          {:error, reason} ->
-            Logger.error(
-              "[SESSION] #{state.session_id} save_preferences failed (workspace=#{workspace}): #{inspect(reason)}"
-            )
-        end
-    end
-  end
-
-  # (Remaining helper functions kept for compatibility...)
-  # get_system_prompt, content_to_text, evaluate_blackboard_update, etc.
-
-  defp get_system_prompt(state) do
-    workspace = state.workspace_path
-
-    identity = AgentPaths.read_file(AgentPaths.identity_path(workspace))
-    soul = AgentPaths.read_file(AgentPaths.soul_path(workspace))
-    user = AgentPaths.read_file(AgentPaths.user_path(workspace))
-    style = AgentPaths.read_file(AgentPaths.style_path(workspace))
-    history = AgentPaths.read_file(AgentPaths.history_path(workspace))
-
-    bootstrap =
-      if bootstrap_active?(workspace) do
-        AgentPaths.read_file(AgentPaths.bootstrap_path(workspace))
-      else
-        ""
-      end
-
-    prompt = """
-    #{if bootstrap != "", do: "!!! BOOTSTRAP MODE ACTIVE !!!\n#{bootstrap}\n", else: ""}
-
-    # YOUR CURRENT IDENTITY
-    #{identity}
-
-    ## SOUL:
-    #{soul}
-
-    ## USER:
-    #{user}
-
-    #{if style != "", do: "## COMMUNICATION STYLE:\n#{style}\n", else: ""}
-    #{if history != "", do: "## SESSION HISTORY:\n#{history}\n", else: ""}
-    #{self_state_section(state)}
-    #{lessons_section(state.root_agent_id)}
-    ## CAPABILITIES & TOOLS:
-    You are a technical agent with access to multiple tools through the Model Context Protocol (MCP) and native Elixir integrations.
-    You can read and write files, execute shell commands, manage projects, and more.
-    Never claim you don't have tools; if a task requires technical action, you must use the available tools to perform it.
-
-    **CRITICAL RULE - ALWAYS RESPOND**: After using any tool, you MUST provide a final textual response to the user summarizing what you did and showing relevant results. NEVER finish with an empty message if you performed actions.
-
-    **Example of correct behavior:**
-    - User asks: "Leia o arquivo config.txt"
-    - You use: file_system tool to read config.txt
-    - You MUST respond: "✅ Li o arquivo config.txt. Ele contém: [conteúdo resumido]"
-
-    **WRONG behavior (NEVER do this):**
-    - Use file_system tool
-    - Return empty response ❌
-
-    **CHAT POLICY**:
-    - To talk to the current user in this session, just write plain text normally.
-    - NEVER use `channel_actions` to talk to the user you are currently chatting with. That tool is only for sending messages to DIFFERENT channels or users.
-    - **NEVER** return empty content after using tools. Always explain what you did.
-    """
-
-    prompt = String.trim(prompt)
-    Logger.debug("[SESSION] GENERATED SYSTEM PROMPT:\n#{prompt}")
-    prompt
-  end
-
-  @doc false
-  def bootstrap_active?(workspace_path, opts \\ []) when is_binary(workspace_path) do
-    # Even if the BOOTSTRAP.md file exists, if we already have IDENTITY and SOUL,
-    # it means the ritual is done.
-    has_identity? = File.exists?(AgentPaths.identity_path(workspace_path))
-    has_soul? = File.exists?(AgentPaths.soul_path(workspace_path))
-
-    if has_identity? and has_soul? do
-      false
-    else
-      AgentPaths.bootstrap_active?(workspace_path, opts)
-    end
-  end
-
-  defp persist_assistant_response(_session_id, response) when not is_binary(response), do: :ok
-
-  defp persist_assistant_response(session_id, response) do
-    trimmed = String.trim(response)
-
-    if trimmed != "" do
-      Storage.save_message(session_id, "assistant", trimmed)
-    end
-
-    :ok
-  end
-
-  defp content_to_text(%IncomingMessage{text: text}), do: text
-  defp content_to_text(c) when is_binary(c), do: c
-
-  defp content_to_text(p) when is_list(p),
-    do:
-      Enum.map_join(p, " ", fn
-        %{"text" => t} -> t
-        _ -> ""
-      end)
-
-  defp evaluate_blackboard_update(pid, sid, hist, mo) do
-    # Evaluate whether the user should be interrupted with new information
-    case LLM.chat_completion(hist, if(mo, do: [provider: mo.provider, model: mo.model], else: [])) do
-      {:ok, %{"content" => resp}, usage} ->
-        if String.upcase(resp) != "IGNORE" do
-          send(pid, {:assistant_reply_finished, resp})
-          PubSub.broadcast("session:#{sid}", {:agent_response, resp, usage})
-        end
+    case result do
+      :ok ->
+        :ok
 
       {:error, reason} ->
-        Logger.error("[SESSION] #{sid} evaluate_blackboard_update failed: #{inspect(reason)}")
+        Logger.error(
+          "[SESSION] #{state.session_id} save_preferences failed (workspace=#{state.workspace_path}): #{inspect(reason)}"
+        )
     end
-  end
-
-  # Structured `kind` is authoritative; the text-prefix checks only keep
-  # messages written to journals before `kind` existed readable.
-  defp format_blackboard_message(msg) do
-    case blackboard_kind(msg) do
-      :plan_generated ->
-        plan = String.replace(msg.content, "PLAN_GENERATED:\n", "")
-
-        "📋 **Suggested Project Plan (#{Map.get(msg, :project_id)})**:\n#{plan}\n\nTo proceed, use:\n`/project approve #{Map.get(msg, :project_id)}`\nOr modify with:\n`/project modify #{Map.get(msg, :project_id)} <new tasks>`"
-
-      :error_diagnostic ->
-        reason = String.replace(msg.content, "ERROR_DIAGNOSTIC: ", "")
-
-        "❌ **CRITICAL PROJECT FAILURE (#{Map.get(msg, :project_id)})**\nThe agent exhausted all execution attempts.\n\n**Detected Reason:**\n`#{reason}`\n\nYou can:\n1. `/project resume #{Map.get(msg, :project_id)}` (Retry)\n2. `/project modify #{Map.get(msg, :project_id)} <plan>` (Change course)\n3. `/project stop #{Map.get(msg, :project_id)}`"
-
-      _other ->
-        "[#{Map.get(msg, :project_id) || "GLOBAL"}]: #{msg.content}"
-    end
-  end
-
-  defp blackboard_kind(%{kind: kind}) when is_atom(kind) and not is_nil(kind), do: kind
-  defp blackboard_kind(%{content: content}) when is_binary(content), do: legacy_kind(content)
-  defp blackboard_kind(_msg), do: nil
-
-  defp legacy_kind(content) do
-    cond do
-      String.contains?(content, "PLAN_GENERATED:") -> :plan_generated
-      String.contains?(content, "ERROR_DIAGNOSTIC:") -> :error_diagnostic
-      true -> nil
-    end
-  end
-
-  defp self_state_section(state) do
-    case state.self_state do
-      nil ->
-        ""
-
-      self_state ->
-        context = Pincer.Core.Introspection.SelfState.to_prompt_context(self_state)
-
-        if context == "" do
-          ""
-        else
-          """
-          ## INTERNAL STATE:
-          #{context}
-          """
-        end
-    end
-  end
-
-  defp lessons_section(agent_id) do
-    alias Pincer.Core.Introspection.LessonStore
-
-    lessons = LessonStore.top_lessons(agent_id, 5, min_confidence: 0.4)
-
-    if lessons == [] do
-      ""
-    else
-      items = Enum.map_join(lessons, "\n", fn l -> "- #{l.content}" end)
-
-      """
-      ## LESSONS FROM EXPERIENCE:
-      #{items}
-      """
-    end
-  rescue
-    _ -> ""
   end
 
   defp verify_alignment_integrity(workspace_path, session_id) do
-    alias Pincer.Core.AlignmentIntegrity
-
     case AlignmentIntegrity.verify(workspace_path) do
       {:ok, []} ->
         :ok
 
       {:ok, violations} ->
         files = Enum.map_join(violations, ", ", & &1.file)
-
         Logger.warning("[SESSION] #{session_id} alignment integrity violation: #{files}")
 
       {:error, :no_snapshot} ->
-        # First boot or post-bootstrap — create initial snapshot if files exist
         if AlignmentIntegrity.protected_files(workspace_path) != [] do
           AlignmentIntegrity.snapshot!(workspace_path)
           Logger.info("[SESSION] #{session_id} alignment integrity snapshot created")
@@ -1046,7 +826,19 @@ defmodule Pincer.Core.Session.Server do
     end
   end
 
-  # --- SIS (Self-Improving System) helpers ---
+  defp maybe_update_lesson_outcomes([], _trace_meta), do: :ok
+
+  defp maybe_update_lesson_outcomes(lesson_ids, trace_meta) do
+    outcome = trace_outcome(trace_meta)
+
+    Task.Supervisor.start_child(@task_supervisor, fn ->
+      Enum.each(lesson_ids, fn id ->
+        Introspection.LessonStore.record_outcome(id, outcome)
+      end)
+    end)
+
+    :ok
+  end
 
   defp trace_outcome(trace_meta) do
     steps = trace_meta[:steps] || trace_meta["steps"] || []
@@ -1061,90 +853,5 @@ defmodule Pincer.Core.Session.Server do
     if has_error?, do: :failure, else: :success
   end
 
-  defp maybe_update_lesson_outcomes([], _trace_meta), do: :ok
-
-  defp maybe_update_lesson_outcomes(lesson_ids, trace_meta) do
-    outcome = trace_outcome(trace_meta)
-    Task.start(fn -> update_lesson_outcomes(lesson_ids, outcome) end)
-    :ok
-  end
-
-  defp update_lesson_outcomes(lesson_ids, outcome) do
-    alias Pincer.Core.Introspection.LessonStore
-
-    Enum.each(lesson_ids, fn id ->
-      LessonStore.record_outcome(id, outcome)
-    end)
-  end
-
-  # --- Boilerplate API ---
-  def start_link(opts),
-    do: GenServer.start_link(__MODULE__, opts, name: via_tuple(opts[:session_id]))
-
-  defp via_tuple(id), do: {:via, Registry, {Pincer.Core.Session.Registry, id}}
-  def process_input(id, input), do: GenServer.call(via_tuple(id), {:process_input, input})
-  def get_status(id), do: GenServer.call(via_tuple(id), :get_status)
-
-  def reset(id) do
-    GenServer.call(via_tuple(id), :reset)
-  end
-
-  def set_model(id, provider, model) do
-    GenServer.call(via_tuple(id), {:set_model, provider, model}, 15_000)
-  end
-
-  def set_thinking(id, level),
-    do: GenServer.call(via_tuple(id), {:set_thinking, level})
-
-  def set_reasoning_visible(id, visible),
-    do: GenServer.call(via_tuple(id), {:set_reasoning_visible, visible})
-
-  def set_verbose(id, verbose),
-    do: GenServer.call(via_tuple(id), {:set_verbose, verbose})
-
-  def set_usage(id, level),
-    do: GenServer.call(via_tuple(id), {:set_usage, level})
-
-  @doc """
-  Enable auto-approval for all privileged tools for `duration_seconds`.
-  """
-  @spec approve_all(String.t(), pos_integer()) :: :ok
-  def approve_all(id, duration_seconds \\ 600),
-    do: GenServer.call(via_tuple(id), {:approve_all, duration_seconds})
-
-  # Prunes history to a sliding window when it exceeds the configured limit.
-  # Always preserves the system message and retains the most recent exchanges.
-  # When pruning occurs, a synthetic summary is inserted so the LLM has context
-  # about the dropped history.
-  defp maybe_prune_history(history, session_id) do
-    max = Application.get_env(:pincer, :max_history_messages, 100)
-    non_system = Enum.reject(history, &(&1["role"] == "system"))
-
-    if length(non_system) <= max do
-      history
-    else
-      system_msg =
-        Enum.find(history, &(&1["role"] == "system")) ||
-          %{"role" => "system", "content" => ""}
-
-      kept = Enum.take(non_system, -max)
-      dropped = length(non_system) - length(kept)
-
-      notice = %{
-        "role" => "system",
-        "content" =>
-          "[Context window pruned: #{dropped} earlier messages removed to stay within the #{max}-message limit. Session: #{session_id}]"
-      }
-
-      Logger.debug("[SESSION] #{session_id} history pruned: dropped #{dropped} messages")
-      [system_msg, notice | kept]
-    end
-  end
-
-  @impl true
-  def terminate(reason, state) do
-    Logger.info("[SERVER] Session #{state.session_id} terminating: #{inspect(reason)}")
-    Archivist.start_consolidation(state.session_id, [], workspace_path: state.workspace_path)
-    :ok
-  end
+  defp via_tuple(id), do: CoreRegistry.via_tuple(Pincer.Core.Session.Registry, id, :local)
 end

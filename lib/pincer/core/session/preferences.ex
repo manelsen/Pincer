@@ -6,14 +6,18 @@ defmodule Pincer.Core.Session.Preferences do
   so they survive restarts. Stored as JSON in the workspace `.pincer/` directory.
   """
 
+  alias Pincer.Core.Structs.Usage
+
   @filename "preferences.json"
 
+  @type model_override :: %{provider: String.t(), model: String.t()}
+
   @type prefs :: %{
-          model_override: map() | nil,
+          model_override: model_override() | nil,
           thinking_level: String.t() | nil,
           reasoning_visible: boolean(),
           usage_display: String.t(),
-          token_usage_total: map()
+          token_usage_total: Usage.t()
         }
 
   @spec save(String.t(), prefs()) :: :ok | {:error, term()}
@@ -21,11 +25,11 @@ defmodule Pincer.Core.Session.Preferences do
     path = path(workspace_path)
 
     data = %{
-      model_override: prefs.model_override,
+      model_override: normalize_model_override(prefs.model_override),
       thinking_level: prefs.thinking_level,
       reasoning_visible: prefs.reasoning_visible,
       usage_display: prefs.usage_display,
-      token_usage_total: prefs.token_usage_total,
+      token_usage_total: prefs.token_usage_total |> Usage.normalize() |> Usage.to_map(),
       saved_at: DateTime.utc_now() |> DateTime.to_iso8601()
     }
 
@@ -48,16 +52,16 @@ defmodule Pincer.Core.Session.Preferences do
     case File.read(path) do
       {:ok, json} ->
         case Jason.decode(json) do
-          {:ok, data} ->
+          {:ok, data} when is_map(data) ->
             %{
-              model_override: data["model_override"],
+              model_override: normalize_model_override(data["model_override"]),
               thinking_level: data["thinking_level"],
               reasoning_visible: data["reasoning_visible"] || false,
               usage_display: data["usage_display"] || "off",
-              token_usage_total: data["token_usage_total"] || default_token_usage()
+              token_usage_total: Usage.normalize(data["token_usage_total"])
             }
 
-          {:error, _} ->
+          _ ->
             defaults()
         end
 
@@ -72,11 +76,21 @@ defmodule Pincer.Core.Session.Preferences do
       thinking_level: nil,
       reasoning_visible: false,
       usage_display: "off",
-      token_usage_total: default_token_usage()
+      token_usage_total: %Usage{}
     }
   end
 
-  defp default_token_usage, do: %{"prompt_tokens" => 0, "completion_tokens" => 0}
+  defp normalize_model_override(%{provider: provider, model: model})
+       when is_binary(provider) and provider != "" and is_binary(model) and model != "" do
+    %{provider: provider, model: model}
+  end
+
+  defp normalize_model_override(%{"provider" => provider, "model" => model})
+       when is_binary(provider) and provider != "" and is_binary(model) and model != "" do
+    %{provider: provider, model: model}
+  end
+
+  defp normalize_model_override(_), do: nil
 
   defp path(workspace_path) do
     Path.join([workspace_path, ".pincer", @filename])

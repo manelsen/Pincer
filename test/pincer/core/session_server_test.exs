@@ -4,6 +4,7 @@ defmodule Pincer.Core.Session.ServerTest do
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.Orchestration.Blackboard
   alias Pincer.Core.Session.Server
+  alias Pincer.Core.Structs.Usage
 
   defmodule StorageStub do
     @behaviour Pincer.Ports.Storage
@@ -146,8 +147,52 @@ defmodule Pincer.Core.Session.ServerTest do
     def provider_config(_provider_id), do: nil
   end
 
+  defmodule LLMStub do
+    @behaviour Pincer.Ports.LLM
+
+    def put_handlers(handlers) when is_map(handlers) do
+      agent = Application.fetch_env!(:pincer, :session_server_test_agent)
+      Agent.update(agent, &Map.put(&1, :llm_handlers, handlers))
+    end
+
+    defp handler(key) do
+      case Application.get_env(:pincer, :session_server_test_agent) do
+        nil -> nil
+        agent -> Agent.get(agent, fn state -> get_in(state, [:llm_handlers, key]) end)
+      end
+    end
+
+    @impl true
+    def stream_completion(messages, opts) do
+      case handler(:stream) do
+        fun when is_function(fun, 2) -> fun.(messages, opts)
+        other -> other || {:ok, [%{"choices" => [%{"delta" => %{"content" => "ok"}}]}], nil}
+      end
+    end
+
+    @impl true
+    def chat_completion(messages, opts) do
+      case handler(:chat) do
+        fun when is_function(fun, 2) -> fun.(messages, opts)
+        other -> other || {:ok, %{"role" => "assistant", "content" => "ok"}, nil}
+      end
+    end
+
+    @impl true
+    def list_providers, do: []
+    @impl true
+    def list_models(_provider_id), do: []
+    @impl true
+    def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+    @impl true
+    def provider_config(_provider_id), do: nil
+  end
+
   setup do
     agent = start_supervised!({Agent, fn -> %{} end})
+
+    existing_kernels =
+      snapshot_kernel_pids()
 
     original_storage = Application.get_env(:pincer, :storage_adapter)
     Application.put_env(:pincer, :storage_adapter, StorageStub)
@@ -155,12 +200,42 @@ defmodule Pincer.Core.Session.ServerTest do
     Blackboard.reset()
 
     on_exit(fn ->
+      terminate_new_kernels(existing_kernels)
       Application.put_env(:pincer, :storage_adapter, original_storage)
       Application.delete_env(:pincer, :session_server_test_agent)
       Blackboard.reset()
     end)
 
     :ok
+  end
+
+  defp snapshot_kernel_pids do
+    case Process.whereis(Pincer.Core.Introspection.Kernel.Supervisor) do
+      nil ->
+        MapSet.new()
+
+      _pid ->
+        Pincer.Core.Introspection.Kernel.Supervisor
+        |> DynamicSupervisor.which_children()
+        |> Enum.map(fn {_, pid, _, _} -> pid end)
+        |> MapSet.new()
+    end
+  end
+
+  defp terminate_new_kernels(existing_kernels) do
+    case Process.whereis(Pincer.Core.Introspection.Kernel.Supervisor) do
+      nil ->
+        :ok
+
+      _pid ->
+        Pincer.Core.Introspection.Kernel.Supervisor
+        |> DynamicSupervisor.which_children()
+        |> Enum.each(fn {_, pid, _, _} ->
+          if is_pid(pid) and not MapSet.member?(existing_kernels, pid) do
+            DynamicSupervisor.terminate_child(Pincer.Core.Introspection.Kernel.Supervisor, pid)
+          end
+        end)
+    end
   end
 
   test "bootstrap is inactive when identity and soul already exist" do
@@ -271,25 +346,40 @@ defmodule Pincer.Core.Session.ServerTest do
     File.mkdir_p!(tmp)
     on_exit(fn -> File.rm_rf!(tmp) end)
 
+    LLMStub.put_handlers(%{
+      chat: {:ok, %{"role" => "assistant", "content" => "hello"}, nil},
+      stream: {:ok, [%{"choices" => [%{"delta" => %{"content" => "final"}}]}], nil}
+    })
+
     AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
     StorageStub.put_messages(session_id, [%{"role" => "user", "content" => "existing"}])
 
     pid =
       start_supervised!(
-        {Server, [session_id: session_id, workspace_path: workspace, bootstrap?: false]}
+        {Server,
+         [
+           session_id: session_id,
+           workspace_path: workspace,
+           bootstrap?: false,
+           llm_client: LLMStub
+         ]}
       )
 
-    send(pid, {:assistant_reply_finished, "hello"})
+    send(pid, :trigger_bootstrap)
 
-    send(
-      pid,
-      {:executor_finished, [%{"role" => "assistant", "content" => "final"}], "final", %{}}
-    )
+    wait_until(1000, fn ->
+      if Enum.any?(StorageStub.saved_messages(session_id), &(&1.content == "hello")), do: :ok
+    end)
 
-    # Drain the Server mailbox so both sends are processed before asserting on StorageStub.
+    send(pid, {:cron_trigger, "continue"})
+
+    wait_until(1000, fn ->
+      if Enum.any?(StorageStub.saved_messages(session_id), &(&1.content == "final")), do: :ok
+    end)
+
     _ = :sys.get_state(pid)
 
-    assert StorageStub.saved_messages(session_id) == [
+    assert Enum.filter(StorageStub.saved_messages(session_id), &(&1.role == "assistant")) == [
              %{role: "assistant", content: "hello"},
              %{role: "assistant", content: "final"}
            ]
@@ -303,25 +393,38 @@ defmodule Pincer.Core.Session.ServerTest do
     File.mkdir_p!(tmp)
     on_exit(fn -> File.rm_rf!(tmp) end)
 
+    err =
+      {:error,
+       {:http_error, 400,
+        ~s({"error":{"message":"`tool calling` is not supported with this model"}})}}
+
+    LLMStub.put_handlers(%{stream: err, chat: err})
+
     AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
     Pincer.Infra.PubSub.subscribe("session:#{session_id}")
 
     pid =
       start_supervised!(
-        {Server, [session_id: session_id, workspace_path: workspace, bootstrap?: false]}
+        {Server,
+         [
+           session_id: session_id,
+           workspace_path: workspace,
+           bootstrap?: false,
+           llm_client: LLMStub
+         ]}
       )
 
-    send(
-      pid,
-      {:executor_failed,
-       {:http_error, 400,
-        ~s({"error":{"message":"`tool calling` is not supported with this model"}})}}
-    )
+    send(pid, {:cron_trigger, "run failing turn"})
 
-    assert_receive {:agent_response, message}, 1000
+    assert_receive {:agent_response, message}, 2000
     assert message =~ "nao suporta"
     assert message =~ "ferramentas"
     refute message =~ "`tool calling`"
+
+    {:ok, state} = Server.get_status(session_id)
+    assert state.status == :idle
+    assert state.worker_pid == nil
+    assert state.worker_ref == nil
   end
 
   test "recovery only ingests blackboard updates from the same scope" do
@@ -498,34 +601,51 @@ defmodule Pincer.Core.Session.ServerTest do
     File.mkdir_p!(tmp)
     on_exit(fn -> File.rm_rf!(tmp) end)
 
+    LLMStub.put_handlers(%{
+      stream:
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "ok"}}]}],
+         %{"prompt_tokens" => 10, "completion_tokens" => 5}}
+    })
+
     AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
+
+    StorageStub.put_messages(
+      session_id,
+      Enum.map(1..19, &%{"role" => "user", "content" => "msg #{&1}"})
+    )
+
     Application.put_env(:pincer, :max_history_messages, 5)
     on_exit(fn -> Application.delete_env(:pincer, :max_history_messages) end)
 
     pid =
       start_supervised!(
-        {Server, [session_id: session_id, workspace_path: workspace, bootstrap?: false]}
+        {Server,
+         [
+           session_id: session_id,
+           workspace_path: workspace,
+           bootstrap?: false,
+           llm_client: LLMStub
+         ]}
       )
 
-    # Build a fake final_history with 20 non-system messages + 1 system message
-    system_msg = %{"role" => "system", "content" => "system prompt"}
+    send(pid, {:cron_trigger, "msg 20"})
 
-    large_history =
-      [system_msg] ++
-        Enum.map(1..20, &%{"role" => "user", "content" => "msg #{&1}"})
+    state =
+      wait_until(2000, fn ->
+        {:ok, st} = Server.get_status(session_id)
 
-    send(
-      pid,
-      {:executor_finished, large_history, "ok",
-       %{"prompt_tokens" => 10, "completion_tokens" => 5}}
-    )
+        if st.status == :idle and length(Enum.reject(st.history, &(&1["role"] == "system"))) == 5,
+          do: st
+      end)
 
-    # get_status is a GenServer.call — the prior send is drained before it returns.
-    {:ok, state} = Server.get_status(session_id)
     non_system = Enum.reject(state.history, &(&1["role"] == "system"))
     assert length(non_system) == 5
-    # Last 5 messages are kept
-    assert List.last(non_system)["content"] == "msg 20"
+    assert List.last(non_system)["content"] == "ok"
+
+    assert Enum.any?(
+             state.history,
+             &(&1["role"] == "system" and &1["content"] =~ "earlier messages removed")
+           )
   end
 
   test "session receives self_state updates from Kernel" do
@@ -550,5 +670,210 @@ defmodule Pincer.Core.Session.ServerTest do
     # get_status drains the mailbox — the prior send is processed before it returns.
     assert {:ok, state} = Server.get_status(session_id)
     assert state.self_state == mock_state
+  end
+
+  test "correlates executor turn via TaskSupervisor, accumulates Usage, and clears worker_ref" do
+    tmp = Path.join(System.tmp_dir!(), "pincer_corr_#{System.unique_integer([:positive])}")
+    session_id = "session_corr_#{System.unique_integer([:positive])}"
+    workspace = Path.join(tmp, "workspaces/#{session_id}")
+
+    File.mkdir_p!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
+
+    LLMStub.put_handlers(%{
+      stream:
+        {:ok, [%{"choices" => [%{"delta" => %{"content" => "Resposta correlacionada"}}]}],
+         %{"prompt_tokens" => 12, "completion_tokens" => 8}}
+    })
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+
+    pid =
+      start_supervised!(
+        {Server,
+         [
+           session_id: session_id,
+           workspace_path: workspace,
+           bootstrap?: false,
+           llm_client: LLMStub
+         ]}
+      )
+
+    send(pid, {:cron_trigger, "hello"})
+
+    assert_receive {:agent_response, "Resposta correlacionada",
+                    %Usage{prompt_tokens: 12, completion_tokens: 8, total_tokens: 20}},
+                   2000
+
+    {:ok, state} = Server.get_status(session_id)
+    assert state.status == :idle
+    assert state.worker_pid == nil
+    assert state.worker_ref == nil
+
+    assert state.token_usage_total == %Usage{
+             prompt_tokens: 12,
+             completion_tokens: 8,
+             total_tokens: 20
+           }
+
+    assert List.last(StorageStub.saved_messages(session_id)) == %{
+             role: "assistant",
+             content: "Resposta correlacionada"
+           }
+  end
+
+  test "recovers gracefully when supervised executor task crashes" do
+    tmp = Path.join(System.tmp_dir!(), "pincer_crash_#{System.unique_integer([:positive])}")
+    session_id = "session_crash_#{System.unique_integer([:positive])}"
+    workspace = Path.join(tmp, "workspaces/#{session_id}")
+
+    File.mkdir_p!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
+
+    LLMStub.put_handlers(%{stream: fn _msgs, _opts -> raise "boom" end})
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+
+    pid =
+      start_supervised!(
+        {Server,
+         [
+           session_id: session_id,
+           workspace_path: workspace,
+           bootstrap?: false,
+           llm_client: LLMStub
+         ]}
+      )
+
+    send(pid, {:cron_trigger, "crash me"})
+
+    assert_receive {:agent_response, err_msg}, 2000
+    assert err_msg =~ "❌"
+    assert Process.alive?(pid)
+
+    {:ok, state} = Server.get_status(session_id)
+    assert state.status == :idle
+    assert state.worker_pid == nil
+    assert state.worker_ref == nil
+  end
+
+  test "ignores stale refs and uncorrelated legacy executor messages" do
+    tmp = Path.join(System.tmp_dir!(), "pincer_stale_#{System.unique_integer([:positive])}")
+    session_id = "session_stale_#{System.unique_integer([:positive])}"
+    workspace = Path.join(tmp, "workspaces/#{session_id}")
+
+    File.mkdir_p!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+
+    pid =
+      start_supervised!(
+        {Server, [session_id: session_id, workspace_path: workspace, bootstrap?: false]}
+      )
+
+    {:ok, initial_state} = Server.get_status(session_id)
+
+    stale_ref = make_ref()
+    send(pid, {stale_ref, {:ok, [], "stale", nil}})
+    send(pid, {stale_ref, {:error, :stale}})
+    send(pid, {:DOWN, stale_ref, :process, self(), :boom})
+    send(pid, {:assistant_reply_finished, "legacy"})
+    send(pid, {:executor_finished, [], "legacy", %{}})
+    send(pid, {:executor_failed, :legacy})
+
+    {:ok, after_state} = Server.get_status(session_id)
+    assert after_state.history == initial_state.history
+    assert after_state.pending_evals == %{}
+    assert StorageStub.saved_messages(session_id) == []
+    refute_receive {:agent_response, _}, 50
+    refute_receive {:agent_response, _, _}, 50
+  end
+
+  test "supervises unsolicited evals in pending_evals for reply, ignore, and crash" do
+    tmp = Path.join(System.tmp_dir!(), "pincer_evals_#{System.unique_integer([:positive])}")
+    session_id = "session_evals_#{System.unique_integer([:positive])}"
+    workspace = Path.join(tmp, "workspaces/#{session_id}")
+
+    File.mkdir_p!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
+
+    AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+
+    pid =
+      start_supervised!(
+        {Server,
+         [
+           session_id: session_id,
+           workspace_path: workspace,
+           bootstrap?: false,
+           llm_client: LLMStub
+         ]}
+      )
+
+    # 1. Meaningful unsolicited reply
+    LLMStub.put_handlers(%{
+      chat:
+        {:ok, %{"content" => "Olá! Eu sou o Pincer."},
+         %{"prompt_tokens" => 4, "completion_tokens" => 6}}
+    })
+
+    send(pid, :trigger_bootstrap)
+
+    assert_receive {:agent_response, "Olá! Eu sou o Pincer.",
+                    %Usage{prompt_tokens: 4, completion_tokens: 6, total_tokens: 10}},
+                   2000
+
+    state1 =
+      wait_until(1000, fn ->
+        {:ok, st} = Server.get_status(session_id)
+        if st.pending_evals == %{}, do: st
+      end)
+
+    assert List.last(state1.history) == %{
+             "role" => "assistant",
+             "content" => "Olá! Eu sou o Pincer."
+           }
+
+    assert state1.token_usage_total == %Usage{
+             prompt_tokens: 4,
+             completion_tokens: 6,
+             total_tokens: 10
+           }
+
+    assert StorageStub.saved_messages(session_id) == [
+             %{role: "assistant", content: "Olá! Eu sou o Pincer."}
+           ]
+
+    # 2. IGNORE response
+    LLMStub.put_handlers(%{chat: {:ok, %{"content" => "IGNORE"}, nil}})
+    send(pid, :trigger_bootstrap)
+
+    wait_until(1000, fn ->
+      # Wait a beat after mailbox flush so async task completes
+      {:ok, st} = Server.get_status(session_id)
+      if st.pending_evals == %{}, do: :ok
+    end)
+
+    {:ok, state2} = Server.get_status(session_id)
+    assert length(state2.history) == length(state1.history)
+    refute_receive {:agent_response, _, _}, 50
+
+    # 3. Task crash during eval
+    LLMStub.put_handlers(%{chat: fn _msgs, _opts -> raise "eval crash" end})
+    send(pid, :trigger_bootstrap)
+
+    wait_until(1000, fn ->
+      {:ok, st} = Server.get_status(session_id)
+      if st.pending_evals == %{}, do: :ok
+    end)
+
+    assert Process.alive?(pid)
+    {:ok, state3} = Server.get_status(session_id)
+    assert state3.pending_evals == %{}
   end
 end

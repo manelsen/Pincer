@@ -3,10 +3,12 @@ defmodule Pincer.Core.ClusterTest do
 
   alias Pincer.Core.Cluster
   alias Pincer.Core.Cluster.NodeObserver
+  alias Pincer.Core.Registry, as: CoreRegistry
   alias Pincer.Core.Session.HordeSupervisor
-  alias Pincer.Core.Session.HordeRegistry
   alias Pincer.Core.Project.HordeSupervisor, as: ProjectHordeSupervisor
-  alias Pincer.Core.Project.HordeRegistry, as: ProjectHordeRegistry
+
+  @session_horde_registry Pincer.Core.Session.HordeRegistry
+  @project_horde_registry Pincer.Core.Project.HordeRegistry
 
   describe "Cluster.topologies/0" do
     test "returns empty list when no cluster config present" do
@@ -29,16 +31,16 @@ defmodule Pincer.Core.ClusterTest do
 
   describe "HordeRegistry — session registry" do
     test "is alive" do
-      assert Process.whereis(HordeRegistry) != nil
+      assert Process.whereis(@session_horde_registry) != nil
     end
 
     test "via_tuple returns a {:via, Horde.Registry, ...} tuple" do
-      result = HordeRegistry.via_tuple("session-abc")
-      assert {:via, Horde.Registry, {HordeRegistry, "session-abc"}} = result
+      result = CoreRegistry.via_tuple(@session_horde_registry, "session-abc")
+      assert {:via, Horde.Registry, {@session_horde_registry, "session-abc"}} = result
     end
 
     test "lookup returns [] for unknown session" do
-      assert Horde.Registry.lookup(HordeRegistry, "no-such-session") == []
+      assert CoreRegistry.lookup(@session_horde_registry, "no-such-session") == []
     end
   end
 
@@ -54,12 +56,12 @@ defmodule Pincer.Core.ClusterTest do
 
   describe "Project.HordeRegistry" do
     test "is alive" do
-      assert Process.whereis(ProjectHordeRegistry) != nil
+      assert Process.whereis(@project_horde_registry) != nil
     end
 
     test "via_tuple returns a {:via, Horde.Registry, ...} tuple" do
-      result = ProjectHordeRegistry.via_tuple("proj-xyz")
-      assert {:via, Horde.Registry, {ProjectHordeRegistry, "proj-xyz"}} = result
+      result = CoreRegistry.via_tuple(@project_horde_registry, "proj-xyz")
+      assert {:via, Horde.Registry, {@project_horde_registry, "proj-xyz"}} = result
     end
   end
 

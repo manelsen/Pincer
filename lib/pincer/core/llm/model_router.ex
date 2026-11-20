@@ -121,14 +121,25 @@ defmodule Pincer.Core.LLM.ModelRouter do
 
   defp load_tiers do
     case Application.get_env(:pincer, :model_router, %{}) do
-      %{tiers: tiers} when is_map(tiers) ->
-        tiers
-        |> Enum.into(%{}, fn {k, v} ->
-          {k, %{provider: v["provider"] || v[:provider], model: v["model"] || v[:model]}}
+      %{"tiers" => tiers} when is_map(tiers) ->
+        Enum.reduce(tiers, %{}, fn {k, v}, acc ->
+          with tier when not is_nil(tier) <- normalize_tier(k),
+               %{"provider" => provider, "model" => model} <- v do
+            Map.put(acc, tier, %{provider: provider, model: model})
+          else
+            _ -> acc
+          end
         end)
 
       _ ->
         %{}
     end
   end
+
+  defp normalize_tier("local"), do: :local
+  defp normalize_tier("fast"), do: :fast
+  defp normalize_tier("balanced"), do: :balanced
+  defp normalize_tier("powerful"), do: :powerful
+  defp normalize_tier(tier) when tier in [:local, :fast, :balanced, :powerful], do: tier
+  defp normalize_tier(_), do: nil
 end

@@ -3,7 +3,6 @@ defmodule Pincer.Channels.Telegram.Session do
     Pincer.Core.ChannelEventPolicy,
     Pincer.Core.ChannelInteractionPolicy,
     Pincer.Core.ProjectFlowDelivery,
-    Pincer.Core.ResponseEnvelope,
     Pincer.Core.Session.Server,
     Pincer.Core.StatusDelivery,
     Pincer.Core.StatusMessagePolicy,
@@ -18,10 +17,10 @@ defmodule Pincer.Channels.Telegram.Session do
   One process per active chat that listens to PubSub and sends to the Telegram API.
   """
   use Pincer.Ports.Channel
+  alias Pincer.Channels.Telegram.ResponseEnvelope
   alias Pincer.Core.ChannelEventPolicy
   alias Pincer.Core.ChannelInteractionPolicy
   alias Pincer.Core.ProjectFlowDelivery
-  alias Pincer.Core.ResponseEnvelope
   alias Pincer.Core.StatusDelivery
   alias Pincer.Core.SubAgentProgress
   alias Pincer.Core.StatusMessagePolicy
@@ -137,9 +136,8 @@ defmodule Pincer.Channels.Telegram.Session do
 
     text_with_usage =
       ResponseEnvelope.build(
-        :telegram,
         text,
-        usage || %{},
+        usage,
         Map.get(session_status, :usage_display)
       )
 
@@ -246,7 +244,7 @@ defmodule Pincer.Channels.Telegram.Session do
   defp stream_transport(state, session_status, extra_opts) do
     opts =
       session_status
-      |> then(&ResponseEnvelope.delivery_options(:telegram, &1))
+      |> ResponseEnvelope.delivery_options()
       |> Keyword.merge(extra_opts)
 
     [

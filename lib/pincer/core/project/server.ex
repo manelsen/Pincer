@@ -9,11 +9,11 @@ defmodule Pincer.Core.Project.Server do
   alias Pincer.Core.Executor
   alias Pincer.Core.Orchestration.Blackboard
   alias Pincer.Core.Project.Planner
-  alias Pincer.Core.Project.Registry, as: ProjectRegistry
+  alias Pincer.Core.Registry, as: CoreRegistry
 
   def start_link(opts) do
     id = Keyword.get(opts, :id) || generate_id()
-    GenServer.start_link(__MODULE__, opts, name: ProjectRegistry.via_tuple(id))
+    GenServer.start_link(__MODULE__, opts, name: via_tuple(id))
   end
 
   @impl true
@@ -40,15 +40,15 @@ defmodule Pincer.Core.Project.Server do
 
   # --- API ---
 
-  def get_status(id), do: GenServer.call(ProjectRegistry.via_tuple(id), :get_status)
+  def get_status(id), do: GenServer.call(via_tuple(id), :get_status)
 
-  def approve(id), do: GenServer.call(ProjectRegistry.via_tuple(id), :approve)
+  def approve(id), do: GenServer.call(via_tuple(id), :approve)
 
-  def pause(id), do: GenServer.call(ProjectRegistry.via_tuple(id), :pause)
+  def pause(id), do: GenServer.call(via_tuple(id), :pause)
 
-  def resume(id), do: GenServer.call(ProjectRegistry.via_tuple(id), :resume)
+  def resume(id), do: GenServer.call(via_tuple(id), :resume)
 
-  def stop(id), do: GenServer.stop(ProjectRegistry.via_tuple(id))
+  def stop(id), do: GenServer.stop(via_tuple(id))
 
   def update_plan(id, tasks) when is_binary(tasks) do
     task_list =
@@ -57,7 +57,7 @@ defmodule Pincer.Core.Project.Server do
       |> Enum.map(&String.trim/1)
       |> Enum.reject(&(&1 == ""))
 
-    GenServer.call(ProjectRegistry.via_tuple(id), {:update_plan, task_list})
+    GenServer.call(via_tuple(id), {:update_plan, task_list})
   end
 
   # --- Callbacks ---
@@ -128,27 +128,31 @@ defmodule Pincer.Core.Project.Server do
   end
 
   def handle_info(:execute_next, state) do
-    task = Enum.at(state.items, state.active_task_index)
-    role = extract_role(task)
+    task_desc = Enum.at(state.items, state.active_task_index)
+    role = extract_role(task_desc)
     parent = self()
 
-    {:ok, pid} =
-      Task.start(fn ->
-        history = [%{"role" => "user", "content" => task}]
-        Executor.run(parent, state.session_id, history, project_id: state.id, role: role)
+    task =
+      Task.Supervisor.async_nolink(Pincer.Core.TaskSupervisor, fn ->
+        history = [%{"role" => "user", "content" => task_desc}]
+
+        Executor.run(parent, state.session_id, history,
+          project_id: state.id,
+          role: role,
+          notify?: false
+        )
       end)
 
-    ref = Process.monitor(pid)
-
-    Blackboard.post("system", "Starting task (#{role}): #{task}", state.id,
+    Blackboard.post("system", "Starting task (#{role}): #{task_desc}", state.id,
       scope: state.session_id
     )
 
-    {:noreply, %{state | status: :running, worker_pid: pid, monitor_ref: ref}}
+    {:noreply, %{state | status: :running, worker_pid: task.pid, monitor_ref: task.ref}}
   end
 
-  def handle_info({:executor_finished, _final_history, _result, _usage}, state) do
-    if state.monitor_ref, do: Process.demonitor(state.monitor_ref, [:flush])
+  def handle_info({ref, {:ok, _final_history, _result, _usage}}, %{monitor_ref: ref} = state)
+      when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
 
     Blackboard.post(
       "system",
@@ -169,11 +173,38 @@ defmodule Pincer.Core.Project.Server do
      }}
   end
 
-  def handle_info({:executor_failed, reason}, state) do
-    handle_info({:DOWN, state.monitor_ref, :process, state.worker_pid, reason}, state)
+  def handle_info({ref, {:error, reason}}, %{monitor_ref: ref} = state)
+      when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    handle_task_failure(reason, state)
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{monitor_ref: ref} = state) do
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{monitor_ref: ref} = state)
+      when is_reference(ref) do
+    handle_task_failure(reason, state)
+  end
+
+  def handle_info(_other, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, state) do
+    if is_reference(state.monitor_ref) do
+      Process.demonitor(state.monitor_ref, [:flush])
+    end
+
+    if is_pid(state.worker_pid) and Process.alive?(state.worker_pid) do
+      case Task.Supervisor.terminate_child(Pincer.Core.TaskSupervisor, state.worker_pid) do
+        :ok -> :ok
+        {:error, :not_found} -> Process.exit(state.worker_pid, :kill)
+      end
+    end
+
+    :ok
+  end
+
+  # --- Helpers ---
+
+  defp handle_task_failure(reason, state) do
     next_retry_count = state.retry_count + 1
 
     if next_retry_count < state.max_retries do
@@ -209,23 +240,14 @@ defmodule Pincer.Core.Project.Server do
     end
   end
 
-  def handle_info(_other, state), do: {:noreply, state}
-
-  @impl true
-  def terminate(_reason, %{worker_pid: pid}) when is_pid(pid) do
-    if Process.alive?(pid), do: Process.exit(pid, :kill)
-    :ok
-  end
-
-  def terminate(_reason, _state), do: :ok
-
-  # --- Helpers ---
   defp extract_role(task) do
     case Regex.run(~r/^(\w+):/, task) do
       [_, role] -> String.downcase(role)
       _ -> "unknown"
     end
   end
+
+  defp via_tuple(id), do: CoreRegistry.via_tuple(Pincer.Core.Project.Registry, id, :local)
 
   defp generate_id do
     "p-" <> (:crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower))

@@ -22,4 +22,18 @@ defmodule Pincer.Core.EmptyResponseRecoveryPolicy do
   def retry_history(history) when is_list(history) do
     history ++ [%{"role" => "user", "content" => recovery_prompt()}]
   end
+
+  @doc """
+  Returns whether a tool-only turn should attempt an empty-response recovery call.
+  """
+  @spec should_retry_tool_only?(non_neg_integer(), boolean()) :: boolean()
+  def should_retry_tool_only?(depth, recovery_attempted?),
+    do: not recovery_attempted? and depth > 0
+
+  @doc """
+  Returns the context window scaling factor for empty-response recovery at `depth`.
+  """
+  @spec safe_limit_scale(non_neg_integer()) :: float() | nil
+  def safe_limit_scale(0), do: nil
+  def safe_limit_scale(_depth), do: 0.4
 end
