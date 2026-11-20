@@ -13,7 +13,7 @@ defmodule Pincer.Channels.WhatsApp do
   ]}
 
   @moduledoc """
-  WhatsApp channel adapter backed by a Baileys bridge process.
+  WhatsApp channel adapter backed by the Go `whatsapp_bridge` sidecar process.
 
   The bridge communicates with this adapter through JSONL events/messages over
   stdio. Incoming text is routed to sessions and core command handlers.

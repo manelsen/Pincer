@@ -100,8 +100,6 @@ defmodule Pincer.Core.Onboard.Defaults do
         "adapter" => "Pincer.Channels.WhatsApp",
         "dm_policy" => %{"mode" => "pairing"},
         "bridge" => %{
-          "command" => "node",
-          "args" => ["infrastructure/whatsapp/baileys_bridge.js"],
           "auth_dir" => "sessions/whatsapp",
           "qr_ascii" => true,
           "qr_ascii_small" => true,

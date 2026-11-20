@@ -8,8 +8,8 @@ This report covers the current architectural state of `Pincer`, the desired targ
 
 This report bundle includes two generated appendices:
 
-- [Pincer API Appendix](/opt/pincer_home/git/Pincer/docs/architecture/pincer_api_appendix.md)
-- [Pincer Lib Skeleton Appendix](/opt/pincer_home/git/Pincer/docs/architecture/pincer_lib_skeletons.md)
+- [Pincer API Appendix](./pincer_api_appendix.md)
+- [Pincer Lib Skeleton Appendix](./pincer_lib_skeletons.md)
 
 The first appendix catalogs compiled module/function docs for the public surface. The second appendix catalogs structural source skeletons from `lib/**/*.ex`, including private functions where present.
 
@@ -59,13 +59,13 @@ Implemented on `2026-03-13` after the report:
 
 New core policy modules introduced as part of that sequence:
 
-- [Pincer.Core.StatusMessagePolicy](/opt/pincer_home/git/Pincer/lib/pincer/core/status_message_policy.ex)
-- [Pincer.Core.StreamDelivery](/opt/pincer_home/git/Pincer/lib/pincer/core/stream_delivery.ex)
-- [Pincer.Core.ResponseEnvelope](/opt/pincer_home/git/Pincer/lib/pincer/core/response_envelope.ex)
-- [Pincer.Core.StatusDelivery](/opt/pincer_home/git/Pincer/lib/pincer/core/status_delivery.ex)
-- [Pincer.Core.ProjectFlowDelivery](/opt/pincer_home/git/Pincer/lib/pincer/core/project_flow_delivery.ex)
-- [Pincer.Core.ContextOverflowRecovery](/opt/pincer_home/git/Pincer/lib/pincer/core/context_overflow_recovery.ex)
-- [Pincer.Core.TurnOutcomePolicy](/opt/pincer_home/git/Pincer/lib/pincer/core/turn_outcome_policy.ex)
+- [Pincer.Core.StatusMessagePolicy](../../lib/pincer/core/status_message_policy.ex)
+- [Pincer.Core.StreamDelivery](../../lib/pincer/core/stream_delivery.ex)
+- [Pincer.Core.ResponseEnvelope](../../lib/pincer/core/response_envelope.ex)
+- [Pincer.Core.StatusDelivery](../../lib/pincer/core/status_delivery.ex)
+- [Pincer.Core.ProjectFlowDelivery](../../lib/pincer/core/project_flow_delivery.ex)
+- [Pincer.Core.ContextOverflowRecovery](../../lib/pincer/core/context_overflow_recovery.ex)
+- [Pincer.Core.TurnOutcomePolicy](../../lib/pincer/core/turn_outcome_policy.ex)
 
 Operationally, this means:
 
@@ -89,8 +89,8 @@ Source inventory at the time of this report:
 
 Boundary compiler status:
 
-- `:boundary` compiler is enabled in [mix.exs](/opt/pincer_home/git/Pincer/mix.exs#L14)
-- `ignore_unknown: true` is still enabled in [mix.exs](/opt/pincer_home/git/Pincer/mix.exs#L15)
+- `:boundary` compiler is enabled in [mix.exs](../../mix.exs#L14)
+- `ignore_unknown: true` is still enabled in [mix.exs](../../mix.exs#L15)
 
 That single flag is the clearest signal that the architecture is still in a transitional phase.
 
@@ -100,17 +100,17 @@ That single flag is the clearest signal that the architecture is still in a tran
 
 Current umbrella boundaries:
 
-- [Pincer](/opt/pincer_home/git/Pincer/lib/pincer.ex)
-- [Pincer.Core](/opt/pincer_home/git/Pincer/lib/pincer/core.ex)
-- [Pincer.Ports](/opt/pincer_home/git/Pincer/lib/pincer/ports.ex)
-- [Pincer.Infra](/opt/pincer_home/git/Pincer/lib/pincer/infra.ex)
-- [Pincer.Channels](/opt/pincer_home/git/Pincer/lib/pincer/channels.ex)
-- [Pincer.Adapters](/opt/pincer_home/git/Pincer/lib/pincer/adapters.ex)
-- [Pincer.Adapters.Tools](/opt/pincer_home/git/Pincer/lib/pincer/adapters/tools.ex)
-- [Pincer.Adapters.Connectors](/opt/pincer_home/git/Pincer/lib/pincer/adapters/connectors.ex)
-- [Pincer.LLM](/opt/pincer_home/git/Pincer/lib/pincer/llm.ex)
-- [Pincer.Utils](/opt/pincer_home/git/Pincer/lib/pincer/utils.ex)
-- [Pincer.Mix](/opt/pincer_home/git/Pincer/lib/pincer.ex#L12)
+- [Pincer](../../lib/pincer.ex)
+- [Pincer.Core](../../lib/pincer/core.ex)
+- [Pincer.Ports](../../lib/pincer/ports.ex)
+- [Pincer.Infra](../../lib/pincer/infra.ex)
+- [Pincer.Channels](../../lib/pincer/channels.ex)
+- [Pincer.Adapters](../../lib/pincer/adapters.ex)
+- [Pincer.Adapters.Tools](../../lib/pincer/adapters/tools.ex)
+- [Pincer.Adapters.Connectors](../../lib/pincer/adapters/connectors.ex)
+- [Pincer.LLM](../../lib/pincer/llm.ex)
+- [Pincer.Utils](../../lib/pincer/utils.ex)
+- [Pincer.Mix](../../lib/pincer.ex#L12)
 
 Current dependency story at top level:
 
@@ -125,7 +125,7 @@ This is directionally sound. The weakness is granularity.
 
 ### Runtime Topology
 
-The supervision tree in [application.ex](/opt/pincer_home/git/Pincer/lib/pincer/application.ex) is broad and operationally convenient, but it couples many concerns into default boot:
+The supervision tree in [application.ex](../../lib/pincer/application.ex) is broad and operationally convenient, but it couples many concerns into default boot:
 
 - `PubSub`
 - `Blackboard`
@@ -153,11 +153,11 @@ This has two implications:
 
 The control plane is effectively concentrated in:
 
-- [Pincer.Core.Session.Server](/opt/pincer_home/git/Pincer/lib/pincer/core/session/server.ex)
-- [Pincer.Core.Executor](/opt/pincer_home/git/Pincer/lib/pincer/core/executor.ex)
-- [Pincer.LLM.Client](/opt/pincer_home/git/Pincer/lib/pincer/llm/client.ex)
-- [Pincer.Adapters.NativeToolRegistry](/opt/pincer_home/git/Pincer/lib/pincer/adapters/native_tool_registry.ex)
-- [Pincer.Storage.Adapters.Postgres](/opt/pincer_home/git/Pincer/lib/pincer/storage/adapters/postgres.ex)
+- [Pincer.Core.Session.Server](../../lib/pincer/core/session/server.ex)
+- [Pincer.Core.Executor](../../lib/pincer/core/executor.ex)
+- [Pincer.LLM.Client](../../lib/pincer/llm/client.ex)
+- [Pincer.Adapters.NativeToolRegistry](../../lib/pincer/adapters/native_tool_registry.ex)
+- [Pincer.Storage.Adapters.Postgres](../../lib/pincer/storage/adapters/postgres.ex)
 
 The transport/data plane is spread through:
 
@@ -283,12 +283,12 @@ Observations:
 
 - `Mix` tasks are explicitly classified into `Pincer.Mix`.
 - `Core`, `Ports`, `Infra`, `Channels`, `Adapters`, `LLM`, `Utils` already exist as recognizable umbrellas.
-- There are targeted boundary regression tests in [boundary_exports_test.exs](/opt/pincer_home/git/Pincer/test/pincer/boundary_exports_test.exs).
+- There are targeted boundary regression tests in [boundary_exports_test.exs](../../test/pincer/boundary_exports_test.exs).
 - There are already examples of a clean port-dispatcher pair:
-  - [Pincer.Ports.Hook](/opt/pincer_home/git/Pincer/lib/pincer/ports/hook.ex)
-  - [Pincer.Core.HookDispatcher](/opt/pincer_home/git/Pincer/lib/pincer/core/hook_dispatcher.ex)
-  - [Pincer.Ports.MediaUnderstanding](/opt/pincer_home/git/Pincer/lib/pincer/ports/media_understanding.ex)
-  - [Pincer.Adapters.MediaDispatcher](/opt/pincer_home/git/Pincer/lib/pincer/adapters/media_dispatcher.ex)
+  - [Pincer.Ports.Hook](../../lib/pincer/ports/hook.ex)
+  - [Pincer.Core.HookDispatcher](../../lib/pincer/core/hook_dispatcher.ex)
+  - [Pincer.Ports.MediaUnderstanding](../../lib/pincer/ports/media_understanding.ex)
+  - [Pincer.Adapters.MediaDispatcher](../../lib/pincer/adapters/media_dispatcher.ex)
 
 ### What Is Not Mature Yet
 
@@ -403,9 +403,9 @@ Desired:
 
 The full function skeleton mapping requested for this report is included as:
 
-- [Pincer API Appendix](/opt/pincer_home/git/Pincer/docs/architecture/pincer_api_appendix.md)
+- [Pincer API Appendix](./pincer_api_appendix.md)
   - compiled public surface with extracted docs
-- [Pincer Lib Skeleton Appendix](/opt/pincer_home/git/Pincer/docs/architecture/pincer_lib_skeletons.md)
+- [Pincer Lib Skeleton Appendix](./pincer_lib_skeletons.md)
   - source-level structural skeleton across `lib/**/*.ex`, including private definitions where present
 
 Together they provide:
@@ -438,18 +438,18 @@ Status:
 
 Completed slices:
 
-- preview/final delivery fallback moved into [Pincer.Core.StreamDelivery](/opt/pincer_home/git/Pincer/lib/pincer/core/stream_delivery.ex)
-- response envelope formation moved into [Pincer.Core.ResponseEnvelope](/opt/pincer_home/git/Pincer/lib/pincer/core/response_envelope.ex)
-- status upsert/delivery policy moved into [Pincer.Core.StatusMessagePolicy](/opt/pincer_home/git/Pincer/lib/pincer/core/status_message_policy.ex) and [Pincer.Core.StatusDelivery](/opt/pincer_home/git/Pincer/lib/pincer/core/status_delivery.ex)
-- project flow delivery moved into [Pincer.Core.ProjectFlowDelivery](/opt/pincer_home/git/Pincer/lib/pincer/core/project_flow_delivery.ex)
-- turn outcome classification moved into [Pincer.Core.TurnOutcomePolicy](/opt/pincer_home/git/Pincer/lib/pincer/core/turn_outcome_policy.ex)
-- tool-only degraded-response formatting moved into [Pincer.Core.ToolOnlyOutcomeFormatter](/opt/pincer_home/git/Pincer/lib/pincer/core/tool_only_outcome_formatter.ex)
-- lightweight web capability split into explicit `web_search` and `web_fetch` tool interfaces in [Pincer.Adapters.Tools.Web](/opt/pincer_home/git/Pincer/lib/pincer/tools/web.ex)
+- preview/final delivery fallback moved into [Pincer.Core.StreamDelivery](../../lib/pincer/core/stream_delivery.ex)
+- response envelope formation moved into [Pincer.Core.ResponseEnvelope](../../lib/pincer/core/response_envelope.ex)
+- status upsert/delivery policy moved into [Pincer.Core.StatusMessagePolicy](../../lib/pincer/core/status_message_policy.ex) and [Pincer.Core.StatusDelivery](../../lib/pincer/core/status_delivery.ex)
+- project flow delivery moved into [Pincer.Core.ProjectFlowDelivery](../../lib/pincer/core/project_flow_delivery.ex)
+- turn outcome classification moved into [Pincer.Core.TurnOutcomePolicy](../../lib/pincer/core/turn_outcome_policy.ex)
+- tool-only degraded-response formatting moved into [Pincer.Core.ToolOnlyOutcomeFormatter](../../lib/pincer/core/tool_only_outcome_formatter.ex)
+- lightweight web capability split into explicit `web_search` and `web_fetch` tool interfaces in [Pincer.Adapters.Tools.Web](../../lib/pincer/tools/web.ex)
 - browser capability is now hidden from the registry when browser infra is disabled, keeping simple URL reads on lightweight web tools
 - first-turn `empty_response` now attempts a lightweight chat recovery before surfacing provider-empty UX
 - prompt pruning and system-context assembly moved out of the executor loop into a dedicated core prompt-assembly seam
-- channel status/error classification moved into [Pincer.Core.ChannelEventPolicy](/opt/pincer_home/git/Pincer/lib/pincer/core/channel_event_policy.ex)
-- WhatsApp session flow now reuses [Pincer.Core.ProjectFlowDelivery](/opt/pincer_home/git/Pincer/lib/pincer/core/project_flow_delivery.ex) instead of owning `ProjectRouter` replay logic directly
+- channel status/error classification moved into [Pincer.Core.ChannelEventPolicy](../../lib/pincer/core/channel_event_policy.ex)
+- WhatsApp session flow now reuses [Pincer.Core.ProjectFlowDelivery](../../lib/pincer/core/project_flow_delivery.ex) instead of owning `ProjectRouter` replay logic directly
 
 Operational impact observed after these slices:
 

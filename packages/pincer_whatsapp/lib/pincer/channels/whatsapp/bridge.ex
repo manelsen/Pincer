@@ -2,7 +2,8 @@ defmodule Pincer.Channels.WhatsApp.Bridge do
   @moduledoc """
   Behaviour for WhatsApp transport bridge adapters.
 
-  The default adapter uses an external Node process (Baileys) over JSONL.
+  The default adapter spawns the Go `whatsapp_bridge` sidecar binary compiled
+  into `priv/whatsapp_bridge` by `Mix.Tasks.Compile.WhatsappBridge` over JSONL.
   """
 
   @callback start_link(keyword()) :: GenServer.on_start()

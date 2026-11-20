@@ -46,15 +46,11 @@ defmodule Pincer.Core.Bootstrap do
   end
 
   @doc """
-  Consolidates user responses into persona files via LLM.
-
-  Sends the collected bootstrap answers to the LLM to generate
-  IDENTITY.md, SOUL.md, and USER.md as a JSON map.
-
-  Returns `{:ok, %{"identity" => ..., "soul" => ..., "user" => ...}}` or `{:error, reason}`.
+  Builds the system prompt used to consolidate bootstrap answers into persona files.
   """
-  def consolidate(responses) do
-    prompt = """
+  @spec build_prompt(map()) :: String.t()
+  def build_prompt(responses) when is_map(responses) do
+    """
     You are a Systems and Behavior Architect. Your mission is to forge the identity of an Elixir Agent called Pincer.
     You MUST AVOID clichés of "helpful AI assistant". Pincer should sound like a technical extension of the user.
 
@@ -80,8 +76,22 @@ defmodule Pincer.Core.Bootstrap do
 
     Return ONLY pure JSON: {"identity": "content...", "soul": "content...", "user": "content..."}
     """
+  end
 
-    case LLM.chat_completion([%{"role" => "system", "content" => prompt}]) do
+  @doc """
+  Consolidates user responses into persona files via LLM.
+
+  Sends the collected bootstrap answers to the LLM to generate
+  IDENTITY.md, SOUL.md, and USER.md as a JSON map.
+
+  Returns `{:ok, %{"identity" => ..., "soul" => ..., "user" => ...}}` or `{:error, reason}`.
+  """
+  @spec consolidate(map(), keyword()) :: {:ok, map()} | {:error, term()}
+  def consolidate(responses, opts \\ []) when is_map(responses) and is_list(opts) do
+    prompt = build_prompt(responses)
+    llm_client = Keyword.get(opts, :llm_client, LLM)
+
+    case llm_client.chat_completion([%{"role" => "system", "content" => prompt}]) do
       {:ok, %{"content" => content}, _usage} ->
         clean_content =
           content

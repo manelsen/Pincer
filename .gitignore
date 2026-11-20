@@ -8,6 +8,7 @@ packages/*/_build/
 packages/*/deps/
 packages/*/cover/
 packages/*/doc/
+packages/*/mix.lock
 erl_crash.dump
 *.ez
 pincer-*.tar
@@ -19,7 +20,6 @@ pincer-*.tar
 # Environment and Secrets
 .env
 .env.test
-.tool-versions
 
 # Local Agent Artifacts
 .local/
@@ -43,6 +43,7 @@ memory/blackboard.journal
 infrastructure/mcp/venv/
 infrastructure/whatsapp/node_modules/
 infrastructure/whatsapp/package-lock.json
+infrastructure/whatsapp/whatsapp_bridge
 
 # Memory and Session History
 memory/*.md
@@ -59,7 +60,6 @@ trash/
 venv/
 mcp_sidecar/node_modules/
 analysis/
-docs/
 .opencode/
 test_exe
 workspaces/*

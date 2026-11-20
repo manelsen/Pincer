@@ -24,9 +24,9 @@ defmodule Pincer.Core.Heartbeat do
   def handle_info(:pulse, state) do
     Logger.info("[HEARTBEAT] Pulse detected. Checking proactivity...")
 
-    # Example of proactive task: Notify User that Pincer is alert.
+    # Example of proactive task: Notify primary user that Pincer is alert.
     # In the future, a specific Worker will be called here to fetch news from GitHub.
-    # Dispatcher.dispatch("telegram_<chat_id>", "⚙️ Routine pulse: systems operational. Any tasks for now, User?")
+    # Dispatcher.dispatch("telegram_<chat_id>", "⚙️ Routine pulse: systems operational.")
 
     schedule_pulse()
     {:noreply, state}

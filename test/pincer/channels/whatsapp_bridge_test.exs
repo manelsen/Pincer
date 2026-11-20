@@ -46,5 +46,41 @@ defmodule Pincer.Channels.WhatsAppBridgeTest do
                ]
       end
     end
+
+    describe "Mix.Tasks.Compile.WhatsappBridge" do
+      test "expands binary output path inside package priv/ instead of Go source directory" do
+        package_root = Path.expand("../../../packages/pincer_whatsapp", __DIR__)
+        expected = Path.join(package_root, "priv/whatsapp_bridge")
+
+        assert Mix.Tasks.Compile.WhatsappBridge.output_binary_path(package_root) == expected
+        refute String.contains?(expected, "priv/src/whatsapp_bridge/priv")
+      end
+
+      test "needs_rebuild?/2 handles existing binary mtime without crashing and rebuilds only when outdated" do
+        tmp =
+          Path.join(System.tmp_dir!(), "pincer_wa_rebuild_#{System.unique_integer([:positive])}")
+
+        src_dir = Path.join(tmp, "src")
+        bin_path = Path.join(tmp, "priv/whatsapp_bridge")
+        File.mkdir_p!(src_dir)
+        File.mkdir_p!(Path.dirname(bin_path))
+
+        go_file = Path.join(src_dir, "main.go")
+        File.write!(go_file, "package main\n")
+
+        # Binary missing -> rebuild needed
+        assert Mix.Tasks.Compile.WhatsappBridge.needs_rebuild?(bin_path, src_dir)
+
+        File.write!(bin_path, "binary")
+        File.touch!(go_file, 1_700_000_000)
+        File.touch!(bin_path, 1_700_000_100)
+        refute Mix.Tasks.Compile.WhatsappBridge.needs_rebuild?(bin_path, src_dir)
+
+        File.touch!(go_file, 1_700_000_200)
+        assert Mix.Tasks.Compile.WhatsappBridge.needs_rebuild?(bin_path, src_dir)
+
+        File.rm_rf!(tmp)
+      end
+    end
   end
 end

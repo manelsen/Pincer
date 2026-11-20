@@ -34,7 +34,7 @@ defmodule Pincer.Core.PromptAssemblyTest do
     prompt_history =
       PromptAssembly.prepare(history, %{provider: "stub_provider", model: "x"},
         current_time: "2026-03-14 00:00:00Z",
-        long_term_memory: "User prefere respostas objetivas.",
+        long_term_memory: "User prefers concise answers.",
         workspace_path: "/tmp/pincer_prompt_assembly",
         storage: StorageStub,
         memory_recall: RecallStub,
@@ -48,7 +48,7 @@ defmodule Pincer.Core.PromptAssemblyTest do
     assert content =~ "System base"
     assert content =~ "CURRENT TIME: 2026-03-14 00:00:00Z"
     assert content =~ "NARRATIVE MEMORY"
-    assert content =~ "User prefere respostas objetivas."
+    assert content =~ "User prefers concise answers."
     assert content =~ "RECENT LEARNINGS & ERRORS"
     assert content =~ "Use web_fetch for plain URL reading"
     assert content =~ "browser pool unavailable"

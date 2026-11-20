@@ -37,7 +37,6 @@ channels:
     bridge:
       args: []
       auth_dir: "sessions/whatsapp"
-      command: "./infrastructure/whatsapp/whatsapp_bridge"
       pairing_phone: ""
       qr_ascii: true
       qr_ascii_small: true
