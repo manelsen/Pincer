@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - master
+  workflow_dispatch:
 
 jobs:
   test:
@@ -59,8 +60,69 @@ jobs:
           mix ecto.create
           mix ecto.migrate
 
+      - name: Compile with warnings as errors
+        run: mix compile --warnings-as-errors
+
+      - name: Run strict doctor and security audit posture gates
+        env:
+          OPENROUTER_API_KEY: ci-posture-check
+        run: |
+          mix pincer.doctor --strict --config test/fixtures/ci_posture/config.yaml
+          mix pincer.security_audit --strict --config test/fixtures/ci_posture/config.yaml
+
       - name: Run QA gate (format + compile + test)
         run: mix qa
+
+  sqlite-smoke:
+    name: Zero-Infra SQLite Smoke & Posture Gate
+    runs-on: ubuntu-latest
+
+    env:
+      MIX_ENV: test
+      PINCER_STORAGE: sqlite
+      PINCER_SQLITE_PATH: tmp/ci_smoke.db
+      PINCER_DB_PORT: "1"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Elixir and OTP
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18.0"
+          otp-version: "27.2"
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-sqlite-otp27-elixir1.18-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-sqlite-otp27-elixir1.18-
+            ${{ runner.os }}-mix-otp27-elixir1.18-
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Compile with warnings as errors
+        run: mix compile --warnings-as-errors
+
+      - name: Run strict doctor and security audit posture gates (no Postgres)
+        env:
+          OPENROUTER_API_KEY: ci-posture-check
+        run: |
+          mix pincer.doctor --strict --config test/fixtures/ci_posture/config.yaml
+          mix pincer.security_audit --strict --config test/fixtures/ci_posture/config.yaml
+
+      - name: Run Postgres-free SQLite E2E boot smoke test
+        run: |
+          mix test --warnings-as-errors \
+            test/pincer/e2e/zero_infra_sqlite_boot_e2e_test.exs \
+            test/pincer/e2e/introspection_skills_e2e_test.exs \
+            test/pincer/e2e/ci_posture_fixture_test.exs
 
   whatsapp:
     name: WhatsApp Channel Tests
@@ -123,3 +185,43 @@ jobs:
 
       - name: Run WhatsApp tests
         run: mix test --warnings-as-errors test/pincer/channels/whatsapp_test.exs test/pincer/channels/whatsapp_session_test.exs test/pincer/channels/whatsapp_bridge_test.exs
+
+  docker-sandbox-e2e:
+    name: Opt-in Real Docker Sandbox E2E
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+
+    env:
+      MIX_ENV: test
+      PINCER_STORAGE: sqlite
+      PINCER_SQLITE_PATH: tmp/ci_docker_e2e.db
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Elixir and OTP
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.18.0"
+          otp-version: "27.2"
+
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-sqlite-otp27-elixir1.18-${{ hashFiles('mix.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-mix-sqlite-otp27-elixir1.18-
+            ${{ runner.os }}-mix-otp27-elixir1.18-
+
+      - name: Pull alpine:3.20 sandbox image
+        run: docker pull alpine:3.20
+
+      - name: Install dependencies
+        run: mix deps.get
+
+      - name: Run Docker Sandbox E2E tests
+        run: mix test --warnings-as-errors --only docker

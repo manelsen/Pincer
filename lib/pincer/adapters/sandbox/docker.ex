@@ -4,6 +4,7 @@ defmodule Pincer.Adapters.Sandbox.Docker do
 
   Inspired by Nous Research Hermes Agent's `tools/environments/docker.py`:
   - Drops all Linux capabilities (`--cap-drop ALL`)
+  - Maps non-root host workspace ownership (`--user <uid>:<gid>`) so `/workspace` stays writable without `CAP_DAC_OVERRIDE`
   - Enforces `--security-opt no-new-privileges` (unless `snap_compat: true`)
   - Bounds PIDs (`--pids-limit`), memory (`--memory`), CPUs (`--cpus`), and writable `/tmp`/`/var/tmp` tmpfs mounts
   - Defaults to network isolation (`--network none`)
@@ -76,6 +77,7 @@ defmodule Pincer.Adapters.Sandbox.Docker do
 
     with {:ok, env} <- Sandbox.validate_env(Keyword.get(merged, :env)),
          {:ok, host_ws, container_cwd} <- resolve_workspace(merged),
+         {:ok, user_args} <- resolve_user_args(host_ws, merged),
          {:ok, image} <- validate_image(Keyword.get(merged, :image, @default_image)) do
       pids_limit = Keyword.get(merged, :pids_limit, @default_pids_limit)
       memory = Keyword.get(merged, :memory, @default_memory)
@@ -91,6 +93,7 @@ defmodule Pincer.Adapters.Sandbox.Docker do
           "--cap-drop",
           "ALL"
         ] ++
+          user_args ++
           if(snap_compat?, do: [], else: ["--security-opt", "no-new-privileges"]) ++
           [
             "--pids-limit",
@@ -229,6 +232,46 @@ defmodule Pincer.Adapters.Sandbox.Docker do
   end
 
   defp validate_image(_), do: {:error, :invalid_docker_image}
+
+  defp resolve_user_args(host_ws, opts) do
+    case Keyword.get(opts, :user) do
+      nil ->
+        resolve_host_user_args(host_ws, opts)
+
+      user when is_binary(user) ->
+        validate_user(user)
+
+      _ ->
+        {:error, :invalid_docker_user}
+    end
+  end
+
+  defp resolve_host_user_args(host_ws, opts) do
+    if Keyword.get(opts, :run_as_host_user, true) do
+      stat_fun = Keyword.get(opts, :stat_fun, &File.stat/1)
+
+      case stat_fun.(host_ws) do
+        {:ok, %File.Stat{uid: uid, gid: gid}}
+        when is_integer(uid) and uid > 0 and is_integer(gid) and gid >= 0 ->
+          {:ok, ["--user", "#{uid}:#{gid}"]}
+
+        _ ->
+          {:ok, []}
+      end
+    else
+      {:ok, []}
+    end
+  end
+
+  defp validate_user(user) when is_binary(user) do
+    trimmed = String.trim(user)
+
+    if Regex.match?(~r/^[A-Za-z0-9_][A-Za-z0-9_.-]*(?::[A-Za-z0-9_][A-Za-z0-9_.-]*)?$/, trimmed) do
+      {:ok, ["--user", trimmed]}
+    else
+      {:error, :invalid_docker_user}
+    end
+  end
 
   defp default_runner(exe, args, cmd_opts) do
     System.cmd(exe, args, cmd_opts)

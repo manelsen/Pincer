@@ -78,6 +78,82 @@ defmodule Pincer.Adapters.Sandbox.DockerTest do
       assert String.length(label) <= 63
       assert Regex.match?(~r/^[A-Za-z0-9_.-]+$/, label)
     end
+
+    test "maps non-root host workspace owner via --user by default and omits for root or stat error" do
+      workspace =
+        Path.join(System.tmp_dir!(), "pincer_docker_user_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(workspace)
+      on_exit(fn -> File.rm_rf(workspace) end)
+
+      non_root_stat = fn _path -> {:ok, %File.Stat{uid: 1000, gid: 1000}} end
+
+      assert {:ok, args} =
+               Docker.build_args("echo hi", workspace_path: workspace, stat_fun: non_root_stat)
+
+      assert contains_pair?(args, "--user", "1000:1000")
+
+      root_stat = fn _path -> {:ok, %File.Stat{uid: 0, gid: 0}} end
+
+      assert {:ok, root_args} =
+               Docker.build_args("echo hi", workspace_path: workspace, stat_fun: root_stat)
+
+      refute "--user" in root_args
+
+      error_stat = fn _path -> {:error, :enoent} end
+
+      assert {:ok, err_args} =
+               Docker.build_args("echo hi", workspace_path: workspace, stat_fun: error_stat)
+
+      refute "--user" in err_args
+    end
+
+    test "supports explicit user override and rejects invalid user specs" do
+      workspace =
+        Path.join(
+          System.tmp_dir!(),
+          "pincer_docker_explicit_user_#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(workspace)
+      on_exit(fn -> File.rm_rf(workspace) end)
+
+      assert {:ok, args} =
+               Docker.build_args("echo hi", workspace_path: workspace, user: "1001:1002")
+
+      assert contains_pair?(args, "--user", "1001:1002")
+
+      assert {:error, :invalid_docker_user} =
+               Docker.build_args("echo hi", workspace_path: workspace, user: "-root")
+
+      assert {:error, :invalid_docker_user} =
+               Docker.build_args("echo hi", workspace_path: workspace, user: "bad user")
+
+      assert {:error, :invalid_docker_user} =
+               Docker.build_args("echo hi", workspace_path: workspace, user: 1000)
+    end
+
+    test "omits --user when run_as_host_user is false" do
+      workspace =
+        Path.join(
+          System.tmp_dir!(),
+          "pincer_docker_no_host_user_#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(workspace)
+      on_exit(fn -> File.rm_rf(workspace) end)
+
+      non_root_stat = fn _path -> {:ok, %File.Stat{uid: 1000, gid: 1000}} end
+
+      assert {:ok, args} =
+               Docker.build_args("echo hi",
+                 workspace_path: workspace,
+                 run_as_host_user: false,
+                 stat_fun: non_root_stat
+               )
+
+      refute "--user" in args
+    end
   end
 
   describe "run/2" do

@@ -1,0 +1,32 @@
+storage:
+  adapter: "sqlite"
+  path: "tmp/ci_posture.db"
+
+sandbox:
+  adapter: "local"
+
+gateway:
+  bind: "127.0.0.1"
+
+tools:
+  restrict_to_workspace: true
+
+channels:
+  cli:
+    enabled: true
+    adapter: "Pincer.Channels.CLI"
+  telegram:
+    enabled: false
+    adapter: "Pincer.Channels.Telegram"
+  discord:
+    enabled: false
+    adapter: "Pincer.Channels.Discord"
+  whatsapp:
+    enabled: false
+    adapter: "Pincer.Channels.WhatsApp"
+
+llm:
+  provider: "openrouter"
+  openrouter:
+    base_url: "https://openrouter.ai/api/v1/chat/completions"
+    default_model: "openrouter/free"

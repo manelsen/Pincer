@@ -327,8 +327,10 @@ Runs `format --check-formatted`, `compile --warnings-as-errors`, and `test --war
 
 ```bash
 docker compose up -d postgres     # database required for Postgres test suite
-mix test                          # all tests
+mix test                          # all tests (excludes opt-in :docker and :sqlite_smoke)
 mix test.quick                    # stale tests only
+PINCER_STORAGE=sqlite PINCER_SQLITE_PATH=tmp/ci_smoke.db mix test test/pincer/e2e/zero_infra_sqlite_boot_e2e_test.exs  # Postgres-free SQLite E2E
+mix test --only docker            # opt-in real Docker container sandbox E2E
 mix test test/pincer/core/executor_test.exs   # single file
 ```
 

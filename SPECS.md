@@ -363,5 +363,31 @@ and validated with zero external PostgreSQL/Docker dependencies:
     and `:sqlite_engine` (`:ok` / `:error`) in SQLite mode with zero PostgreSQL false positives,
     plus basic `database` shape validation in Postgres mode without blocking network calls.
 
+### 20. E2E Verification & CI Posture Gates
 
+Consolidates real end-to-end verification and continuous security/health posture enforcement:
+
+- **Postgres-free Test & Smoke Boot (`test/test_helper.exs` + `sqlite-smoke` CI job)**:
+  - When `PINCER_STORAGE=sqlite` (or `sqlite3`), `test/test_helper.exs` skips
+    `ecto.drop` / `ecto.create` / `ecto.migrate` against PostgreSQL and includes `:sqlite_smoke`
+    tests verifying `StartupGuard.run/0`, `Pincer.Application` supervision without `Repo`,
+    `Pincer.Ports.Storage` round-trips, FTS5 search, checkpoints, pairing state, and `PurgeIndices`.
+  - Default `ExUnit.start/1` excludes opt-in `:docker` E2E tests (and `:sqlite_smoke` under Postgres mode).
+- **Opt-in Real Container E2E (`@tag :docker`)**:
+  - `test/pincer/e2e/docker_sandbox_e2e_test.exs` runs `Pincer.Adapters.Sandbox.Docker.run/2`
+    against `alpine:3.20` (executes via `mix test --only docker` or manual `workflow_dispatch`),
+    asserting confined `/workspace` r/w, `--network none`, `CapEff: 0000000000000000`,
+    `NoNewPrivs: 1`, `/tmp` `noexec` tmpfs, and workspace traversal rejection.
+  - `Pincer.Adapters.Sandbox.Docker` maps non-root host workspace ownership via
+    `--user <uid>:<gid>` by default (`run_as_host_user: true`, overridable via `:user` or
+    `run_as_host_user: false`) so `/workspace` remains writable under `--cap-drop ALL`
+    without granting `CAP_DAC_OVERRIDE`.
+- **Full Introspection → Skills → Session E2E**:
+  - Exercises `Session.Server`, `Introspection.Kernel`, `Skills.Generator`, `Skills.Guard`,
+    `Skills.PromptIndex`, and `PromptAssembly` end-to-end on embedded SQLite, proving both
+    dynamic prompt delivery to the LLM client on `{:kernel_skills_updated, skill}` and
+    fail-closed blocking of dangerous skill payloads.
+- **Continuous CI Posture Gates**:
+  - Deterministic hardened fixture at `test/fixtures/ci_posture/config.yaml` verified by
+    `mix pincer.doctor --strict` and `mix pincer.security_audit --strict` in CI.
 
