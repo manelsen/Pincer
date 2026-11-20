@@ -539,6 +539,159 @@ defmodule Pincer.Adapters.Connectors.MCP.ManagerTest do
     assert {:ok, %{"result" => %{"content" => []}}} = result
   end
 
+  defmodule FakeClient do
+    def list_tools(server_pid) do
+      case Agent.get_and_update(server_pid, fn state ->
+             attempt = state.attempts + 1
+             {attempt, %{state | attempts: attempt}}
+           end) do
+        1 ->
+          {:ok, %{"result" => %{"tools" => []}}}
+
+        _ ->
+          tools = Agent.get(server_pid, & &1.tools)
+          {:ok, %{"result" => %{"tools" => tools}}}
+      end
+    end
+
+    def call_tool(_server_pid, "slow", args) do
+      Process.sleep(80)
+      {:ok, %{"result" => %{"content" => [%{"type" => "text", "text" => "slow:#{args["n"]}"}]}}}
+    end
+
+    def call_tool(_server_pid, _name, args) do
+      {:ok, %{"result" => %{"content" => [%{"type" => "text", "text" => "ok:#{inspect(args)}"}]}}}
+    end
+  end
+
+  test "build_client_opts/3 and audit_sidecar_result/6 do not intern atoms from unseen keys" do
+    unseen_key = "unseen_mcp_key_#{System.unique_integer([:positive])}"
+    cfg = %{"command" => "npx", "args" => [], unseen_key => "val"}
+
+    opts = Manager.build_client_opts("custom", cfg, %{})
+    assert opts[:command] == "npx"
+
+    assert_raise ArgumentError, fn ->
+      String.to_existing_atom(unseen_key)
+    end
+  end
+
+  describe "non-blocking discovery and concurrent execution" do
+    setup do
+      tools = [
+        %{"name" => "slow", "description" => "Slow tool", "inputSchema" => %{"type" => "object"}}
+      ]
+
+      {:ok, fake_srv} = Agent.start_link(fn -> %{attempts: 0, tools: tools} end)
+
+      on_exit(fn ->
+        if Process.alive?(fake_srv), do: Agent.stop(fake_srv)
+      end)
+
+      {:ok, fake_srv: fake_srv}
+    end
+
+    test "boots and responds to get_all_tools immediately without blocking on retry interval", %{
+      fake_srv: fake_srv
+    } do
+      start_ms = System.monotonic_time(:millisecond)
+
+      pid =
+        start_supervised!(
+          {Manager,
+           name: nil,
+           servers: %{"fake" => fake_srv},
+           client_module: FakeClient,
+           retry_interval_ms: 5_000,
+           max_retries: 2}
+        )
+
+      tools = Manager.get_all_tools(pid, 100)
+      elapsed_ms = System.monotonic_time(:millisecond) - start_ms
+
+      assert is_list(tools)
+      assert elapsed_ms < 250
+    end
+
+    test "retries discovery asynchronously and populates tools on subsequent attempts", %{
+      fake_srv: fake_srv
+    } do
+      pid =
+        start_supervised!(
+          {Manager,
+           name: nil,
+           servers: %{"fake" => fake_srv},
+           client_module: FakeClient,
+           retry_interval_ms: 15,
+           max_retries: 3}
+        )
+
+      eventually(fn ->
+        tools = Manager.get_all_tools(pid, 200)
+        assert Enum.any?(tools, &(&1.name == "slow"))
+      end)
+    end
+
+    test "execute_tool runs concurrently across callers without blocking Manager GenServer", %{
+      fake_srv: fake_srv
+    } do
+      pid =
+        start_supervised!(
+          {Manager,
+           name: nil,
+           servers: %{"fake" => fake_srv},
+           client_module: FakeClient,
+           retry_interval_ms: 10,
+           max_retries: 3}
+        )
+
+      eventually(fn ->
+        assert Enum.any?(Manager.get_all_tools(pid, 200), &(&1.name == "slow"))
+      end)
+
+      t0 = System.monotonic_time(:millisecond)
+
+      t1 = Task.async(fn -> Manager.execute_tool(pid, "slow", %{"n" => 1}) end)
+      t2 = Task.async(fn -> Manager.execute_tool(pid, "slow", %{"n" => 2}) end)
+
+      # Manager stays responsive to get_all_tools while slow tools execute
+      Process.sleep(15)
+      t_query_start = System.monotonic_time(:millisecond)
+      _tools = Manager.get_all_tools(pid, 50)
+      assert System.monotonic_time(:millisecond) - t_query_start < 40
+
+      assert {:ok, "slow:1"} = Task.await(t1, 1_000)
+      assert {:ok, "slow:2"} = Task.await(t2, 1_000)
+
+      elapsed_ms = System.monotonic_time(:millisecond) - t0
+      assert elapsed_ms < 145
+    end
+  end
+
+  test "call_tool_with_timeout/4 catches sidecar exits without crashing caller" do
+    result =
+      Manager.call_tool_with_timeout(
+        "skills_sidecar",
+        fn -> exit(:boom) end,
+        200,
+        5
+      )
+
+    assert {:error, :boom} = result
+  end
+
+  defp eventually(fun, attempts \\ 30)
+
+  defp eventually(fun, 1), do: fun.()
+
+  defp eventually(fun, attempts) do
+    fun.()
+  rescue
+    ExUnit.AssertionError ->
+      Process.sleep(20)
+      eventually(fun, attempts - 1)
+  end
+
   defp write_tmp_json!(map) do
     dir = Path.join(System.tmp_dir!(), "pincer_mcp_manager_#{System.unique_integer([:positive])}")
     File.mkdir_p!(dir)

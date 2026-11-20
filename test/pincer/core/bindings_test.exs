@@ -26,4 +26,16 @@ defmodule Pincer.Core.BindingsTest do
     assert :ok = Bindings.bind(principal_ref, "a1b2c3")
     assert Bindings.resolve(principal_ref) == "a1b2c3"
   end
+
+  test "parse_principal_ref/1 resolves known channels without interning arbitrary atoms" do
+    assert {:ok, {:telegram, "123"}} = Bindings.parse_principal_ref("telegram:user:123")
+    assert {:ok, {:discord, "456"}} = Bindings.parse_principal_ref("discord:user:456")
+
+    unseen = "unseen_channel_#{System.unique_integer([:positive])}"
+    assert {:error, :invalid_principal_ref} = Bindings.parse_principal_ref("#{unseen}:user:99")
+
+    assert_raise ArgumentError, fn ->
+      String.to_existing_atom(unseen)
+    end
+  end
 end

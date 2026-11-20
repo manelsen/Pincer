@@ -22,15 +22,27 @@ defmodule Pincer.Adapters.Browser.Pool do
   require Logger
 
   @call_timeout 30_000
+  @default_line_length 1_048_576
 
-  defstruct port: nil, pending: %{}, next_id: 1
+  defstruct port: nil,
+            pending: %{},
+            next_id: 1,
+            line_buffer: [],
+            executable: nil,
+            args: nil,
+            line_length: @default_line_length
 
   # ---------------------------------------------------------------------------
   # Public API
   # ---------------------------------------------------------------------------
 
+  @doc "Starts the Browser Pool GenServer."
+  @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+    case Keyword.get(opts, :name, __MODULE__) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   @doc "Send a browser command to the sidecar. Returns `{:ok, result}` or `{:error, reason}`."
@@ -59,13 +71,19 @@ defmodule Pincer.Adapters.Browser.Pool do
   # ---------------------------------------------------------------------------
 
   @impl true
-  def init(_opts) do
-    {:ok, %__MODULE__{}, {:continue, :start_sidecar}}
+  def init(opts) do
+    state = %__MODULE__{
+      executable: Keyword.get(opts, :executable),
+      args: Keyword.get(opts, :args),
+      line_length: Keyword.get(opts, :line_length, @default_line_length)
+    }
+
+    {:ok, state, {:continue, :start_sidecar}}
   end
 
   @impl true
   def handle_continue(:start_sidecar, state) do
-    case open_port() do
+    case open_port(state) do
       {:ok, port} ->
         Logger.info("[BROWSER POOL] Playwright sidecar started")
         {:noreply, %{state | port: port}}
@@ -97,7 +115,23 @@ defmodule Pincer.Adapters.Browser.Pool do
   end
 
   @impl true
-  def handle_info({port, {:data, data}}, %{port: port} = state) do
+  def handle_info({port, {:data, {:noeol, chunk}}}, %{port: port} = state)
+      when is_binary(chunk) do
+    {:noreply, %{state | line_buffer: [chunk | state.line_buffer]}}
+  end
+
+  def handle_info({port, {:data, {:eol, chunk}}}, %{port: port} = state)
+      when is_binary(chunk) do
+    line =
+      state.line_buffer
+      |> Enum.reverse([chunk])
+      |> IO.iodata_to_binary()
+
+    state = handle_response_line(line, %{state | line_buffer: []})
+    {:noreply, state}
+  end
+
+  def handle_info({port, {:data, data}}, %{port: port} = state) when is_binary(data) do
     state = process_responses(data, state)
     {:noreply, state}
   end
@@ -107,29 +141,19 @@ defmodule Pincer.Adapters.Browser.Pool do
       "[BROWSER POOL] Sidecar exited with status #{status}. Will restart on next call."
     )
 
-    # Fail all pending callers
-    Enum.each(state.pending, fn {_id, from} ->
-      GenServer.reply(from, {:error, :sidecar_crashed})
-    end)
-
-    {:noreply, %{state | port: nil, pending: %{}}}
+    {:noreply, fail_pending(state)}
   end
 
   def handle_info({:EXIT, port, reason}, %{port: port} = state) do
     Logger.warning("[BROWSER POOL] Sidecar port exited: #{inspect(reason)}")
-
-    Enum.each(state.pending, fn {_id, from} ->
-      GenServer.reply(from, {:error, :sidecar_crashed})
-    end)
-
-    {:noreply, %{state | port: nil, pending: %{}}}
+    {:noreply, fail_pending(state)}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
   def terminate(_reason, state) do
-    if state.port, do: Port.close(state.port)
+    if state.port && Port.info(state.port) != nil, do: Port.close(state.port)
     :ok
   end
 
@@ -137,8 +161,16 @@ defmodule Pincer.Adapters.Browser.Pool do
   # Helpers
   # ---------------------------------------------------------------------------
 
+  defp fail_pending(state) do
+    Enum.each(state.pending, fn {_id, from} ->
+      GenServer.reply(from, {:error, :sidecar_crashed})
+    end)
+
+    %{state | port: nil, pending: %{}, line_buffer: []}
+  end
+
   defp ensure_port(%{port: nil} = state) do
-    case open_port() do
+    case open_port(state) do
       {:ok, port} ->
         Logger.info("[BROWSER POOL] Playwright sidecar restarted")
         %{state | port: port}
@@ -150,22 +182,21 @@ defmodule Pincer.Adapters.Browser.Pool do
 
   defp ensure_port(state), do: state
 
-  defp open_port do
-    node = System.find_executable("node")
+  defp open_port(state) do
+    executable = state.executable || System.find_executable("node")
 
-    if node == nil do
+    if executable == nil do
       {:error, :node_not_found}
     else
-      script = Application.app_dir(:pincer, "priv/browser/server.js")
+      args = state.args || [Application.app_dir(:pincer, "priv/browser/server.js")]
 
       port =
-        Port.open({:spawn_executable, node}, [
+        Port.open({:spawn_executable, executable}, [
           :binary,
           :exit_status,
           :use_stdio,
-          {:packet, 0},
-          {:line, 1_048_576},
-          {:args, [script]}
+          {:line, state.line_length},
+          {:args, args}
         ])
 
       {:ok, port}
@@ -175,25 +206,27 @@ defmodule Pincer.Adapters.Browser.Pool do
   end
 
   defp process_responses(data, state) do
-    # data may be a single line or partial; we split on newlines
-    lines = String.split(to_string(data), "\n", trim: true)
+    lines = String.split(data, "\n", trim: true)
+    Enum.reduce(lines, state, &handle_response_line/2)
+  end
 
-    Enum.reduce(lines, state, fn line, acc ->
-      case Jason.decode(line) do
-        {:ok, %{"id" => id, "ok" => result}} ->
-          {from, pending} = Map.pop(acc.pending, id)
-          if from, do: GenServer.reply(from, {:ok, result})
-          %{acc | pending: pending}
+  defp handle_response_line("", state), do: state
 
-        {:ok, %{"id" => id, "error" => reason}} ->
-          {from, pending} = Map.pop(acc.pending, id)
-          if from, do: GenServer.reply(from, {:error, reason})
-          %{acc | pending: pending}
+  defp handle_response_line(line, state) do
+    case Jason.decode(line) do
+      {:ok, %{"id" => id, "ok" => result}} ->
+        {from, pending} = Map.pop(state.pending, id)
+        if from, do: GenServer.reply(from, {:ok, result})
+        %{state | pending: pending}
 
-        {:error, _} ->
-          Logger.debug("[BROWSER POOL] Ignoring non-JSON sidecar output: #{inspect(line)}")
-          acc
-      end
-    end)
+      {:ok, %{"id" => id, "error" => reason}} ->
+        {from, pending} = Map.pop(state.pending, id)
+        if from, do: GenServer.reply(from, {:error, reason})
+        %{state | pending: pending}
+
+      {:error, _} ->
+        Logger.debug("[BROWSER POOL] Ignoring non-JSON sidecar output: #{inspect(line)}")
+        state
+    end
   end
 end

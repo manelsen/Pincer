@@ -119,73 +119,78 @@ defmodule Mix.Tasks.Pincer.Plugins do
         Mix.shell().error("Plugin '#{name}' not found. Is it installed?")
 
       manifest ->
-        package_atom = manifest_to_package_atom(manifest)
-        mix_exs_path = "mix.exs"
+        case manifest_to_package_name(manifest) do
+          {:error, :invalid_plugin_id} ->
+            Mix.shell().error("Invalid plugin id: #{inspect(manifest.id)}")
 
-        if path_dep?(package_atom) do
-          Mix.shell().info("""
-          '#{name}' is a bundled path dependency — its source lives inside this
-          repository and cannot be removed via this command.
+          {:ok, package_name} ->
+            mix_exs_path = "mix.exs"
 
-          To stop it from loading at runtime, run:
+            if path_dep?(package_name) do
+              Mix.shell().info("""
+              '#{name}' is a bundled path dependency — its source lives inside this
+              repository and cannot be removed via this command.
 
-              mix pincer.plugins disable #{name}
-          """)
-        else
-          confirmed =
-            force ||
-              Mix.shell().yes?(
-                "Remove Hex dep '#{package_atom}' from #{mix_exs_path} and clean? [y/N]"
-              )
+              To stop it from loading at runtime, run:
 
-          if confirmed do
-            # 1. Disable in config.yaml (best-effort; ignore if channel not configured)
-            case File.read(config_path) do
-              {:ok, content} ->
-                case set_channel_enabled(content, name, false) do
-                  {:ok, updated} ->
-                    File.write!(config_path, updated)
-                    Mix.shell().info("  ✓ Disabled '#{name}' in #{config_path}")
+                  mix pincer.plugins disable #{name}
+              """)
+            else
+              confirmed =
+                force ||
+                  Mix.shell().yes?(
+                    "Remove Hex dep '#{package_name}' from #{mix_exs_path} and clean? [y/N]"
+                  )
 
-                  {:error, :channel_not_found} ->
+              if confirmed do
+                # 1. Disable in config.yaml (best-effort; ignore if channel not configured)
+                case File.read(config_path) do
+                  {:ok, content} ->
+                    case set_channel_enabled(content, name, false) do
+                      {:ok, updated} ->
+                        File.write!(config_path, updated)
+                        Mix.shell().info("  ✓ Disabled '#{name}' in #{config_path}")
+
+                      {:error, :channel_not_found} ->
+                        :ok
+                    end
+
+                  _ ->
                     :ok
                 end
 
-              _ ->
-                :ok
+                # 2. Remove dep line from mix.exs
+                case remove_dep_from_mix_exs(mix_exs_path, package_name) do
+                  {:ok, :removed} ->
+                    Mix.shell().info("  ✓ Removed {:#{package_name}, ...} from #{mix_exs_path}")
+
+                  {:ok, :not_found} ->
+                    Mix.shell().info(
+                      "  ℹ {:#{package_name}, ...} not found in #{mix_exs_path} — skipping"
+                    )
+
+                  {:error, reason} ->
+                    Mix.shell().error("  ✗ Could not edit #{mix_exs_path}: #{reason}")
+                end
+
+                # 3. Clean compiled artifacts and unlock
+                Mix.shell().info("  Running: mix deps.clean #{package_name} --unlock")
+                Mix.shell().cmd("mix deps.clean #{package_name} --unlock")
+                clean_native_binaries(package_name)
+
+                # 4. Re-resolve lock (drops orphaned transitive deps automatically)
+                Mix.shell().info("  Running: mix deps.get")
+                Mix.shell().cmd("mix deps.get")
+
+                Mix.shell().info("""
+
+                ✅ Plugin '#{name}' removed.
+                   Run `mix compile` to rebuild.
+                """)
+              else
+                Mix.shell().info("Aborted.")
+              end
             end
-
-            # 2. Remove dep line from mix.exs
-            case remove_dep_from_mix_exs(mix_exs_path, package_atom) do
-              {:ok, :removed} ->
-                Mix.shell().info("  ✓ Removed {:#{package_atom}, ...} from #{mix_exs_path}")
-
-              {:ok, :not_found} ->
-                Mix.shell().info(
-                  "  ℹ {:#{package_atom}, ...} not found in #{mix_exs_path} — skipping"
-                )
-
-              {:error, reason} ->
-                Mix.shell().error("  ✗ Could not edit #{mix_exs_path}: #{reason}")
-            end
-
-            # 3. Clean compiled artifacts and unlock
-            Mix.shell().info("  Running: mix deps.clean #{package_atom} --unlock")
-            Mix.shell().cmd("mix deps.clean #{package_atom} --unlock")
-            clean_native_binaries(package_atom)
-
-            # 4. Re-resolve lock (drops orphaned transitive deps automatically)
-            Mix.shell().info("  Running: mix deps.get")
-            Mix.shell().cmd("mix deps.get")
-
-            Mix.shell().info("""
-
-            ✅ Plugin '#{name}' removed.
-               Run `mix compile` to rebuild.
-            """)
-          else
-            Mix.shell().info("Aborted.")
-          end
         end
     end
   end
@@ -313,37 +318,40 @@ defmodule Mix.Tasks.Pincer.Plugins do
     end
   end
 
-  # Derives the Mix app atom from a manifest, e.g. "slack" → :pincer_slack.
-  # Manifests from Hex packages have the package name in their source path;
-  # fall back to the conventional naming scheme.
-  @spec manifest_to_package_atom(Manifest.t()) :: atom()
-  defp manifest_to_package_atom(%Manifest{} = manifest) do
-    # If the manifest came from a Hex dep, its file path is inside
-    # _build/.../priv/pincer_plugin.yaml and we can read the app name from it.
-    # For simplicity, derive it by convention: id → :pincer_<id>.
-    String.to_atom("pincer_#{manifest.id}")
+  # Derives the Mix app package name from a manifest without interning atoms, e.g. "slack" -> "pincer_slack".
+  @doc false
+  @spec manifest_to_package_name(Manifest.t()) :: {:ok, String.t()} | {:error, :invalid_plugin_id}
+  def manifest_to_package_name(%Manifest{id: id}) when is_binary(id) do
+    if Regex.match?(~r/^[a-z0-9_]+$/, id) do
+      {:ok, "pincer_#{id}"}
+    else
+      {:error, :invalid_plugin_id}
+    end
   end
+
+  def manifest_to_package_name(_), do: {:error, :invalid_plugin_id}
 
   # Returns true when the package is declared as a path dep in this project.
   # Path deps are bundled (monorepo) packages — they cannot be Hex-removed.
-  @spec path_dep?(atom()) :: boolean()
-  defp path_dep?(package_atom) do
+  @spec path_dep?(String.t()) :: boolean()
+  defp path_dep?(package_name) when is_binary(package_name) do
     Mix.Project.config()[:deps]
     |> List.wrap()
     |> Enum.any?(fn
-      {^package_atom, opts} when is_list(opts) -> Keyword.has_key?(opts, :path)
-      {^package_atom, _version, opts} when is_list(opts) -> Keyword.has_key?(opts, :path)
-      _ -> false
+      {dep_atom, opts} when is_atom(dep_atom) and is_list(opts) ->
+        Atom.to_string(dep_atom) == package_name and Keyword.has_key?(opts, :path)
+
+      {dep_atom, _version, opts} when is_atom(dep_atom) and is_list(opts) ->
+        Atom.to_string(dep_atom) == package_name and Keyword.has_key?(opts, :path)
+
+      _ ->
+        false
     end)
   end
 
-  # Removes the line declaring `{:package_atom, ...}` from mix.exs.
-  # Returns {:ok, :removed}, {:ok, :not_found}, or {:error, reason}.
-  @spec remove_dep_from_mix_exs(String.t(), atom()) ::
-          {:ok, :removed | :not_found} | {:error, String.t()}
   # Removes compiled native binaries left inside the package's priv/ directory.
   # Currently handles the whatsapp_bridge Go sidecar; extend as new native deps arise.
-  defp clean_native_binaries(:pincer_whatsapp) do
+  defp clean_native_binaries("pincer_whatsapp") do
     pattern = Path.join(["_build", "**", "lib", "pincer_whatsapp", "priv", "whatsapp_bridge"])
 
     case Path.wildcard(pattern) do
@@ -358,10 +366,14 @@ defmodule Mix.Tasks.Pincer.Plugins do
     end
   end
 
-  defp clean_native_binaries(_package_atom), do: :ok
+  defp clean_native_binaries(_package_name), do: :ok
 
-  defp remove_dep_from_mix_exs(mix_exs_path, package_atom) do
-    dep_re = ~r/\{:#{Regex.escape(Atom.to_string(package_atom))}\b/
+  # Removes the line declaring `{:package_name, ...}` from mix.exs.
+  # Returns {:ok, :removed}, {:ok, :not_found}, or {:error, reason}.
+  @spec remove_dep_from_mix_exs(String.t(), String.t()) ::
+          {:ok, :removed | :not_found} | {:error, String.t()}
+  defp remove_dep_from_mix_exs(mix_exs_path, package_name) when is_binary(package_name) do
+    dep_re = ~r/\{:#{Regex.escape(package_name)}\b/
 
     case File.read(mix_exs_path) do
       {:error, reason} ->

@@ -552,4 +552,148 @@ defmodule Pincer.Adapters.Tools.FileSystemTest do
     assert message =~ "2#"
     assert File.read!(path) == "alpha\nbeta changed\n"
   end
+
+  test "supports both string and existing atom keys without interning arbitrary atoms", %{
+    root: root,
+    context: context
+  } do
+    File.write!(Path.join(root, "sample.txt"), "ok")
+    unseen_arg = "unseen_fs_arg_#{System.unique_integer([:positive])}"
+
+    assert {:ok, _} =
+             FileSystem.execute(
+               %{"action" => "stat", "path" => "sample.txt", unseen_arg => "ignored"},
+               context
+             )
+
+    assert {:ok, content} =
+             FileSystem.execute(%{action: "read", path: "sample.txt"}, context)
+
+    assert content =~ "ok"
+
+    assert_raise ArgumentError, fn ->
+      String.to_existing_atom(unseen_arg)
+    end
+  end
+
+  describe "unzip Zip Slip confinement" do
+    test "extracts valid archive inside workspace", %{root: root, context: context} do
+      src_dir = Path.join(root, "src")
+      File.mkdir_p!(src_dir)
+      File.write!(Path.join(src_dir, "hello.txt"), "safe content")
+
+      archive = Path.join(root, "valid.zip")
+
+      {:ok, _} =
+        :zip.create(String.to_charlist(archive), [{~c"nested/hello.txt", "safe content"}], [
+          :memory
+        ])
+        |> then(fn {:ok, {_, bin}} ->
+          File.write!(archive, bin)
+          {:ok, archive}
+        end)
+
+      assert {:ok, msg} =
+               FileSystem.execute(
+                 %{"action" => "unzip", "path" => "valid.zip", "destination" => "out"},
+                 context
+               )
+
+      assert msg =~ "Extracted 1 file(s)"
+      assert File.read!(Path.join(root, "out/nested/hello.txt")) == "safe content"
+    end
+
+    test "blocks relative Zip Slip entries fail-closed without extracting anything", %{
+      root: root,
+      context: context
+    } do
+      evil_name = "pincer_zipslip_#{System.unique_integer([:positive])}.txt"
+      evil_target = Path.join(Path.dirname(root), evil_name)
+      rel_evil = "../../#{evil_name}"
+      on_exit(fn -> File.rm(evil_target) end)
+
+      {:ok, {_, bin}} =
+        :zip.create(
+          ~c"evil.zip",
+          [{~c"good.txt", "good"}, {String.to_charlist(rel_evil), "pwned"}],
+          [:memory]
+        )
+
+      File.write!(Path.join(root, "evil.zip"), bin)
+
+      assert {:error, reason} =
+               FileSystem.execute(
+                 %{"action" => "unzip", "path" => "evil.zip", "destination" => "out"},
+                 context
+               )
+
+      assert reason =~ "Zip Slip" or reason =~ "unsafe"
+      refute File.exists?(evil_target)
+      refute File.exists?(Path.join(root, "out/good.txt"))
+    end
+
+    test "blocks unzip into a symlinked directory escaping workspace", %{
+      root: root,
+      context: context
+    } do
+      outside =
+        Path.join(System.tmp_dir!(), "pincer_zip_sym_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(outside)
+      on_exit(fn -> File.rm_rf!(outside) end)
+
+      File.ln_s!(outside, Path.join(root, "escape_dir"))
+
+      {:ok, {_, bin}} = :zip.create(~c"valid.zip", [{~c"inner.txt", "hello"}], [:memory])
+      File.write!(Path.join(root, "valid.zip"), bin)
+
+      assert {:error, reason} =
+               FileSystem.execute(
+                 %{"action" => "unzip", "path" => "valid.zip", "destination" => "escape_dir/sub"},
+                 context
+               )
+
+      assert reason =~ "Access denied" or reason =~ "outside"
+      refute File.exists?(Path.join(outside, "sub/inner.txt"))
+    end
+
+    test "blocks absolute path entries and backslash traversal entries", %{
+      root: root,
+      context: context
+    } do
+      abs_target =
+        Path.join(
+          System.tmp_dir!(),
+          "pincer_zipslip_abs_#{System.unique_integer([:positive])}.txt"
+        )
+
+      on_exit(fn -> File.rm(abs_target) end)
+
+      {:ok, {_, abs_bin}} =
+        :zip.create(~c"abs.zip", [{String.to_charlist(abs_target), "pwned"}], [:memory])
+
+      File.write!(Path.join(root, "abs.zip"), abs_bin)
+
+      assert {:error, _} =
+               FileSystem.execute(
+                 %{"action" => "unzip", "path" => "abs.zip", "destination" => "out_abs"},
+                 context
+               )
+
+      refute File.exists?(abs_target)
+
+      {:ok, {_, win_bin}} =
+        :zip.create(~c"win.zip", [{~c"..\\evil_win.txt", "pwned"}], [:memory])
+
+      File.write!(Path.join(root, "win.zip"), win_bin)
+
+      assert {:error, _} =
+               FileSystem.execute(
+                 %{"action" => "unzip", "path" => "win.zip", "destination" => "out_win"},
+                 context
+               )
+
+      refute File.exists?(Path.expand(Path.join(root, "../evil_win.txt")))
+    end
+  end
 end

@@ -20,20 +20,29 @@ defmodule Mix.Tasks.Pincer.PurgeIndices do
       "[PURGE] Identifying invalid document indices in 'tmp/' and 'workspaces/'..."
     )
 
-    query =
-      from(n in Node,
-        where:
-          n.type == "document" and
-            (fragment("json_extract(data, '$.path') LIKE ?", "tmp/%") or
-               fragment("json_extract(data, '$.path') LIKE ?", "workspaces/%"))
-      )
-
-    {count, _} = Repo.delete_all(query)
+    {count, _} = purge()
 
     if count > 0 do
       Mix.shell().info("[PURGE] Successfully deleted #{count} invalid indices.")
     else
       Mix.shell().info("[PURGE] No invalid indices found. Knowledge graph is clean.")
     end
+  end
+
+  @doc false
+  @spec invalid_documents_query() :: Ecto.Query.t()
+  def invalid_documents_query do
+    from(n in Node,
+      where:
+        n.type == "document" and
+          (fragment("?->>'path' LIKE ?", n.data, "tmp/%") or
+             fragment("?->>'path' LIKE ?", n.data, "workspaces/%"))
+    )
+  end
+
+  @doc false
+  @spec purge(module()) :: {non_neg_integer(), nil | [term()]}
+  def purge(repo \\ Repo) do
+    repo.delete_all(invalid_documents_query())
   end
 end

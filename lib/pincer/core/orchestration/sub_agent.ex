@@ -73,7 +73,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   - `{:sme_tool_use, tools}` - Tool usage notification (forwarded to Blackboard)
   """
 
-  use GenServer
+  use GenServer, restart: :temporary
   require Logger
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.LLM.RuntimeStatus
@@ -123,6 +123,14 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   @spec start_link([option]) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts)
+  end
+
+  @doc """
+  Starts a SubAgent as a `:temporary` child under the given `DynamicSupervisor`.
+  """
+  @spec start_supervised([option], GenServer.server()) :: DynamicSupervisor.on_start_child()
+  def start_supervised(opts, supervisor \\ Pincer.Core.Orchestration.SubAgentSupervisor) do
+    DynamicSupervisor.start_child(supervisor, {__MODULE__, opts})
   end
 
   @doc false

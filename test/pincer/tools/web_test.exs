@@ -1,10 +1,18 @@
 defmodule Pincer.Adapters.Tools.WebTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Pincer.Adapters.Tools.Web
 
   defmodule HTTPClientStub do
+    @pt_key :web_test_http_stub_pid
+
+    def register(pid), do: :persistent_term.put(@pt_key, pid)
+    def unregister, do: :persistent_term.erase(@pt_key)
+    defp notify(msg), do: if(pid = :persistent_term.get(@pt_key, nil), do: send(pid, msg))
+
     def get("https://www.legacy.example", _opts) do
+      notify({:http_get, "https://www.legacy.example"})
+
       {:error,
        %Req.TransportError{
          reason:
@@ -15,19 +23,13 @@ defmodule Pincer.Adapters.Tools.WebTest do
     end
 
     def get("http://www.legacy.example", _opts) do
-      {:ok,
-       %Req.Response{
-         status: 301,
-         headers: %{"location" => ["http://portal.example/landing"]}
-       }}
-    end
+      notify({:http_get, "http://www.legacy.example"})
 
-    def get("http://portal.example/landing", _opts) do
       {:ok,
        %Req.Response{
          status: 200,
          headers: %{"content-type" => ["text/html"]},
-         body: "<html><body><h1>Portal Landing</h1><p>Resolved through fallback</p></body></html>"
+         body: "<html><body><h1>Downgraded</h1></body></html>"
        }}
     end
   end
@@ -59,21 +61,25 @@ defmodule Pincer.Adapters.Tools.WebTest do
     assert msg =~ "internal hosts" or msg =~ "not allowed"
   end
 
-  test "web_fetch retries through http when https fails with hostname mismatch" do
+  test "web_fetch refuses to downgrade https to http on TLS hostname mismatch" do
+    HTTPClientStub.register(self())
     previous_client = Application.get_env(:pincer, :web_http_client)
     Application.put_env(:pincer, :web_http_client, HTTPClientStub)
 
     on_exit(fn ->
+      HTTPClientStub.unregister()
+
       case previous_client do
         nil -> Application.delete_env(:pincer, :web_http_client)
         client -> Application.put_env(:pincer, :web_http_client, client)
       end
     end)
 
-    assert {:ok, content} =
+    assert {:error, msg} =
              Web.execute(%{"tool_name" => "web_fetch", "url" => "https://www.legacy.example"})
 
-    assert content =~ "Portal Landing"
-    assert content =~ "Resolved through fallback"
+    assert msg =~ "TLS certificate does not match"
+    assert_received {:http_get, "https://www.legacy.example"}
+    refute_received {:http_get, "http://www.legacy.example"}
   end
 end

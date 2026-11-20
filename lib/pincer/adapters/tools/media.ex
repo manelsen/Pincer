@@ -30,6 +30,7 @@ defmodule Pincer.Adapters.Tools.Media do
   @behaviour Pincer.Ports.Tool
 
   require Logger
+  alias Pincer.Core.WorkspaceGuard
 
   @vision_prompt "Describe this image in detail. Include all text visible in the image."
   @ocr_prompt "Extract ALL text from this image exactly as it appears. Output only the raw text, preserving line breaks."
@@ -94,7 +95,9 @@ defmodule Pincer.Adapters.Tools.Media do
 
   @impl true
   def execute(%{"action" => action} = args, context \\ %{}) do
-    workspace = Map.get(context, "workspace_path") || File.cwd!()
+    workspace =
+      Map.get(context, "workspace_path") || Map.get(context, :workspace_path) || File.cwd!()
+
     llm_client = Application.get_env(:pincer, :media_llm_client, Pincer.LLM.Client)
     run_action(action, args, workspace, llm_client)
   end
@@ -161,13 +164,13 @@ defmodule Pincer.Adapters.Tools.Media do
   # ---------------------------------------------------------------------------
 
   defp run_action("pdf_extract", %{"path" => rel_path} = args, workspace, _client) do
-    abs_path = resolve_path(rel_path, workspace)
-
-    unless File.exists?(abs_path) do
-      {:error, "File not found: #{rel_path}"}
-    else
-      page_range = Map.get(args, "page_range")
-      extract_pdf_text(abs_path, page_range)
+    with {:ok, abs_path} <- resolve_path(rel_path, workspace) do
+      unless File.exists?(abs_path) do
+        {:error, "File not found: #{rel_path}"}
+      else
+        page_range = Map.get(args, "page_range")
+        extract_pdf_text(abs_path, page_range)
+      end
     end
   end
 
@@ -180,11 +183,11 @@ defmodule Pincer.Adapters.Tools.Media do
 
   defp run_action("tts", %{"text" => text} = args, workspace, _client) do
     rel_out = Map.get(args, "output_path", "media/speech.mp3")
-    abs_out = resolve_path(rel_out, workspace)
     voice = Map.get(args, "voice", @tts_default_voice)
     provider_key = Map.get(args, "provider") || tts_provider()
 
-    with :ok <- File.mkdir_p(Path.dirname(abs_out)),
+    with {:ok, abs_out} <- resolve_path(rel_out, workspace),
+         :ok <- File.mkdir_p(Path.dirname(abs_out)),
          {:ok, api_key, base_url, model} <- resolve_tts_config(provider_key),
          body = %{"model" => model, "input" => text, "voice" => voice},
          {:ok, %{status: 200, body: audio}} when is_binary(audio) <-
@@ -199,6 +202,9 @@ defmodule Pincer.Adapters.Tools.Media do
       {:ok, %{status: status, body: body}} ->
         {:error, "TTS request failed: #{status} — #{inspect(body)}"}
 
+      {:error, reason} when is_binary(reason) ->
+        {:error, reason}
+
       {:error, reason} ->
         {:error, "TTS error: #{inspect(reason)}"}
     end
@@ -212,13 +218,13 @@ defmodule Pincer.Adapters.Tools.Media do
   # ---------------------------------------------------------------------------
 
   defp run_action("transcribe", %{"path" => rel_path} = args, workspace, llm_client) do
-    abs_path = resolve_path(rel_path, workspace)
-
-    unless File.exists?(abs_path) do
-      {:error, "File not found: #{rel_path}"}
-    else
-      provider = Map.get(args, "provider", "groq_whisper")
-      llm_client.transcribe_audio(abs_path, provider: provider)
+    with {:ok, abs_path} <- resolve_path(rel_path, workspace) do
+      unless File.exists?(abs_path) do
+        {:error, "File not found: #{rel_path}"}
+      else
+        provider = Map.get(args, "provider", "groq_whisper")
+        llm_client.transcribe_audio(abs_path, provider: provider)
+      end
     end
   end
 
@@ -233,22 +239,22 @@ defmodule Pincer.Adapters.Tools.Media do
   # ---------------------------------------------------------------------------
 
   defp read_image_as_base64(rel_path, workspace) do
-    abs_path = resolve_path(rel_path, workspace)
+    with {:ok, abs_path} <- resolve_path(rel_path, workspace) do
+      cond do
+        not File.exists?(abs_path) ->
+          {:error, "File not found: #{rel_path}"}
 
-    cond do
-      not File.exists?(abs_path) ->
-        {:error, "File not found: #{rel_path}"}
+        File.dir?(abs_path) ->
+          {:error, "Path is a directory: #{rel_path}"}
 
-      File.dir?(abs_path) ->
-        {:error, "Path is a directory: #{rel_path}"}
+        true ->
+          mime = mime_from_extension(Path.extname(rel_path))
 
-      true ->
-        mime = mime_from_extension(Path.extname(rel_path))
-
-        case File.read(abs_path) do
-          {:ok, data} -> {:ok, Base.encode64(data), mime}
-          {:error, reason} -> {:error, "Failed to read file #{rel_path}: #{reason}"}
-        end
+          case File.read(abs_path) do
+            {:ok, data} -> {:ok, Base.encode64(data), mime}
+            {:error, reason} -> {:error, "Failed to read file #{rel_path}: #{reason}"}
+          end
+      end
     end
   end
 
@@ -339,11 +345,7 @@ defmodule Pincer.Adapters.Tools.Media do
   end
 
   defp resolve_path(rel_path, workspace) do
-    if Path.type(rel_path) == :absolute do
-      rel_path
-    else
-      Path.join(workspace, rel_path)
-    end
+    WorkspaceGuard.confine_path(rel_path, root: workspace, reject_parent_segments: true)
   end
 
   defp vision_provider, do: Application.get_env(:pincer, :vision_provider, "google")

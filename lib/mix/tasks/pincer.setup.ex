@@ -56,9 +56,20 @@ defmodule Mix.Tasks.Pincer.Setup do
     end
 
     steps = build_steps(opts)
-    total = length(steps)
 
     Mix.shell().info("\nPincer Setup\n")
+
+    case run_steps(steps) do
+      :ok -> :ok
+      {:error, message} -> Mix.raise(message)
+    end
+  end
+
+  @doc false
+  @spec run_steps([{String.t(), (-> :ok | {:skip, String.t()} | {:error, String.t()})}]) ::
+          :ok | {:error, String.t()}
+  def run_steps(steps) when is_list(steps) do
+    total = length(steps)
 
     steps
     |> Enum.with_index(1)
@@ -67,17 +78,16 @@ defmodule Mix.Tasks.Pincer.Setup do
 
       case fun.() do
         :ok ->
-          :ok
+          {:cont, :ok}
 
         {:skip, reason} ->
           Mix.shell().info("      ↷  #{reason}")
+          {:cont, :ok}
 
         {:error, message} ->
-          Mix.shell().info("\n✗  #{message}")
+          Mix.shell().error("\n✗  #{message}")
           {:halt, {:error, message}}
       end
-
-      {:cont, :ok}
     end)
   end
 

@@ -271,6 +271,36 @@ defmodule Mix.Tasks.Pincer.PluginsTest do
     end
   end
 
+  describe "manifest_to_package_name/1" do
+    test "returns binary package name without creating dynamic atoms" do
+      unseen_id = "unseen_plug_#{System.unique_integer([:positive])}"
+
+      manifest = %Pincer.Plugin.Manifest{
+        id: unseen_id,
+        name: "Unseen",
+        version: "0.1.0",
+        kind: :channel
+      }
+
+      assert {:ok, "pincer_" <> ^unseen_id} = Plugins.manifest_to_package_name(manifest)
+
+      assert_raise ArgumentError, fn ->
+        String.to_existing_atom("pincer_#{unseen_id}")
+      end
+    end
+
+    test "rejects unsafe plugin ids with invalid characters" do
+      bad = %Pincer.Plugin.Manifest{
+        id: "../evil;rm",
+        name: "Bad",
+        version: "0.1.0",
+        kind: :channel
+      }
+
+      assert {:error, :invalid_plugin_id} = Plugins.manifest_to_package_name(bad)
+    end
+  end
+
   # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------

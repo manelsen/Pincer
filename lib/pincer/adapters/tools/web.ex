@@ -338,16 +338,6 @@ defmodule Pincer.Adapters.Tools.Web do
       {:ok, %{status: status}} ->
         {:error, "Error downloading URL (Status #{status})"}
 
-      {:error, reason} when redirects_remaining > 0 ->
-        case fallback_url_for(reason, url) do
-          {:ok, fallback_url} ->
-            Logger.warning("[WEB] Retrying fetch with fallback URL: #{fallback_url}")
-            do_fetch(fallback_url, redirects_remaining - 1, opts)
-
-          :error ->
-            {:error, WebFetchError.format(reason)}
-        end
-
       {:error, reason} ->
         {:error, WebFetchError.format(reason)}
     end
@@ -355,29 +345,6 @@ defmodule Pincer.Adapters.Tools.Web do
 
   defp http_client do
     Application.get_env(:pincer, :web_http_client, Req)
-  end
-
-  defp fallback_url_for(reason, url) do
-    if WebFetchError.hostname_mismatch?(reason) do
-      case URI.parse(url) do
-        %URI{scheme: "https"} = uri ->
-          fallback_url =
-            uri
-            |> Map.put(:scheme, "http")
-            |> Map.put(:port, if(uri.port == 443, do: nil, else: uri.port))
-            |> URI.to_string()
-
-          case validate_url(fallback_url) do
-            {:ok, valid_url} -> {:ok, valid_url}
-            {:error, _} -> :error
-          end
-
-        _ ->
-          :error
-      end
-    else
-      :error
-    end
   end
 
   defp truncate_text(text) do

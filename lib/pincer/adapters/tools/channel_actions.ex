@@ -16,6 +16,7 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
   alias Pincer.Channels.Telegram
   alias Pincer.Channels.WhatsApp
   alias Pincer.Core.Session.Server
+  alias Pincer.Core.WorkspaceGuard
 
   @type channel :: :telegram | :discord | :whatsapp
 
@@ -98,11 +99,14 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
   end
 
   defp send_file(args, context) do
-    workspace = Map.get(context, "workspace_path") || File.cwd!()
+    workspace =
+      Map.get(context, "workspace_path") || Map.get(context, :workspace_path) || File.cwd!()
 
     with {:ok, rel_path} <- fetch_required_string(args, "path"),
-         abs_path = Path.join(workspace, rel_path),
+         {:ok, abs_path} <-
+           WorkspaceGuard.confine_path(rel_path, root: workspace, reject_parent_segments: true),
          true <- File.exists?(abs_path) || {:error, "File not found: #{rel_path}"},
+         {:dir?, false} <- {:dir?, File.dir?(abs_path)},
          {:ok, binary} <- File.read(abs_path),
          {:ok, {channel, recipient}} <- resolve_destination(args, context) do
       filename = Path.basename(abs_path)
@@ -116,6 +120,7 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
         {:error, reason} -> {:error, inspect(reason)}
       end
     else
+      {:dir?, true} -> {:error, "Path is a directory, not a file."}
       true -> {:error, "Unexpected error resolving file path."}
       {:error, reason} when is_binary(reason) -> {:error, reason}
       {:error, reason} -> {:error, inspect(reason)}

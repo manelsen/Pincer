@@ -120,22 +120,25 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
 
   ## Implementation Notes
 
-  - Agent IDs are 6-character hex strings prefixed with "agent_"
-  - Agents are spawned as GenServer processes (not supervised in MVP)
-  - In production, consider using DynamicSupervisor for better fault tolerance
+  - Agent IDs are 16-character hex strings prefixed with "agent_"
+  - Sub-Agents run as supervised `:temporary` children under `SubAgentSupervisor`
   """
-  @spec execute(%{String.t() => String.t()}) :: execute_result()
-  def execute(%{"goal" => goal} = args) do
-    parent_session_id = Map.get(args, "session_id")
-    parent_workspace_path = Map.get(args, "workspace_path")
+  @spec execute(map(), map()) :: execute_result()
+  def execute(args, context \\ %{})
+
+  def execute(%{"goal" => goal} = args, context) when is_binary(goal) do
+    parent_session_id = Map.get(context, "session_id") || Map.get(args, "session_id")
+    parent_workspace_path = Map.get(context, "workspace_path") || Map.get(args, "workspace_path")
     id = "agent_" <> (:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower))
 
-    case GenServer.start(SubAgent,
-           goal: goal,
-           id: id,
-           parent_session_id: parent_session_id,
-           parent_workspace_path: parent_workspace_path
-         ) do
+    opts = [
+      goal: goal,
+      id: id,
+      parent_session_id: parent_session_id,
+      parent_workspace_path: parent_workspace_path
+    ]
+
+    case SubAgent.start_supervised(opts, sub_agent_supervisor()) do
       {:ok, _pid} ->
         {:ok, "Sub-Agent detached successfully. ID: #{id}. Monitor the Blackboard for updates."}
 
@@ -144,8 +147,16 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
     end
   end
 
-  def execute(args) do
+  def execute(args, _context) do
     {:error, "dispatch_agent requires a 'goal' parameter. Got keys: #{inspect(Map.keys(args))}"}
+  end
+
+  defp sub_agent_supervisor do
+    Application.get_env(
+      :pincer,
+      :sub_agent_supervisor,
+      Pincer.Core.Orchestration.SubAgentSupervisor
+    )
   end
 end
 

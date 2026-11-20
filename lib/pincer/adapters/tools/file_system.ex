@@ -233,8 +233,25 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp get_arg(map, key) when is_map(map) do
-    Map.get(map, key) || Map.get(map, String.to_atom(key))
+    case Map.get(map, key) do
+      nil ->
+        case safe_existing_atom(key) do
+          {:ok, atom_key} -> Map.get(map, atom_key)
+          :error -> nil
+        end
+
+      value ->
+        value
+    end
   end
+
+  defp safe_existing_atom(key) when is_binary(key) do
+    {:ok, String.to_existing_atom(key)}
+  rescue
+    ArgumentError -> :error
+  end
+
+  defp safe_existing_atom(_), do: :error
 
   defp default_path("list"), do: "."
   defp default_path("search"), do: "."
@@ -627,15 +644,18 @@ defmodule Pincer.Adapters.Tools.FileSystem do
         _ -> Path.dirname(path)
       end
 
-    :ok = File.mkdir_p(dest_dir)
-
-    case :zip.extract(
-           String.to_charlist(path),
-           [{:cwd, String.to_charlist(dest_dir)}]
-         ) do
-      {:ok, files} ->
-        rel_dest = relative_to_workspace(dest_dir, workspace_root)
-        {:ok, "Extracted #{length(files)} file(s) to '#{rel_dest}'."}
+    with :ok <- validate_zip_entries(path, dest_dir, workspace_root),
+         :ok <- File.mkdir_p(dest_dir),
+         {:ok, files} <-
+           :zip.extract(
+             String.to_charlist(path),
+             [{:cwd, String.to_charlist(dest_dir)}]
+           ) do
+      rel_dest = relative_to_workspace(dest_dir, workspace_root)
+      {:ok, "Extracted #{length(files)} file(s) to '#{rel_dest}'."}
+    else
+      {:error, reason} when is_binary(reason) ->
+        {:error, reason}
 
       {:error, reason} ->
         {:error, "Failed to extract zip: #{inspect(reason)}"}
@@ -667,6 +687,77 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   end
 
   defp perform_action(_, _path, _args, _workspace_root), do: {:error, "Invalid action."}
+
+  defp validate_zip_entries(archive_path, dest_dir, workspace_root) do
+    case :zip.table(String.to_charlist(archive_path)) do
+      {:ok, entries} ->
+        Enum.reduce_while(entries, :ok, fn
+          {:zip_comment, _}, :ok ->
+            {:cont, :ok}
+
+          {:zip_file, name_charlist, file_info, _comment, _offset, _comp_size}, :ok ->
+            entry = List.to_string(name_charlist)
+
+            case validate_single_zip_entry(entry, file_info, dest_dir, workspace_root) do
+              :ok -> {:cont, :ok}
+              {:error, reason} -> {:halt, {:error, reason}}
+            end
+
+          _, :ok ->
+            {:cont, :ok}
+        end)
+
+      {:error, reason} ->
+        {:error, "Failed to inspect zip: #{inspect(reason)}"}
+    end
+  end
+
+  defp validate_single_zip_entry(entry, file_info, dest_dir, workspace_root) do
+    normalized = entry |> String.replace("\\", "/") |> String.trim_trailing("/")
+
+    cond do
+      entry == "" or String.contains?(entry, "\0") ->
+        {:error, "Zip Slip blocked: unsafe archive entry '#{entry}'"}
+
+      String.starts_with?(entry, "/") or String.starts_with?(entry, "\\") or
+          Regex.match?(~r/^[A-Za-z]:/, entry) ->
+        {:error, "Zip Slip blocked: unsafe archive entry '#{entry}'"}
+
+      zip_symlink?(file_info) ->
+        {:error, "Zip Slip blocked: symlink entry '#{entry}' is not allowed"}
+
+      normalized == "" ->
+        {:error, "Zip Slip blocked: unsafe archive entry '#{entry}'"}
+
+      ".." in String.split(normalized, "/", trim: true) ->
+        {:error, "Zip Slip blocked: unsafe archive entry '#{entry}'"}
+
+      true ->
+        with {:ok, target} <-
+               WorkspaceGuard.confine_path(normalized,
+                 root: dest_dir,
+                 reject_parent_segments: true
+               ),
+             {:ok, _} <-
+               WorkspaceGuard.confine_path(target,
+                 root: workspace_root,
+                 reject_parent_segments: true
+               ) do
+          :ok
+        else
+          {:error, _reason} ->
+            {:error, "Zip Slip blocked: unsafe archive entry '#{entry}'"}
+        end
+    end
+  end
+
+  defp zip_symlink?(file_info) when is_tuple(file_info) and tuple_size(file_info) >= 8 do
+    file_type = elem(file_info, 2)
+    mode = elem(file_info, 7)
+    file_type == :symlink or (is_integer(mode) and Bitwise.band(mode, 0o170000) == 0o120000)
+  end
+
+  defp zip_symlink?(_), do: false
 
   defp fetch_required_string(args, key) do
     case fetch_string(args, key) do

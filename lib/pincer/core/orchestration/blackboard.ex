@@ -204,7 +204,7 @@ defmodule Pincer.Core.Orchestration.Blackboard do
   end
 
   defp fallback_usage do
-    memsup = String.to_atom("memsup")
+    memsup = :memsup
 
     if Process.whereis(memsup) do
       try do

@@ -293,4 +293,78 @@ defmodule Pincer.Adapters.Tools.MediaTest do
 
     File.rm(jpg)
   end
+
+  # ---------------------------------------------------------------------------
+  # workspace path confinement
+  # ---------------------------------------------------------------------------
+
+  describe "workspace path confinement" do
+    setup do
+      base =
+        Path.join(System.tmp_dir!(), "pincer_media_confine_#{System.unique_integer([:positive])}")
+
+      ws = Path.join(base, "ws")
+      outside = Path.join(base, "outside")
+      File.mkdir_p!(ws)
+      File.mkdir_p!(outside)
+
+      outside_png = Path.join(outside, "secret.png")
+      outside_pdf = Path.join(outside, "secret.pdf")
+      outside_mp3 = Path.join(outside, "secret.mp3")
+      File.write!(outside_png, "not really read")
+      File.write!(outside_pdf, "%PDF-1.4 secret")
+      File.write!(outside_mp3, "secret audio")
+
+      symlink_png = Path.join(ws, "link_out.png")
+      File.ln_s!(outside_png, symlink_png)
+
+      on_exit(fn -> File.rm_rf!(base) end)
+
+      {:ok,
+       %{ws: ws, outside: outside, outside_png: outside_png, context: %{"workspace_path" => ws}}}
+    end
+
+    test "rejects outside absolute paths, traversal, and escaping symlinks on reads", %{
+      outside_png: outside_png,
+      context: ctx
+    } do
+      for action <- ["describe", "ocr", "pdf_extract", "transcribe"] do
+        for unsafe_path <- [outside_png, "../outside/secret.png", "link_out.png"] do
+          assert {:error, reason} =
+                   Media.execute(%{"action" => action, "path" => unsafe_path}, ctx)
+
+          assert reason =~ "Access denied" or reason =~ "traversal" or reason =~ "outside"
+        end
+      end
+
+      refute_received {:chat_completion, _, _}
+      refute_received {:transcribe_audio, _, _}
+    end
+
+    test "rejects outside output_path on tts before creating directories", %{
+      outside: outside,
+      context: ctx
+    } do
+      outside_subdir = Path.join(outside, "escaped_tts_dir")
+      abs_target = Path.join(outside_subdir, "speech.mp3")
+
+      assert {:error, reason} =
+               Media.execute(
+                 %{"action" => "tts", "text" => "hello", "output_path" => abs_target},
+                 ctx
+               )
+
+      assert reason =~ "Access denied" or reason =~ "outside"
+      refute File.exists?(outside_subdir)
+
+      assert {:error, reason2} =
+               Media.execute(
+                 %{"action" => "tts", "text" => "hello", "output_path" => "../outside/evil.mp3"},
+                 ctx
+               )
+
+      assert reason2 =~ "traversal" or reason2 =~ "Access denied"
+      refute File.exists?(Path.join(outside, "evil.mp3"))
+    end
+  end
 end

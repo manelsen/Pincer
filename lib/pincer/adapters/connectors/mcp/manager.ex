@@ -131,14 +131,15 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
   alias Pincer.Adapters.Connectors.MCP.Transports.HTTP
   alias Pincer.Adapters.Connectors.MCP.Transports.Stdio
   @default_get_tools_timeout 200
+  @lookup_timeout_ms 5_000
   @skills_sidecar_tool_timeout_ms 15_000
   @skills_sidecar_hard_kill_timeout_ms 100
 
   @doc """
   Starts the MCP Manager process.
 
-  The manager is registered under the module name and must be started
-  before any MCP operations can be performed.
+  The manager is registered under the module name by default (`name: __MODULE__`)
+  unless overridden with `name: nil` or a custom name.
 
   ## Returns
 
@@ -150,8 +151,11 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
       {:ok, _pid} = Pincer.Adapters.Connectors.MCP.Manager.start_link([])
   """
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, %{servers: %{}, tools: %{}}, name: __MODULE__)
+  def start_link(opts \\ []) when is_list(opts) do
+    case Keyword.get(opts, :name, __MODULE__) do
+      nil -> GenServer.start_link(__MODULE__, opts)
+      name -> GenServer.start_link(__MODULE__, opts, name: name)
+    end
   end
 
   @doc false
@@ -221,11 +225,18 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
   Returns an empty list if no MCP servers are configured or if
   all servers failed to start.
   """
-  @spec get_all_tools(timeout :: non_neg_integer()) :: [map()]
-  def get_all_tools(timeout \\ @default_get_tools_timeout)
+  @spec get_all_tools() :: [map()]
+  def get_all_tools, do: get_all_tools(__MODULE__, @default_get_tools_timeout)
 
-  def get_all_tools(timeout) when is_integer(timeout) and timeout >= 0 do
-    GenServer.call(__MODULE__, :get_tools, timeout)
+  @spec get_all_tools(non_neg_integer() | GenServer.server()) :: [map()]
+  def get_all_tools(timeout) when is_integer(timeout) and timeout >= 0,
+    do: get_all_tools(__MODULE__, timeout)
+
+  def get_all_tools(server), do: get_all_tools(server, @default_get_tools_timeout)
+
+  @spec get_all_tools(GenServer.server(), non_neg_integer()) :: [map()]
+  def get_all_tools(server, timeout) when is_integer(timeout) and timeout >= 0 do
+    GenServer.call(server, :get_tools, timeout)
   catch
     :exit, reason ->
       Logger.warning("MCP Manager unavailable for get_all_tools: #{inspect(reason)}")
@@ -285,8 +296,23 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
   multiple content items, text items are concatenated.
   """
   @spec execute_tool(String.t(), map()) :: {:ok, String.t()} | {:error, any()}
-  def execute_tool(name, arguments) do
-    GenServer.call(__MODULE__, {:execute, name, arguments}, 120_000)
+  def execute_tool(name, arguments) when is_binary(name) and is_map(arguments) do
+    execute_tool(__MODULE__, name, arguments)
+  end
+
+  @doc """
+  Executes a tool on a specific `Manager` instance outside its GenServer loop so
+  concurrent tool calls do not serialize behind one process.
+  """
+  @spec execute_tool(GenServer.server(), String.t(), map()) :: {:ok, String.t()} | {:error, any()}
+  def execute_tool(server, name, arguments) when is_binary(name) and is_map(arguments) do
+    case GenServer.call(server, {:lookup_tool, name}, @lookup_timeout_ms) do
+      {:ok, info, client_module} ->
+        run_tool_execution(info, name, arguments, client_module)
+
+      {:error, :tool_not_found} ->
+        {:error, :tool_not_found}
+    end
   end
 
   @doc false
@@ -330,11 +356,14 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
       when is_binary(server_name) and is_function(call_fun, 0) and is_integer(timeout_ms) and
              timeout_ms >= 0 and is_integer(kill_timeout_ms) and kill_timeout_ms >= 0 do
     if server_name == "skills_sidecar" do
-      task = Task.async(call_fun)
+      task = start_unlinked_task(Pincer.TaskSupervisor, call_fun)
 
       case Task.yield(task, timeout_ms) do
         {:ok, result} ->
           result
+
+        {:exit, reason} ->
+          {:error, reason}
 
         nil ->
           _ = Task.shutdown(task, kill_timeout_ms)
@@ -348,89 +377,86 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
   # Callbacks
 
   @impl true
-  def init(_) do
-    {:ok, %{servers: %{}, tools: %{}}, {:continue, :load_servers}}
+  def init(opts) do
+    opts = if is_list(opts), do: opts, else: []
+
+    state = %{
+      servers: %{},
+      tools: %{},
+      injected_servers: Keyword.get(opts, :servers),
+      retry_interval_ms: Keyword.get(opts, :retry_interval_ms, 5_000),
+      max_retries: Keyword.get(opts, :max_retries, 5),
+      client_module: Keyword.get(opts, :client_module, Client),
+      task_supervisor: Keyword.get(opts, :task_supervisor, Pincer.TaskSupervisor),
+      discovery_task: nil
+    }
+
+    {:ok, state, {:continue, :load_servers}}
   end
 
   @impl true
   def handle_continue(:load_servers, state) do
-    mcp_config = Application.get_env(:pincer, :mcp, %{})
-    servers_config = resolve_servers_config(mcp_config)
-    tokens = Application.get_env(:pincer, :tokens, %{})
-
     new_servers =
-      Enum.reduce(servers_config, %{}, fn {name, cfg}, acc ->
-        client_opts = build_client_opts(name, cfg, tokens)
+      if is_map(state.injected_servers) do
+        state.injected_servers
+      else
+        start_configured_servers()
+      end
 
-        spec = %{
-          id: name,
-          start: {Client, :start_link, [client_opts]},
-          # Try to restart, but don't crash the supervisor if it fails repeatedly
-          restart: :transient
-        }
+    if map_size(new_servers) > 0 and state.max_retries > 0 do
+      Process.send_after(self(), {:discover_tools, state.max_retries}, state.retry_interval_ms)
+    end
 
-        case DynamicSupervisor.start_child(Pincer.MCP.Supervisor, spec) do
-          {:ok, pid} ->
-            Map.put(acc, name, pid)
-
-          {:error, reason} ->
-            Logger.error("Failed to start MCP server #{name}: #{inspect(reason)}")
-            acc
-        end
-      end)
-
-    # Try to collect tools with retries (waiting for npx/download)
-    new_tools = discover_tools_with_retry(new_servers, 5)
-
-    Logger.info(
-      "MCP Manager: #{map_size(new_tools)} tools discovered in #{map_size(new_servers)} servers."
-    )
-
-    {:noreply, %{state | servers: new_servers, tools: new_tools}}
+    {:noreply, %{state | servers: new_servers}}
   end
 
-  defp discover_tools_with_retry(servers, retries) when retries > 0 do
-    # Wait a bit before trying
-    Process.sleep(5000)
+  @impl true
+  def handle_info({:discover_tools, retries_left}, %{discovery_task: nil} = state)
+      when retries_left > 0 do
+    if map_size(state.servers) > 0 do
+      servers = state.servers
+      client_module = state.client_module
 
-    tools =
-      Enum.reduce(servers, %{}, fn {server_name, pid}, acc ->
-        if Process.alive?(pid) do
-          try do
-            case Client.list_tools(pid) do
-              {:ok, %{"result" => %{"tools" => tools}}} ->
-                Enum.reduce(tools, acc, fn tool, inner_acc ->
-                  if Application.get_env(:pincer, :log_mcp),
-                    do: Logger.debug("Tool discovered [#{server_name}]: #{tool["name"]}")
+      task =
+        start_unlinked_task(state.task_supervisor, fn ->
+          discover_tools_once(servers, client_module)
+        end)
 
-                  Map.put(inner_acc, tool["name"], %{
-                    server_pid: pid,
-                    spec: tool,
-                    server_name: server_name
-                  })
-                end)
-
-              _ ->
-                acc
-            end
-          catch
-            :exit, _reason -> acc
-          end
-        else
-          acc
-        end
-      end)
-
-    if map_size(tools) == 0 and map_size(servers) > 0 do
-      Logger.warning("No MCP tools found. Trying again... (#{retries} remaining)")
-
-      discover_tools_with_retry(servers, retries - 1)
+      {:noreply, %{state | discovery_task: {task.ref, retries_left}}}
     else
-      tools
+      {:noreply, state}
     end
   end
 
-  defp discover_tools_with_retry(_servers, 0), do: %{}
+  def handle_info({ref, tools}, %{discovery_task: {ref, retries_left}} = state) do
+    Process.demonitor(ref, [:flush])
+
+    if map_size(tools) == 0 and map_size(state.servers) > 0 and retries_left > 1 do
+      Logger.warning("No MCP tools found. Trying again... (#{retries_left - 1} remaining)")
+      Process.send_after(self(), {:discover_tools, retries_left - 1}, state.retry_interval_ms)
+    else
+      Logger.info(
+        "MCP Manager: #{map_size(tools)} tools discovered in #{map_size(state.servers)} servers."
+      )
+    end
+
+    {:noreply, %{state | tools: tools, discovery_task: nil}}
+  end
+
+  def handle_info(
+        {:DOWN, ref, :process, _pid, reason},
+        %{discovery_task: {ref, retries_left}} = state
+      ) do
+    Logger.warning("MCP discovery task exited (#{inspect(reason)}).")
+
+    if map_size(state.servers) > 0 and retries_left > 1 do
+      Process.send_after(self(), {:discover_tools, retries_left - 1}, state.retry_interval_ms)
+    end
+
+    {:noreply, %{state | discovery_task: nil}}
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
 
   @impl true
   def handle_call(:get_tools, _from, state) do
@@ -447,41 +473,124 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
     {:reply, openai_specs, state}
   end
 
-  @impl true
-  def handle_call({:execute, name, args}, _from, state) do
+  def handle_call({:lookup_tool, name}, _from, state) do
+    case Map.get(state.tools, name) do
+      nil -> {:reply, {:error, :tool_not_found}, state}
+      info -> {:reply, {:ok, info, state.client_module}, state}
+    end
+  end
+
+  def handle_call({:execute, name, args}, from, state) do
     case Map.get(state.tools, name) do
       nil ->
         {:reply, {:error, :tool_not_found}, state}
 
       info ->
-        started_at_ms = System.monotonic_time(:millisecond)
+        client_module = state.client_module
 
-        result =
-          info.server_name
-          |> call_tool_with_timeout(fn -> Client.call_tool(info.server_pid, name, args) end)
-          |> case do
-            {:ok, %{"result" => %{"content" => content}}} ->
-              # MCP returns a list of contents (text, image, etc)
-              text_content =
-                content
-                |> Enum.filter(fn c -> c["type"] == "text" end)
-                |> Enum.map(fn c -> c["text"] end)
-                |> Enum.join("
-")
+        start_supervised_fire_and_forget(state.task_supervisor, fn ->
+          reply = run_tool_execution(info, name, args, client_module)
+          GenServer.reply(from, reply)
+        end)
 
-              {:ok, text_content}
+        {:noreply, state}
+    end
+  end
 
-            {:ok, %{"error" => error}} ->
-              {:error, error}
+  defp start_configured_servers do
+    mcp_config = Application.get_env(:pincer, :mcp, %{})
+    servers_config = resolve_servers_config(mcp_config)
+    tokens = Application.get_env(:pincer, :tokens, %{})
 
-            error ->
-              error
+    Enum.reduce(servers_config, %{}, fn {name, cfg}, acc ->
+      client_opts = build_client_opts(name, cfg, tokens)
+
+      spec = %{
+        id: name,
+        start: {Client, :start_link, [client_opts]},
+        # Try to restart, but don't crash the supervisor if it fails repeatedly
+        restart: :transient
+      }
+
+      case DynamicSupervisor.start_child(Pincer.MCP.Supervisor, spec) do
+        {:ok, pid} ->
+          Map.put(acc, name, pid)
+
+        {:error, reason} ->
+          Logger.error("Failed to start MCP server #{name}: #{inspect(reason)}")
+          acc
+      end
+    end)
+  end
+
+  defp discover_tools_once(servers, client_module) do
+    Enum.reduce(servers, %{}, fn {server_name, pid}, acc ->
+      if Process.alive?(pid) do
+        try do
+          case client_module.list_tools(pid) do
+            {:ok, %{"result" => %{"tools" => tools}}} ->
+              Enum.reduce(tools, acc, fn tool, inner_acc ->
+                if Application.get_env(:pincer, :log_mcp),
+                  do: Logger.debug("Tool discovered [#{server_name}]: #{tool["name"]}")
+
+                Map.put(inner_acc, tool["name"], %{
+                  server_pid: pid,
+                  spec: tool,
+                  server_name: server_name
+                })
+              end)
+
+            _ ->
+              acc
           end
+        catch
+          :exit, _reason -> acc
+        end
+      else
+        acc
+      end
+    end)
+  end
 
-        audited_result =
-          audit_sidecar_result(info.server_name, name, started_at_ms, result, SidecarAudit, args)
+  defp run_tool_execution(info, name, args, client_module) do
+    started_at_ms = System.monotonic_time(:millisecond)
 
-        {:reply, audited_result, state}
+    result =
+      info.server_name
+      |> call_tool_with_timeout(fn -> client_module.call_tool(info.server_pid, name, args) end)
+      |> normalize_tool_response()
+
+    audit_sidecar_result(info.server_name, name, started_at_ms, result, SidecarAudit, args)
+  end
+
+  defp normalize_tool_response({:ok, %{"result" => %{"content" => content}}}) do
+    text_content =
+      content
+      |> Enum.filter(fn c -> c["type"] == "text" end)
+      |> Enum.map(fn c -> c["text"] end)
+      |> Enum.join("\n")
+
+    {:ok, text_content}
+  end
+
+  defp normalize_tool_response({:ok, %{"error" => error}}), do: {:error, error}
+  defp normalize_tool_response(other), do: other
+
+  defp start_unlinked_task(task_supervisor, fun) do
+    if Process.whereis(task_supervisor) do
+      Task.Supervisor.async_nolink(task_supervisor, fun)
+    else
+      Task.Supervisor.async_nolink(Pincer.TaskSupervisor, fun)
+    end
+  catch
+    :exit, _ -> Task.async(fun)
+  end
+
+  defp start_supervised_fire_and_forget(task_supervisor, fun) do
+    if Process.whereis(task_supervisor) do
+      Task.Supervisor.start_child(task_supervisor, fun)
+    else
+      Task.start(fun)
     end
   end
 
@@ -502,7 +611,7 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
   end
 
   defp normalize_audit_value(args, key, default) do
-    value = Map.get(args, key) || Map.get(args, String.to_atom(key))
+    value = fetch_map_value(args, key)
 
     cond do
       is_nil(value) ->
@@ -544,11 +653,29 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
   end
 
   defp cfg_value(cfg, key, default \\ nil) when is_map(cfg) do
-    case Map.get(cfg, key) do
-      nil -> Map.get(cfg, String.to_atom(key), default)
-      value -> value
+    fetch_map_value(cfg, key, default)
+  end
+
+  defp fetch_map_value(map, key, default \\ nil) when is_map(map) do
+    case Map.get(map, key) do
+      nil ->
+        case safe_existing_atom(key) do
+          {:ok, atom_key} -> Map.get(map, atom_key, default)
+          :error -> default
+        end
+
+      value ->
+        value
     end
   end
+
+  defp safe_existing_atom(key) when is_binary(key) do
+    {:ok, String.to_existing_atom(key)}
+  rescue
+    ArgumentError -> :error
+  end
+
+  defp safe_existing_atom(_), do: :error
 
   defp maybe_add_github_token(env, "github", tokens) do
     case Map.get(tokens, "github") || Map.get(tokens, :github) do

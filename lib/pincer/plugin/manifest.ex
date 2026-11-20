@@ -127,13 +127,27 @@ defmodule Pincer.Plugin.Manifest do
   end
 
   defp parse_kind(data) do
-    case Map.get(data, "kind") do
-      kind when kind in @valid_kinds ->
-        {:ok, String.to_atom(kind)}
+    kind_atoms = %{
+      "channel" => :channel,
+      "storage" => :storage,
+      "llm" => :llm,
+      "tool" => :tool
+    }
 
+    case Map.get(data, "kind") do
       nil ->
         {:error,
          "Missing required field: kind (must be one of: #{Enum.join(@valid_kinds, ", ")})"}
+
+      kind when is_binary(kind) ->
+        case Map.fetch(kind_atoms, kind) do
+          {:ok, atom} ->
+            {:ok, atom}
+
+          :error ->
+            {:error,
+             "Invalid kind: #{inspect(kind)}. Must be one of: #{Enum.join(@valid_kinds, ", ")}"}
+        end
 
       other ->
         {:error,

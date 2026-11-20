@@ -202,6 +202,55 @@ defmodule Pincer.Adapters.Tools.ChannelActionsTest do
     assert msg =~ "path"
   end
 
+  test "send_file blocks path traversal, outside absolute paths, escaping symlinks, and directories" do
+    base =
+      Path.join(System.tmp_dir!(), "pincer_ca_confine_#{System.unique_integer([:positive])}")
+
+    ws = Path.join(base, "ws")
+    outside = Path.join(base, "outside")
+    sub = Path.join(ws, "subdir")
+    File.mkdir_p!(ws)
+    File.mkdir_p!(outside)
+    File.mkdir_p!(sub)
+
+    outside_file = Path.join(outside, "secret.txt")
+    File.write!(outside_file, "TOP_SECRET")
+    File.ln_s!(outside_file, Path.join(ws, "leak.txt"))
+
+    ctx = %{"workspace_path" => ws}
+
+    on_exit(fn -> File.rm_rf!(base) end)
+
+    for unsafe <- ["../outside/secret.txt", outside_file, "leak.txt"] do
+      assert {:error, reason} =
+               ChannelActions.execute(
+                 %{
+                   "action" => "send_file",
+                   "path" => unsafe,
+                   "channel" => "discord",
+                   "recipient" => "789"
+                 },
+                 ctx
+               )
+
+      assert reason =~ "Access denied" or reason =~ "traversal" or reason =~ "outside"
+    end
+
+    assert {:error, dir_err} =
+             ChannelActions.execute(
+               %{
+                 "action" => "send_file",
+                 "path" => "subdir",
+                 "channel" => "discord",
+                 "recipient" => "789"
+               },
+               ctx
+             )
+
+    assert dir_err =~ "directory"
+    refute_receive {:discord_send, _, _, _}
+  end
+
   test "send_file to whatsapp returns unsupported error" do
     tmp = System.tmp_dir!()
     path = Path.join(tmp, "pincer_ca_wa_#{:rand.uniform(9999)}.txt")

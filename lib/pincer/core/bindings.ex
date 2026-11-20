@@ -67,6 +67,18 @@ defmodule Pincer.Core.Bindings do
     end
   end
 
+  @known_channels %{
+    "telegram" => :telegram,
+    "discord" => :discord,
+    "whatsapp" => :whatsapp,
+    "slack" => :slack,
+    "cli" => :cli,
+    "webhook" => :webhook,
+    "line" => :line,
+    "feishu" => :feishu,
+    "dingtalk" => :dingtalk
+  }
+
   @doc """
   Parses a principal reference back into channel and external identity.
   """
@@ -75,7 +87,10 @@ defmodule Pincer.Core.Bindings do
   def parse_principal_ref(principal_ref) when is_binary(principal_ref) do
     case String.split(principal_ref, ":", parts: 3) do
       [channel, _kind, external_id] when external_id != "" ->
-        {:ok, {String.to_atom(channel), external_id}}
+        case resolve_channel_atom(channel) do
+          {:ok, channel_atom} -> {:ok, {channel_atom, external_id}}
+          :error -> {:error, :invalid_principal_ref}
+        end
 
       _ ->
         {:error, :invalid_principal_ref}
@@ -83,6 +98,20 @@ defmodule Pincer.Core.Bindings do
   end
 
   def parse_principal_ref(_), do: {:error, :invalid_principal_ref}
+
+  defp resolve_channel_atom(channel) when is_binary(channel) do
+    case Map.fetch(@known_channels, channel) do
+      {:ok, atom} ->
+        {:ok, atom}
+
+      :error ->
+        try do
+          {:ok, String.to_existing_atom(channel)}
+        rescue
+          ArgumentError -> :error
+        end
+    end
+  end
 
   defp normalize_segment(segment) do
     segment

@@ -1,9 +1,10 @@
 defmodule Pincer.Adapters.Tools.CodeSkeleton do
   @moduledoc """
-  Tool to extract the structural skeleton of a source code file.
+  Tool to extract the structural skeleton of a source code file within the workspace.
   """
   @behaviour Pincer.Ports.Tool
 
+  alias Pincer.Core.WorkspaceGuard
   alias Pincer.Utils.CodeSkeleton
 
   @impl true
@@ -17,7 +18,7 @@ defmodule Pincer.Adapters.Tools.CodeSkeleton do
         properties: %{
           file_path: %{
             type: "string",
-            description: "The path to the source code file to analyze."
+            description: "The workspace-relative path to the source code file to analyze."
           }
         },
         required: ["file_path"]
@@ -26,15 +27,32 @@ defmodule Pincer.Adapters.Tools.CodeSkeleton do
   end
 
   @impl true
-  def execute(%{"file_path" => file_path}) do
-    case File.read(file_path) do
-      {:ok, content} ->
-        ext = Path.extname(file_path)
-        skeleton = CodeSkeleton.extract(content, ext)
-        {:ok, skeleton}
+  def execute(args, context \\ %{})
+
+  def execute(%{"file_path" => file_path} = args, context)
+      when is_binary(file_path) and is_map(context) do
+    workspace =
+      Map.get(context, "workspace_path") ||
+        Map.get(context, :workspace_path) ||
+        Map.get(args, "workspace_path") ||
+        File.cwd!()
+
+    with {:ok, safe_path} <-
+           WorkspaceGuard.confine_path(file_path, root: workspace, reject_parent_segments: true),
+         {:ok, content} <- File.read(safe_path) do
+      ext = Path.extname(safe_path)
+      skeleton = CodeSkeleton.extract(content, ext)
+      {:ok, skeleton}
+    else
+      {:error, reason} when is_binary(reason) ->
+        {:error, reason}
 
       {:error, reason} ->
         {:error, "Could not read file: #{inspect(reason)}"}
     end
+  end
+
+  def execute(_args, _context) do
+    {:error, "Missing required parameter: file_path"}
   end
 end

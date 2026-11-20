@@ -10,6 +10,7 @@ defmodule Pincer.Adapters.Tools do
       GitInspect,
       ChannelActions,
       Scheduler,
+      TimerServer,
       Browser,
       Media,
       Workflow
