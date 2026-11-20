@@ -164,10 +164,11 @@ defmodule Pincer.Core.Session.Server do
     # Let the LLM decide how to introduce itself based on BOOTSTRAP.md;
     # force a start if the history is empty
     history_with_prompt = [%{"role" => "system", "content" => get_system_prompt(state)}]
+    session_pid = self()
 
     Task.start(fn ->
       evaluate_blackboard_update(
-        self(),
+        session_pid,
         state.session_id,
         history_with_prompt,
         state.model_override
@@ -449,22 +450,7 @@ defmodule Pincer.Core.Session.Server do
 
     updates =
       messages
-      |> Enum.map(fn msg ->
-        cond do
-          String.contains?(msg.content, "PLAN_GENERATED:") ->
-            plan = String.replace(msg.content, "PLAN_GENERATED:\n", "")
-
-            "📋 **Suggested Project Plan (#{msg.project_id})**:\n#{plan}\n\nTo proceed, use:\n`/project approve #{msg.project_id}`\nOr modify with:\n`/project modify #{msg.project_id} <new tasks>`"
-
-          String.contains?(msg.content, "ERROR_DIAGNOSTIC:") ->
-            reason = String.replace(msg.content, "ERROR_DIAGNOSTIC: ", "")
-
-            "❌ **CRITICAL PROJECT FAILURE (#{msg.project_id})**\nThe agent exhausted all execution attempts.\n\n**Detected Reason:**\n`#{reason}`\n\nYou can:\n1. `/project resume #{msg.project_id}` (Retry)\n2. `/project modify #{msg.project_id} <plan>` (Change course)\n3. `/project stop #{msg.project_id}`"
-
-          true ->
-            "[#{msg.project_id || "GLOBAL"}]: #{msg.content}"
-        end
-      end)
+      |> Enum.map(&format_blackboard_message/1)
       |> Enum.join("\n\n")
 
     system_msg = %{
@@ -477,8 +463,15 @@ defmodule Pincer.Core.Session.Server do
     # If idle and something important happened, the Maestro evaluates whether to speak up
     # Only when broadcasting (prevents the bot from talking unprompted during boot)
     if broadcast? and state.status == :idle and needs_review? do
+      session_pid = self()
+
       Task.start(fn ->
-        evaluate_blackboard_update(self(), state.session_id, new_history, state.model_override)
+        evaluate_blackboard_update(
+          session_pid,
+          state.session_id,
+          new_history,
+          state.model_override
+        )
       end)
     end
 
@@ -960,6 +953,37 @@ defmodule Pincer.Core.Session.Server do
 
       {:error, reason} ->
         Logger.error("[SESSION] #{sid} evaluate_blackboard_update failed: #{inspect(reason)}")
+    end
+  end
+
+  # Structured `kind` is authoritative; the text-prefix checks only keep
+  # messages written to journals before `kind` existed readable.
+  defp format_blackboard_message(msg) do
+    case blackboard_kind(msg) do
+      :plan_generated ->
+        plan = String.replace(msg.content, "PLAN_GENERATED:\n", "")
+
+        "📋 **Suggested Project Plan (#{Map.get(msg, :project_id)})**:\n#{plan}\n\nTo proceed, use:\n`/project approve #{Map.get(msg, :project_id)}`\nOr modify with:\n`/project modify #{Map.get(msg, :project_id)} <new tasks>`"
+
+      :error_diagnostic ->
+        reason = String.replace(msg.content, "ERROR_DIAGNOSTIC: ", "")
+
+        "❌ **CRITICAL PROJECT FAILURE (#{Map.get(msg, :project_id)})**\nThe agent exhausted all execution attempts.\n\n**Detected Reason:**\n`#{reason}`\n\nYou can:\n1. `/project resume #{Map.get(msg, :project_id)}` (Retry)\n2. `/project modify #{Map.get(msg, :project_id)} <plan>` (Change course)\n3. `/project stop #{Map.get(msg, :project_id)}`"
+
+      _other ->
+        "[#{Map.get(msg, :project_id) || "GLOBAL"}]: #{msg.content}"
+    end
+  end
+
+  defp blackboard_kind(%{kind: kind}) when is_atom(kind) and not is_nil(kind), do: kind
+  defp blackboard_kind(%{content: content}) when is_binary(content), do: legacy_kind(content)
+  defp blackboard_kind(_msg), do: nil
+
+  defp legacy_kind(content) do
+    cond do
+      String.contains?(content, "PLAN_GENERATED:") -> :plan_generated
+      String.contains?(content, "ERROR_DIAGNOSTIC:") -> :error_diagnostic
+      true -> nil
     end
   end
 

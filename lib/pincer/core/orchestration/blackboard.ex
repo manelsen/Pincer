@@ -45,13 +45,19 @@ defmodule Pincer.Core.Orchestration.Blackboard do
     GenServer.call(__MODULE__, :reset)
   end
 
-  @doc "Direct write to ETS. This is what allows 10M+ ops."
+  @doc """
+  Direct write to ETS. This is what allows 10M+ ops.
+
+  `opts[:kind]` carries a structured message type (for example `:plan_generated`)
+  so consumers can dispatch on intent instead of parsing the text body.
+  """
   def post_direct(id, agent_id, content, project_id, opts \\ []) do
     msg = %{
       id: id,
       agent_id: agent_id,
       project_id: project_id,
       scope: Keyword.get(opts, :scope),
+      kind: Keyword.get(opts, :kind),
       content: content,
       timestamp: DateTime.utc_now()
     }

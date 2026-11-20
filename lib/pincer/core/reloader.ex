@@ -66,32 +66,21 @@ defmodule Pincer.Core.Reloader do
     Logger.debug("[RELOADER] Change detected. Recompiling...")
 
     try do
-      # 1. Clear compiler cache and rerun compilation
+      # `Mix.Task.rerun/1` returns `:ok` or raises; it has no diagnostics payload.
       Mix.Task.clear()
-      {status, diagnostics} = Mix.Task.rerun("compile")
+      Mix.Task.rerun("compile")
 
-      case status do
-        :ok ->
-          # 2. Extract which files were actually compiled/changed
-          changed_beams = get_changed_modules(diagnostics)
-
-          if Enum.empty?(changed_beams) do
-            # No actual BEAM changes detected
-            :ok
-          else
-            reload_modules(changed_beams)
-
-            Logger.info("[RELOADER] Success! Hot-reloaded #{length(changed_beams)} modules.")
-
-            # Notify all live sessions to hot-swap their system prompts
-            Pincer.Infra.PubSub.broadcast("system:updates", {:system_update_prompt})
-          end
-
-        :error ->
-          Logger.error("[RELOADER] Compilation failed! Check your syntax errors.")
-
-        :noop ->
+      case get_changed_modules(nil) do
+        [] ->
           :ok
+
+        changed_beams ->
+          reload_modules(changed_beams)
+
+          Logger.info("[RELOADER] Success! Hot-reloaded #{length(changed_beams)} modules.")
+
+          # Notify all live sessions to hot-swap their system prompts
+          Pincer.Infra.PubSub.broadcast("system:updates", {:system_update_prompt})
       end
     catch
       kind, error ->

@@ -103,37 +103,34 @@ defmodule Pincer.Core.SecurityAudit do
   end
 
   defp load_config(path) do
-    cond do
-      not File.exists?(path) ->
-        {:error,
-         error_check(
-           :config_yaml,
-           "Config file not found at #{path}",
-           %{path: path, reason: :enoent}
-         )}
+    if File.exists?(path) do
+      case YamlElixir.read_from_file(path) do
+        {:ok, config} when is_map(config) ->
+          {:ok, config, ok_check(:config_yaml, "Config file loaded successfully", %{path: path})}
 
-      true ->
-        case YamlElixir.read_from_file(path) do
-          {:ok, config} when is_map(config) ->
-            {:ok, config,
-             ok_check(:config_yaml, "Config file loaded successfully", %{path: path})}
+        {:ok, _other} ->
+          {:error,
+           error_check(
+             :config_yaml,
+             "Config root must be a map/object",
+             %{path: path, reason: :invalid_root}
+           )}
 
-          {:ok, _other} ->
-            {:error,
-             error_check(
-               :config_yaml,
-               "Config root must be a map/object",
-               %{path: path, reason: :invalid_root}
-             )}
-
-          {:error, reason} ->
-            {:error,
-             error_check(
-               :config_yaml,
-               "Config file is invalid YAML",
-               %{path: path, reason: inspect(reason)}
-             )}
-        end
+        {:error, reason} ->
+          {:error,
+           error_check(
+             :config_yaml,
+             "Config file is invalid YAML",
+             %{path: path, reason: inspect(reason)}
+           )}
+      end
+    else
+      {:error,
+       error_check(
+         :config_yaml,
+         "Config file not found at #{path}",
+         %{path: path, reason: :enoent}
+       )}
     end
   end
 

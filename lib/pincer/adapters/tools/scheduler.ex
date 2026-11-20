@@ -6,6 +6,14 @@ defmodule Pincer.Adapters.Tools.Scheduler do
   @behaviour Pincer.Ports.Tool
   alias Pincer.Ports.Cron
 
+  @schedulable_tools ["schedule_reminder", "schedule_cron_job", "delete_cron_job"]
+
+  @required_params_by_tool %{
+    "schedule_reminder" => ["message", "seconds", "session_id"],
+    "schedule_cron_job" => ["name", "cron_expression", "prompt", "session_id"],
+    "delete_cron_job" => ["id"]
+  }
+
   @impl true
   def spec do
     [
@@ -114,22 +122,21 @@ defmodule Pincer.Adapters.Tools.Scheduler do
     end
   end
 
-  def execute(%{"tool_name" => tool_name} = args) do
-    required =
-      case tool_name do
-        "schedule_reminder" -> ["message", "seconds", "session_id"]
-        "schedule_cron_job" -> ["name", "cron_expression", "prompt", "session_id"]
-        "delete_cron_job" -> ["id"]
-        _ -> []
-      end
-
-    missing = Enum.reject(required, &Map.has_key?(args, &1))
+  def execute(%{"tool_name" => tool_name} = args) when tool_name in @schedulable_tools do
+    missing =
+      @required_params_by_tool
+      |> Map.fetch!(tool_name)
+      |> Enum.reject(&Map.has_key?(args, &1))
 
     if missing != [] do
       {:error, "#{tool_name} is missing required parameters: #{Enum.join(missing, ", ")}"}
     else
-      {:error, "Unknown scheduler tool: #{tool_name}"}
+      {:error, "#{tool_name} is missing the session context required to schedule work."}
     end
+  end
+
+  def execute(%{"tool_name" => tool_name}) do
+    {:error, "Unknown scheduler tool: #{tool_name}"}
   end
 
   def execute(args) do

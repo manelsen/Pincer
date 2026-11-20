@@ -28,4 +28,26 @@ defmodule Pincer.Core.BlackboardTest do
     assert Enum.all?(lucie_messages, &(&1.scope == "lucie"))
     assert lucie_last_id > 0
   end
+
+  test "post/4 persists the structured kind so consumers do not parse text" do
+    id =
+      Blackboard.post("Architect", "some plan text", "proj-1",
+        scope: "session-1",
+        kind: :plan_generated
+      )
+
+    assert is_integer(id)
+    {[message], _} = Blackboard.fetch_new(0, scope: "session-1")
+
+    assert message.kind == :plan_generated
+    assert message.content == "some plan text"
+  end
+
+  test "kind defaults to nil when the producer omits it" do
+    _id = Blackboard.post("Architect", "plain note", nil, scope: "session-2")
+
+    {[message], _} = Blackboard.fetch_new(0, scope: "session-2")
+
+    assert message.kind == nil
+  end
 end

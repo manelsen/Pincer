@@ -29,12 +29,12 @@ defmodule Pincer.Core.LLM.ModelRouter do
   @doc """
   Calculate a complexity score from 0.0 to 1.0 for the given history.
   """
-  @spec score([map()], keyword()) :: float()
-  def score(history, _opts \\ [])
+  @spec score([map()]) :: float()
+  def score(history)
 
-  def score([], _opts), do: 0.0
+  def score([]), do: 0.0
 
-  def score(history, _opts) do
+  def score(history) do
     depth = depth_score(history)
     tools = tool_score(history)
     length = length_score(history)
@@ -54,13 +54,12 @@ defmodule Pincer.Core.LLM.ModelRouter do
           {:ok, tier(), String.t(), String.t()} | {:ok, :default}
   def route(history, opts \\ [])
 
-  def route(_history, enabled: false), do: {:ok, :default}
   def route([], _opts), do: {:ok, :default}
 
   def route(history, opts) do
     tiers = Keyword.get(opts, :tiers, load_tiers())
 
-    if tiers == %{} do
+    if not Keyword.get(opts, :enabled, true) or tiers == %{} do
       {:ok, :default}
     else
       s = score(history)

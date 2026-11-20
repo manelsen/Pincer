@@ -20,7 +20,7 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.TurnOutcomePolicy
   alias Pincer.Utils.Text
 
-  @max_recursion_depth Application.compile_env(:pincer, :max_recursion_depth, 100)
+  @default_max_recursion_depth 100
   @approval_timeout_ms Application.compile_env(:pincer, :approval_timeout_ms, 600_000)
   @tool_result_max_chars Application.compile_env(:pincer, :tool_result_max_chars, 32_000)
   @max_inline_bytes Application.compile_env(:pincer, :max_inline_bytes, 6_291_456)
@@ -41,9 +41,7 @@ defmodule Pincer.Core.Executor do
       llm_client: opts[:llm_client] || Pincer.Ports.LLM,
       tool_registry: opts[:tool_registry] || Pincer.Ports.ToolRegistry,
       file_fetcher: opts[:file_fetcher] || (&default_file_fetch/1),
-      max_depth:
-        opts[:max_depth] ||
-          Application.get_env(:pincer, :executor_max_depth, @max_recursion_depth)
+      max_depth: opts[:max_depth] || resolve_max_depth()
     }
 
     # Store workspace path in process dictionary for easy access in nested calls
@@ -57,7 +55,7 @@ defmodule Pincer.Core.Executor do
       Process.put(
         :executor_trace,
         Trace.new(session_id, "turn-#{System.unique_integer([:positive])}", %{
-          depth_limit: @max_recursion_depth
+          depth_limit: deps.max_depth
         })
       )
 
@@ -146,40 +144,21 @@ defmodule Pincer.Core.Executor do
   end
 
   defp run_loop(logical_history, session_id, session_pid, depth, model_override, deps) do
-    if depth > max_depth(deps) do
-      Logger.warning("[EXECUTOR] Depth limit reached (#{depth}/#{max_depth(deps)})")
-      send(session_pid, {:executor_failed, {:depth_exceeded, depth}})
-      {:error, {:depth_exceeded, depth}}
-    else
-      updated_model_override = check_messages(model_override)
-
-      if loop_detected?(logical_history) do
-        send(session_pid, {:executor_failed, "Tool loop detected. Aborting."})
-        {:error, :tool_loop}
-      else
-        prompt_history =
-          if depth == 0 do
-            prepare_prompt_history(logical_history, model_override)
-          else
-            raise "run_loop called with depth > 0 without prompt_history context"
-          end
-
-        do_run_loop(
-          logical_history,
-          prompt_history,
-          session_id,
-          session_pid,
-          depth,
-          updated_model_override,
-          deps
-        )
-      end
-    end
+    run_loop(
+      logical_history,
+      nil,
+      session_id,
+      session_pid,
+      depth,
+      model_override,
+      deps
+    )
   end
 
   # Internal recursive entry point that carries both histories to preserve context
   # without re-pruning (which causes amnesia when tool results are large).
-  defp run_loop_recursive(
+  # `prompt_history` is nil on the first iteration and built from `logical_history`.
+  defp run_loop(
          logical_history,
          prompt_history,
          session_id,
@@ -188,27 +167,28 @@ defmodule Pincer.Core.Executor do
          model_override,
          deps
        ) do
-    if depth > max_depth(deps) do
-      Logger.warning("[EXECUTOR] Depth limit reached (#{depth}/#{max_depth(deps)})")
-      send(session_pid, {:executor_failed, {:depth_exceeded, depth}})
-      {:error, {:depth_exceeded, depth}}
-    else
-      updated_model_override = check_messages(model_override)
+    cond do
+      depth > max_depth(deps) ->
+        Logger.warning("[EXECUTOR] Depth limit reached (#{depth}/#{max_depth(deps)})")
+        send(session_pid, {:executor_failed, {:depth_exceeded, depth}})
+        {:error, {:depth_exceeded, depth}}
 
-      if loop_detected?(logical_history) do
+      loop_detected?(logical_history) ->
         send(session_pid, {:executor_failed, "Tool loop detected. Aborting."})
         {:error, :tool_loop}
-      else
+
+      true ->
+        prompt_history = prompt_history || prepare_prompt_history(logical_history, model_override)
+
         do_run_loop(
           logical_history,
           prompt_history,
           session_id,
           session_pid,
           depth,
-          updated_model_override,
+          check_messages(model_override),
           deps
         )
-      end
     end
   end
 
@@ -279,100 +259,34 @@ defmodule Pincer.Core.Executor do
 
     case deps.llm_client.stream_completion(prompt_history, [tools: tools_spec] ++ client_opts) do
       {:ok, stream, stream_usage} ->
-        try do
-          case handle_stream(
-                 stream,
-                 logical_history,
-                 prompt_history,
-                 session_id,
-                 session_pid,
-                 depth,
-                 model_override,
-                 deps,
-                 stream_usage
-               ) do
-            {:error, :empty_response} ->
-              recover_empty_response(
-                logical_history,
-                prompt_history,
-                session_id,
-                session_pid,
-                depth,
-                model_override,
-                deps,
-                client_opts
-              )
-
-            other ->
-              other
-          end
-        rescue
-          error in Protocol.UndefinedError ->
-            Logger.warning(
-              "[EXECUTOR] Invalid streaming payload. Falling back to chat completion."
-            )
-
-            fallback_chat_completion(
-              error,
-              logical_history,
-              prompt_history,
-              session_id,
-              session_pid,
-              depth,
-              model_override,
-              deps,
-              client_opts,
-              tools_spec
-            )
-        end
+        run_stream(
+          stream,
+          stream_usage,
+          logical_history,
+          prompt_history,
+          session_id,
+          session_pid,
+          depth,
+          model_override,
+          deps,
+          client_opts,
+          tools_spec
+        )
 
       {:ok, stream} ->
-        try do
-          case handle_stream(
-                 stream,
-                 logical_history,
-                 prompt_history,
-                 session_id,
-                 session_pid,
-                 depth,
-                 model_override,
-                 deps,
-                 nil
-               ) do
-            {:error, :empty_response} ->
-              recover_empty_response(
-                logical_history,
-                prompt_history,
-                session_id,
-                session_pid,
-                depth,
-                model_override,
-                deps,
-                client_opts
-              )
-
-            other ->
-              other
-          end
-        rescue
-          error in Protocol.UndefinedError ->
-            Logger.warning(
-              "[EXECUTOR] Invalid streaming payload. Falling back to chat completion."
-            )
-
-            fallback_chat_completion(
-              error,
-              logical_history,
-              prompt_history,
-              session_id,
-              session_pid,
-              depth,
-              model_override,
-              deps,
-              client_opts,
-              tools_spec
-            )
-        end
+        run_stream(
+          stream,
+          nil,
+          logical_history,
+          prompt_history,
+          session_id,
+          session_pid,
+          depth,
+          model_override,
+          deps,
+          client_opts,
+          tools_spec
+        )
 
       {:error, {:missing_credentials, _env_key} = cred_error} ->
         Logger.warning("[EXECUTOR] LLM call failed: #{inspect(cred_error)}")
@@ -388,6 +302,65 @@ defmodule Pincer.Core.Executor do
 
         fallback_chat_completion(
           reason,
+          logical_history,
+          prompt_history,
+          session_id,
+          session_pid,
+          depth,
+          model_override,
+          deps,
+          client_opts,
+          tools_spec
+        )
+    end
+  end
+
+  defp run_stream(
+         stream,
+         stream_usage,
+         logical_history,
+         prompt_history,
+         session_id,
+         session_pid,
+         depth,
+         model_override,
+         deps,
+         client_opts,
+         tools_spec
+       ) do
+    try do
+      case handle_stream(
+             stream,
+             logical_history,
+             prompt_history,
+             session_id,
+             session_pid,
+             depth,
+             model_override,
+             deps,
+             stream_usage
+           ) do
+        {:error, :empty_response} ->
+          recover_empty_response(
+            logical_history,
+            prompt_history,
+            session_id,
+            session_pid,
+            depth,
+            model_override,
+            deps,
+            client_opts
+          )
+
+        other ->
+          other
+      end
+    rescue
+      error in Protocol.UndefinedError ->
+        Logger.warning("[EXECUTOR] Invalid streaming payload. Falling back to chat completion.")
+
+        fallback_chat_completion(
+          error,
           logical_history,
           prompt_history,
           session_id,
@@ -932,7 +905,7 @@ defmodule Pincer.Core.Executor do
           prompt_history ++
             [assistant_msg] ++ tool_results ++ [post_tool_grounding_message(tool_results)]
 
-        run_loop_recursive(
+        run_loop(
           new_logical_history,
           new_prompt_history,
           session_id,
@@ -1519,7 +1492,11 @@ defmodule Pincer.Core.Executor do
   end
 
   defp max_depth(deps) do
-    Map.get(deps, :max_depth, @max_recursion_depth)
+    Map.get(deps, :max_depth) || resolve_max_depth()
+  end
+
+  defp resolve_max_depth do
+    Application.get_env(:pincer, :max_recursion_depth, @default_max_recursion_depth)
   end
 
   defp loop_detected?(history) do

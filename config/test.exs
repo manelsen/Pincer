@@ -26,3 +26,7 @@ config :pincer, workspaces_dir: "tmp/test_workspaces"
 config :pincer, enable_graph_watcher: false
 config :pincer, enable_heartbeat_watchers: false
 config :pincer, health_port: 0
+
+# The sandbox pool cannot satisfy StartupGuard's migration check at boot;
+# test_helper.exs already creates and migrates the database explicitly.
+config :pincer, skip_startup_guard: true

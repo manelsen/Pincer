@@ -69,6 +69,20 @@ defmodule Pincer.Core.LLM.ModelRouterTest do
       assert {:ok, :default} = ModelRouter.route([], enabled: true)
     end
 
+    test "enabled: false wins even when other options are present" do
+      history = [%{"role" => "user", "content" => "complex request with tools"}]
+
+      assert {:ok, :default} =
+               ModelRouter.route(history, enabled: false, tiers: %{local: %{}})
+    end
+
+    test "router is enabled by default when the option is omitted" do
+      tiers = %{local: %{provider: "groq", model: "m"}}
+
+      assert {:ok, _tier, "groq", "m"} =
+               ModelRouter.route([%{"role" => "user", "content" => "hi"}], tiers: tiers)
+    end
+
     test "returns appropriate tier for low complexity" do
       tiers = %{
         local: %{provider: "groq", model: "llama-3.3-70b-versatile"},

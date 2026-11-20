@@ -102,7 +102,8 @@ defmodule Pincer.Core.Project.Server do
     case Planner.build_plan(state.objective) do
       {:ok, tasks} ->
         Blackboard.post("Architect", "PLAN_GENERATED:\n" <> Enum.join(tasks, "\n"), state.id,
-          scope: state.session_id
+          scope: state.session_id,
+          kind: :plan_generated
         )
 
         {:noreply, %{state | items: tasks, status: :awaiting_approval}}
@@ -189,7 +190,10 @@ defmodule Pincer.Core.Project.Server do
       diagnostic =
         "ERROR_DIAGNOSTIC: Task failed after #{state.max_retries} attempts. Last Reason: #{inspect(reason)}"
 
-      Blackboard.post("Reviewer", diagnostic, state.id, scope: state.session_id)
+      Blackboard.post("Reviewer", diagnostic, state.id,
+        scope: state.session_id,
+        kind: :error_diagnostic
+      )
 
       Logger.error("Project #{state.id} halted. Awaiting user intervention.")
 

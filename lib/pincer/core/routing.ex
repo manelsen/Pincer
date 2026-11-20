@@ -28,7 +28,7 @@ defmodule Pincer.Core.Routing do
       │
       └──► Executor (lib/pincer/core/executor.ex)
                Runs the agentic loop: LLM → tool calls → LLM
-               Max recursion depth: 15
+               Max recursion depth: configurable via :pincer, :max_recursion_depth (default 100)
                Resolves tools from native registry + MCP servers
   ```
 
