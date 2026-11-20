@@ -304,5 +304,78 @@ defmodule Pincer.Core.OnboardTest do
       assert String.contains?(plan.onboard_command, "--capabilities 'workspace_dirs,config_yaml'")
       assert Enum.any?(plan.steps, &String.contains?(&1, "ssh deploy@vps.example.com"))
     end
+
+    test "builds sqlite remote onboard command when config uses sqlite storage" do
+      config =
+        Onboard.defaults(storage: :sqlite, sqlite_path: "data/remote.db")
+        |> put_in(["llm", "provider"], "openrouter")
+        |> put_in(["llm", "openrouter", "default_model"], "openrouter/free")
+
+      assert {:ok, plan} =
+               Onboard.remote_assisted_plan(config,
+                 remote_host: "vps.example.com",
+                 remote_user: "deploy",
+                 remote_path: "/srv/pincer"
+               )
+
+      assert String.contains?(plan.onboard_command, "--storage 'sqlite'")
+      assert String.contains?(plan.onboard_command, "--sqlite-path 'data/remote.db'")
+    end
+  end
+
+  describe "zero-infra sqlite defaults and preflight" do
+    test "defaults(storage: :sqlite) emits storage and local sandbox config without postgres" do
+      defaults = Onboard.defaults(storage: :sqlite, sqlite_path: "tmp/local.db")
+
+      refute Map.has_key?(defaults, "database")
+      assert get_in(defaults, ["storage", "adapter"]) == "sqlite"
+      assert get_in(defaults, ["storage", "path"]) == "tmp/local.db"
+      assert get_in(defaults, ["sandbox", "adapter"]) == "local"
+      assert Defaults.sqlite_storage_config?(defaults)
+      assert Defaults.sqlite_path(defaults) == "tmp/local.db"
+    end
+
+    test "plan/2 supports custom config_file destination" do
+      tmp =
+        Path.join(System.tmp_dir!(), "pincer_onboard_cfg_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      config = Onboard.defaults(storage: :sqlite, sqlite_path: "data/custom.db")
+      assert {:ok, plan} = Onboard.plan(config, config_file: "nested/custom.yaml")
+      assert {:write_config_yaml, "nested/custom.yaml", config} in plan
+
+      assert {:ok, report} = Onboard.apply_plan(plan, root: tmp)
+      assert "nested/custom.yaml" in report.written
+      {:ok, parsed} = YamlElixir.read_from_file(Path.join(tmp, "nested/custom.yaml"))
+      assert parsed["storage"]["adapter"] == "sqlite"
+      assert parsed["storage"]["path"] == "data/custom.db"
+    end
+
+    test "preflight/1 validates sqlite path and rejects traversal or unwritable parent" do
+      tmp =
+        Path.join(System.tmp_dir!(), "pincer_sqlite_pf_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+
+      valid = Onboard.defaults(storage: :sqlite, sqlite_path: Path.join(tmp, "data/pincer.db"))
+      assert :ok = Onboard.preflight(valid)
+      assert :ok = Preflight.check_db_connectivity(valid)
+
+      traversal = Onboard.defaults(storage: :sqlite, sqlite_path: "../outside/pincer.db")
+      assert {:error, issues_trav} = Onboard.preflight(traversal)
+      assert Enum.any?(issues_trav, &(&1.id == :invalid_sqlite_path))
+
+      blocker = Path.join(tmp, "not_a_dir")
+      File.write!(blocker, "file")
+
+      blocked_cfg =
+        Onboard.defaults(storage: :sqlite, sqlite_path: Path.join(blocker, "pincer.db"))
+
+      assert {:error, issues_blocked} = Onboard.preflight(blocked_cfg)
+      assert Enum.any?(issues_blocked, &(&1.id == :invalid_sqlite_path))
+    end
   end
 end

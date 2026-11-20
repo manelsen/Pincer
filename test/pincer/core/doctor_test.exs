@@ -270,6 +270,111 @@ defmodule Pincer.Core.DoctorTest do
     end
   end
 
+  describe "storage_checks" do
+    test "reports :storage_backend, writable :sqlite_path, and :sqlite_engine ok in sqlite mode" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        storage:
+          adapter: "sqlite"
+          path: "data/doctor_test.db"
+        channels:
+          cli:
+            enabled: true
+        """
+      )
+
+      report = Doctor.run(root: tmp, env_fetcher: fn _ -> nil end)
+
+      assert report.status == :ok
+
+      assert Enum.any?(report.checks, fn c ->
+               c.id == :storage_backend and c.severity == :ok and c.meta[:backend] == :sqlite
+             end)
+
+      assert Enum.any?(report.checks, fn c ->
+               c.id == :sqlite_path and c.severity == :ok
+             end)
+
+      assert Enum.any?(report.checks, fn c ->
+               c.id == :sqlite_engine and c.severity == :ok
+             end)
+    end
+
+    test "reports error when sqlite_path contains traversal or unwritable regular file parent" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        storage:
+          adapter: "sqlite"
+          path: "../outside.db"
+        channels:
+          cli:
+            enabled: true
+        """
+      )
+
+      report_trav = Doctor.run(root: tmp, env_fetcher: fn _ -> nil end)
+      assert report_trav.status == :error
+
+      assert Enum.any?(report_trav.checks, fn c ->
+               c.id == :sqlite_path and c.severity == :error
+             end)
+
+      blocker = Path.join(tmp, "not_a_dir")
+      File.write!(blocker, "file")
+
+      write_config!(
+        tmp,
+        """
+        storage:
+          adapter: "sqlite"
+          path: "not_a_dir/pincer.db"
+        channels:
+          cli:
+            enabled: true
+        """
+      )
+
+      report_blocked = Doctor.run(root: tmp, env_fetcher: fn _ -> nil end)
+      assert report_blocked.status == :error
+
+      assert Enum.any?(report_blocked.checks, fn c ->
+               c.id == :sqlite_path and c.severity == :error
+             end)
+    end
+
+    test "reports postgres storage backend and validates invalid database port cleanly" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        database:
+          adapter: "Ecto.Adapters.PostgreSQL"
+          hostname: "localhost"
+          port: 70000
+          database: "pincer"
+        """
+      )
+
+      report = Doctor.run(root: tmp, env_fetcher: fn _ -> nil end)
+      assert report.status == :error
+
+      assert Enum.any?(report.checks, fn c ->
+               c.id == :storage_backend and c.severity == :ok and c.meta[:backend] == :postgres
+             end)
+
+      assert Enum.any?(report.checks, fn c ->
+               c.id == :postgres_config and c.severity == :error
+             end)
+    end
+  end
+
   defp tmp_dir! do
     tmp = Path.join(System.tmp_dir!(), "pincer_doctor_#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)

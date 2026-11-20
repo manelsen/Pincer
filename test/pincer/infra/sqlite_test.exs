@@ -170,4 +170,10 @@ defmodule Pincer.Infra.SQLiteTest do
       assert SQLite.parse_datetime(nil) == nil
     end
   end
+
+  describe "health_check/0" do
+    test "returns :ok confirming SQLite3 and FTS5 availability" do
+      assert :ok = SQLite.health_check()
+    end
+  end
 end

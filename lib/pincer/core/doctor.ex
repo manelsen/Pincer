@@ -27,6 +27,7 @@ defmodule Pincer.Core.Doctor do
         }
 
   alias Pincer.Infra.Config
+  alias Pincer.Infra.SQLite
   alias Pincer.Utils.MapHelpers
 
   @default_config_file "config.yaml"
@@ -61,6 +62,7 @@ defmodule Pincer.Core.Doctor do
 
     checks =
       checks ++
+        storage_checks(config, root, env_fetcher) ++
         channel_token_checks(config, env_fetcher) ++
         dm_policy_checks(config) ++
         llm_provider_checks(config, env_fetcher) ++
@@ -150,6 +152,126 @@ defmodule Pincer.Core.Doctor do
     end
   end
 
+  defp storage_checks(config, root, env_fetcher) do
+    backend = SQLite.detect_storage_backend(config, env_fetcher.("PINCER_STORAGE"))
+
+    backend_check =
+      ok_check(
+        :storage_backend,
+        "Storage backend configured: #{backend}",
+        %{backend: backend}
+      )
+
+    detail_checks =
+      case backend do
+        :sqlite -> sqlite_storage_checks(config, root, env_fetcher)
+        :postgres -> postgres_storage_checks(config)
+      end
+
+    [backend_check | detail_checks]
+  end
+
+  defp sqlite_storage_checks(config, root, env_fetcher) do
+    path = resolve_sqlite_path_for_doctor(config, env_fetcher)
+
+    path_check =
+      case SQLite.check_writable_path(path, root: root) do
+        :ok ->
+          ok_check(:sqlite_path, "SQLite database path is writable (#{path})", %{path: path})
+
+        {:error, reason} ->
+          error_check(
+            :sqlite_path,
+            "Invalid or unwritable SQLite path '#{path}': #{inspect(reason)}",
+            %{path: path, reason: reason}
+          )
+      end
+
+    engine_check =
+      case SQLite.health_check() do
+        :ok ->
+          ok_check(:sqlite_engine, "Embedded SQLite3 + FTS5 engine operational", %{})
+
+        {:error, reason} ->
+          error_check(
+            :sqlite_engine,
+            "Embedded SQLite3 engine check failed: #{inspect(reason)}",
+            %{reason: inspect(reason)}
+          )
+      end
+
+    [path_check, engine_check]
+  end
+
+  defp postgres_storage_checks(config) do
+    case MapHelpers.read_field(config, :database) do
+      db when is_map(db) ->
+        port = MapHelpers.read_field(db, :port)
+        database = MapHelpers.read_field(db, :database)
+
+        cond do
+          port != nil and not valid_port?(port) ->
+            [
+              error_check(
+                :postgres_config,
+                "Invalid PostgreSQL port in database config: #{inspect(port)}",
+                %{port: port}
+              )
+            ]
+
+          database != nil and not MapHelpers.present?(database) ->
+            [
+              error_check(
+                :postgres_config,
+                "database.database must be a non-empty string",
+                %{database: database}
+              )
+            ]
+
+          true ->
+            []
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  defp valid_port?(port) when is_integer(port), do: port >= 1 and port <= 65_535
+
+  defp valid_port?(port) when is_binary(port) do
+    case Integer.parse(String.trim(port)) do
+      {num, ""} -> valid_port?(num)
+      _ -> false
+    end
+  end
+
+  defp valid_port?(_), do: false
+
+  defp resolve_sqlite_path_for_doctor(config, env_fetcher) do
+    storage_cfg = MapHelpers.read_field(config, :storage)
+    db_cfg = MapHelpers.read_field(config, :database)
+    db_is_sqlite? = SQLite.parse_storage_backend(read_sub(db_cfg, :adapter)) == {:ok, :sqlite}
+
+    candidates = [
+      env_fetcher.("PINCER_SQLITE_PATH"),
+      read_sub(storage_cfg, :path),
+      read_sub(db_cfg, :path),
+      if(db_is_sqlite?, do: read_sub(db_cfg, :database), else: nil),
+      "data/pincer.db"
+    ]
+
+    candidates
+    |> Enum.find(fn
+      val when is_binary(val) -> String.trim(val) != ""
+      _ -> false
+    end)
+    |> String.trim()
+  end
+
+  defp read_sub(map, key) when is_map(map), do: MapHelpers.read_field(map, key)
+  defp read_sub(_, _), do: nil
+
   defp runtime_cohesion_checks do
     [
       check_runtime(
@@ -180,7 +302,8 @@ defmodule Pincer.Core.Doctor do
   end
 
   defp check_runtime(id, module, exports, ok_message) do
-    if Enum.all?(exports, fn {name, arity} -> function_exported?(module, name, arity) end) do
+    if Code.ensure_loaded?(module) and
+         Enum.all?(exports, fn {name, arity} -> function_exported?(module, name, arity) end) do
       ok_check(id, ok_message, %{module: inspect(module), exports: exports})
     else
       warn_check(

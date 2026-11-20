@@ -78,8 +78,8 @@ defmodule Pincer.Core.Onboard do
   @doc """
   Returns onboarding defaults used for `config.yaml` generation.
   """
-  @spec defaults() :: map()
-  def defaults, do: Defaults.defaults()
+  @spec defaults(keyword()) :: map()
+  def defaults(opts \\ []), do: Defaults.defaults(opts)
 
   @doc """
   Returns the minimum paths required for a workspace to be considered onboarded.
@@ -117,10 +117,12 @@ defmodule Pincer.Core.Onboard do
       |> Enum.reject(&(&1 in Defaults.available_capabilities()))
 
     if unknown == [] do
+      config_file = Keyword.get(opts, :config_file, "config.yaml")
+
       operations =
         capabilities
         |> Enum.uniq()
-        |> Enum.flat_map(&Defaults.capability_operations(&1, config))
+        |> Enum.flat_map(&Defaults.capability_operations(&1, config, config_file: config_file))
 
       {:ok, operations}
     else
@@ -286,13 +288,20 @@ defmodule Pincer.Core.Onboard do
   end
 
   defp apply_operation({:write_config_yaml, rel_path, config}, root, force?) do
-    abs_path = Path.join(root, rel_path)
+    abs_path =
+      if Path.type(rel_path) == :absolute do
+        rel_path
+      else
+        Path.join(root, rel_path)
+      end
 
     if File.exists?(abs_path) and not force? do
       {:ok, :skipped, rel_path}
     else
-      case File.write(abs_path, yaml_dump(config)) do
-        :ok -> {:ok, :written, rel_path}
+      with :ok <- abs_path |> Path.dirname() |> File.mkdir_p(),
+           :ok <- File.write(abs_path, yaml_dump(config)) do
+        {:ok, :written, rel_path}
+      else
         {:error, reason} -> {:error, {:write_config_yaml, rel_path, reason}}
       end
     end
@@ -472,18 +481,29 @@ defmodule Pincer.Core.Onboard do
   end
 
   defp build_remote_onboard_command(config, capabilities) do
-    db_name = get_in(config, ["database", "database"]) |> normalize_string() || "pincer"
     provider = get_in(config, ["llm", "provider"]) |> normalize_string() || "z_ai"
     model = get_in(config, ["llm", provider, "default_model"]) |> normalize_string() || "glm-4.7"
 
-    args = [
-      "mix pincer.onboard",
-      "--non-interactive",
-      "--yes",
-      "--db-name #{shell_quote(db_name)}",
-      "--provider #{shell_quote(provider)}",
-      "--model #{shell_quote(model)}"
-    ]
+    storage_args =
+      if Defaults.sqlite_storage_config?(config) do
+        sqlite_path = Defaults.sqlite_path(config)
+        ["--storage 'sqlite'", "--sqlite-path #{shell_quote(sqlite_path)}"]
+      else
+        db_name = get_in(config, ["database", "database"]) |> normalize_string() || "pincer"
+        ["--db-name #{shell_quote(db_name)}"]
+      end
+
+    args =
+      [
+        "mix pincer.onboard",
+        "--non-interactive",
+        "--yes"
+      ] ++
+        storage_args ++
+        [
+          "--provider #{shell_quote(provider)}",
+          "--model #{shell_quote(model)}"
+        ]
 
     args =
       if capabilities == [] do

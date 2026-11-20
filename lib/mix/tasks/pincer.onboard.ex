@@ -6,6 +6,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
 
       mix pincer.onboard
       mix pincer.onboard --non-interactive --yes
+      mix pincer.onboard --non-interactive --yes --storage sqlite --sqlite-path data/pincer.db
       mix pincer.onboard --non-interactive --db-name pincer_custom
       mix pincer.onboard --non-interactive --yes --capabilities workspace_dirs,config_yaml
   """
@@ -13,6 +14,8 @@ defmodule Mix.Tasks.Pincer.Onboard do
   use Mix.Task
   use Boundary, classify_to: Pincer.Mix
   alias Pincer.Core.Onboard
+  alias Pincer.Core.Onboard.Defaults
+  alias Pincer.Infra.SQLite
 
   @shortdoc "Initialize config and workspace files"
 
@@ -35,6 +38,9 @@ defmodule Mix.Tasks.Pincer.Onboard do
     yes: :boolean,
     if_missing: :boolean,
     accept_risk: :boolean,
+    config: :string,
+    storage: :string,
+    sqlite_path: :string,
     db_name: :string,
     provider: :string,
     model: :string,
@@ -55,20 +61,24 @@ defmodule Mix.Tasks.Pincer.Onboard do
       Mix.raise("Invalid flags for pincer.onboard: #{invalid_flags}")
     end
 
-    if opts[:if_missing] && Onboard.onboarded?(File.cwd!()) do
+    config_file = opts[:config] || "config.yaml"
+
+    if opts[:if_missing] && Onboard.onboarded?(File.cwd!()) && File.exists?(config_file) do
       Mix.shell().info("Workspace already onboarded. Skipping.")
       :ok
     else
-      do_run(opts)
+      do_run(opts, config_file)
     end
   end
 
-  defp do_run(opts) do
+  defp do_run(opts, config_file) do
     require_risk_acknowledgement(opts)
 
     mode = parse_mode!(opts[:mode])
-    base_config = resolve_base_config(Onboard.defaults())
-    onboarding_config = resolve_config(base_config, opts)
+    explicit_storage = parse_storage_opt!(opts[:storage])
+    base_config = resolve_base_config(config_file, explicit_storage)
+    target_storage = resolve_target_storage(explicit_storage, base_config)
+    onboarding_config = resolve_config(base_config, opts, target_storage)
     maybe_capture_api_key(onboarding_config, opts)
 
     capabilities = parse_capabilities(opts[:capabilities])
@@ -77,8 +87,8 @@ defmodule Mix.Tasks.Pincer.Onboard do
 
     case mode do
       :local ->
-        force? = resolve_force?(opts)
-        apply_local_plan!(onboarding_config, capabilities, force?)
+        force? = resolve_force?(opts, config_file)
+        apply_local_plan!(onboarding_config, capabilities, force?, config_file)
 
       :remote ->
         run_remote_assisted!(onboarding_config, opts, capabilities || [])
@@ -112,41 +122,91 @@ defmodule Mix.Tasks.Pincer.Onboard do
     end
   end
 
-  defp resolve_config(config, opts) do
+  defp resolve_config(config, opts, target_storage) do
     if opts[:non_interactive] do
-      apply_overrides(config, opts)
+      apply_overrides(config, opts, target_storage)
     else
-      ask_interactive(config, opts)
+      ask_interactive(config, opts, target_storage)
     end
   end
 
-  defp resolve_base_config(defaults) do
-    if File.exists?("config.yaml") do
-      case YamlElixir.read_from_file("config.yaml") do
+  defp resolve_base_config(config_file, explicit_storage) do
+    if File.exists?(config_file) do
+      case YamlElixir.read_from_file(config_file) do
         {:ok, existing} when is_map(existing) ->
-          Onboard.merge_config(defaults, existing)
+          base_storage =
+            explicit_storage ||
+              SQLite.detect_storage_backend(existing, System.get_env("PINCER_STORAGE"))
+
+          Onboard.defaults(storage: base_storage)
+          |> Onboard.merge_config(existing)
 
         {:ok, _other} ->
-          Mix.raise("Invalid existing config.yaml format. Hint: root element must be a YAML map.")
+          Mix.raise(
+            "Invalid existing #{config_file} format. Hint: root element must be a YAML map."
+          )
 
         {:error, reason} ->
           Mix.raise(
-            "Could not read existing config.yaml: #{inspect(reason)}. Hint: fix YAML syntax or remove the file."
+            "Could not read existing #{config_file}: #{inspect(reason)}. Hint: fix YAML syntax or remove the file."
           )
       end
     else
-      defaults
+      Onboard.defaults(storage: explicit_storage || :postgres)
     end
   end
 
-  defp ask_interactive(config, opts) do
+  defp parse_storage_opt!(nil), do: nil
+
+  defp parse_storage_opt!(value) do
+    case SQLite.parse_storage_backend(value) do
+      {:ok, backend} ->
+        backend
+
+      _ ->
+        Mix.raise("Invalid storage backend: #{inspect(value)}. Valid values: sqlite, postgres")
+    end
+  end
+
+  defp resolve_target_storage(explicit_storage, base_config) do
+    cond do
+      explicit_storage != nil ->
+        explicit_storage
+
+      (env = System.get_env("PINCER_STORAGE")) not in [nil, ""] ->
+        case SQLite.parse_storage_backend(env) do
+          {:ok, backend} -> backend
+          _ -> SQLite.detect_storage_backend(base_config, nil)
+        end
+
+      true ->
+        SQLite.detect_storage_backend(base_config, nil)
+    end
+  end
+
+  defp ask_interactive(config, opts, target_storage) do
     Mix.shell().info("Pincer onboarding wizard")
     Mix.shell().info("Press ENTER to keep defaults.")
 
-    db_default = opts[:db_name] || get_in(config, ["database", "database"])
-    provider_default = opts[:provider] || get_in(config, ["llm", "provider"])
+    storage =
+      if opts[:storage] do
+        target_storage
+      else
+        prompt_storage_choice(target_storage)
+      end
 
-    db_name = prompt_with_default("Database name", db_default)
+    {db_name, sqlite_path} =
+      case storage do
+        :sqlite ->
+          default_path = opts[:sqlite_path] || Defaults.sqlite_path(config)
+          {nil, prompt_with_default("SQLite database path", default_path)}
+
+        :postgres ->
+          db_default = opts[:db_name] || get_in(config, ["database", "database"]) || "pincer"
+          {prompt_with_default("Database name", db_default), nil}
+      end
+
+    provider_default = opts[:provider] || get_in(config, ["llm", "provider"])
 
     provider =
       if opts[:provider] do
@@ -162,7 +222,29 @@ defmodule Mix.Tasks.Pincer.Onboard do
         prompt_model_for_provider(provider)
       end
 
-    apply_overrides(config, db_name: db_name, provider: provider, model: model)
+    apply_overrides(
+      config,
+      [db_name: db_name, sqlite_path: sqlite_path, provider: provider, model: model],
+      storage
+    )
+  end
+
+  defp prompt_storage_choice(default_backend) do
+    default_num = if default_backend == :sqlite, do: "1", else: "2"
+    Mix.shell().info("\nSelect storage backend:")
+    Mix.shell().info("  1) sqlite   (Zero-Infra embedded SQLite3 + FTS5 — no Postgres required)")
+    Mix.shell().info("  2) postgres (PostgreSQL + pgvector for large-scale vector indexing)")
+
+    answer =
+      Mix.shell().prompt("Choose [1-2] (default #{default_num}): ")
+      |> to_string()
+      |> String.trim()
+
+    case if(answer == "", do: default_num, else: answer) do
+      "1" -> :sqlite
+      "2" -> :postgres
+      _ -> default_backend
+    end
   end
 
   defp prompt_provider_choice(_default) do
@@ -221,8 +303,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
     if answer == "", do: default, else: answer
   end
 
-  defp apply_overrides(config, opts) do
-    db_name = opts[:db_name] || get_in(config, ["database", "database"])
+  defp apply_overrides(config, opts, target_storage) do
     provider = opts[:provider] || get_in(config, ["llm", "provider"])
 
     model =
@@ -230,8 +311,28 @@ defmodule Mix.Tasks.Pincer.Onboard do
         get_in(config, ["llm", provider, "default_model"]) ||
         get_in(config, ["llm", get_in(config, ["llm", "provider"]), "default_model"])
 
+    config =
+      case target_storage do
+        :sqlite ->
+          sqlite_path = opts[:sqlite_path] || Defaults.sqlite_path(config)
+
+          config
+          |> Map.delete("database")
+          |> Map.put("storage", %{"adapter" => "sqlite", "path" => sqlite_path})
+          |> Map.put_new("sandbox", %{"adapter" => "local"})
+
+        :postgres ->
+          default_db = Defaults.defaults(storage: :postgres)["database"]
+          existing_db = Map.get(config, "database") || %{}
+          db_name = opts[:db_name] || existing_db["database"] || "pincer"
+          merged_db = default_db |> Map.merge(existing_db) |> Map.put("database", db_name)
+
+          config
+          |> then(fn cfg -> if opts[:storage], do: Map.delete(cfg, "storage"), else: cfg end)
+          |> Map.put("database", merged_db)
+      end
+
     config
-    |> put_in(["database", "database"], db_name)
     |> put_in(["llm", "provider"], provider)
     |> ensure_provider_model(provider, model)
   end
@@ -249,7 +350,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
     put_in(config, ["llm"], Map.put(llm, provider, provider_config))
   end
 
-  defp resolve_force?(opts) do
+  defp resolve_force?(opts, config_file) do
     cond do
       opts[:yes] ->
         true
@@ -257,10 +358,10 @@ defmodule Mix.Tasks.Pincer.Onboard do
       opts[:non_interactive] ->
         false
 
-      File.exists?("config.yaml") ->
+      File.exists?(config_file) ->
         answer =
           Mix.shell()
-          |> then(& &1.prompt("config.yaml already exists. Overwrite? [y/N]: "))
+          |> then(& &1.prompt("#{config_file} already exists. Overwrite? [y/N]: "))
           |> to_string()
           |> String.trim()
           |> String.downcase()
@@ -272,7 +373,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
     end
   end
 
-  defp print_summary(report) do
+  defp print_summary(report, config, config_file) do
     Mix.shell().info("")
     Mix.shell().info("Pincer onboarding complete.")
     Mix.shell().info("Created: #{format_paths(report.created)}")
@@ -280,14 +381,23 @@ defmodule Mix.Tasks.Pincer.Onboard do
     Mix.shell().info("Skipped: #{format_paths(report.skipped)}")
     Mix.shell().info("")
     Mix.shell().info("Next steps:")
-    Mix.shell().info("1) Review config.yaml and set provider credentials in .env")
-    Mix.shell().info("2) Start with: mix pincer.chat")
+    Mix.shell().info("1) Review #{config_file} and set provider credentials in .env")
+
+    if Defaults.sqlite_storage_config?(config) do
+      Mix.shell().info(
+        "2) Start in Zero-Infra SQLite mode with: PINCER_STORAGE=sqlite mix pincer.chat"
+      )
+    else
+      Mix.shell().info("2) Start with: mix pincer.chat")
+    end
 
     Mix.shell().info(
       "3) WhatsApp bridge (optional): add {:pincer_whatsapp, \"~> 0.1\"} to mix.exs — the Go sidecar compiles automatically during `mix deps.compile` (requires Go 1.21+)"
     )
 
-    Mix.shell().info("4) To enable WhatsApp, set channels.whatsapp.enabled=true in config.yaml")
+    Mix.shell().info(
+      "4) To enable WhatsApp, set channels.whatsapp.enabled=true in #{config_file}"
+    )
 
     Mix.shell().info(
       "5) Pairing flow: WhatsApp Mobile -> Aparelhos conectados -> Conectar um aparelho (scan terminal QR)"
@@ -319,7 +429,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
   defp validate_option_matrix!(opts, capabilities) do
     if is_list(capabilities) and "config_yaml" not in capabilities do
       invalid_flag =
-        [:db_name, :provider, :model]
+        [:db_name, :provider, :model, :storage, :sqlite_path]
         |> Enum.find(&present_option?(opts, &1))
 
       if invalid_flag do
@@ -355,9 +465,9 @@ defmodule Mix.Tasks.Pincer.Onboard do
     end
   end
 
-  defp apply_local_plan!(onboarding_config, capabilities, force?) do
+  defp apply_local_plan!(onboarding_config, capabilities, force?, config_file) do
     plan =
-      case Onboard.plan(onboarding_config, capabilities: capabilities) do
+      case Onboard.plan(onboarding_config, capabilities: capabilities, config_file: config_file) do
         {:ok, operations} ->
           operations
 
@@ -370,9 +480,9 @@ defmodule Mix.Tasks.Pincer.Onboard do
 
     case Onboard.apply_plan(plan, root: File.cwd!(), force: force?) do
       {:ok, report} ->
-        print_summary(report)
+        print_summary(report, onboarding_config, config_file)
         check_db_connectivity(onboarding_config)
-        run_doctor_report(onboarding_config)
+        run_doctor_report(onboarding_config, config_file)
         :ok
 
       {:error, reason} ->
@@ -381,9 +491,14 @@ defmodule Mix.Tasks.Pincer.Onboard do
   end
 
   defp check_db_connectivity(config) do
+    ok_label =
+      if Defaults.sqlite_storage_config?(config),
+        do: "  ✓ SQLite embutido operacional",
+        else: "  ✓ PostgreSQL acessível"
+
     case Onboard.check_db_connectivity(config) do
       :ok ->
-        Mix.shell().info("  ✓ PostgreSQL acessível")
+        Mix.shell().info(ok_label)
 
       {:warn, message} ->
         Mix.shell().info("")
@@ -391,9 +506,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
     end
   end
 
-  defp run_doctor_report(_config) do
-    config_path = "config.yaml"
-
+  defp run_doctor_report(_config, config_path) do
     if File.exists?(config_path) do
       Mix.shell().info("")
       Mix.shell().info("─── Relatório de saúde pós-configuração ─────────────────────")

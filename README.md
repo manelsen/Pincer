@@ -24,7 +24,7 @@ docker compose exec pincer-server mix pincer.chat
 
 The Docker build starts PostgreSQL with pgvector, runs migrations, and boots the supervision tree.
 
-### Local
+### Local (PostgreSQL + pgvector)
 
 ```bash
 git clone https://github.com/micelio/pincer.git && cd pincer
@@ -33,13 +33,23 @@ mix pincer.setup                # deps → DB → migrations → wizard → heal
 mix pincer.chat
 ```
 
-`mix pincer.setup` guides you through the full first-run sequence interactively. Use `--yes` for a non-interactive run with defaults.
+### Zero-Infra / SQLite (Local sem Docker)
+
+Sem PostgreSQL e sem Docker — usa SQLite3 + FTS5 + WAL embutidos (`exqlite`):
+
+```bash
+git clone https://github.com/micelio/pincer.git && cd pincer
+mix pincer.setup --storage sqlite --yes   # deps → onboard SQLite → inicializa data/pincer.db
+PINCER_STORAGE=sqlite mix pincer.chat
+```
+
+`mix pincer.setup` guides you through the full first-run sequence interactively. Use `--yes` for a non-interactive run with defaults, `--storage sqlite|postgres` to pick the backend explicitly, and `--sqlite-path <path>` to customize the SQLite file location.
 
 ### Reconfigurar / diagnosticar
 
 ```bash
 mix pincer.onboard              # re-run configuration wizard
-mix pincer.doctor               # health check: config, tokens, LLM, migrations
+mix pincer.doctor               # health check: config, storage, tokens, LLM, migrations
 mix pincer.doctor --strict      # same, but fail on warnings
 ```
 
@@ -49,8 +59,10 @@ mix pincer.doctor --strict      # same, but fail on warnings
 |---|---|---|
 | Elixir | 1.14+ | Compilation target |
 | Erlang/OTP | 27+ | `boundary` compiler plugin |
-| PostgreSQL | 18+ with pgvector | Graph memory + message storage |
-| Node.js | 18+ | MCP sidecar servers (optional) |
+| SQLite3 (embedded via `exqlite`) | Built-in (FTS5) | Zero-infra message + graph/FTS5 storage (no external server) |
+| PostgreSQL | 18+ with pgvector *(optional)* | Scalable graph memory + native pgvector semantic search |
+| Node.js | 18+ *(optional)* | MCP sidecar servers |
+| Docker / Podman | *(optional)* | Hardened container sandbox backend (`sandbox.adapter: "docker"`) |
 
 ## Configuration
 
@@ -59,7 +71,8 @@ Runtime config lives in `config.yaml`, not `config/*.exs`. The `Pincer.Infra.Con
 - **LLM providers** — set `llm.provider` and add API keys to `.env`
 - **Channels** — enable/disable Telegram, Discord, CLI, webhook, WhatsApp, LINE, DingTalk, Feishu/Lark
 - **MCP servers** — add external tool servers under `mcp.servers`
-- **Database** — override via `config.yaml` or `PINCER_DB_*` env vars
+- **Storage / Database** — use zero-infra SQLite (`storage.adapter: "sqlite"`, `storage.path: "data/pincer.db"`, or `PINCER_STORAGE=sqlite` / `PINCER_SQLITE_PATH`) or PostgreSQL (`database.*` / `PINCER_DB_*` env vars)
+- **Sandbox execution** — set `sandbox.adapter` (`"local"`, `"docker"`, `"ssh"`) or override with `PINCER_SANDBOX_ADAPTER`
 - **Workspace isolation** — `tools.restrict_to_workspace: true` (default) confines file/shell tools to the agent's workspace
 
 
@@ -114,16 +127,28 @@ Pincer uses **Hexagonal Architecture** (Ports & Adapters) with compile-time boun
 ```
 Channels       Telegram, Discord, Slack, WhatsApp, LINE, Feishu/Lark, DingTalk, CLI, Webhook
     ↓
-Adapters       Concrete implementations: MCP, Cron, Tools
+Adapters       Concrete implementations: MCP, Cron, Tools, Sandbox (Local, Docker, SSH)
     ↓
-Core           Domain logic: Executor, Session, Orchestration, Memory
+Core           Domain logic: Executor, Session, Orchestration, Memory, Introspection, Skills
     ↓
-Ports          Behaviour contracts (LLM, Storage, Channel, Tool)
+Ports          Behaviour contracts (LLM, Storage, Channel, Tool, Sandbox)
     ↓
-Infra          PubSub, Config, Ecto Repo
+Infra          PubSub, Config, Ecto Repo / Embedded SQLite3 (FTS5)
 ```
 
 The `boundary` compiler plugin enforces this at compile time. `mix compile --warnings-as-errors` will fail if an inner layer reaches outward.
+
+### Sandbox Execution (`Pincer.Ports.Sandbox`)
+
+Validated shell commands (`Pincer.Adapters.Tools.SafeShell` + `WorkspaceGuard`) run through `Pincer.Ports.Sandbox` with three pluggable adapters:
+
+- **`Pincer.Adapters.Sandbox.Local`** (default): workspace-confined execution (MCP `"run_command"` delegation or bounded local runner)
+- **`Pincer.Adapters.Sandbox.Docker`**: ephemeral containers with `--cap-drop ALL`, `--security-opt no-new-privileges`, `--network none` by default, bounded PIDs/RAM/CPU, `--tmpfs` mounts for `/tmp` and `/var/tmp`, and confined `/workspace` bind mounts (auto-detects `docker` or `podman`)
+- **`Pincer.Adapters.Sandbox.SSH`**: hardened remote execution (`BatchMode=yes`, strict host-key checking, flag-injection validation, optional ControlMaster multiplexing)
+
+### Closed-Loop Introspection & Skill Promotion
+
+Recurring high-confidence lessons tracked by `Pincer.Core.Introspection.Kernel` and `LessonStore` are synthesized into reusable `SKILL.md` artifacts by `Pincer.Core.Skills.Generator`, scanned by `Pincer.Core.Skills.Guard` under a **fail-closed** security policy (anti-exfiltration, destructive payload, persistence, prompt-injection, and invisible Unicode checks), indexed via `Pincer.Core.Skills.PromptIndex`, and hot-injected into active `Session.Server` prompts on `{:kernel_skills_updated, skill}`.
 
 ### Supervision Tree
 
@@ -174,7 +199,7 @@ Three layers, each serving a different recall horizon:
 |---|---|---|
 | **Session** | `HISTORY.md` | Rolling log of the current session |
 | **Curated** | `MEMORY.md` | Consolidated insights extracted by the Archivist |
-| **Semantic** | PostgreSQL nodes/edges + pgvector | Structured knowledge graph: bugs, decisions, patterns, people, entities |
+| **Semantic** | PostgreSQL + pgvector **or** SQLite3 + FTS5 | Structured knowledge graph: bugs, decisions, patterns, people, entities |
 
 Before each LLM call, `MemoryRecall` searches all three layers and injects relevant context into the prompt. Memory content is sanitized to prevent prompt injection.
 
@@ -277,7 +302,8 @@ mcp:
 |---|---|
 | `mix pincer.chat` | Interactive CLI agent |
 | `mix pincer.server` | Start persistent node (all enabled channels) |
-| `mix pincer.onboard` | Bootstrap config and scaffold agent workspaces |
+| `mix pincer.setup` | First-run bootstrap (`--storage sqlite\|postgres`, deps, DB/SQLite, onboard) |
+| `mix pincer.onboard` | Bootstrap config (`--storage sqlite\|postgres`, `--sqlite-path`) and agent workspaces |
 | `mix pincer.agent new <id>` | Create a new agent workspace |
 | `mix pincer.agent pair <id>` | Generate a Telegram pairing code |
 | `mix pincer.doctor [--strict]` | Operational diagnostics |
@@ -300,7 +326,7 @@ Runs `format --check-formatted`, `compile --warnings-as-errors`, and `test --war
 ### Running Tests
 
 ```bash
-docker compose up -d postgres     # database required
+docker compose up -d postgres     # database required for Postgres test suite
 mix test                          # all tests
 mix test.quick                    # stale tests only
 mix test test/pincer/core/executor_test.exs   # single file

@@ -336,4 +336,32 @@ Follow-up hardening consolidating post-merge behavior across PostgreSQL and SQLi
   - `load/1` maps YAML top-level keys only through an explicit `@allowed_top_level_keys` table; unknown keys log a warning and are ignored without calling `String.to_atom/1`.
   - `configure_database/1` maps Ecto/Postgrex `database` options only through `@allowed_ecto_keys`; unknown keys log a warning and are ignored without calling `String.to_atom/1`.
 
+### 19. Zero-Infra SQLite Onboarding & Diagnostics
+
+Extends `setup`, `onboard`, `doctor`, and user documentation so Pincer can be bootstrapped
+and validated with zero external PostgreSQL/Docker dependencies:
+
+- **`Pincer.Infra.SQLite.health_check/0`**:
+  - Opens an in-memory SQLite3 connection (`:memory:`), creates and drops a temporary
+    `fts5` virtual table, and closes the connection cleanly, returning `:ok` or
+    `{:error, reason}`.
+- **Storage Mode Resolution (`mix pincer.setup` & `mix pincer.onboard`)**:
+  - Flags: `--storage <sqlite|postgres>`, `--sqlite-path <path>` (default `"data/pincer.db"`),
+    and `--config <path>` (default `"config.yaml"`).
+  - Precedence when `--storage` is omitted: `PINCER_STORAGE` env var > configured
+    `storage.adapter` / `database.adapter` in `--config` / `config.yaml` > `:postgres` default.
+  - Under `:sqlite`, `mix pincer.setup` skips PostgreSQL TCP wait / `ecto.create` /
+    `ecto.migrate`, forwards `--storage`, `--sqlite-path`, and `--config` to
+    `mix pincer.onboard`, and runs idempotent SQLite schema initialization.
+  - `Pincer.Core.Onboard.Defaults.defaults/1` emits `storage: {adapter: "sqlite", path: ...}`
+    and `sandbox: {adapter: "local"}` for `:sqlite` without requiring a `database` block.
+  - `Pincer.Core.Onboard.Preflight` validates `storage.path` writability (rejecting empty
+    strings, `..` traversal segments, and non-directory/file parents) and uses
+    `SQLite.health_check/0` in `check_db_connectivity/1`.
+- **Diagnostics (`Pincer.Core.Doctor`)**:
+  - Adds `storage_checks` emitting `:storage_backend` (`:ok`), `:sqlite_path` (`:ok` / `:error`),
+    and `:sqlite_engine` (`:ok` / `:error`) in SQLite mode with zero PostgreSQL false positives,
+    plus basic `database` shape validation in Postgres mode without blocking network calls.
+
+
 

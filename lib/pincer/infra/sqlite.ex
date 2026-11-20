@@ -19,6 +19,18 @@ defmodule Pincer.Infra.SQLite do
   alias Exqlite.Sqlite3
 
   @default_db_path "data/pincer.db"
+  @sqlite_aliases MapSet.new([
+                    "sqlite",
+                    "sqlite3",
+                    "ecto.adapters.sqlite3",
+                    "pincer.storage.adapters.sqlite"
+                  ])
+  @postgres_aliases MapSet.new([
+                      "postgres",
+                      "postgresql",
+                      "ecto.adapters.postgresql",
+                      "pincer.storage.adapters.postgres"
+                    ])
 
   @schema_sql """
   CREATE TABLE IF NOT EXISTS messages (
@@ -214,6 +226,155 @@ defmodule Pincer.Infra.SQLite do
   @spec db_path() :: String.t()
   def db_path do
     Application.get_env(:pincer, :sqlite_path) || @default_db_path
+  end
+
+  @doc """
+  Parses a raw storage backend identifier into `:sqlite` or `:postgres`.
+  """
+  @spec parse_storage_backend(term()) ::
+          {:ok, :sqlite | :postgres} | :unset | {:error, {:invalid_storage_backend, term()}}
+  def parse_storage_backend(nil), do: :unset
+
+  def parse_storage_backend(value) when is_atom(value) do
+    value |> Atom.to_string() |> parse_storage_backend()
+  end
+
+  def parse_storage_backend(value) when is_binary(value) do
+    normalized = value |> String.trim() |> String.downcase()
+
+    cond do
+      normalized == "" -> :unset
+      MapSet.member?(@sqlite_aliases, normalized) -> {:ok, :sqlite}
+      MapSet.member?(@postgres_aliases, normalized) -> {:ok, :postgres}
+      true -> {:error, {:invalid_storage_backend, value}}
+    end
+  end
+
+  def parse_storage_backend(other), do: {:error, {:invalid_storage_backend, other}}
+
+  @doc """
+  Resolves the effective storage backend (`:sqlite` or `:postgres`) from env + parsed config map.
+  """
+  @spec detect_storage_backend(map(), term()) :: :sqlite | :postgres
+  def detect_storage_backend(config, env_storage \\ nil)
+
+  def detect_storage_backend(config, env_storage) when is_map(config) do
+    candidates = [
+      env_storage,
+      read_nested_string_or_atom(config, "storage", "adapter"),
+      read_nested_string_or_atom(config, "database", "adapter")
+    ]
+
+    Enum.find_value(candidates, :postgres, fn candidate ->
+      case parse_storage_backend(candidate) do
+        {:ok, backend} -> backend
+        _ -> nil
+      end
+    end)
+  end
+
+  def detect_storage_backend(_config, env_storage) do
+    case parse_storage_backend(env_storage) do
+      {:ok, backend} -> backend
+      _ -> :postgres
+    end
+  end
+
+  @doc """
+  Validates that `path` is safe (no `..` traversal) and its target/ancestor directory is writable.
+  """
+  @spec check_writable_path(String.t(), keyword()) :: :ok | {:error, atom()}
+  def check_writable_path(path, opts \\ [])
+
+  def check_writable_path(path, opts) when is_binary(path) and is_list(opts) do
+    trimmed = String.trim(path)
+    root = Keyword.get(opts, :root)
+
+    cond do
+      trimmed == "" ->
+        {:error, :empty_path}
+
+      trimmed == ":memory:" or String.starts_with?(trimmed, "file::memory:") ->
+        :ok
+
+      String.contains?(trimmed, "\0") or Enum.member?(Path.split(trimmed), "..") ->
+        {:error, :path_traversal}
+
+      true ->
+        expanded =
+          if is_binary(root) and Path.type(trimmed) == :relative do
+            Path.expand(trimmed, root)
+          else
+            Path.expand(trimmed)
+          end
+
+        if File.dir?(expanded) do
+          {:error, :is_directory}
+        else
+          check_parent_writable(Path.dirname(expanded))
+        end
+    end
+  end
+
+  def check_writable_path(_, _opts), do: {:error, :invalid_path}
+
+  @doc """
+  Verifies embedded SQLite3 + FTS5 runtime health on an in-memory connection.
+  """
+  @spec health_check() :: :ok | {:error, term()}
+  def health_check do
+    case Sqlite3.open(":memory:") do
+      {:ok, conn} ->
+        try do
+          with :ok <- Sqlite3.execute(conn, "CREATE VIRTUAL TABLE _health_fts USING fts5(x);"),
+               :ok <- Sqlite3.execute(conn, "DROP TABLE _health_fts;") do
+            :ok
+          end
+        after
+          _ = Sqlite3.close(conn)
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp check_parent_writable(dir) do
+    cond do
+      File.dir?(dir) ->
+        case File.stat(dir) do
+          {:ok, %{access: access}} when access in [:read_write, :write] -> :ok
+          {:ok, _} -> {:error, :eacces}
+          {:error, reason} -> {:error, reason}
+        end
+
+      File.exists?(dir) ->
+        {:error, :enotdir}
+
+      true ->
+        parent = Path.dirname(dir)
+        if parent == dir, do: {:error, :enoent}, else: check_parent_writable(parent)
+    end
+  end
+
+  defp read_nested_string_or_atom(map, section, key) do
+    section_atom = if section == "storage", do: :storage, else: :database
+    key_atom = :adapter
+
+    sub =
+      case Map.get(map, section) do
+        nil -> Map.get(map, section_atom)
+        val -> val
+      end
+
+    if is_map(sub) do
+      case Map.get(sub, key) do
+        nil -> Map.get(sub, key_atom)
+        val -> val
+      end
+    else
+      nil
+    end
   end
 
   @doc "Generates a standard UUID v4 string."

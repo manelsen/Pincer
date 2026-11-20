@@ -310,4 +310,73 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
       assert msg =~ "inacessível"
     end
   end
+
+  describe "zero-infra sqlite flags" do
+    test "supports --storage sqlite, --sqlite-path, and --config in non-interactive mode" do
+      output =
+        capture_io(fn ->
+          Mix.Task.run(@task, [
+            "--non-interactive",
+            "--yes",
+            "--storage",
+            "sqlite",
+            "--sqlite-path",
+            "data/custom_zero.db",
+            "--config",
+            "custom/pincer.yaml"
+          ])
+        end)
+
+      assert File.exists?("custom/pincer.yaml")
+      {:ok, config} = YamlElixir.read_from_file("custom/pincer.yaml")
+      refute Map.has_key?(config, "database")
+      assert get_in(config, ["storage", "adapter"]) == "sqlite"
+      assert get_in(config, ["storage", "path"]) == "data/custom_zero.db"
+      assert get_in(config, ["sandbox", "adapter"]) == "local"
+      assert output =~ "SQLite"
+    end
+
+    test "switching an existing postgres config to --storage sqlite removes postgres database block" do
+      File.write!("config.yaml", """
+      database:
+        adapter: "Ecto.Adapters.PostgreSQL"
+        hostname: "localhost"
+        database: "pincer"
+      custom_keep:
+        flag: true
+      """)
+
+      capture_io(fn ->
+        Mix.Task.run(@task, ["--non-interactive", "--yes", "--storage", "sqlite"])
+      end)
+
+      {:ok, config} = YamlElixir.read_from_file("config.yaml")
+      refute Map.has_key?(config, "database")
+      assert get_in(config, ["storage", "adapter"]) == "sqlite"
+      assert get_in(config, ["custom_keep", "flag"]) == true
+    end
+
+    test "raises Mix.Error on invalid --storage backend" do
+      assert_raise Mix.Error, ~r/Invalid storage backend/i, fn ->
+        capture_io(fn ->
+          Mix.Task.run(@task, ["--non-interactive", "--yes", "--storage", "mysql"])
+        end)
+      end
+    end
+
+    test "raises when --sqlite-path or --storage is used without config_yaml capability" do
+      assert_raise Mix.Error, ~r/requires config_yaml capability/, fn ->
+        capture_io(fn ->
+          Mix.Task.run(@task, [
+            "--non-interactive",
+            "--yes",
+            "--capabilities",
+            "workspace_dirs",
+            "--storage",
+            "sqlite"
+          ])
+        end)
+      end
+    end
+  end
 end
