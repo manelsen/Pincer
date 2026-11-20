@@ -559,6 +559,62 @@ defmodule Pincer.Storage.Adapters.SQLite do
     end
   end
 
+  @impl true
+  @spec purge_invalid_documents([String.t()]) :: {:ok, non_neg_integer()} | {:error, term()}
+  def purge_invalid_documents(prefixes \\ ["tmp/", "workspaces/"]) when is_list(prefixes) do
+    case Pincer.Ports.Storage.like_prefix_patterns(prefixes) do
+      [] ->
+        {:ok, 0}
+
+      patterns ->
+        clauses =
+          patterns
+          |> Enum.with_index(1)
+          |> Enum.map_join(" OR ", fn {_pat, idx} ->
+            "json_extract(data, '$.path') LIKE ?#{idx} ESCAPE '!'"
+          end)
+
+        select_sql = "SELECT id FROM nodes WHERE type = 'document' AND (#{clauses})"
+
+        SQLite.transaction(SQLite.default_server(), fn tx ->
+          with {:ok, %{rows: rows}} <- SQLite.query(tx, select_sql, patterns),
+               ids <- Enum.map(rows, fn [id] -> id end),
+               :ok <- delete_document_ids(tx, ids) do
+            {:ok, length(ids)}
+          end
+        end)
+    end
+  end
+
+  defp delete_document_ids(_tx, []), do: :ok
+
+  defp delete_document_ids(tx, ids) do
+    ids
+    |> Enum.chunk_every(200)
+    |> Enum.reduce_while(:ok, fn chunk, :ok ->
+      placeholders =
+        1..length(chunk)
+        |> Enum.map_join(", ", &"?#{&1}")
+
+      with :ok <-
+             SQLite.execute(
+               tx,
+               "DELETE FROM documents_fts WHERE node_id IN (#{placeholders})",
+               chunk
+             ),
+           :ok <-
+             SQLite.execute(
+               tx,
+               "DELETE FROM nodes WHERE id IN (#{placeholders})",
+               chunk
+             ) do
+        {:cont, :ok}
+      else
+        error -> {:halt, error}
+      end
+    end)
+  end
+
   # --- Checkpoints ---
 
   @impl true

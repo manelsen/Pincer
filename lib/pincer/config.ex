@@ -96,6 +96,78 @@ defmodule Pincer.Infra.Config do
 
   @config_file "config.yaml"
 
+  @allowed_top_level_keys %{
+    "agents" => :agents,
+    "channels" => :channels,
+    "cluster" => :cluster,
+    "cron" => :cron,
+    "database" => :database,
+    "enable_browser" => :enable_browser,
+    "enable_graph_watcher" => :enable_graph_watcher,
+    "enable_heartbeat_watchers" => :enable_heartbeat_watchers,
+    "enable_skill_promotion" => :enable_skill_promotion,
+    "enabled_channels" => :enabled_channels,
+    "gateway" => :gateway,
+    "health" => :health,
+    "health_port" => :health_port,
+    "heartbeat" => :heartbeat,
+    "hooks" => :hooks,
+    "image_provider" => :image_provider,
+    "introspection" => :introspection,
+    "llm" => :llm,
+    "log_mcp" => :log_mcp,
+    "log_utc_offset" => :log_utc_offset,
+    "max_history_messages" => :max_history_messages,
+    "max_recursion_depth" => :max_recursion_depth,
+    "mcp" => :mcp,
+    "memory" => :memory,
+    "memory_window_size" => :memory_window_size,
+    "model_router" => :model_router,
+    "pairing" => :pairing,
+    "rate_limits" => :rate_limits,
+    "sandbox" => :sandbox,
+    "security" => :security,
+    "skills_registry" => :skills_registry,
+    "storage" => :storage,
+    "tools" => :tools,
+    "tts_provider" => :tts_provider,
+    "vision_provider" => :vision_provider,
+    "webhook" => :webhook,
+    "webhook_token" => :webhook_token,
+    "workspaces_dir" => :workspaces_dir
+  }
+
+  @allowed_ecto_keys %{
+    "adapter" => :adapter,
+    "backoff_max" => :backoff_max,
+    "backoff_min" => :backoff_min,
+    "backoff_type" => :backoff_type,
+    "connect_timeout" => :connect_timeout,
+    "database" => :database,
+    "hostname" => :hostname,
+    "idle_interval" => :idle_interval,
+    "log" => :log,
+    "parameters" => :parameters,
+    "password" => :password,
+    "path" => :path,
+    "pool" => :pool,
+    "pool_size" => :pool_size,
+    "port" => :port,
+    "prepare" => :prepare,
+    "queue_interval" => :queue_interval,
+    "queue_target" => :queue_target,
+    "show_sensitive_data_on_connection_error" => :show_sensitive_data_on_connection_error,
+    "socket" => :socket,
+    "socket_dir" => :socket_dir,
+    "ssl" => :ssl,
+    "ssl_opts" => :ssl_opts,
+    "stacktrace" => :stacktrace,
+    "timeout" => :timeout,
+    "types" => :types,
+    "url" => :url,
+    "username" => :username
+  }
+
   @doc """
   Recursively normalizes configuration keys to canonical `snake_case` string keys.
 
@@ -183,8 +255,10 @@ defmodule Pincer.Infra.Config do
 
     case load_file(config_file) do
       {:ok, config} ->
-        Enum.each(config, fn {key, value} ->
-          Application.put_env(:pincer, String.to_atom(key), value)
+        config
+        |> allowlisted_entries(@allowed_top_level_keys, "config.yaml top-level")
+        |> Enum.each(fn {atom_key, value} ->
+          Application.put_env(:pincer, atom_key, value)
         end)
 
         configure_tokens()
@@ -319,7 +393,7 @@ defmodule Pincer.Infra.Config do
 
       ecto_config =
         db_config
-        |> Enum.map(fn {k, v} -> {String.to_atom(k), v} end)
+        |> allowlisted_entries(@allowed_ecto_keys, "database config")
         |> Keyword.merge(current_repo_config)
 
       ecto_config =
@@ -598,4 +672,19 @@ defmodule Pincer.Infra.Config do
   end
 
   defp key_priority(_key, _normalized_key), do: 0
+
+  defp allowlisted_entries(map, allowlist, context) do
+    map
+    |> Enum.reduce([], fn {key, value}, acc ->
+      case Map.fetch(allowlist, key) do
+        {:ok, atom_key} ->
+          [{atom_key, value} | acc]
+
+        :error ->
+          Logger.warning("Ignoring unknown #{context} key: #{inspect(key)}")
+          acc
+      end
+    end)
+    |> Enum.reverse()
+  end
 end

@@ -23,7 +23,8 @@ defmodule Pincer.Contracts.StorageAdapterContractTest do
     {:search_messages, 2},
     {:search_documents, 2},
     {:memory_report, 1},
-    {:forget_memory, 1}
+    {:forget_memory, 1},
+    {:purge_invalid_documents, 1}
   ]
 
   test "storage adapters declare Pincer.Ports.Storage behaviour" do

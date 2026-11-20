@@ -163,6 +163,9 @@ defmodule Pincer.Core.ExecutorMemoryRecallTest do
 
     @impl true
     def list_pairing_states_by_channel(_channel), do: {:ok, []}
+
+    @impl true
+    def purge_invalid_documents(_prefixes), do: {:ok, 0}
   end
 
   setup do

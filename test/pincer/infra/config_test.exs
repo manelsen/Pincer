@@ -234,4 +234,42 @@ defmodule Pincer.Infra.ConfigTest do
       assert Application.get_env(:pincer, :sqlite_path) == "/tmp/pincer_override.db"
     end
   end
+
+  describe "atom allowlist hardening" do
+    test "ignores unknown top-level and database YAML keys without creating BEAM atoms" do
+      suffix = System.unique_integer([:positive])
+      unknown_top = "unknown_top_atom_#{suffix}"
+      unknown_db = "unknown_db_atom_#{suffix}"
+
+      yaml =
+        write_yaml!("""
+        #{unknown_top}:
+          nested: true
+        database:
+          adapter: "Ecto.Adapters.PostgreSQL"
+          hostname: "localhost"
+          #{unknown_db}: "evil_value"
+        tools:
+          restrict_to_workspace: true
+        """)
+
+      log =
+        ExUnit.CaptureLog.capture_log(fn ->
+          assert :ok = Config.load(config_file: yaml, load_dotenv: false)
+        end)
+
+      assert log =~ unknown_top
+      assert log =~ unknown_db
+      assert Config.get(:tools) == %{"restrict_to_workspace" => true}
+      assert Keyword.get(Config.get(:repo), :hostname) == "localhost"
+
+      assert_raise ArgumentError, fn ->
+        String.to_existing_atom(unknown_top)
+      end
+
+      assert_raise ArgumentError, fn ->
+        String.to_existing_atom(unknown_db)
+      end
+    end
+  end
 end

@@ -258,4 +258,75 @@ defmodule Pincer.Storage.Adapters.SQLiteTest do
       assert SQLiteStorage.get_pairing_state("telegram", "user-1") == nil
     end
   end
+
+  describe "purge_invalid_documents/1" do
+    test "deletes matching document nodes and documents_fts rows atomically while keeping valid entries",
+         %{db: db} do
+      assert :ok =
+               SQLiteStorage.index_document(
+                 "tmp/scratch_alpha.md",
+                 "Temporary secret token alpha",
+                 [0.1, 0.2]
+               )
+
+      assert :ok =
+               SQLiteStorage.index_document(
+                 "workspaces/agent_1/notes.md",
+                 "Workspace ephemeral secret beta",
+                 [0.1, 0.2]
+               )
+
+      assert :ok =
+               SQLiteStorage.index_document(
+                 "lib/pincer/app.ex",
+                 "Production architecture reference",
+                 [0.1, 0.2]
+               )
+
+      assert :ok =
+               SQLiteStorage.index_document(
+                 "tmp_valid_not_dir/readme.md",
+                 "Literal underscore percent guard",
+                 [0.1, 0.2]
+               )
+
+      assert :ok = SQLiteStorage.ingest_bug_fix("Bug", "Fix", "tmp/source_file.ex")
+
+      assert {:ok, []} ==
+               SQLiteStorage.purge_invalid_documents([]) |> then(fn {:ok, 0} -> {:ok, []} end)
+
+      assert {:ok, 2} = SQLiteStorage.purge_invalid_documents(["tmp/", "workspaces/"])
+
+      assert {:ok, []} = SQLiteStorage.search_documents("alpha", 5)
+      assert {:ok, []} = SQLiteStorage.search_documents("beta", 5)
+      assert {:ok, [valid_hit]} = SQLiteStorage.search_documents("architecture", 5)
+      assert valid_hit.source == "lib/pincer/app.ex"
+      assert {:ok, [underscore_hit]} = SQLiteStorage.search_documents("underscore", 5)
+      assert underscore_hit.source == "tmp_valid_not_dir/readme.md"
+
+      # Ensure documents_fts virtual table has no orphan entries for purged paths
+      assert {:ok, %{rows: [[0]]}} =
+               SQLite.query(
+                 db,
+                 "SELECT COUNT(*) FROM documents_fts WHERE path LIKE 'tmp/%' OR path LIKE 'workspaces/%'"
+               )
+
+      assert {:ok, %{rows: [[2]]}} = SQLite.query(db, "SELECT COUNT(*) FROM documents_fts")
+
+      # Non-document graph nodes pointing to tmp/ must remain intact
+      assert [%{file: "tmp/source_file.ex"}] = SQLiteStorage.query_history()
+    end
+
+    test "escapes LIKE wildcards % and _ in prefixes" do
+      assert :ok =
+               SQLiteStorage.index_document("100%_real/keep.md", "Keep underscore percent", [])
+
+      assert :ok = SQLiteStorage.index_document("100abc/drop.md", "Should not match escaped", [])
+
+      assert {:ok, 1} = SQLiteStorage.purge_invalid_documents(["100%_real/"])
+      assert {:ok, []} = SQLiteStorage.search_documents("underscore", 5)
+      assert {:ok, [kept]} = SQLiteStorage.search_documents("escaped", 5)
+      assert kept.source == "100abc/drop.md"
+    end
+  end
 end

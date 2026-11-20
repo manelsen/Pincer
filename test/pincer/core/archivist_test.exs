@@ -187,6 +187,9 @@ defmodule Pincer.Core.ArchivistTest do
     @impl true
     def list_pairing_states_by_channel(_channel), do: {:ok, []}
 
+    @impl true
+    def purge_invalid_documents(_prefixes), do: {:ok, 0}
+
     defp agent do
       Application.fetch_env!(:pincer, :archivist_test_agent)
     end

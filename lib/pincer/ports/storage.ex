@@ -29,6 +29,8 @@ defmodule Pincer.Ports.Storage do
   @callback memory_report(integer()) :: {:ok, map()} | {:error, term()}
   @callback forget_memory(String.t()) :: :ok | {:error, term()}
   @callback search_similar(String.t(), [float()], integer()) :: {:ok, [map()]} | {:error, term()}
+  @callback purge_invalid_documents([String.t()]) ::
+              {:ok, non_neg_integer()} | {:error, term()}
 
   @callback save_checkpoint(session_id :: String.t(), checkpoint :: map()) ::
               {:ok, term()} | {:error, term()}
@@ -96,6 +98,9 @@ defmodule Pincer.Ports.Storage do
   def forget_memory(source), do: adapter().forget_memory(source)
   def search_similar(type, vector, limit), do: adapter().search_similar(type, vector, limit)
 
+  def purge_invalid_documents(prefixes \\ ["tmp/", "workspaces/"]),
+    do: adapter().purge_invalid_documents(prefixes)
+
   def save_checkpoint(session_id, checkpoint),
     do: adapter().save_checkpoint(session_id, checkpoint)
 
@@ -113,4 +118,23 @@ defmodule Pincer.Ports.Storage do
 
   def list_pairing_states_by_channel(channel),
     do: adapter().list_pairing_states_by_channel(channel)
+
+  @doc """
+  Filters non-empty string prefixes and converts them into SQL `LIKE` patterns
+  escaped with `'!'` (`!`, `%`, `_`).
+  """
+  @spec like_prefix_patterns([String.t()]) :: [String.t()]
+  def like_prefix_patterns(prefixes) when is_list(prefixes) do
+    prefixes
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.map(fn prefix ->
+      escaped =
+        prefix
+        |> String.replace("!", "!!")
+        |> String.replace("%", "!%")
+        |> String.replace("_", "!_")
+
+      escaped <> "%"
+    end)
+  end
 end

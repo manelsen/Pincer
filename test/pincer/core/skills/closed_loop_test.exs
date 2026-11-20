@@ -70,6 +70,8 @@ defmodule Pincer.Core.Skills.ClosedLoopTest do
     def delete_pairing_state(_c, _s), do: :ok
     @impl true
     def list_pairing_states_by_channel(_c), do: []
+    @impl true
+    def purge_invalid_documents(_p), do: {:ok, 0}
   end
 
   setup do

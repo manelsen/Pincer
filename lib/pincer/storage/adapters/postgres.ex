@@ -1303,4 +1303,28 @@ defmodule Pincer.Storage.Adapters.Postgres do
       }
     end)
   end
+
+  @impl true
+  def purge_invalid_documents(prefixes \\ ["tmp/", "workspaces/"]) when is_list(prefixes) do
+    case Pincer.Ports.Storage.like_prefix_patterns(prefixes) do
+      [] ->
+        {:ok, 0}
+
+      [first | rest] ->
+        initial = dynamic([n], fragment("?->>'path' LIKE ? ESCAPE '!'", n.data, ^first))
+
+        path_filter =
+          Enum.reduce(rest, initial, fn pattern, acc ->
+            dynamic([n], ^acc or fragment("?->>'path' LIKE ? ESCAPE '!'", n.data, ^pattern))
+          end)
+
+        {count, _} =
+          Node
+          |> where([n], n.type == "document")
+          |> where(^path_filter)
+          |> Repo.delete_all()
+
+        {:ok, count}
+    end
+  end
 end
