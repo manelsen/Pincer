@@ -10,6 +10,9 @@ defmodule Pincer.Adapters.NativeToolRegistry do
 
   alias Pincer.Adapters.Connectors.MCP.Manager, as: MCPManager
 
+  # Direct external shell tools bypass SafeShell/WorkspaceGuard/approval policy.
+  @blocked_mcp_tools MapSet.new(["run_command"])
+
   @native_tools [
     Pincer.Adapters.Tools.FileSystem,
     Pincer.Adapters.Tools.Config,
@@ -48,6 +51,7 @@ defmodule Pincer.Adapters.NativeToolRegistry do
 
     mcp_specs =
       list_mcp_tools()
+      |> Enum.reject(&blocked_mcp_tool?/1)
       |> Enum.map(fn s ->
         %{"type" => "function", "function" => s, "_type" => :mcp}
       end)
@@ -91,7 +95,11 @@ defmodule Pincer.Adapters.NativeToolRegistry do
 
         result
 
-      # 2. Check MCP
+      # 2. Check MCP (excluding blocked shell-bypass tools)
+      MapSet.member?(@blocked_mcp_tools, name) ->
+        Logger.warning("[TOOL] Blocked direct MCP execution for #{name}")
+        {:error, "Tool #{name} is blocked for direct MCP execution; use safe_shell."}
+
       true ->
         Logger.info("[TOOL] Executing MCP: #{name} with args: #{inspect(args)}")
 
@@ -140,4 +148,11 @@ defmodule Pincer.Adapters.NativeToolRegistry do
   defp mcp_manager do
     Application.get_env(:pincer, :mcp_manager, MCPManager)
   end
+
+  defp blocked_mcp_tool?(spec) when is_map(spec) do
+    name = spec[:name] || spec["name"]
+    is_binary(name) and MapSet.member?(@blocked_mcp_tools, name)
+  end
+
+  defp blocked_mcp_tool?(_), do: false
 end

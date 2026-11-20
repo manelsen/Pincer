@@ -25,13 +25,13 @@ defmodule Pincer.Adapters.Tools.SafeShell do
   |--------------|----------------------------|
   | `ls`         | No shell operators         |
   | `pwd`        | No arguments allowed       |
-  | `git`        | Only `status` and `log`    |
+  | `git`        | Only safe `status` / `log` |
   | `cat`        | No `..` or shell operators |
   | `head`       | No `..` or shell operators |
   | `tail`       | No `..` or shell operators |
   | `mix`        | Only `test` and `compile`  |
   | `du`         | Only with `-sh`            |
-  | `find`       | No shell operators         |
+  | `find`       | Read-only flags only (`-delete`/`-exec*`/`-ok*`/`-fprint*`/`-fls` blocked) |
 
   ## Security Considerations
 
@@ -68,6 +68,18 @@ defmodule Pincer.Adapters.Tools.SafeShell do
   @max_command_length 1024
   @dangerous_chars ~r/[;&|`$<>]/
   @multiline_or_line_continuation ~r/\\(?:\r\n|\n|\r)|[\r\n]/
+  @forbidden_find_flags MapSet.new([
+                          "-delete",
+                          "-exec",
+                          "-execdir",
+                          "-ok",
+                          "-okdir",
+                          "-fprint",
+                          "-fprint0",
+                          "-fprintf",
+                          "-fls"
+                        ])
+  @forbidden_git_log_flags MapSet.new(["--output", "--ext-diff", "--textconv"])
 
   @type spec :: %{
           name: String.t(),
@@ -185,7 +197,7 @@ defmodule Pincer.Adapters.Tools.SafeShell do
       ["ls" | args] -> validate_generic_args("ls", args, opts)
       ["pwd"] -> {:ok, "pwd"}
       ["git", "status"] -> {:ok, "git status"}
-      ["git", "log" | args] -> validate_generic_args("git log", args, opts)
+      ["git", "log" | args] -> validate_git_log_args(args, opts)
       ["cat", path] -> validate_path_arg("cat", path, opts)
       ["head", path] -> validate_path_arg("head", path, opts)
       ["tail", path] -> validate_path_arg("tail", path, opts)
@@ -193,7 +205,7 @@ defmodule Pincer.Adapters.Tools.SafeShell do
       ["du", "-sh", path] -> validate_path_arg("du -sh", path, opts)
       ["mix", "test"] -> {:ok, "mix test"}
       ["mix", "compile"] -> {:ok, "mix compile"}
-      ["find" | args] -> validate_generic_args("find", args, opts)
+      ["find" | args] -> validate_find_args(args, opts)
       # Grep is too complex to validate easily
       ["grep" | _] -> {:error, "Grep requires approval"}
       _ -> validate_dynamic_command(tokens, opts)
@@ -231,6 +243,35 @@ defmodule Pincer.Adapters.Tools.SafeShell do
   defp starts_with_tokens?(tokens, prefix) do
     Enum.take(tokens, length(prefix)) == prefix
   end
+
+  defp validate_find_args(args, opts) do
+    if Enum.any?(args, &forbidden_flag?(&1, @forbidden_find_flags)) do
+      {:error, "Dangerous find flag requires approval"}
+    else
+      validate_generic_args("find", args, opts)
+    end
+  end
+
+  defp validate_git_log_args(args, opts) do
+    if Enum.any?(args, &forbidden_flag?(&1, @forbidden_git_log_flags)) do
+      {:error, "Dangerous git log flag requires approval"}
+    else
+      validate_generic_args("git log", args, opts)
+    end
+  end
+
+  defp forbidden_flag?(arg, forbidden_set) when is_binary(arg) do
+    flag_name =
+      arg
+      |> String.trim()
+      |> String.downcase()
+      |> String.split("=", parts: 2)
+      |> hd()
+
+    MapSet.member?(forbidden_set, flag_name)
+  end
+
+  defp forbidden_flag?(_, _forbidden_set), do: true
 
   defp validate_generic_args(cmd, args, opts) do
     if Enum.any?(args, &unsafe_generic_arg?(&1, opts)) do

@@ -174,6 +174,7 @@ defmodule Pincer.Application do
       {Bandit,
        plug: Pincer.Adapters.Health.Plug,
        scheme: :http,
+       ip: Pincer.Infra.Config.health_bind_ip(),
        port: Application.get_env(:pincer, :health_port, 4001)}
     ]
 

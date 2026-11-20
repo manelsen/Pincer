@@ -65,4 +65,25 @@ defmodule Pincer.Adapters.Health.PlugTest do
       assert conn.status == 404
     end
   end
+
+  describe "bind_ip/1" do
+    test "defaults to loopback {127, 0, 0, 1}" do
+      assert HealthPlug.bind_ip(health_ip: nil, env_fetcher: fn _ -> nil end) == {127, 0, 0, 1}
+    end
+
+    test "parses explicit IPv4 and IPv6 strings or tuples and falls back on invalid values" do
+      assert HealthPlug.bind_ip(health_ip: "0.0.0.0") == {0, 0, 0, 0}
+      assert HealthPlug.bind_ip(health_ip: "::1") == {0, 0, 0, 0, 0, 0, 0, 1}
+      assert HealthPlug.bind_ip(health_ip: {127, 0, 0, 1}) == {127, 0, 0, 1}
+      assert HealthPlug.bind_ip(health_ip: "not-an-ip") == {127, 0, 0, 1}
+
+      assert HealthPlug.bind_ip(
+               health_ip: nil,
+               env_fetcher: fn
+                 "PINCER_HEALTH_IP" -> "0.0.0.0"
+                 _ -> nil
+               end
+             ) == {0, 0, 0, 0}
+    end
+  end
 end

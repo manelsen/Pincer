@@ -120,12 +120,20 @@ defmodule Pincer.Channels.Webhook do
   defp authorize(%{token: expected}, opts) do
     provided = opts[:token] || token_from_headers(Keyword.get(opts, :headers))
 
-    if is_binary(provided) and provided == expected do
+    if secure_compare(provided, expected) do
       :ok
     else
       {:error, :unauthorized}
     end
   end
+
+  defp secure_compare(provided, expected)
+       when is_binary(provided) and is_binary(expected) and
+              byte_size(provided) == byte_size(expected) do
+    :crypto.hash_equals(provided, expected)
+  end
+
+  defp secure_compare(_, _), do: false
 
   defp token_from_headers(headers) when is_map(headers) do
     read_map_value(headers, "x-pincer-token") ||

@@ -49,7 +49,6 @@ As defined in `AGENTS.md` and `SPECS.md`, all development must follow these rule
 
 -   `lib/pincer/`: Core boundaries (Core, Session, LLM, MCP, Tools, etc.).
 -   `workspaces/`: Per-agent cognitive state (`.pincer/` folder contains Persona, Memory, and Session Logs).
--   `mcp_sidecar/`: Hardened Node.js environment for MCP tools.
 -   `infrastructure/`: Deployment assets (Docker, systemd).
 -   `test/`: Unit, integration, and contract tests.
 

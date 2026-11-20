@@ -90,9 +90,12 @@ mcp:
     github:
       args: ["-y", "@modelcontextprotocol/server-github"]
       command: "npx"
-    shell:
-      args: ["infrastructure/mcp/shell_server.py"]
-      command: "infrastructure/mcp/venv/bin/python3"
+gateway:
+  bind: "127.0.0.1"
+sandbox:
+  adapter: "local"
+  local:
+    transport: "os"
 tools:
   restrict_to_workspace: true
 # log_utc_offset: 0  # No longer needed — TZ is set in docker-compose.yml

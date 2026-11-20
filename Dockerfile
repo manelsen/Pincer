@@ -43,17 +43,12 @@ ENV MIX_ENV=prod \
     HEX_HOME=/app/.hex
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates inotify-tools git nodejs npm postgresql-client python3 python3-venv python3-pip && \
+    apt-get install -y --no-install-recommends ca-certificates inotify-tools git nodejs npm postgresql-client && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --gid "${APP_GID}" pincer && \
     useradd --uid "${APP_UID}" --gid pincer --home /app --shell /bin/sh --create-home pincer
 
 WORKDIR /app
-
-# Install Python dependencies directly in runtime to avoid relocation issues
-RUN mkdir -p /app/infrastructure/mcp && \
-    python3 -m venv /app/infrastructure/mcp/venv && \
-    /app/infrastructure/mcp/venv/bin/pip install --no-cache-dir "mcp[cli]" fastmcp
 
 COPY --from=builder /app/_build /app/_build
 COPY --from=builder /app/deps /app/deps
@@ -61,7 +56,6 @@ COPY --from=builder /app/packages /app/packages
 COPY --from=builder /app/lib /app/lib
 COPY --from=builder /app/priv /app/priv
 COPY --from=builder /app/config /app/config
-COPY infrastructure/mcp/shell_server.py /app/infrastructure/mcp/shell_server.py
 COPY --from=builder /app/mix.exs /app/mix.exs
 COPY --from=builder /app/mix.lock /app/mix.lock
 COPY --from=builder /app/config.yaml /app/config.yaml

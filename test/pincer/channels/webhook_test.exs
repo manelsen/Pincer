@@ -59,9 +59,16 @@ defmodule Pincer.Channels.WebhookTest do
     start_channel!(config)
 
     assert {:error, :unauthorized} = Webhook.ingest(%{"text" => "unauthorized"})
+    assert {:error, :unauthorized} = Webhook.ingest(%{"text" => "wrong-len"}, token: "short")
+
+    assert {:error, :unauthorized} =
+             Webhook.ingest(%{"text" => "wrong-same-len"}, token: "top-secrex")
 
     assert {:ok, %{status: :accepted}} =
              Webhook.ingest(%{"text" => "authorized"}, token: token)
+
+    assert {:ok, %{status: :accepted}} =
+             Webhook.ingest(%{"text" => "via-header"}, headers: %{"x-pincer-token" => token})
   end
 
   test "ignores duplicated event_id without processing input twice", %{

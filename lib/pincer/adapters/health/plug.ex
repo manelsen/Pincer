@@ -18,7 +18,11 @@ defmodule Pincer.Adapters.Health.Plug do
 
   ## Configuration
 
-      config :pincer, health_port: 4001
+      config :pincer,
+        health_port: 4001,
+        health_ip: {127, 0, 0, 1}
+
+  `health_ip` (or env `PINCER_HEALTH_IP`) defaults to loopback `{127, 0, 0, 1}`.
 
   ## Wire-up
 
@@ -39,6 +43,16 @@ defmodule Pincer.Adapters.Health.Plug do
 
   match _ do
     send_resp(conn, 404, "not found")
+  end
+
+  @doc """
+  Resolves the bind IP address for the `/health` Bandit server.
+
+  Delegates to `Pincer.Infra.Config.health_bind_ip/1`.
+  """
+  @spec bind_ip(keyword()) :: :inet.ip_address()
+  def bind_ip(opts \\ []) when is_list(opts) do
+    Pincer.Infra.Config.health_bind_ip(opts)
   end
 
   # --- Private ---

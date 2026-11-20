@@ -109,6 +109,7 @@ defmodule Pincer.Infra.Config do
     "enabled_channels" => :enabled_channels,
     "gateway" => :gateway,
     "health" => :health,
+    "health_ip" => :health_ip,
     "health_port" => :health_port,
     "heartbeat" => :heartbeat,
     "hooks" => :hooks,
@@ -613,6 +614,24 @@ defmodule Pincer.Infra.Config do
     end
   end
 
+  @doc """
+  Resolves the bind IP address for the `/health` HTTP endpoint.
+
+  Defaults to `{127, 0, 0, 1}` unless overridden via `:health_ip` option/app env
+  or `PINCER_HEALTH_IP`.
+  """
+  @spec health_bind_ip(keyword()) :: :inet.ip_address()
+  def health_bind_ip(opts \\ []) when is_list(opts) do
+    env_fetcher = Keyword.get(opts, :env_fetcher, &System.get_env/1)
+
+    candidate =
+      Keyword.get(opts, :health_ip) ||
+        Application.get_env(:pincer, :health_ip) ||
+        env_fetcher.("PINCER_HEALTH_IP")
+
+    parse_bind_ip(candidate)
+  end
+
   defp write_yaml(path, config) do
     mcp_section =
       if config["mcp"] do
@@ -687,4 +706,24 @@ defmodule Pincer.Infra.Config do
     end)
     |> Enum.reverse()
   end
+
+  defp parse_bind_ip({a, b, c, d} = ip)
+       when a in 0..255 and b in 0..255 and c in 0..255 and d in 0..255,
+       do: ip
+
+  defp parse_bind_ip({a, b, c, d, e, f, g, h} = ip)
+       when a in 0..65_535 and b in 0..65_535 and c in 0..65_535 and d in 0..65_535 and
+              e in 0..65_535 and f in 0..65_535 and g in 0..65_535 and h in 0..65_535,
+       do: ip
+
+  defp parse_bind_ip(value) when is_binary(value) do
+    trimmed = String.trim(value)
+
+    case :inet.parse_address(String.to_charlist(trimmed)) do
+      {:ok, ip} -> ip
+      {:error, _} -> {127, 0, 0, 1}
+    end
+  end
+
+  defp parse_bind_ip(_), do: {127, 0, 0, 1}
 end

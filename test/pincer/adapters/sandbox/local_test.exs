@@ -30,17 +30,20 @@ defmodule Pincer.Adapters.Sandbox.LocalTest do
   end
 
   setup do
-    prev_tools = Application.get_env(:pincer, :tool_adapters)
+    prev_tools = Application.get_env(:pincer, :tool_adapters, :__unset__)
+    prev_sandbox = Application.get_env(:pincer, :sandbox, :__unset__)
     Application.put_env(:pincer, :tool_adapters, [FakeToolRegistry])
+    Application.delete_env(:pincer, :sandbox)
     Application.put_env(:pincer, :local_sandbox_test_pid, self())
 
     on_exit(fn ->
       Application.delete_env(:pincer, :local_sandbox_test_pid)
 
-      if is_nil(prev_tools) do
-        Application.delete_env(:pincer, :tool_adapters)
-      else
-        Application.put_env(:pincer, :tool_adapters, prev_tools)
+      for {key, prev} <- [tool_adapters: prev_tools, sandbox: prev_sandbox] do
+        case prev do
+          :__unset__ -> Application.delete_env(:pincer, key)
+          val -> Application.put_env(:pincer, key, val)
+        end
       end
     end)
 

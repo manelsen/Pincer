@@ -391,3 +391,20 @@ Consolidates real end-to-end verification and continuous security/health posture
   - Deterministic hardened fixture at `test/fixtures/ci_posture/config.yaml` verified by
     `mix pincer.doctor --strict` and `mix pincer.security_audit --strict` in CI.
 
+### 21. Pre-Release Security Hardening
+
+Closes shell-execution bypasses, sidecar PoC leaks, and unhardened defaults before public release:
+
+- **Removal of `mcp.servers.shell` / `mcp_sidecar/` & Registry Defense-in-Depth**:
+  - Removes `infrastructure/mcp/shell_server.py` (which executed unvalidated `subprocess.run(..., shell=True)`),
+    the Node `mcp_sidecar/` PoC, and Python MCP venv installation from `Dockerfile` / `entrypoint.sh` / default `config.yaml`.
+  - Default local sandbox uses `transport: "os"` (`Pincer.Adapters.Sandbox.Local`) behind `SafeShell` + `WorkspaceGuard`.
+  - `Pincer.Adapters.NativeToolRegistry` filters and rejects `"run_command"` from external MCP tool catalogs.
+- **`SafeShell` `find` & `git log` Hardening**:
+  - `find` rejects destructive/exec/file-writing flags (`-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprint0`, `-fprintf`, `-fls`) unless explicitly approved.
+  - `git log` rejects `--output` / `--output=*`, `--ext-diff`, and `--textconv` unless explicitly approved.
+- **Constant-Time Webhook Token Auth**:
+  - `Pincer.Channels.Webhook` (`packages/pincer_webhook`) verifies tokens using `:crypto.hash_equals/2` after length matching.
+- **Loopback Default for `/health` Endpoint**:
+  - `Pincer.Adapters.Health.Plug.bind_ip/0` resolves `health_ip` / `PINCER_HEALTH_IP` and defaults `Bandit` to `{127, 0, 0, 1}`.
+

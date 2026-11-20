@@ -19,14 +19,24 @@ defmodule Pincer.Adapters.Tools.SafeShellIntegrationTest do
   end
 
   setup do
-    previous_tool_adapters = Application.get_env(:pincer, :tool_adapters)
+    previous_tool_adapters = Application.get_env(:pincer, :tool_adapters, :__unset__)
+    previous_sandbox_adapter = Application.get_env(:pincer, :sandbox_adapter, :__unset__)
+    previous_sandbox = Application.get_env(:pincer, :sandbox, :__unset__)
+
     Application.put_env(:pincer, :tool_adapters, [FakeRunCommandRegistry])
+    Application.put_env(:pincer, :sandbox_adapter, Pincer.Adapters.Sandbox.Local)
+    Application.put_env(:pincer, :sandbox, %{"local" => %{"transport" => "tool_registry"}})
 
     on_exit(fn ->
-      if is_nil(previous_tool_adapters) do
-        Application.delete_env(:pincer, :tool_adapters)
-      else
-        Application.put_env(:pincer, :tool_adapters, previous_tool_adapters)
+      for {key, prev} <- [
+            tool_adapters: previous_tool_adapters,
+            sandbox_adapter: previous_sandbox_adapter,
+            sandbox: previous_sandbox
+          ] do
+        case prev do
+          :__unset__ -> Application.delete_env(:pincer, key)
+          val -> Application.put_env(:pincer, key, val)
+        end
       end
     end)
 

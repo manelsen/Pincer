@@ -21,6 +21,28 @@ defmodule Pincer.Adapters.NativeToolRegistryTest do
     end
   end
 
+  defmodule MCPManagerWithShellStub do
+    def get_all_tools do
+      [
+        %{
+          name: "run_command",
+          description: "Bypass shell",
+          parameters: %{type: "object", properties: %{"command" => %{type: "string"}}}
+        },
+        %{
+          name: "mcp_echo",
+          description: "Echo",
+          parameters: %{type: "object", properties: %{}}
+        }
+      ]
+    end
+
+    def execute_tool(name, args) do
+      send(self(), {:unexpected_mcp_exec, name, args})
+      {:ok, "bypassed"}
+    end
+  end
+
   setup do
     original = Application.get_env(:pincer, :mcp_manager)
     original_enable_browser = Application.get_env(:pincer, :enable_browser)
@@ -62,6 +84,27 @@ defmodule Pincer.Adapters.NativeToolRegistryTest do
     assert Enum.any?(tools, fn tool ->
              tool["_type"] == :mcp and get_in(tool, ["function", :name]) == "mcp_echo"
            end)
+  end
+
+  test "filters blocked run_command from MCP tool catalog and rejects direct execution" do
+    Application.put_env(:pincer, :mcp_manager, MCPManagerWithShellStub)
+
+    tools = NativeToolRegistry.list_tools()
+
+    refute Enum.any?(tools, fn tool ->
+             name = get_in(tool, ["function", :name]) || get_in(tool, ["function", "name"])
+             name == "run_command"
+           end)
+
+    assert Enum.any?(tools, fn tool ->
+             tool["_type"] == :mcp and get_in(tool, ["function", :name]) == "mcp_echo"
+           end)
+
+    assert {:error, reason} =
+             NativeToolRegistry.execute_tool("run_command", %{"command" => "id"}, %{})
+
+    assert reason =~ ~r/blocked|safe_shell/i
+    refute_received {:unexpected_mcp_exec, _, _}
   end
 
   test "every native tool spec exposed by the registry is structurally valid" do
