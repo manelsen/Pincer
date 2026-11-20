@@ -30,14 +30,17 @@ defmodule Pincer.Core.Introspection.Kernel do
   use GenServer, restart: :transient
   require Logger
 
+  alias Pincer.Core.AgentPaths
   alias Pincer.Core.Introspection.LessonExtractor
   alias Pincer.Core.Introspection.LessonStore
   alias Pincer.Core.Introspection.Mood
   alias Pincer.Core.Introspection.SelfState
   alias Pincer.Core.Reflection
+  alias Pincer.Core.Skills.Generator, as: SkillGenerator
 
   @default_tick_interval 600_000
   @default_reflection_throttle 300_000
+  @default_skill_promotion_throttle 300_000
   @stall_threshold 3
   @stall_hold_ms 600_000
   @max_reflection_history 5
@@ -98,6 +101,12 @@ defmodule Pincer.Core.Introspection.Kernel do
     :exit, _ -> []
   end
 
+  @doc "Triggers asynchronous evaluation of eligible lessons for promotion into workspace skills."
+  @spec promote_skills(String.t()) :: :ok
+  def promote_skills(agent_id) do
+    GenServer.cast(via(agent_id), :promote_skills)
+  end
+
   # --- Lifecycle ---
 
   def start_link(opts) do
@@ -110,7 +119,20 @@ defmodule Pincer.Core.Introspection.Kernel do
     agent_id = Keyword.fetch!(opts, :agent_id)
     tick_interval = Keyword.get(opts, :tick_interval, @default_tick_interval)
     reflection_throttle = Keyword.get(opts, :reflection_throttle_ms, @default_reflection_throttle)
+
+    skill_promotion_throttle =
+      Keyword.get(opts, :skill_promotion_throttle_ms, @default_skill_promotion_throttle)
+
     introspection_client = Keyword.get(opts, :introspection_client)
+    workspace_path = Keyword.get(opts, :workspace_path, AgentPaths.workspace_root(agent_id))
+    skill_generator = Keyword.get(opts, :skill_generator, SkillGenerator)
+
+    skill_promotion_enabled? =
+      Keyword.get(
+        opts,
+        :skill_promotion_enabled?,
+        Application.get_env(:pincer, :enable_skill_promotion, true)
+      )
 
     self_state =
       case SelfState.load_or_create(agent_id) do
@@ -120,6 +142,7 @@ defmodule Pincer.Core.Introspection.Kernel do
 
     state = %{
       agent_id: agent_id,
+      workspace_path: workspace_path,
       self_state: self_state,
       wakefulness: :idle,
       tick_interval: tick_interval,
@@ -127,6 +150,11 @@ defmodule Pincer.Core.Introspection.Kernel do
       last_reflection_at: nil,
       last_trace: nil,
       pending_reflection?: false,
+      skill_promotion_enabled?: skill_promotion_enabled?,
+      skill_promotion_throttle_ms: skill_promotion_throttle,
+      last_skill_promotion_at: nil,
+      pending_skill_promotion?: false,
+      skill_generator: skill_generator,
       reflection_history: [],
       stall_hold_until: nil,
       session_pids: MapSet.new(),
@@ -179,16 +207,17 @@ defmodule Pincer.Core.Introspection.Kernel do
 
         broadcast(state.session_pids, {:kernel_self_state_updated, updated})
 
-        {:noreply,
-         %{
-           state
-           | self_state: updated,
-             pending_reflection?: false,
-             wakefulness: new_wakefulness,
-             last_reflection_at: now(),
-             reflection_history: new_history,
-             stall_hold_until: stall_hold
-         }}
+        next_state = %{
+          state
+          | self_state: updated,
+            pending_reflection?: false,
+            wakefulness: new_wakefulness,
+            last_reflection_at: now(),
+            reflection_history: new_history,
+            stall_hold_until: stall_hold
+        }
+
+        {:noreply, maybe_promote_skills(next_state, false)}
 
       {:error, reason} ->
         Logger.warning("[KERNEL] #{state.agent_id} self-state update failed: #{inspect(reason)}")
@@ -200,6 +229,30 @@ defmodule Pincer.Core.Introspection.Kernel do
   def handle_info({:reflection_complete, {:error, reason}}, state) do
     Logger.warning("[KERNEL] #{state.agent_id} reflection failed: #{inspect(reason)}")
     {:noreply, %{state | pending_reflection?: false, last_reflection_at: now()}}
+  end
+
+  @impl true
+  def handle_info({:skill_promotion_complete, {:ok, %{name: skill_name} = skill}}, state) do
+    Logger.info("[KERNEL] #{state.agent_id} promoted skill #{skill_name}")
+    broadcast(state.session_pids, {:kernel_skills_updated, skill})
+
+    {:noreply,
+     %{
+       state
+       | pending_skill_promotion?: false,
+         last_skill_promotion_at: now()
+     }}
+  end
+
+  @impl true
+  def handle_info({:skill_promotion_complete, {:ok, :no_eligible_lessons}}, state) do
+    {:noreply, %{state | pending_skill_promotion?: false}}
+  end
+
+  @impl true
+  def handle_info({:skill_promotion_complete, {:error, reason}}, state) do
+    Logger.warning("[KERNEL] #{state.agent_id} skill promotion failed: #{inspect(reason)}")
+    {:noreply, %{state | pending_skill_promotion?: false}}
   end
 
   # --- Session monitoring ---
@@ -281,6 +334,11 @@ defmodule Pincer.Core.Introspection.Kernel do
   def handle_cast({:report_activity, :idle}, state) do
     new_wakefulness = if state.pending_reflection?, do: :reflecting, else: :idle
     {:noreply, %{state | wakefulness: new_wakefulness}}
+  end
+
+  @impl true
+  def handle_cast(:promote_skills, state) do
+    {:noreply, maybe_promote_skills(state, true)}
   end
 
   # --- Calls ---
@@ -386,6 +444,56 @@ defmodule Pincer.Core.Introspection.Kernel do
         end)
 
         %{state | pending_reflection?: true, wakefulness: :reflecting}
+    end
+  end
+
+  defp maybe_promote_skills(state, force?) do
+    current_time = now()
+
+    cond do
+      not state.skill_promotion_enabled? ->
+        state
+
+      state.pending_skill_promotion? ->
+        state
+
+      not force? and
+          not throttle_expired?(
+            state.last_skill_promotion_at,
+            state.skill_promotion_throttle_ms,
+            current_time
+          ) ->
+        state
+
+      true ->
+        kernel_pid = self()
+        agent_id = state.agent_id
+        generator = state.skill_generator
+
+        opts =
+          [workspace_path: state.workspace_path]
+          |> then(fn acc ->
+            if state.introspection_client do
+              Keyword.put(acc, :introspection_client, state.introspection_client)
+            else
+              acc
+            end
+          end)
+
+        Task.start(fn ->
+          result =
+            try do
+              generator.promote(agent_id, opts)
+            rescue
+              e -> {:error, {:exception, Exception.message(e)}}
+            catch
+              :exit, reason -> {:error, {:exit, reason}}
+            end
+
+          send(kernel_pid, {:skill_promotion_complete, result})
+        end)
+
+        %{state | pending_skill_promotion?: true}
     end
   end
 

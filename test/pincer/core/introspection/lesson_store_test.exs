@@ -120,4 +120,21 @@ defmodule Pincer.Core.Introspection.LessonStoreTest do
       assert score <= 1.0
     end
   end
+
+  describe "mark_promoted/2" do
+    test "stores promoted_skill and promoted_at metadata on lesson records" do
+      {:ok, l1} = LessonStore.create(@agent, %{content: "Promote lesson 1"})
+      {:ok, l2} = LessonStore.create(@agent, %{content: "Promote lesson 2 with SQL checks"})
+
+      assert :ok = LessonStore.mark_promoted([l1.id, l2.id], "db-check-skill")
+
+      [reloaded1, reloaded2] =
+        LessonStore.list_active(@agent)
+        |> Enum.sort_by(& &1.content)
+
+      assert reloaded1.meta["promoted_skill"] == "db-check-skill"
+      assert is_binary(reloaded1.meta["promoted_at"])
+      assert reloaded2.meta["promoted_skill"] == "db-check-skill"
+    end
+  end
 end

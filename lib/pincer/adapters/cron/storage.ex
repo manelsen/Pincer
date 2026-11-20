@@ -46,9 +46,11 @@ defmodule Pincer.Adapters.Cron.Storage do
       # Delete permanently
       {:ok, _} = Pincer.Adapters.Cron.Storage.delete_job(job_id)
   """
+  import Ecto.Changeset, only: [apply_changes: 1]
   import Ecto.Query
-  alias Pincer.Infra.Repo
   alias Pincer.Adapters.Cron.Job
+  alias Pincer.Infra.Repo
+  alias Pincer.Infra.SQLite
 
   @doc """
   Returns all enabled jobs whose `next_run_at` is at or before the given time.
@@ -79,9 +81,17 @@ defmodule Pincer.Adapters.Cron.Storage do
   """
   @spec list_due_jobs(DateTime.t()) :: [Job.t()]
   def list_due_jobs(now \\ DateTime.utc_now()) do
-    Job
-    |> where([j], j.enabled == true and j.next_run_at <= ^now)
-    |> Repo.all()
+    if SQLite.sqlite_mode?() do
+      sqlite_list_jobs()
+      |> Enum.filter(fn job ->
+        job.enabled == true and job.next_run_at != nil and
+          DateTime.compare(job.next_run_at, now) != :gt
+      end)
+    else
+      Job
+      |> where([j], j.enabled == true and j.next_run_at <= ^now)
+      |> Repo.all()
+    end
   end
 
   @doc """
@@ -124,14 +134,12 @@ defmodule Pincer.Adapters.Cron.Storage do
             %DateTime{} -> next_date
           end
 
-        job
-        |> Job.changeset(%{next_run_at: utc_next_date})
-        |> Repo.update!()
+        changeset = Job.changeset(job, %{next_run_at: utc_next_date})
+        persist_job_update!(changeset)
 
       {:error, _} ->
-        job
-        |> Job.changeset(%{enabled: false})
-        |> Repo.update!()
+        changeset = Job.changeset(job, %{enabled: false})
+        persist_job_update!(changeset)
     end
   end
 
@@ -165,15 +173,18 @@ defmodule Pincer.Adapters.Cron.Storage do
   """
   @spec create_job(map()) :: {:ok, Job.t()} | {:error, Ecto.Changeset.t()}
   def create_job(attrs) do
-    %Job{}
-    |> Job.changeset(attrs)
-    |> Repo.insert()
-    |> case do
-      {:ok, job} ->
-        {:ok, update_next_run!(job)}
+    changeset = Job.changeset(%Job{}, attrs)
 
-      error ->
-        error
+    result =
+      if SQLite.sqlite_mode?() do
+        sqlite_insert_job(changeset)
+      else
+        Repo.insert(changeset)
+      end
+
+    case result do
+      {:ok, job} -> {:ok, update_next_run!(job)}
+      error -> error
     end
   end
 
@@ -201,14 +212,13 @@ defmodule Pincer.Adapters.Cron.Storage do
   """
   @spec disable_job(binary()) :: {:ok, Job.t()} | {:error, :not_found}
   def disable_job(id) do
-    case Repo.get(Job, id) do
+    case fetch_job(id) do
       nil ->
         {:error, :not_found}
 
       job ->
-        job
-        |> Job.changeset(%{enabled: false})
-        |> Repo.update()
+        changeset = Job.changeset(job, %{enabled: false})
+        if SQLite.sqlite_mode?(), do: sqlite_update_job(changeset), else: Repo.update(changeset)
     end
   end
 
@@ -231,7 +241,7 @@ defmodule Pincer.Adapters.Cron.Storage do
   """
   @spec list_jobs() :: [Job.t()]
   def list_jobs do
-    Repo.all(Job)
+    if SQLite.sqlite_mode?(), do: sqlite_list_jobs(), else: Repo.all(Job)
   end
 
   @doc """
@@ -257,9 +267,140 @@ defmodule Pincer.Adapters.Cron.Storage do
   """
   @spec delete_job(binary()) :: {:ok, Job.t()} | {:error, :not_found}
   def delete_job(id) do
-    case Repo.get(Job, id) do
-      nil -> {:error, :not_found}
-      job -> Repo.delete(job)
+    case fetch_job(id) do
+      nil ->
+        {:error, :not_found}
+
+      job ->
+        if SQLite.sqlite_mode?() do
+          case SQLite.execute(SQLite.default_server(), "DELETE FROM cron_jobs WHERE id = ?1", [
+                 job.id
+               ]) do
+            :ok -> {:ok, job}
+            error -> error
+          end
+        else
+          Repo.delete(job)
+        end
     end
+  end
+
+  # --- SQLite persistence helpers ---
+
+  defp fetch_job(id) do
+    if SQLite.sqlite_mode?(), do: sqlite_get_job(id), else: Repo.get(Job, id)
+  end
+
+  defp persist_job_update!(changeset) do
+    if SQLite.sqlite_mode?() do
+      {:ok, job} = sqlite_update_job(changeset)
+      job
+    else
+      Repo.update!(changeset)
+    end
+  end
+
+  defp sqlite_insert_job(changeset) do
+    if changeset.valid? do
+      now = DateTime.utc_now()
+      now_str = DateTime.to_iso8601(now)
+      job = %{apply_changes(changeset) | id: SQLite.uuid(), inserted_at: now, updated_at: now}
+
+      case SQLite.execute(
+             SQLite.default_server(),
+             """
+             INSERT INTO cron_jobs
+               (id, name, cron_expression, prompt, session_id, enabled, next_run_at, inserted_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             """,
+             [
+               job.id,
+               job.name,
+               job.cron_expression,
+               job.prompt,
+               job.session_id,
+               if(job.enabled == false, do: 0, else: 1),
+               job.next_run_at && DateTime.to_iso8601(job.next_run_at),
+               now_str,
+               now_str
+             ]
+           ) do
+        :ok -> {:ok, job}
+        error -> error
+      end
+    else
+      {:error, changeset}
+    end
+  end
+
+  defp sqlite_update_job(changeset) do
+    if changeset.valid? do
+      now = DateTime.utc_now()
+      now_str = DateTime.to_iso8601(now)
+      job = %{apply_changes(changeset) | updated_at: now}
+
+      case SQLite.execute(
+             SQLite.default_server(),
+             """
+             UPDATE cron_jobs
+             SET enabled = ?1, next_run_at = ?2, updated_at = ?3
+             WHERE id = ?4
+             """,
+             [
+               if(job.enabled == false, do: 0, else: 1),
+               job.next_run_at && DateTime.to_iso8601(job.next_run_at),
+               now_str,
+               job.id
+             ]
+           ) do
+        :ok -> {:ok, job}
+        error -> error
+      end
+    else
+      {:error, changeset}
+    end
+  end
+
+  defp sqlite_get_job(id) do
+    case SQLite.query(
+           SQLite.default_server(),
+           """
+           SELECT id, name, cron_expression, prompt, session_id, enabled, next_run_at, inserted_at, updated_at
+           FROM cron_jobs
+           WHERE id = ?1
+           LIMIT 1
+           """,
+           [to_string(id)]
+         ) do
+      {:ok, %{rows: [row]}} -> hydrate_job(row)
+      _ -> nil
+    end
+  end
+
+  defp sqlite_list_jobs do
+    case SQLite.query(
+           SQLite.default_server(),
+           """
+           SELECT id, name, cron_expression, prompt, session_id, enabled, next_run_at, inserted_at, updated_at
+           FROM cron_jobs
+           """
+         ) do
+      {:ok, %{rows: rows}} -> Enum.map(rows, &hydrate_job/1)
+      _ -> []
+    end
+  end
+
+  defp hydrate_job([id, name, expr, prompt, sid, enabled, next_run, ins, upd]) do
+    %Job{
+      id: id,
+      name: name,
+      cron_expression: expr,
+      prompt: prompt,
+      session_id: sid,
+      enabled: enabled == 1,
+      next_run_at: SQLite.parse_datetime(next_run),
+      inserted_at: SQLite.parse_datetime(ins),
+      updated_at: SQLite.parse_datetime(upd)
+    }
   end
 end

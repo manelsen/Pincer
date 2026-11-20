@@ -147,7 +147,7 @@ defmodule Pincer.Application do
       Pincer.Core.MemoryObservability,
       Pincer.Core.ConversationObservability,
       {Finch, name: Pincer.Finch},
-      {Pincer.Infra.Repo, repo_config},
+      storage_child(repo_config),
       Pincer.Core.Heartbeat,
       {Registry, keys: :duplicate, name: Pincer.Dispatcher.Registry},
       {Task.Supervisor, name: Pincer.TaskSupervisor},
@@ -201,5 +201,13 @@ defmodule Pincer.Application do
 
     opts = [strategy: :one_for_one, name: Pincer.Supervisor]
     Supervisor.start_link(children, opts)
+  end
+
+  defp storage_child(repo_config) do
+    if Pincer.Infra.SQLite.sqlite_mode?() do
+      {Pincer.Infra.SQLite, db_path: Pincer.Infra.SQLite.db_path()}
+    else
+      {Pincer.Infra.Repo, repo_config}
+    end
   end
 end

@@ -16,6 +16,7 @@ defmodule Pincer.Core.StartupGuard do
   """
 
   require Logger
+  alias Pincer.Infra.SQLite
 
   @type check_result :: :ok | {:error, atom(), String.t()}
 
@@ -112,17 +113,52 @@ defmodule Pincer.Core.StartupGuard do
     end
   end
 
+  @doc """
+  Verifies that the configured SQLite database path and parent directory are writable.
+  """
+  @spec check_sqlite() :: check_result()
+  def check_sqlite do
+    path = SQLite.db_path()
+
+    if path == ":memory:" or String.starts_with?(path, "file::memory:") do
+      :ok
+    else
+      dir = Path.dirname(path)
+      probe = Path.join(dir, ".pincer_sqlite_write_probe_#{System.unique_integer([:positive])}")
+
+      with :ok <- File.mkdir_p(dir),
+           :ok <- File.write(probe, ""),
+           :ok <- File.rm(probe) do
+        :ok
+      else
+        {:error, reason} ->
+          _ = File.rm(probe)
+
+          {:error, :sqlite_unwritable,
+           "SQLite inacessível/sem permissão em #{path}: #{inspect(reason)}"}
+      end
+    end
+  end
+
   # Private
 
   defp format_reason(reason) when is_binary(reason), do: reason
   defp format_reason(reason), do: inspect(reason)
 
   defp maybe_check_database do
-    if skip_guard?(), do: :ok, else: check_database()
+    cond do
+      skip_guard?() -> :ok
+      SQLite.sqlite_mode?() -> check_sqlite()
+      true -> check_database()
+    end
   end
 
   defp maybe_check_migrations do
-    if skip_guard?(), do: :ok, else: check_migrations()
+    cond do
+      skip_guard?() -> :ok
+      SQLite.sqlite_mode?() -> :ok
+      true -> check_migrations()
+    end
   end
 
   defp skip_guard? do

@@ -170,8 +170,47 @@ defmodule Pincer.Infra.Config do
     - Sets `System.put_env/2` for `.env` values
     - Sets `Application.put_env/3` for all config sections
   """
-  @spec load() :: :ok | :error
-  def load do
+  @spec load(keyword()) :: :ok | :error
+  def load(opts \\ []) do
+    config_file = Keyword.get(opts, :config_file, @config_file)
+    load_dotenv? = Keyword.get(opts, :load_dotenv, true)
+
+    if load_dotenv? do
+      load_dotenv_file()
+    end
+
+    previous_llm = Application.get_env(:pincer, :llm, %{}) |> normalize_keys()
+
+    case load_file(config_file) do
+      {:ok, config} ->
+        Enum.each(config, fn {key, value} ->
+          Application.put_env(:pincer, String.to_atom(key), value)
+        end)
+
+        configure_tokens()
+        configure_llm(config, previous_llm)
+        configure_sandbox(config)
+
+        if intro_config = config["introspection"] do
+          Application.put_env(:pincer, :introspection, intro_config)
+          Logger.info("Introspection Provider: #{intro_config["provider"] || "default LLM"}")
+        end
+
+        if router_config = config["model_router"] do
+          Application.put_env(:pincer, :model_router, router_config)
+        end
+
+        configure_database(config)
+
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Fatal error: Failed to load #{config_file}: #{inspect(reason)}")
+        :error
+    end
+  end
+
+  defp load_dotenv_file do
     Logger.info("Loading environment variables from .env...")
 
     case File.read(".env") do
@@ -193,103 +232,184 @@ defmodule Pincer.Infra.Config do
       {:error, _} ->
         Logger.warning(".env file not found.")
     end
+  end
 
-    previous_llm = Application.get_env(:pincer, :llm, %{}) |> normalize_keys()
+  defp configure_tokens do
+    env_telegram = System.get_env("TELEGRAM_BOT_TOKEN")
+    env_openrouter = System.get_env("OPENROUTER_API_KEY")
+    env_opencode_zen = System.get_env("OPENCODE_ZEN_API_KEY")
 
-    case load_file(@config_file) do
-      {:ok, config} ->
-        Enum.each(config, fn {key, value} ->
-          Application.put_env(:pincer, String.to_atom(key), value)
-        end)
+    Logger.info(
+      "Token ENV Telegram: #{if env_telegram && env_telegram != "", do: "OK", else: "NOT FOUND"}"
+    )
 
-        env_telegram = System.get_env("TELEGRAM_BOT_TOKEN")
-        env_openrouter = System.get_env("OPENROUTER_API_KEY")
-        env_opencode_zen = System.get_env("OPENCODE_ZEN_API_KEY")
+    Logger.info(
+      "Token ENV Opencode Zen: #{if env_opencode_zen && env_opencode_zen != "", do: "OK", else: "NOT FOUND"}"
+    )
 
-        Logger.info(
-          "Token ENV Telegram: #{if env_telegram && env_telegram != "", do: "OK", else: "NOT FOUND"}"
-        )
+    tokens = %{
+      "telegram" => env_telegram,
+      "openrouter" => env_openrouter,
+      "opencode_zen" => env_opencode_zen,
+      "github" => System.get_env("GITHUB_PERSONAL_ACCESS_TOKEN")
+    }
 
-        Logger.info(
-          "Token ENV Opencode Zen: #{if env_opencode_zen && env_opencode_zen != "", do: "OK", else: "NOT FOUND"}"
-        )
+    final_tokens =
+      tokens
+      |> Enum.filter(fn {_, v} -> v != nil && v != "" end)
+      |> Map.new()
 
-        tokens = %{
-          "telegram" => env_telegram,
-          "openrouter" => env_openrouter,
-          "opencode_zen" => env_opencode_zen,
-          "github" => System.get_env("GITHUB_PERSONAL_ACCESS_TOKEN")
-        }
+    Application.put_env(:pincer, :tokens, final_tokens)
+  end
 
-        final_tokens =
-          tokens
-          |> Enum.filter(fn {_, v} -> v != nil && v != "" end)
-          |> Map.new()
+  defp configure_llm(config, previous_llm) do
+    if llm_config = config["llm"] do
+      merged_llm = Map.merge(previous_llm, llm_config)
+      Application.put_env(:pincer, :llm, merged_llm)
 
-        Application.put_env(:pincer, :tokens, final_tokens)
-
-        if llm_config = config["llm"] do
-          # Merge normalized YAML config into existing Application env
-          merged_llm = Map.merge(previous_llm, llm_config)
-          Application.put_env(:pincer, :llm, merged_llm)
-
-          provider = merged_llm["provider"] || "openrouter"
-          Application.put_env(:pincer, :default_llm_provider, provider)
-          Logger.info("LLM Provider: #{provider}")
-        end
-
-        if intro_config = config["introspection"] do
-          Application.put_env(:pincer, :introspection, intro_config)
-          Logger.info("Introspection Provider: #{intro_config["provider"] || "default LLM"}")
-        end
-
-        if router_config = config["model_router"] do
-          Application.put_env(:pincer, :model_router, router_config)
-        end
-
-        if db_config = config["database"] do
-          current_repo_config = Application.get_env(:pincer, Pincer.Infra.Repo, [])
-
-          ecto_config =
-            db_config
-            |> Enum.map(fn {k, v} -> {String.to_atom(k), v} end)
-            |> Keyword.merge(current_repo_config)
-
-          ecto_config =
-            case db_config["adapter"] do
-              "Ecto.Adapters.PostgreSQL" ->
-                ecto_config
-                |> Keyword.put(:adapter, Ecto.Adapters.Postgres)
-                |> Keyword.put(:types, Pincer.Infra.PostgrexTypes)
-                |> maybe_put_runtime_override(:hostname, "PINCER_DB_HOST")
-                |> maybe_put_runtime_override(:port, "PINCER_DB_PORT", &String.to_integer/1)
-                |> maybe_put_runtime_override(:username, "PINCER_DB_USER")
-                |> maybe_put_runtime_override(:password, "PINCER_DB_PASSWORD")
-                |> maybe_put_runtime_override(:database, "PINCER_DB_NAME")
-                |> maybe_put_runtime_override(
-                  :pool_size,
-                  "PINCER_DB_POOL_SIZE",
-                  &String.to_integer/1
-                )
-                |> maybe_put_runtime_override(
-                  :ssl,
-                  "PINCER_DB_SSL",
-                  &(&1 in ["1", "true", "TRUE"])
-                )
-
-              _ ->
-                ecto_config
-            end
-
-          Application.put_env(:pincer, :repo, ecto_config)
-        end
-
-        :ok
-
-      {:error, reason} ->
-        Logger.error("Fatal error: Failed to load config.yaml: #{inspect(reason)}")
-        :error
+      provider = merged_llm["provider"] || "openrouter"
+      Application.put_env(:pincer, :default_llm_provider, provider)
+      Logger.info("LLM Provider: #{provider}")
     end
+  end
+
+  defp configure_sandbox(config) do
+    sandbox_config = config["sandbox"]
+
+    if is_map(sandbox_config) do
+      Application.put_env(:pincer, :sandbox, sandbox_config)
+    end
+
+    adapter_spec =
+      case System.get_env("PINCER_SANDBOX_ADAPTER") do
+        val when is_binary(val) and val != "" -> String.trim(val)
+        _ -> is_map(sandbox_config) && sandbox_config["adapter"]
+      end
+
+    case resolve_sandbox_module(adapter_spec) do
+      nil -> :ok
+      mod -> Application.put_env(:pincer, :sandbox_adapter, mod)
+    end
+  end
+
+  defp resolve_sandbox_module(spec) when is_binary(spec) do
+    case String.downcase(String.trim(spec)) do
+      "local" -> Module.concat(["Pincer", "Adapters", "Sandbox", "Local"])
+      "docker" -> Module.concat(["Pincer", "Adapters", "Sandbox", "Docker"])
+      "ssh" -> Module.concat(["Pincer", "Adapters", "Sandbox", "SSH"])
+      _ -> safe_existing_module(spec)
+    end
+  end
+
+  defp resolve_sandbox_module(_), do: nil
+
+  defp safe_existing_module(spec) do
+    parts = spec |> String.trim_leading("Elixir.") |> String.split(".", trim: true)
+    if parts != [], do: Module.safe_concat(["Elixir" | parts]), else: nil
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp configure_database(config) do
+    db_config = config["database"]
+    storage_config = config["storage"]
+
+    if db_config do
+      current_repo_config = Application.get_env(:pincer, Pincer.Infra.Repo, [])
+
+      ecto_config =
+        db_config
+        |> Enum.map(fn {k, v} -> {String.to_atom(k), v} end)
+        |> Keyword.merge(current_repo_config)
+
+      ecto_config =
+        case db_config["adapter"] do
+          "Ecto.Adapters.PostgreSQL" ->
+            ecto_config
+            |> Keyword.put(:adapter, Ecto.Adapters.Postgres)
+            |> Keyword.put(:types, Pincer.Infra.PostgrexTypes)
+            |> maybe_put_runtime_override(:hostname, "PINCER_DB_HOST")
+            |> maybe_put_runtime_override(:port, "PINCER_DB_PORT", &String.to_integer/1)
+            |> maybe_put_runtime_override(:username, "PINCER_DB_USER")
+            |> maybe_put_runtime_override(:password, "PINCER_DB_PASSWORD")
+            |> maybe_put_runtime_override(:database, "PINCER_DB_NAME")
+            |> maybe_put_runtime_override(
+              :pool_size,
+              "PINCER_DB_POOL_SIZE",
+              &String.to_integer/1
+            )
+            |> maybe_put_runtime_override(
+              :ssl,
+              "PINCER_DB_SSL",
+              &(&1 in ["1", "true", "TRUE"])
+            )
+
+          _ ->
+            ecto_config
+        end
+
+      Application.put_env(:pincer, :repo, ecto_config)
+    end
+
+    configure_storage_adapter(storage_config, db_config)
+  end
+
+  defp configure_storage_adapter(storage_config, db_config) do
+    env_storage = System.get_env("PINCER_STORAGE")
+
+    storage_adapter =
+      if is_map(storage_config), do: storage_config["adapter"], else: nil
+
+    db_adapter = if is_map(db_config), do: db_config["adapter"], else: nil
+    selected = first_non_empty([env_storage, storage_adapter, db_adapter])
+
+    sqlite_names = [
+      "sqlite",
+      "sqlite3",
+      "ecto.adapters.sqlite3",
+      "pincer.storage.adapters.sqlite"
+    ]
+
+    postgres_names = ["postgres", "postgresql", "pincer.storage.adapters.postgres"]
+
+    normalized =
+      if is_binary(selected), do: selected |> String.trim() |> String.downcase(), else: nil
+
+    cond do
+      normalized in sqlite_names ->
+        Application.put_env(
+          :pincer,
+          :storage_adapter,
+          Module.concat(["Pincer", "Storage", "Adapters", "SQLite"])
+        )
+
+        sqlite_path =
+          first_non_empty([
+            System.get_env("PINCER_SQLITE_PATH"),
+            is_map(storage_config) && storage_config["path"],
+            is_map(db_config) && (db_config["path"] || db_config["database"]),
+            "data/pincer.db"
+          ])
+
+        Application.put_env(:pincer, :sqlite_path, sqlite_path)
+
+      normalized in postgres_names ->
+        Application.put_env(
+          :pincer,
+          :storage_adapter,
+          Module.concat(["Pincer", "Storage", "Adapters", "Postgres"])
+        )
+
+      true ->
+        :ok
+    end
+  end
+
+  defp first_non_empty(candidates) do
+    Enum.find(candidates, fn
+      val when is_binary(val) -> String.trim(val) != ""
+      _ -> false
+    end)
   end
 
   @doc """

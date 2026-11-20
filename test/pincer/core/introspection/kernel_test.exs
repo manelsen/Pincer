@@ -39,6 +39,30 @@ defmodule Pincer.Core.Introspection.KernelTest do
     def chat_completion(_messages, _opts), do: {:error, :timeout}
   end
 
+  defmodule ReflectAndSkillLLMStub do
+    def chat_completion([%{"content" => system_prompt} | _], _opts) do
+      body =
+        if String.contains?(system_prompt, "skill synthesis engine") do
+          Jason.encode!(%{
+            "name" => "kernel-auto-skill",
+            "description" => "Promoted directly from introspection reflection.",
+            "when_to_use" => "When running Elixir verification loops.",
+            "steps" => ["Run mix format", "Run mix test --warnings-as-errors"],
+            "pitfalls" => ["Avoid skipping boundary checks."]
+          })
+        else
+          Jason.encode!(%{
+            focus: "Consolidate verified practices into skills",
+            concerns: [],
+            open_questions: [],
+            summary: "Trace reviewed and lessons consolidated."
+          })
+        end
+
+      {:ok, %{"content" => body}, nil}
+    end
+  end
+
   setup do
     # Clean introspection data
     Pincer.Infra.Repo.delete_all(Pincer.Core.Introspection.Schema)
@@ -354,6 +378,71 @@ defmodule Pincer.Core.Introspection.KernelTest do
       state2 = :sys.get_state(pid)
       # Mood should have moved toward zero
       assert abs(state2.self_state.mood_valence) < abs(v_after_trace)
+    end
+  end
+
+  describe "skill promotion loop" do
+    test "promote_skills/1 generates workspace SKILL.md and broadcasts {:kernel_skills_updated, skill}" do
+      workspace =
+        Path.join(System.tmp_dir!(), "pincer_kernel_promo_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(workspace)
+      on_exit(fn -> File.rm_rf(workspace) end)
+
+      {:ok, lesson} =
+        Pincer.Core.Introspection.LessonStore.create(@agent, %{
+          content: "Always run mix format and mix test before submitting patches.",
+          confidence: 0.9,
+          success_count: 3
+        })
+
+      start_kernel(
+        workspace_path: workspace,
+        introspection_client: ReflectAndSkillLLMStub,
+        skill_promotion_throttle_ms: 0
+      )
+
+      Kernel.register_session(@agent, self())
+      Kernel.promote_skills(@agent)
+
+      assert_receive {:kernel_skills_updated, promoted}, 1_000
+      assert promoted.name == "kernel-auto-skill"
+      assert File.exists?(promoted.path)
+      assert lesson.id in promoted.lesson_ids
+    end
+
+    test "reflection completion automatically promotes eligible lessons when throttle allows" do
+      workspace =
+        Path.join(
+          System.tmp_dir!(),
+          "pincer_kernel_autopromo_#{System.unique_integer([:positive])}"
+        )
+
+      File.mkdir_p!(workspace)
+      on_exit(fn -> File.rm_rf(workspace) end)
+
+      {:ok, _lesson} =
+        Pincer.Core.Introspection.LessonStore.create(@agent, %{
+          content: "Verify boundary exports after adding any new Core submodule.",
+          confidence: 0.88,
+          success_count: 2
+        })
+
+      start_kernel(
+        tick_interval: 40,
+        reflection_throttle_ms: 0,
+        skill_promotion_throttle_ms: 0,
+        workspace_path: workspace,
+        introspection_client: ReflectAndSkillLLMStub
+      )
+
+      Kernel.register_session(@agent, self())
+      trace = %{"steps" => [%{"kind" => "tool"}, %{"kind" => "error"}, %{"kind" => "tool"}]}
+      Kernel.report_trace(@agent, trace)
+
+      assert_receive {:kernel_self_state_updated, _updated}, 1_000
+      assert_receive {:kernel_skills_updated, promoted}, 1_000
+      assert File.exists?(promoted.path)
     end
   end
 end

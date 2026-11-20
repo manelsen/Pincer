@@ -220,3 +220,106 @@ Telegram HTML usage-footer formatting and reasoning delivery options reside in
 `Pincer.Channels.Telegram.ResponseEnvelope` inside `packages/pincer_telegram`,
 keeping `Pincer.Core` transport-agnostic (plain text + structured `%Usage{}`).
 
+---
+
+### 14. Sandbox Execution Port (`Pincer.Ports.Sandbox`)
+
+Hexagonal execution boundary decoupling shell safety policy (`Pincer.Adapters.Tools.SafeShell`
+and `Pincer.Core.WorkspaceGuard`) from where and how validated commands run.
+
+- **Contract (`Pincer.Ports.Sandbox`)**:
+  - `backend_name/0 :: atom()`
+  - `available?/0 :: boolean()`
+  - `run/2 :: (command, opts) -> {:ok, %{output, exit_code, backend, metadata}} | {:error, term()}`
+  - `cleanup/1 :: (scope_id) -> :ok | {:error, term()}`
+- **Environment Security (`Sandbox.validate_env/1`)**:
+  Rejects unsafe loader/shell injection variables (`LD_PRELOAD`, `LD_LIBRARY_PATH`,
+  `DYLD_*`, `BASH_ENV`, `ENV`, `IFS`), malformed names, and non-binary entries before
+  dispatching to any backend.
+- **Pluggable Adapters (`lib/pincer/adapters/sandbox/`)**:
+  1. **`Local`** (default): preserves MCP `ToolRegistry` `"run_command"` delegation by
+     default and supports an opt-in `:os` runner transport (`sh -c` with timeout enforcement
+     and `WorkspaceGuard.confine_path/2` path confinement).
+  2. **`Docker`**: ephemeral hardened container runner (`--rm`, `--cap-drop ALL`,
+     `--security-opt no-new-privileges`, `--pids-limit`, `--memory`, `--cpus`, bounded
+     `/tmp` and `/var/tmp` `--tmpfs` mounts, `--network none` default, confined workspace
+     bind mount, sanitized `pincer-scope` labels, Docker/Podman auto-detection).
+  3. **`SSH`**: hardened remote execution (`BatchMode=yes`, strict host-key checking,
+     option-injection guards rejecting leading `-` hosts/users and invalid ports,
+     ControlMaster multiplexing support, POSIX shell quoting).
+- **Configuration (`config.yaml` / env)**:
+  - `sandbox.adapter`: `"local" | "docker" | "ssh"` (or module name)
+  - `PINCER_SANDBOX_ADAPTER` overrides `config.yaml` at boot.
+
+```elixir
+{:ok, %{output: out, exit_code: 0, backend: :local}} =
+  Pincer.Ports.Sandbox.run("git status", workspace_path: "/path/to/workspace")
+```
+
+### 15. Closed-Loop Introspection → Skill Generation (`Core.Skills.*` + `Introspection.Kernel`)
+
+Closes the self-improvement loop so recurring validated lessons in `Introspection.LessonStore`
+are promoted into reusable workspace `SKILL.md` artifacts and dynamically injected back into
+active agent prompts.
+
+- **Security Gate (`Pincer.Core.Skills.Guard`)**:
+  - Validates skill slug format (`^[a-z0-9][a-z0-9_-]{0,63}$`), YAML frontmatter,
+    description length budget (`<= 512` chars), and body size budget (`<= 16_384` chars).
+  - Runs static security scanning across five threat categories (`exfiltration`,
+    `destructive`, `persistence`, `injection`, and invisible Unicode/bidi control chars)
+    with loopback URL exemption (`localhost` / `127.0.0.1` / `[::1]`).
+  - Enforces a **fail-closed** policy for agent-generated skills (`verdict == :dangerous`
+    blocks installation and leaves disk + lesson metadata untouched).
+- **Promotion Engine (`Pincer.Core.Skills.Generator`)**:
+  - Selects eligible lessons (`active == true`, `confidence >= 0.75`, `success_count >= 2`,
+    and `meta["promoted_skill"] == nil`).
+  - Synthesizes structured `SKILL.md` via `Introspection.Client` (or deterministic fallback
+    when configured), validates with `Skills.Guard.validate_and_scan/2`, confines target
+    path inside `workspaces/<agent>/.pincer/skills/<slug>/SKILL.md` via `WorkspaceGuard`,
+    writes atomically via temp file + `File.rename`, bumps patch semver when updating an
+    existing skill, and records `LessonStore.mark_promoted/2`.
+- **Kernel & Prompt Feedback Loop**:
+  - `Pincer.Core.Introspection.Kernel` exposes `promote_skills/1` and asynchronously checks
+    for promotable lessons after reflection cycles (throttled via
+    `:skill_promotion_throttle_ms`, configurable via `:enable_skill_promotion`).
+  - On promotion, Kernel broadcasts `{:kernel_skills_updated, skill}` to registered
+    `Session.Server` processes, which rebuild the system prompt header immediately using
+    `Pincer.Core.Skills.PromptIndex.build/2` (`Loader.discover/1` + requirements filtering).
+
+### 16. Optional Zero-Infra SQLite Storage (`Pincer.Infra.SQLite` + `Pincer.Storage.Adapters.SQLite`)
+
+Allows booting and running Pincer with zero external database infrastructure using embedded
+`exqlite` SQLite3 + FTS5 + WAL mode, while keeping PostgreSQL + pgvector as the default.
+
+- **Engine (`Pincer.Infra.SQLite`)**:
+  - GenServer owning an `Exqlite.Sqlite3` connection with `PRAGMA foreign_keys = ON`,
+    `PRAGMA busy_timeout = 5000`, and on file-backed DBs `PRAGMA journal_mode = WAL` +
+    `PRAGMA synchronous = NORMAL`.
+  - Runs idempotent DDL initialization on open across core storage tables (`messages`,
+    `messages_fts`, `nodes`, `edges`, `documents_fts`, `checkpoints`, `pairing_states`)
+    and subsystem tables (`self_states`, `lessons`, `cron_jobs`, `audit_log`,
+    `dead_letter_queue`).
+- **Storage Adapter (`Pincer.Storage.Adapters.SQLite`)**:
+  - Implements every callback of `Pincer.Ports.Storage` with Postgres-compatible map/struct
+    contracts, FTS5 full-text search (with safe query quoting and substring fallback), and
+    pure-Elixir cosine similarity over stored float vectors for `search_similar/3`.
+- **Zero-Infra Boot & Secondary Persistence**:
+  - Enabled via `database.adapter: "sqlite"` or `storage.adapter: "sqlite"` in `config.yaml`,
+    or `PINCER_STORAGE=sqlite` (`PINCER_SQLITE_PATH` defaults to `"data/pincer.db"`).
+  - `Pincer.Core.StartupGuard` verifies SQLite parent-dir/file writability and skips
+    PostgreSQL TCP & Ecto migration checks when SQLite mode is active.
+  - `Pincer.Application` starts `Pincer.Infra.SQLite` instead of `Pincer.Infra.Repo`.
+  - `SelfState`, `LessonStore`, `Cron.Storage`, `AuditLog`, `DeadLetterQueue`, and
+    `CircuitBreaker` route cleanly to `Pincer.Infra.SQLite` (or ETS-only for circuit
+    snapshots) when SQLite mode is active.
+
+### 17. Inspiration & Attribution (`~/git/hermes-agent`)
+
+Several security, self-improvement, and embedded-persistence designs in §§14–16 were
+inspired by patterns in Nous Research's Hermes Agent (`~/git/hermes-agent`) and adapted
+idiomatically to Elixir/OTP and Pincer's Hexagonal Boundaries:
+
+1. **Isolated Execution & Conformance (`~/git/hermes-agent/tools/environments/{base,docker,ssh,sandbox_conformance}.py`)** → Inspired `Pincer.Ports.Sandbox`, hardened `Docker` container flags (`--cap-drop ALL`, `no-new-privileges`, bounded `/tmp` & `/var/tmp` tmpfs mounts, default `--network none`, Docker/Podman detection, sanitized tracking labels), hardened `SSH` validation/ControlMaster patterns, and the shared `Pincer.Test.Support.SandboxConformance` contract suite.
+2. **Skill Validation & Threat Guard (`~/git/hermes-agent/tools/{skills_guard,skill_manager_tool}.py`)** → Inspired `Pincer.Core.Skills.Guard` threat categories (`exfiltration`, `destructive`, `persistence`, `injection`, invisible Unicode chars) with loopback exemptions and descriptive-prose safeguards, slug/size budgets, atomic temp-file writes, and fail-closed gating for agent-authored skills generated by `Pincer.Core.Skills.Generator`.
+3. **Zero-Infra SQLite & FTS5 Persistence (`~/git/hermes-agent/persistence/sqlite/{_schema_ddl,_backend}.py`)** → Inspired `Pincer.Infra.SQLite` WAL/busy-timeout pragmas, idempotent startup DDL, FTS5 virtual tables kept synchronized via triggers/mutations, and safe FTS5 query tokenization/quoting in `Pincer.Storage.Adapters.SQLite`.
+

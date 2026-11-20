@@ -72,6 +72,7 @@ defmodule Pincer.Core.PromptAssembly do
       #{if history != "", do: "## SESSION HISTORY:\n#{history}\n", else: ""}
       #{self_state_section(self_state)}
       #{lessons_section(root_agent_id, lesson_store)}
+      #{skills_section(workspace)}
       ## CAPABILITIES & TOOLS:
       You are a technical agent with access to multiple tools through the Model Context Protocol (MCP) and native Elixir integrations.
       You can read and write files, execute shell commands, manage projects, and more.
@@ -326,6 +327,12 @@ defmodule Pincer.Core.PromptAssembly do
         #{items}
         """
     end
+  rescue
+    _ -> ""
+  end
+
+  defp skills_section(workspace_path) do
+    Pincer.Core.Skills.PromptIndex.build(workspace_path)
   rescue
     _ -> ""
   end

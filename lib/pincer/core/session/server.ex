@@ -115,7 +115,7 @@ defmodule Pincer.Core.Session.Server do
 
     AgentPaths.ensure_workspace!(workspace_path, bootstrap?: bootstrap?)
 
-    Introspection.Kernel.ensure_started(root_agent_id)
+    Introspection.Kernel.ensure_started(root_agent_id, workspace_path: workspace_path)
     Introspection.Kernel.register_session(root_agent_id, self())
     self_state = Introspection.Kernel.get_self_state(root_agent_id)
 
@@ -473,6 +473,12 @@ defmodule Pincer.Core.Session.Server do
   @impl true
   def handle_info({:kernel_self_state_updated, self_state}, state) do
     {:noreply, %{state | self_state: self_state}}
+  end
+
+  @impl true
+  def handle_info({:kernel_skills_updated, _skill}, state) do
+    new_history = SessionHistory.swap_system_prompt(state.history, system_prompt(state))
+    {:noreply, %{state | history: new_history}}
   end
 
   @impl true

@@ -13,6 +13,7 @@ defmodule Pincer.Ports do
       UserMenu,
       Tool,
       Cron,
-      Hook
+      Hook,
+      Sandbox
     ]
 end

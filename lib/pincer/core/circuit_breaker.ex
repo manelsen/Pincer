@@ -19,8 +19,9 @@ defmodule Pincer.Core.CircuitBreaker do
 
   require Logger
 
-  alias Pincer.Infra.Repo
   alias Pincer.Infra.CircuitBreakerSnapshot
+  alias Pincer.Infra.Repo
+  alias Pincer.Infra.SQLite
   alias Pincer.Utils.ETSHelper
 
   import Ecto.Query
@@ -178,6 +179,12 @@ defmodule Pincer.Core.CircuitBreaker do
   # --- Persistence helpers ---
 
   defp load_persisted_states do
+    unless SQLite.sqlite_mode?() do
+      do_load_persisted_states()
+    end
+  end
+
+  defp do_load_persisted_states do
     recovery_timeout_ms =
       Application.get_env(:pincer, :circuit_breaker_recovery_ms, @default_recovery_timeout)
 
@@ -214,32 +221,38 @@ defmodule Pincer.Core.CircuitBreaker do
   end
 
   defp persist_snapshot(name, state, failure_count, opened_at) do
-    try do
-      attrs = %{
-        name: name,
-        state: Atom.to_string(state),
-        failure_count: failure_count,
-        last_failure_at: DateTime.utc_now(),
-        opened_at: opened_at
-      }
+    unless SQLite.sqlite_mode?() do
+      try do
+        attrs = %{
+          name: name,
+          state: Atom.to_string(state),
+          failure_count: failure_count,
+          last_failure_at: DateTime.utc_now(),
+          opened_at: opened_at
+        }
 
-      %CircuitBreakerSnapshot{}
-      |> CircuitBreakerSnapshot.changeset(attrs)
-      |> Repo.insert(
-        on_conflict:
-          {:replace, [:state, :failure_count, :last_failure_at, :opened_at, :updated_at]},
-        conflict_target: :name
-      )
-    rescue
-      e -> Logger.warning("CircuitBreaker: could not persist snapshot for #{name}: #{inspect(e)}")
+        %CircuitBreakerSnapshot{}
+        |> CircuitBreakerSnapshot.changeset(attrs)
+        |> Repo.insert(
+          on_conflict:
+            {:replace, [:state, :failure_count, :last_failure_at, :opened_at, :updated_at]},
+          conflict_target: :name
+        )
+      rescue
+        e ->
+          Logger.warning("CircuitBreaker: could not persist snapshot for #{name}: #{inspect(e)}")
+      end
     end
   end
 
   defp delete_snapshot(name) do
-    try do
-      Repo.delete_all(from(s in CircuitBreakerSnapshot, where: s.name == ^name))
-    rescue
-      e -> Logger.warning("CircuitBreaker: could not delete snapshot for #{name}: #{inspect(e)}")
+    unless SQLite.sqlite_mode?() do
+      try do
+        Repo.delete_all(from(s in CircuitBreakerSnapshot, where: s.name == ^name))
+      rescue
+        e ->
+          Logger.warning("CircuitBreaker: could not delete snapshot for #{name}: #{inspect(e)}")
+      end
     end
   end
 end

@@ -62,6 +62,7 @@ defmodule Pincer.Adapters.Tools.SafeShell do
   @behaviour Pincer.Ports.Tool
   alias Pincer.Core.Tooling.CommandProfile
   alias Pincer.Core.WorkspaceGuard
+  alias Pincer.Ports.Sandbox
   require Logger
 
   @max_command_length 1024
@@ -145,7 +146,7 @@ defmodule Pincer.Adapters.Tools.SafeShell do
       approval_granted ->
         Logger.info("[SAFE-SHELL] Pre-approved command: #{command}")
 
-        call_mcp(command,
+        execute_in_sandbox(command,
           workspace_restrict: workspace_restrict,
           workspace_root: workspace_root
         )
@@ -166,7 +167,7 @@ defmodule Pincer.Adapters.Tools.SafeShell do
           {:ok, sanitized_command} ->
             Logger.info("[SAFE-SHELL] Safe command: #{sanitized_command}")
 
-            call_mcp(sanitized_command,
+            execute_in_sandbox(sanitized_command,
               workspace_restrict: workspace_restrict,
               workspace_root: workspace_root
             )
@@ -305,20 +306,34 @@ defmodule Pincer.Adapters.Tools.SafeShell do
     {:error, {:approval_required, command}}
   end
 
-  defp call_mcp(command, opts) do
-    payload =
-      if Keyword.get(opts, :workspace_restrict, false) do
-        %{
-          "command" => command,
-          "cwd" => opts |> Keyword.get(:workspace_root, File.cwd!()) |> Path.expand()
-        }
-      else
-        %{"command" => command}
-      end
+  defp execute_in_sandbox(command, opts) do
+    restrict? = Keyword.get(opts, :workspace_restrict, false)
+    workspace_root = Keyword.get(opts, :workspace_root)
 
-    case Pincer.Ports.ToolRegistry.execute_tool("run_command", payload) do
-      {:ok, result} -> {:ok, result}
-      {:error, reason} -> {:error, "Shell execution failed: #{inspect(reason)}"}
+    sandbox_opts =
+      [restrict_to_workspace: restrict?]
+      |> then(fn acc ->
+        if is_binary(workspace_root) and workspace_root != "" do
+          expanded = Path.expand(workspace_root)
+          acc = Keyword.put(acc, :workspace_path, expanded)
+          if restrict?, do: Keyword.put(acc, :cwd, expanded), else: acc
+        else
+          if restrict?, do: Keyword.put(acc, :cwd, File.cwd!()), else: acc
+        end
+      end)
+
+    case Sandbox.run(command, sandbox_opts) do
+      {:ok, %{output: output, exit_code: 0}} ->
+        {:ok, output}
+
+      {:ok, %{output: output, exit_code: code}} ->
+        {:error, "Command failed (exit #{code}): #{output}"}
+
+      {:error, reason} when is_binary(reason) ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, "Shell execution failed: #{inspect(reason)}"}
     end
   end
 

@@ -61,6 +61,44 @@ defmodule Pincer.Adapters.Tools.SafeShellIntegrationTest do
     assert cwd == Path.expand(root)
   end
 
+  defmodule FakeSandbox do
+    @behaviour Pincer.Ports.Sandbox
+
+    @impl true
+    def backend_name, do: :fake
+
+    @impl true
+    def available?, do: true
+
+    @impl true
+    def run(command, opts) do
+      send(self(), {:sandbox_run, command, opts})
+
+      case Process.get(:fake_sandbox_exit_code, 0) do
+        0 ->
+          {:ok,
+           %{
+             output: "from-sandbox: #{command}",
+             exit_code: 0,
+             backend: :fake,
+             metadata: %{}
+           }}
+
+        code ->
+          {:ok,
+           %{
+             output: "boom",
+             exit_code: code,
+             backend: :fake,
+             metadata: %{}
+           }}
+      end
+    end
+
+    @impl true
+    def cleanup(_scope_id), do: :ok
+  end
+
   test "execute/2 omits cwd when workspace restriction is disabled", %{context: context} do
     assert {:ok, "ok"} =
              SafeShell.execute(
@@ -69,5 +107,33 @@ defmodule Pincer.Adapters.Tools.SafeShellIntegrationTest do
              )
 
     assert_received {:run_command, %{"command" => "pwd"}, %{}}
+  end
+
+  test "execute/2 dispatches through Pincer.Ports.Sandbox adapter and maps non-zero exit code",
+       %{root: root, context: context} do
+    previous_sandbox = Application.get_env(:pincer, :sandbox_adapter)
+    Application.put_env(:pincer, :sandbox_adapter, FakeSandbox)
+
+    on_exit(fn ->
+      Process.delete(:fake_sandbox_exit_code)
+
+      if previous_sandbox do
+        Application.put_env(:pincer, :sandbox_adapter, previous_sandbox)
+      else
+        Application.delete_env(:pincer, :sandbox_adapter)
+      end
+    end)
+
+    assert {:ok, "from-sandbox: ls"} = SafeShell.execute(%{"command" => "ls"}, context)
+
+    assert_received {:sandbox_run, "ls", opts}
+    assert Keyword.get(opts, :cwd) == Path.expand(root)
+    assert Keyword.get(opts, :workspace_path) == Path.expand(root)
+    assert Keyword.get(opts, :restrict_to_workspace) == true
+
+    Process.put(:fake_sandbox_exit_code, 2)
+
+    assert {:error, "Command failed (exit 2): boom"} =
+             SafeShell.execute(%{"command" => "ls"}, context)
   end
 end

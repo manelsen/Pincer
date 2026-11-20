@@ -13,6 +13,8 @@ defmodule Pincer.Core.StartupGuardTest do
     # The check_database/0 tests modify and then delete this key, which
     # would leave the application unable to connect to the DB in subsequent tests.
     original_repo_config = Application.get_env(:pincer, Pincer.Infra.Repo)
+    original_storage = Application.get_env(:pincer, :storage_adapter)
+    original_sqlite_path = Application.get_env(:pincer, :sqlite_path)
 
     on_exit(fn ->
       Application.delete_env(:pincer, :skip_startup_guard)
@@ -23,6 +25,18 @@ defmodule Pincer.Core.StartupGuardTest do
         Application.put_env(:pincer, Pincer.Infra.Repo, original_repo_config)
       else
         Application.delete_env(:pincer, Pincer.Infra.Repo)
+      end
+
+      if original_storage do
+        Application.put_env(:pincer, :storage_adapter, original_storage)
+      else
+        Application.delete_env(:pincer, :storage_adapter)
+      end
+
+      if original_sqlite_path do
+        Application.put_env(:pincer, :sqlite_path, original_sqlite_path)
+      else
+        Application.delete_env(:pincer, :sqlite_path)
       end
     end)
 
@@ -119,6 +133,38 @@ defmodule Pincer.Core.StartupGuardTest do
       Application.put_env(:pincer, :skip_startup_guard, true)
 
       assert {:error, :config_missing, _msg} = StartupGuard.run()
+    end
+
+    test "succeeds in SQLite mode even when PostgreSQL is unreachable" do
+      path = write_tmp_yaml!("database:\n  adapter: sqlite\n")
+      on_exit(fn -> File.rm_rf(path) end)
+
+      db_dir =
+        Path.join(System.tmp_dir!(), "pincer_sg_sqlite_#{System.unique_integer([:positive])}")
+
+      db_path = Path.join(db_dir, "nested/pincer.db")
+      on_exit(fn -> File.rm_rf(db_dir) end)
+
+      Application.put_env(:pincer, :config_path, path)
+      Application.put_env(:pincer, :skip_startup_guard, false)
+      Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
+      Application.put_env(:pincer, :sqlite_path, db_path)
+      Application.put_env(:pincer, Pincer.Infra.Repo, hostname: "127.0.0.1", port: 19_999)
+
+      assert StartupGuard.run() == :ok
+    end
+
+    test "returns {:error, :sqlite_unwritable, _} when SQLite path cannot be created" do
+      blocker =
+        Path.join(System.tmp_dir!(), "pincer_sg_blocker_#{System.unique_integer([:positive])}")
+
+      File.write!(blocker, "not-a-directory")
+      on_exit(fn -> File.rm_rf(blocker) end)
+
+      Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
+      Application.put_env(:pincer, :sqlite_path, Path.join(blocker, "pincer.db"))
+
+      assert {:error, :sqlite_unwritable, _msg} = StartupGuard.check_sqlite()
     end
   end
 

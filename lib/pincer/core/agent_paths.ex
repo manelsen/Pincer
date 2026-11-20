@@ -16,6 +16,7 @@ defmodule Pincer.Core.AgentPaths do
 
   @pincer_dir ".pincer"
   @sessions_dir "sessions"
+  @skills_dir "skills"
   @identity_file "IDENTITY.md"
   @soul_file "SOUL.md"
   @user_file "USER.md"
@@ -143,6 +144,10 @@ defmodule Pincer.Core.AgentPaths do
 
   @spec sessions_dir(String.t()) :: String.t()
   def sessions_dir(workspace_path), do: Path.join(pincer_dir(workspace_path), @sessions_dir)
+
+  @doc "Returns the workspace skills directory (`<workspace>/.pincer/skills`)."
+  @spec skills_dir(String.t()) :: String.t()
+  def skills_dir(workspace_path), do: Path.join(pincer_dir(workspace_path), @skills_dir)
 
   @spec identity_path(String.t()) :: String.t()
   def identity_path(workspace_path), do: Path.join(pincer_dir(workspace_path), @identity_file)

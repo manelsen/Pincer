@@ -25,10 +25,14 @@ pincer-*.tar
 .local/
 
 # Databases
-/db/*.db
-/db/*.db-shm
-/db/*.db-wal
-*db*
+/db/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+*.sqlite3-shm
+*.sqlite3-wal
 
 # Runtime and Logs
 bot.log

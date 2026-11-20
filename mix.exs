@@ -89,6 +89,7 @@ defmodule Pincer.MixProject do
       {:ecto_sql, "~> 3.11"},
       {:postgrex, "~> 0.19"},
       {:pgvector, "~> 0.3"},
+      {:exqlite, "~> 0.34"},
 
       # Channel plugins (monorepo path deps)
       {:pincer_ports, path: "packages/pincer_ports", override: true},

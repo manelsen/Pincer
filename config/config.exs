@@ -8,6 +8,7 @@ config :telegex,
   caller_adapter: {Finch, [name: Pincer.Finch]}
 
 config :pincer, :storage_adapter, Pincer.Storage.Adapters.Postgres
+config :pincer, :sandbox_adapter, Pincer.Adapters.Sandbox.Local
 
 config :pincer, :llm_providers, %{
   "google" => %{

@@ -5,6 +5,7 @@ defmodule Pincer.Infra do
       PubSub,
       Config,
       Repo,
+      SQLite,
       CircuitBreakerSnapshot
     ]
 end
