@@ -16,7 +16,7 @@ defmodule PincerLine.MixProject do
       description: "LINE Messaging API channel adapter for the Pincer AI agent framework",
       package: [
         name: "pincer_line", licenses: ["MIT"], maintainers: ["Micelio"], links: %{"GitHub" => "https://github.com/manelsen/Pincer"},
-        files: ["lib", "mix.exs", "README.md", "LICENSE"]
+        files: ["lib", "priv/pincer_plugin.yaml", "mix.exs", "README.md", "LICENSE"]
       ]
     ]
   end

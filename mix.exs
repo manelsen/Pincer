@@ -2,7 +2,7 @@ defmodule Pincer.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/micelio/pincer"
+  @source_url "https://github.com/manelsen/Pincer"
   @hex_url "https://hex.pm/packages/pincer"
 
   def project do
@@ -168,9 +168,9 @@ defmodule Pincer.MixProject do
       links: %{
         "GitHub" => @source_url,
         "HexDocs" => @hex_url <> "/docs",
-        "Changelog" => @source_url <> "/blob/main/CHANGELOG.md"
+        "Changelog" => @source_url <> "/blob/master/CHANGELOG.md"
       },
-      files: ~w(lib .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
+      files: ~w(lib priv .formatter.exs mix.exs README.md LICENSE CHANGELOG.md)
     ]
   end
 
@@ -188,72 +188,29 @@ defmodule Pincer.MixProject do
     [
       "README.md": [title: "Getting Started"],
       "CHANGELOG.md": [title: "Changelog"],
-      "SOUL.md": [title: "Philosophy"],
-      "AGENTS.md": [title: "Development Protocol"]
+      "SPECS.md": [title: "Specifications"],
+      "AGENTS.md": [title: "Development Protocol"],
+      "SECURITY.md": [title: "Security Policy"],
+      "CONTRIBUTING.md": [title: "Contributing"],
+      "CODE_OF_CONDUCT.md": [title: "Code of Conduct"],
+      LICENSE: [title: "License"]
     ]
   end
 
   defp groups_for_modules do
     [
-      Core: [
-        Pincer,
-        Pincer.Tool,
-        Pincer.Core.Executor,
-        Pincer.Core.SubAgentProgress
-      ],
-      Session: [
-        Pincer.Session.Server,
-        Pincer.Session.Supervisor,
-        Pincer.Session.Logger
-      ],
-      LLM: [
-        Pincer.LLM.Client
-      ],
-      MCP: [
-        Pincer.Connectors.MCP.Manager,
-        Pincer.Connectors.MCP.Client,
-        Pincer.Connectors.MCP.Transport,
-        Pincer.Connectors.MCP.Transports.Stdio
-      ],
-      Tools: [
-        Pincer.Tools.FileSystem,
-        Pincer.Tools.SafeShell,
-        Pincer.Tools.Web,
-        Pincer.Tools.GitHub,
-        Pincer.Tools.Scheduler,
-        Pincer.Tools.Orchestrator,
-        Pincer.Tools.GraphMemory
-      ],
-      Orchestration: [
-        Pincer.Orchestration.Blackboard,
-        Pincer.Orchestration.SubAgent,
-        Pincer.Orchestration.Scheduler,
-        Pincer.Orchestration.Archivist
-      ],
-      Channels: [
-        Pincer.Channel,
-        Pincer.Channels.Telegram,
-        Pincer.Channels.CLI,
-        Pincer.Channels.Webhook,
-        Pincer.Channels.Factory,
-        Pincer.Channels.Supervisor
-      ],
-      Storage: [
-        Pincer.Storage,
-        Pincer.Storage.Port,
-        Pincer.Storage.Message,
-        Pincer.Storage.Adapters.Postgres,
-        Pincer.Storage.Adapters.Graph,
-        Pincer.Storage.Graph.Node,
-        Pincer.Storage.Graph.Edge
-      ],
-      Infrastructure: [
-        Pincer.Config,
-        Pincer.Infra.PubSub,
-        Pincer.Cron.Scheduler,
-        Pincer.Cron.Job,
-        Pincer.Cron.Storage
-      ]
+      Core: ~r/^Pincer\.Core(?:\.(?!Session|Introspection|Skills|Orchestration|Project).*)?$/,
+      Session: ~r/^Pincer\.Core\.Session\b/,
+      "Introspection & Skills": ~r/^Pincer\.Core\.(Introspection|Skills)\b/,
+      "Orchestration & Projects": ~r/^Pincer\.Core\.(Orchestration|Project)\b/,
+      Ports: ~r/^Pincer\.Ports\b/,
+      Tools: ~r/^Pincer\.Adapters\.Tools\b/,
+      Sandbox: ~r/^Pincer\.Adapters\.Sandbox\b/,
+      MCP: ~r/^Pincer\.Adapters\.Connectors\.MCP\b/,
+      Channels: ~r/^Pincer\.Channels\b/,
+      LLM: ~r/^Pincer\.LLM\b/,
+      Storage: ~r/^Pincer\.Storage\b/,
+      Infrastructure: ~r/^Pincer\.(Infra|Telemetry|Plugin|Adapters\.(Cron|Health))\b/
     ]
   end
 end

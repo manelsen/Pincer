@@ -2,7 +2,7 @@ defmodule PincerPorts.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/micelio/pincer_ports"
+  @source_url "https://github.com/manelsen/Pincer"
 
   def project do
     [

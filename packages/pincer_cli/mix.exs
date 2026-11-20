@@ -2,7 +2,7 @@ defmodule PincerCLI.MixProject do
   use Mix.Project
 
   @version "0.1.0"
-  @source_url "https://github.com/micelio/pincer_cli"
+  @source_url "https://github.com/manelsen/Pincer"
 
   def project do
     [
@@ -32,7 +32,7 @@ defmodule PincerCLI.MixProject do
       licenses: ["MIT"],
       maintainers: ["Micelio"],
       links: %{"GitHub" => @source_url},
-      files: ["lib", "mix.exs", "README.md", "LICENSE"]
+      files: ["lib", "priv/pincer_plugin.yaml", "mix.exs", "README.md", "LICENSE"]
     ]
   end
 end
