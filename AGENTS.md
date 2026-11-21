@@ -113,16 +113,26 @@ PINCER_WHATSAPP=1 mix test --warnings-as-errors \
 Toolchain: `mise.toml` pins Elixir 1.19.5 / OTP 27 (plus Go); `.tool-versions` and CI use
 Elixir 1.18 / OTP 27.2; `mix.exs` only requires `~> 1.14`.
 
-**Long commands land in a background job in this environment.** The Crush config sets
-`options.auto_background_after` to 2 seconds, so anything slower than that (including
-`mix test` and `mix compile --force`) returns a job ID instead of blocking. Read output
-with `job_output` (pass `wait: true` when the result is what you need next) and stop
-runaway jobs with `job_kill`; do not assume a command finished just because the call
-returned.
+**Pick the bash execution mode per call.** The bash tool blocks for 60 seconds by
+default; that threshold is a per-call parameter (`auto_background_after`), not a global
+Crush setting, so there is nothing to configure once:
 
-When driving long commands yourself, prefer `run_in_background: true` over an implicit
-auto-background, and wrap any script that loops over files in `timeout <seconds>` -
-a runaway loop otherwise burns the whole turn.
+| Command | Mode |
+|---|---|
+| Known-trivial (`git status`, `grep`, `ls`, `wc`) | synchronous |
+| Unknown duration | `auto_background_after: 10` |
+| Known-slow (`mix test`, `mix compile --force`, repo-wide scans) | `run_in_background: true` |
+
+Read results with `job_output` (`wait: true` when the result is the next step) and stop
+runaway jobs with `job_kill`; do not assume a command finished because the call returned.
+`Esc` cancels a running command (`Ctrl-C` only opens the quit dialog), which is why
+synchronous mode is acceptable for the trivial cases.
+
+Commands that read stdin (password prompts, `sudo`, interactive generators) obey neither
+the timer nor `Esc`, because the process stays alive waiting for input. Never start one.
+
+Always scope expensive commands: wrap loops in `timeout <seconds>`, and never start an
+unbounded scan such as `find /` - it burns the whole turn for no result.
 
 ---
 
