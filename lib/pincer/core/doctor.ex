@@ -419,7 +419,9 @@ defmodule Pincer.Core.Doctor do
   defp do_llm_provider_checks_trimmed("", _env_fetcher), do: []
 
   defp do_llm_provider_checks_trimmed(provider_id, env_fetcher) do
-    provider_registry = Application.get_env(:pincer, :llm_providers, %{})
+    # get_env only applies its default when the key is absent, so a nil value
+    # (left by a test or a failed reload) must be treated as "no registry".
+    provider_registry = Application.get_env(:pincer, :llm_providers) || %{}
 
     case Map.get(provider_registry, provider_id) do
       nil ->

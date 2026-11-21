@@ -15,6 +15,7 @@ defmodule Pincer.Core.Session.AdapterTest do
     def set_verbose(sid, v), do: {:set_verbose, sid, v}
     def set_usage(sid, level), do: {:set_usage, sid, level}
     def approve_all(sid, seconds), do: {:approve_all, sid, seconds}
+    def resolve(channel, ctx, cfg), do: {:resolve, channel, ctx, cfg}
     def start_session(sid, opts), do: {:start_session, sid, opts}
     def stop_session(sid), do: {:stop_session, sid}
     def ensure_started(sid, opts), do: {:ensure_started, sid, opts}
@@ -31,6 +32,13 @@ defmodule Pincer.Core.Session.AdapterTest do
     for {fun, arity} <- Pincer.Ports.Session.behaviour_info(:callbacks) do
       assert function_exported?(Adapter, fun, arity),
              "Adapter does not implement #{fun}/#{arity}"
+    end
+  end
+
+  test "the test double covers every port callback" do
+    for {fun, arity} <- Pincer.Ports.Session.behaviour_info(:callbacks) do
+      assert function_exported?(Stub, fun, arity),
+             "Stub does not implement #{fun}/#{arity} - update it with the port"
     end
   end
 

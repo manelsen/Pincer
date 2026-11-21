@@ -21,7 +21,12 @@ unless sqlite_mode? do
   Mix.Task.run("ecto.migrate", ["--quiet"])
 end
 
-excludes = if sqlite_mode?, do: [:docker], else: [:docker, :sqlite_smoke]
+# :chaos and :stress are load/performance suites: they assert on latency and
+# must not compete with the rest of the suite. Run them explicitly with
+# `mix test --only chaos` / `--only stress`.
+excludes =
+  if sqlite_mode?, do: [:docker, :chaos, :stress], else: [:docker, :sqlite_smoke, :chaos, :stress]
+
 ExUnit.start(exclude: excludes)
 
 # Mock credentials

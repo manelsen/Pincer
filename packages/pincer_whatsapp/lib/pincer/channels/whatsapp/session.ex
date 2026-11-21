@@ -11,7 +11,6 @@ defmodule Pincer.Channels.WhatsApp.Session do
   WhatsApp session worker that forwards session PubSub events to a chat ID.
   """
   use Pincer.Ports.Channel
-  alias Pincer.Core.ChannelEventPolicy
   alias Pincer.Core.ProjectFlowDelivery
 
   @impl Pincer.Ports.Channel
@@ -112,7 +111,7 @@ defmodule Pincer.Channels.WhatsApp.Session do
   def on_agent_error(text, state) do
     Pincer.Channels.WhatsApp.send_message(
       state.chat_id,
-      ChannelEventPolicy.error_message(:whatsapp, text)
+      Pincer.Ports.ChannelPolicy.error_message(:whatsapp, text)
     )
 
     maybe_recover_project_flow(state)

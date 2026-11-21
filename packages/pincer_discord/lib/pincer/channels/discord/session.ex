@@ -17,8 +17,6 @@ defmodule Pincer.Channels.Discord.Session do
   One process per active Discord channel that listens to PubSub and sends messages via Nostrum.
   """
   use Pincer.Ports.Channel
-  alias Pincer.Core.ChannelEventPolicy
-  alias Pincer.Core.ChannelInteractionPolicy
   alias Pincer.Core.ProjectFlowDelivery
   alias Pincer.Core.StatusDelivery
   alias Pincer.Core.StatusMessagePolicy
@@ -136,7 +134,7 @@ defmodule Pincer.Channels.Discord.Session do
   def on_agent_error(text, state) do
     Pincer.Channels.Discord.send_message(
       "#{state.channel_id}",
-      ChannelEventPolicy.error_message(:discord, text)
+      Pincer.Ports.ChannelPolicy.error_message(:discord, text)
     )
 
     maybe_recover_project_flow(state)
@@ -145,7 +143,7 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def on_agent_status(text, state) do
-    if ChannelEventPolicy.status_kind(text) == :subagent do
+    if Pincer.Ports.ChannelPolicy.status_kind(text) == :subagent do
       deliver_subagent_status(state, text)
     else
       Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
@@ -170,7 +168,7 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def on_approval_ui(_call_id, command, state) do
-    text = ChannelEventPolicy.approval_message(:discord, command)
+    text = Pincer.Ports.ChannelPolicy.approval_message(:discord, command)
     components = build_approval_components()
     Pincer.Channels.Discord.send_message("#{state.channel_id}", text, components: components)
     state
@@ -208,7 +206,7 @@ defmodule Pincer.Channels.Discord.Session do
 
   defp build_approval_components do
     buttons =
-      ChannelInteractionPolicy.approval_button_spec()
+      Pincer.Ports.ChannelPolicy.approval_button_spec()
       |> Enum.with_index()
       |> Enum.map(fn {{label, payload}, idx} ->
         style = if idx == 0, do: 3, else: 4

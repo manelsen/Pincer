@@ -17,8 +17,6 @@ defmodule Pincer.Channels.Telegram.Session do
   """
   use Pincer.Ports.Channel
   alias Pincer.Channels.Telegram.ResponseEnvelope
-  alias Pincer.Core.ChannelEventPolicy
-  alias Pincer.Core.ChannelInteractionPolicy
   alias Pincer.Core.ProjectFlowDelivery
   alias Pincer.Core.StatusDelivery
   alias Pincer.Core.SubAgentProgress
@@ -161,7 +159,7 @@ defmodule Pincer.Channels.Telegram.Session do
   def on_agent_error(text, state) do
     Pincer.Channels.Telegram.send_message(
       state.chat_id,
-      ChannelEventPolicy.error_message(:telegram, text)
+      Pincer.Ports.ChannelPolicy.error_message(:telegram, text)
     )
 
     maybe_recover_project_flow(state)
@@ -170,7 +168,7 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def on_agent_status(text, state) do
-    if ChannelEventPolicy.status_kind(text) == :subagent,
+    if Pincer.Ports.ChannelPolicy.status_kind(text) == :subagent,
       do: state,
       else: deliver_status(state, text)
   end
@@ -208,10 +206,10 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def on_approval_ui(_call_id, command, state) do
-    text = ChannelEventPolicy.approval_message(:telegram, command)
+    text = Pincer.Ports.ChannelPolicy.approval_message(:telegram, command)
 
     buttons =
-      ChannelInteractionPolicy.approval_button_spec()
+      Pincer.Ports.ChannelPolicy.approval_button_spec()
       |> Enum.map(fn {label, payload} ->
         %Telegex.Type.InlineKeyboardButton{text: label, callback_data: payload}
       end)

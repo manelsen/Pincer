@@ -5,7 +5,6 @@ defmodule Pincer.Channels.WhatsApp do
     Pincer.Core.ProjectRouter,
     Pincer.Ports.Session.registry(),
     Pincer.Core.SessionResolver,
-    Pincer.Core.UX,
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM
   ]}
@@ -21,11 +20,6 @@ defmodule Pincer.Channels.WhatsApp do
   require Logger
 
   alias Pincer.Channels.Shared.Inbound
-  alias Pincer.Core.Policy
-  alias Pincer.Core.Pairing
-  alias Pincer.Core.ProjectRouter
-  alias Pincer.Core.SessionResolver
-  alias Pincer.Core.UX
 
   @default_bridge_module Pincer.Channels.WhatsApp.Bridge.Adapter
   @max_outbound_chunk_chars 3500
@@ -195,8 +189,8 @@ defmodule Pincer.Channels.WhatsApp do
     }
 
     Inbound.dispatch(inbound,
-      resolve_shortcut: &UX.resolve_shortcut/1,
-      continue_project: &ProjectRouter.continue_if_collecting/3
+      resolve_shortcut: &Pincer.Ports.UX.resolve_shortcut/1,
+      continue_project: &Pincer.Ports.Project.continue_if_collecting/3
     )
   end
 
@@ -239,7 +233,7 @@ defmodule Pincer.Channels.WhatsApp do
   end
 
   defp maybe_start_project_execution(chat_id, session_context, state) do
-    case ProjectRouter.kickoff(session_context.session_id) do
+    case Pincer.Ports.Project.kickoff(session_context.session_id) do
       {:ok, kickoff} ->
         with :ok <- ensure_session_started(state, session_context),
              :ok <-
@@ -281,23 +275,23 @@ defmodule Pincer.Channels.WhatsApp do
         deliver_message(state, chat_id, "Pong!")
 
       "/menu" ->
-        deliver_message(state, chat_id, UX.help_text(:generic))
+        deliver_message(state, chat_id, Pincer.Ports.UX.help_text(:generic))
 
       "/help" ->
-        deliver_message(state, chat_id, UX.help_text(:generic))
+        deliver_message(state, chat_id, Pincer.Ports.UX.help_text(:generic))
 
       "/commands" ->
-        deliver_message(state, chat_id, UX.help_text(:generic))
+        deliver_message(state, chat_id, Pincer.Ports.UX.help_text(:generic))
 
       "/status" ->
         deliver_message(state, chat_id, build_status(state, session_id))
 
       "/kanban" ->
-        deliver_message(state, chat_id, ProjectRouter.kanban(session_id))
+        deliver_message(state, chat_id, Pincer.Ports.Project.kanban(session_id))
 
       "/project" ->
         seed = if args == "", do: nil, else: args
-        deliver_message(state, chat_id, ProjectRouter.project(session_id, seed))
+        deliver_message(state, chat_id, Pincer.Ports.Project.project(session_id, seed))
         maybe_start_project_execution(chat_id, session_context, state)
 
       "/models" ->
@@ -314,7 +308,7 @@ defmodule Pincer.Channels.WhatsApp do
         deliver_message(
           state,
           chat_id,
-          "Unknown command: #{command}\n#{UX.unknown_command_hint()}"
+          "Unknown command: #{command}\n#{Pincer.Ports.UX.unknown_command_hint()}"
         )
     end
   end
@@ -352,7 +346,7 @@ defmodule Pincer.Channels.WhatsApp do
       true ->
         code = String.trim(args)
 
-        case Pairing.approve_code(:whatsapp, sender_id, code) do
+        case Pincer.Ports.ChannelPolicy.approve_code(:whatsapp, sender_id, code) do
           :ok ->
             deliver_message(
               state,
@@ -501,14 +495,14 @@ defmodule Pincer.Channels.WhatsApp do
         true -> "unknown"
       end
 
-    case Policy.allow?(:dm_access, %{channel: :whatsapp, sender_id: candidate_id, config: config}) do
+    case Pincer.Ports.ChannelPolicy.allow?(:dm_access, %{channel: :whatsapp, sender_id: candidate_id, config: config}) do
       {:allow, _meta} -> :allow
       {:deny, %{user_message: message}} -> {:deny, message}
     end
   end
 
   defp resolve_session_context(chat_id, sender_id, is_group, config) do
-    SessionResolver.resolve(
+    Pincer.Ports.Session.resolve(
       :whatsapp,
       %{
         chat_id: chat_id,

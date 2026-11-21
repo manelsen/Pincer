@@ -11,9 +11,6 @@ defmodule Pincer.Channels.Telegram do
     Pincer.Core.SessionResolver,
     Pincer.Core.Structs.IncomingMessage,
     Pincer.Core.Telemetry,
-    Pincer.Core.UX,
-    Pincer.Core.UX.MenuPolicy,
-    Pincer.Core.UX.ModelKeyboard,
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM,
     Pincer.Utils.Text,
@@ -94,8 +91,6 @@ defmodule Pincer.Channels.Telegram do
   use Supervisor
   @behaviour Pincer.Ports.Channel
   require Logger
-  alias Pincer.Core.UX
-  alias Pincer.Core.UX.MenuPolicy
   alias Pincer.Utils.Text
 
   @file_extensions ~w(md go py pl sh am at be cc)
@@ -473,7 +468,7 @@ defmodule Pincer.Channels.Telegram do
 
   @doc false
   def register_commands do
-    policy = MenuPolicy.registerable_commands(:telegram, UX.commands())
+    policy = Pincer.Ports.UX.registerable_commands(:telegram, Pincer.Ports.UX.commands())
 
     Enum.each(policy.issues, fn issue ->
       Logger.warning("[TELEGRAM] Command policy issue: #{issue}")
@@ -501,7 +496,7 @@ defmodule Pincer.Channels.Telegram do
     case menu_keyboard_mode(Application.get_env(:pincer, :telegram_channel_config, %{})) do
       :persistent ->
         %{
-          keyboard: [[%{text: UX.menu_button_label()}]],
+          keyboard: [[%{text: Pincer.Ports.UX.menu_button_label()}]],
           resize_keyboard: true,
           one_time_keyboard: false,
           is_persistent: true
@@ -589,9 +584,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     Pincer.Core.SessionResolver,
     Pincer.Core.Structs.IncomingMessage,
     Pincer.Core.Telemetry,
-    Pincer.Core.UX,
-    Pincer.Core.UX.MenuPolicy,
-    Pincer.Core.UX.ModelKeyboard,
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM,
     Req
@@ -641,13 +633,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   use GenServer
   require Logger
-  alias Pincer.Core.Policy
-  alias Pincer.Core.ChannelInteractionPolicy
-  alias Pincer.Core.Pairing
-  alias Pincer.Core.ProjectOrchestrator
-  alias Pincer.Core.ProjectRouter
   alias Pincer.Core.Telemetry, as: CoreTelemetry
-  alias Pincer.Core.UX
 
   @base_poll_interval 1000
   @max_poll_interval 30_000
@@ -795,7 +781,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         CoreTelemetry.emit_error(reason, %{component: :telegram_poller, failures: next_failures})
         interval_ms = next_poll_interval(next_failures)
 
-        if Policy.classify(:transient, %{reason: reason}) do
+        if Pincer.Ports.ChannelPolicy.classify(:transient, %{reason: reason}) do
           Logger.warning(
             "Telegram polling error: #{inspect(reason)}. Next interval: #{interval_ms}ms"
           )
@@ -878,8 +864,8 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       }
 
       Inbound.dispatch(inbound,
-        resolve_shortcut: &UX.resolve_shortcut/1,
-        continue_project: &ProjectRouter.continue_if_collecting/3
+        resolve_shortcut: &Pincer.Ports.UX.resolve_shortcut/1,
+        continue_project: &Pincer.Ports.Project.continue_if_collecting/3
       )
     end
   end
@@ -1345,7 +1331,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp handle_command(chat_id, "/menu", _text, _chat_type) do
-    Pincer.Channels.Telegram.send_message(chat_id, UX.help_text(:telegram),
+    Pincer.Channels.Telegram.send_message(chat_id, Pincer.Ports.UX.help_text(:telegram),
       reply_markup: Pincer.Channels.Telegram.menu_reply_markup()
     )
   end
@@ -1373,13 +1359,13 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   defp handle_command(chat_id, "/kanban", _text, chat_type) do
     session_id = session_context_for_chat(chat_id, chat_type).session_id
-    Pincer.Channels.Telegram.send_message(chat_id, ProjectRouter.kanban(session_id))
+    Pincer.Channels.Telegram.send_message(chat_id, Pincer.Ports.Project.kanban(session_id))
   end
 
   defp handle_command(chat_id, "/project", text, chat_type) do
     context = session_context_for_chat(chat_id, chat_type)
     session_id = context.session_id
-    response = ProjectRouter.project(session_id, text)
+    response = Pincer.Ports.Project.project(session_id, text)
     send_project_message(chat_id, session_id, response)
     maybe_start_project_execution(chat_id, context)
   end
@@ -1400,7 +1386,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     session_id = context.session_id
     ensure_session_started(context)
 
-    case Pincer.Core.ProjectRouter.handle_command(:status, nil, session_id) do
+    case Pincer.Ports.Project.handle_command(:status, nil, session_id) do
       {:ok, msg} -> Pincer.Channels.Telegram.send_message(chat_id, msg)
       {:error, reason} -> Pincer.Channels.Telegram.send_message(chat_id, "❌ #{reason}")
     end
@@ -1526,7 +1512,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp handle_command(chat_id, cmd, _text, _chat_type) do
     Pincer.Channels.Telegram.send_message(
       chat_id,
-      "❓ Unknown command: <code>#{cmd}</code>\n#{UX.unknown_command_hint()}",
+      "❓ Unknown command: <code>#{cmd}</code>\n#{Pincer.Ports.UX.unknown_command_hint()}",
       reply_markup: Pincer.Channels.Telegram.menu_reply_markup()
     )
   end
@@ -1537,13 +1523,13 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     session_id = context.session_id
     ensure_session_started(context)
 
-    case ChannelInteractionPolicy.parse(:telegram, payload) do
+    case Pincer.Ports.ChannelPolicy.parse(:telegram, payload) do
       {:ok, {:page, provider_id, page}} ->
         models = Pincer.Ports.LLM.list_models(provider_id)
         current_model = current_model_for_session(session_id)
 
         buttons =
-          Pincer.Core.UX.ModelKeyboard.build_keyboard(
+          Pincer.Ports.UX.build_keyboard(
             :telegram,
             provider_id,
             models,
@@ -1568,7 +1554,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         current_model = current_model_for_session(session_id)
 
         buttons =
-          Pincer.Core.UX.ModelKeyboard.build_keyboard(
+          Pincer.Ports.UX.build_keyboard(
             :telegram,
             provider_id,
             models,
@@ -1692,7 +1678,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       code ->
         old_session_id = session_context_for_chat(chat_id, "private").session_id
 
-        case Pairing.approve_code(:telegram, chat_id, code) do
+        case Pincer.Ports.ChannelPolicy.approve_code(:telegram, chat_id, code) do
           :ok ->
             Pincer.Ports.Session.stop_session(old_session_id)
             Pincer.Channels.Telegram.send_message(chat_id, pairing_success_message(chat_id))
@@ -1733,7 +1719,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp authorize_private_dm(chat_id, "private") do
     policy_config = Application.get_env(:pincer, :telegram_channel_config, %{})
 
-    case Policy.allow?(:dm_access, %{
+    case Pincer.Ports.ChannelPolicy.allow?(:dm_access, %{
            channel: :telegram,
            sender_id: chat_id,
            config: policy_config
@@ -1758,7 +1744,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp session_context_for_chat(chat_id, chat_type) do
     channel_config = Application.get_env(:pincer, :telegram_channel_config, %{})
 
-    Pincer.Core.SessionResolver.resolve(
+    Pincer.Ports.Session.resolve(
       :telegram,
       %{chat_id: chat_id, chat_type: chat_type},
       channel_config
@@ -1785,7 +1771,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp pairing_success_message(chat_id) do
-    bound_agent_id = Pairing.bound_agent_id(:telegram, chat_id)
+    bound_agent_id = Pincer.Ports.ChannelPolicy.bound_agent_id(:telegram, chat_id)
 
     cond do
       is_nil(bound_agent_id) ->
@@ -1797,7 +1783,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp maybe_start_project_execution(chat_id, %Pincer.Core.Session.Context{} = context) do
-    case ProjectRouter.kickoff(context.session_id) do
+    case Pincer.Ports.Project.kickoff(context.session_id) do
       {:ok, kickoff} ->
         ensure_session_started(context)
         Pincer.Channels.Telegram.Session.ensure_started(chat_id, context.session_id)
@@ -1844,7 +1830,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp project_reply_markup(session_id) do
-    case ProjectOrchestrator.phase(session_id) do
+    case Pincer.Ports.Project.phase(session_id) do
       :await_kind ->
         %{
           keyboard: [[%{text: "software"}, %{text: "nao-software"}]],
@@ -1860,7 +1846,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp build_provider_buttons(providers) do
     providers
     |> Enum.reduce([], fn provider, acc ->
-      case ChannelInteractionPolicy.provider_selector_id(:telegram, provider.id) do
+      case Pincer.Ports.ChannelPolicy.provider_selector_id(:telegram, provider.id) do
         {:ok, callback_data} ->
           [[%{text: provider.name, callback_data: callback_data}] | acc]
 

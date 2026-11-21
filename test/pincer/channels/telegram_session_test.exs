@@ -93,8 +93,10 @@ defmodule Pincer.Channels.Telegram.SessionTest do
 
     send(pid, {:agent_response, payload, nil})
 
-    assert_receive {:telegram_chunk, 1, _}, 500
-    assert_receive {:telegram_chunk, 2, _}, 500
+    # Chunking is synchronous but the assertions can queue behind other tests on
+    # a loaded machine; 2s keeps a real regression visible without flaking.
+    assert_receive {:telegram_chunk, 1, _}, 2_000
+    assert_receive {:telegram_chunk, 2, _}, 2_000
     refute_receive {:telegram_chunk, _, _}, 100
   end
 

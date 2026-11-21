@@ -160,7 +160,7 @@ defmodule Pincer.Core.Onboard do
     command_checker = Keyword.get(opts, :command_checker, &command_available?/1)
 
     llm_providers =
-      Keyword.get(opts, :llm_providers, Application.get_env(:pincer, :llm_providers, %{}))
+      Keyword.get(opts, :llm_providers, Application.get_env(:pincer, :llm_providers) || %{})
 
     checks =
       channel_token_checks(config, env_fetcher) ++

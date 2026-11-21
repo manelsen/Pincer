@@ -38,6 +38,13 @@ defmodule Pincer.Core.Session.Adapter do
   def set_usage(session_id, level), do: Server.set_usage(session_id, level)
 
   @impl true
+  def approve_all(session_id, seconds), do: Server.approve_all(session_id, seconds)
+
+  @impl true
+  def resolve(channel, context, channel_config),
+    do: Pincer.Core.SessionResolver.resolve(channel, context, channel_config)
+
+  @impl true
   def start_session(session_id, opts), do: Supervisor.start_session(session_id, opts)
 
   @impl true

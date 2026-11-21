@@ -32,6 +32,7 @@ defmodule Pincer.Ports.Session do
   @callback set_verbose(String.t(), boolean()) :: term()
   @callback set_usage(String.t(), term()) :: term()
   @callback approve_all(String.t(), non_neg_integer()) :: term()
+  @callback resolve(atom(), map(), map()) :: term()
   @callback start_session(String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
   @callback stop_session(String.t()) :: term()
   @callback ensure_started(String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
@@ -64,6 +65,7 @@ defmodule Pincer.Ports.Session do
   def set_verbose(session_id, verbose), do: adapter().set_verbose(session_id, verbose)
   def set_usage(session_id, level), do: adapter().set_usage(session_id, level)
   def approve_all(session_id, seconds \\ 600), do: adapter().approve_all(session_id, seconds)
+  def resolve(channel, context, channel_config \\ %{}), do: adapter().resolve(channel, context, channel_config)
   def start_session(session_id, opts \\ []), do: adapter().start_session(session_id, opts)
   def stop_session(session_id), do: adapter().stop_session(session_id)
   def ensure_started(session_id, opts), do: adapter().ensure_started(session_id, opts)
