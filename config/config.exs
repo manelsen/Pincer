@@ -9,6 +9,7 @@ config :telegex,
 
 config :pincer, :storage_adapter, Pincer.Storage.Adapters.Postgres
 config :pincer, :sandbox_adapter, Pincer.Adapters.Sandbox.Local
+config :pincer, :session_adapter, Pincer.Core.Session.Adapter
 
 config :pincer, :llm_providers, %{
   "google" => %{
