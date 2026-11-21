@@ -8,11 +8,10 @@ defmodule Pincer.Core.Onboard do
   """
 
   @behaviour Pincer.Ports.Onboarding
+  alias Pincer.Core.ConfigProbe
   alias Pincer.Core.Onboard.Defaults
   alias Pincer.Core.Onboard.Preflight
   alias Pincer.Utils.MapHelpers
-
-  @channels_requiring_token MapSet.new(["telegram", "discord", "slack"])
 
   @typedoc "Onboarding file operation."
   @type operation ::
@@ -309,56 +308,45 @@ defmodule Pincer.Core.Onboard do
 
   defp channel_token_checks(config, env_fetcher) do
     config
-    |> read_map_field("channels")
-    |> case do
-      channels when is_map(channels) ->
-        channels
-        |> Enum.map(fn {channel_name, channel_cfg} ->
-          {normalize_channel_name(channel_name), normalize_map(channel_cfg)}
-        end)
-        |> Enum.filter(fn {_channel_name, channel_cfg} -> enabled_channel?(channel_cfg) end)
-        |> Enum.flat_map(fn {channel_name, channel_cfg} ->
-          token_env = channel_cfg |> read_map_field("token_env") |> normalize_string()
+    |> ConfigProbe.enabled_channels()
+    |> Enum.flat_map(fn {channel_name, channel_cfg} ->
+      token_env = ConfigProbe.token_env(channel_cfg)
 
-          cond do
-            token_env != nil and MapHelpers.present?(env_fetcher.(token_env)) ->
-              [
-                assisted_ok(
-                  {:channel_token, channel_name},
-                  "Token env #{token_env} is present for enabled channel #{channel_name}",
-                  "No action required.",
-                  %{channel: channel_name, token_env: token_env}
-                )
-              ]
+      cond do
+        token_env != nil and MapHelpers.present?(env_fetcher.(token_env)) ->
+          [
+            assisted_ok(
+              {:channel_token, channel_name},
+              "Token env #{token_env} is present for enabled channel #{channel_name}",
+              "No action required.",
+              %{channel: channel_name, token_env: token_env}
+            )
+          ]
 
-            token_env != nil ->
-              [
-                assisted_warn(
-                  {:channel_token, channel_name},
-                  "Missing token env #{token_env} for enabled channel #{channel_name}",
-                  "Set #{token_env} in the target runtime environment before starting channels.",
-                  %{channel: channel_name, token_env: token_env}
-                )
-              ]
+        token_env != nil ->
+          [
+            assisted_warn(
+              {:channel_token, channel_name},
+              "Missing token env #{token_env} for enabled channel #{channel_name}",
+              "Set #{token_env} in the target runtime environment before starting channels.",
+              %{channel: channel_name, token_env: token_env}
+            )
+          ]
 
-            token_required_channel?(channel_name) ->
-              [
-                assisted_warn(
-                  {:channel_token, channel_name},
-                  "Enabled channel #{channel_name} requires token_env",
-                  "Add channels.#{channel_name}.token_env to config.yaml and provide that env var.",
-                  %{channel: channel_name}
-                )
-              ]
+        token_required_channel?(channel_name) ->
+          [
+            assisted_warn(
+              {:channel_token, channel_name},
+              "Enabled channel #{channel_name} requires token_env",
+              "Add channels.#{channel_name}.token_env to config.yaml and provide that env var.",
+              %{channel: channel_name}
+            )
+          ]
 
-            true ->
-              []
-          end
-        end)
-
-      _ ->
-        []
-    end
+        true ->
+          []
+      end
+    end)
   end
 
   defp provider_env_checks(config, llm_providers, env_fetcher) do
@@ -542,27 +530,11 @@ defmodule Pincer.Core.Onboard do
 
   defp provider_registry_entry(_registry, _provider_id), do: %{}
 
-  defp normalize_channel_name(channel_name) do
-    channel_name
-    |> to_string()
-    |> String.trim()
-    |> String.downcase()
-  end
-
   defp normalize_map(map) when is_map(map), do: map
   defp normalize_map(_other), do: %{}
 
-  defp enabled_channel?(channel_cfg) do
-    case read_map_field(channel_cfg, "enabled") do
-      true -> true
-      "true" -> true
-      _ -> false
-    end
-  end
-
-  defp token_required_channel?(channel_name) do
-    MapSet.member?(@channels_requiring_token, channel_name)
-  end
+  defp token_required_channel?(channel_name),
+    do: ConfigProbe.token_required_channel?(channel_name)
 
   defp assisted_ok(id, message, hint, meta) do
     %{id: id, severity: :ok, message: message, hint: hint, meta: meta}

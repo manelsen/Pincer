@@ -26,13 +26,12 @@ defmodule Pincer.Core.Doctor do
           run_id: String.t()
         }
 
+  alias Pincer.Core.ConfigProbe
   alias Pincer.Infra.Config
   alias Pincer.Infra.SQLite
   alias Pincer.Utils.MapHelpers
 
   @default_config_file "config.yaml"
-  @channels_requiring_token MapSet.new(["telegram", "discord", "slack"])
-  @dm_capable_channels MapSet.new(["telegram", "discord", "whatsapp"])
 
   @doc """
   Runs doctor checks and returns a structured report.
@@ -521,69 +520,14 @@ defmodule Pincer.Core.Doctor do
     end)
   end
 
-  defp channels(config) when is_map(config) do
-    case MapHelpers.read_field(config, :channels) do
-      map when is_map(map) ->
-        map
-        |> Enum.map(fn {name, cfg} ->
-          {normalize_channel_name(name), normalize_config_map(cfg)}
-        end)
+  defp channels(config), do: ConfigProbe.channels(config)
 
-      _ ->
-        []
-    end
-  end
+  defp token_required_channel?(channel_name),
+    do: ConfigProbe.token_required_channel?(channel_name)
 
-  defp token_required_channel?(channel_name) do
-    MapSet.member?(@channels_requiring_token, channel_name)
-  end
-
-  defp dm_capable_channel?(channel_name) do
-    MapSet.member?(@dm_capable_channels, channel_name)
-  end
-
-  defp enabled?(cfg) when is_map(cfg) do
-    case MapHelpers.read_field(cfg, :enabled) do
-      true -> true
-      "true" -> true
-      _ -> false
-    end
-  end
-
-  defp enabled?(_), do: false
-
-  defp normalize_dm_mode(nil), do: :missing
-
-  defp normalize_dm_mode(dm_policy) when is_map(dm_policy) do
-    dm_policy
-    |> MapHelpers.read_field(:mode)
-    |> normalize_dm_mode_value()
-  end
-
-  defp normalize_dm_mode(_), do: :invalid
-
-  defp normalize_dm_mode_value(nil), do: :missing
-  defp normalize_dm_mode_value(""), do: :missing
-
-  defp normalize_dm_mode_value(mode) do
-    case mode |> to_string() |> String.trim() |> String.downcase() do
-      "open" -> :open
-      "allowlist" -> :allowlist
-      "disabled" -> :disabled
-      "pairing" -> :pairing
-      _ -> :invalid
-    end
-  end
-
-  defp normalize_channel_name(name) do
-    name
-    |> to_string()
-    |> String.trim()
-    |> String.downcase()
-  end
-
-  defp normalize_config_map(map) when is_map(map), do: map
-  defp normalize_config_map(_), do: %{}
+  defp dm_capable_channel?(channel_name), do: ConfigProbe.dm_capable_channel?(channel_name)
+  defp enabled?(cfg), do: ConfigProbe.enabled?(cfg)
+  defp normalize_dm_mode(dm_policy), do: ConfigProbe.dm_mode(dm_policy)
 
   defp counts(checks) do
     %{ok: 0, warn: 0, error: 0}

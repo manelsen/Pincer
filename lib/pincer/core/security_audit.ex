@@ -9,6 +9,7 @@ defmodule Pincer.Core.SecurityAudit do
   """
 
   alias Pincer.Core.LLM.SkillsSidecarPolicy
+  alias Pincer.Core.ConfigProbe
   alias Pincer.Infra.Config
   alias Pincer.Utils.MapHelpers
 
@@ -31,7 +32,6 @@ defmodule Pincer.Core.SecurityAudit do
 
   @default_config_file "config.yaml"
   @token_channels MapSet.new(["telegram", "discord", "slack", "webhook"])
-  @dm_channels MapSet.new(["telegram", "discord", "whatsapp"])
   @risky_binds MapSet.new(["0.0.0.0", "::", "[::]"])
   @dangerous_flag_paths [
     {"gateway.control_ui.allow_insecure_auth", true,
@@ -373,64 +373,14 @@ defmodule Pincer.Core.SecurityAudit do
     end
   end
 
-  defp channels(config) when is_map(config) do
-    case MapHelpers.read_field(config, :channels) do
-      channels when is_map(channels) ->
-        channels
-        |> Enum.map(fn {name, cfg} -> {normalize_channel_name(name), normalize_map(cfg)} end)
+  defp channels(config), do: ConfigProbe.channels(config)
 
-      _ ->
-        []
-    end
-  end
-
-  defp channels(_), do: []
-
-  defp normalize_map(map) when is_map(map), do: map
-  defp normalize_map(_), do: %{}
-
+  # The audit additionally treats `webhook` as token-required.
   defp token_required_channel?(name), do: MapSet.member?(@token_channels, name)
-  defp dm_capable_channel?(name), do: MapSet.member?(@dm_channels, name)
 
-  defp normalize_channel_name(name) do
-    name
-    |> to_string()
-    |> String.trim()
-    |> String.downcase()
-  end
-
-  defp normalize_dm_mode(nil), do: :missing
-
-  defp normalize_dm_mode(dm_policy) when is_map(dm_policy) do
-    dm_policy
-    |> MapHelpers.read_field(:mode)
-    |> normalize_dm_mode_value()
-  end
-
-  defp normalize_dm_mode(_), do: :invalid
-
-  defp normalize_dm_mode_value(nil), do: :missing
-  defp normalize_dm_mode_value(""), do: :missing
-
-  defp normalize_dm_mode_value(value) do
-    case value |> to_string() |> String.trim() |> String.downcase() do
-      "open" -> :open
-      "allowlist" -> :allowlist
-      "disabled" -> :disabled
-      "pairing" -> :pairing
-      _ -> :invalid
-    end
-  end
-
-  defp enabled?(cfg) when is_map(cfg) do
-    case MapHelpers.read_field(cfg, :enabled) do
-      true -> true
-      "true" -> true
-      _ -> false
-    end
-  end
-
-  defp enabled?(_), do: false
+  defp dm_capable_channel?(name), do: ConfigProbe.dm_capable_channel?(name)
+  defp normalize_dm_mode(dm_policy), do: ConfigProbe.dm_mode(dm_policy)
+  defp enabled?(cfg), do: ConfigProbe.enabled?(cfg)
 
   defp counts(checks) do
     %{
