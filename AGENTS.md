@@ -25,6 +25,12 @@ Doc-First + TDD:
 Warnings are errors everywhere: `elixirc_options: [warnings_as_errors: true]` in
 `mix.exs`, so an unused variable or a boundary violation fails the build.
 
+**Reconcile the task list whenever you close a cycle.** After finishing a step, a
+commit, or a shift in plan, re-read the todo list and update it before continuing: mark
+what is done, add what the work revealed, and drop what no longer applies. The list is
+the working record of a multi-step task - leaving it stale means the next agent (or the
+next turn) cannot tell what still needs doing.
+
 ---
 
 ## 2. Commands
@@ -106,6 +112,17 @@ PINCER_WHATSAPP=1 mix test --warnings-as-errors \
 
 Toolchain: `mise.toml` pins Elixir 1.19.5 / OTP 27 (plus Go); `.tool-versions` and CI use
 Elixir 1.18 / OTP 27.2; `mix.exs` only requires `~> 1.14`.
+
+**Long commands land in a background job in this environment.** The Crush config sets
+`options.auto_background_after` to 2 seconds, so anything slower than that (including
+`mix test` and `mix compile --force`) returns a job ID instead of blocking. Read output
+with `job_output` (pass `wait: true` when the result is what you need next) and stop
+runaway jobs with `job_kill`; do not assume a command finished just because the call
+returned.
+
+When driving long commands yourself, prefer `run_in_background: true` over an implicit
+auto-background, and wrap any script that loops over files in `timeout <seconds>` -
+a runaway loop otherwise burns the whole turn.
 
 ---
 
