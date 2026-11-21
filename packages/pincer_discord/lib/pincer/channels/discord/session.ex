@@ -3,7 +3,7 @@ defmodule Pincer.Channels.Discord.Session do
     Pincer.Core.ChannelEventPolicy,
     Pincer.Core.ChannelInteractionPolicy,
     Pincer.Core.ProjectFlowDelivery,
-    Pincer.Core.Session.Registry,
+    Pincer.Ports.Session.registry(),
     Pincer.Core.StatusDelivery,
     Pincer.Core.StatusMessagePolicy,
     Pincer.Core.StreamDelivery,
@@ -36,14 +36,14 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   defp via_tuple(channel_id),
-    do: {:via, Registry, {Pincer.Core.Session.Registry, "discord_session_worker_#{channel_id}"}}
+    do: {:via, Registry, {Pincer.Ports.Session.registry(), "discord_session_worker_#{channel_id}"}}
 
   def ensure_started(channel_id, session_id \\ nil)
 
   def ensure_started(channel_id, session_id) do
     session_id = normalize_session_id(channel_id, session_id)
 
-    case Registry.lookup(Pincer.Core.Session.Registry, "discord_session_worker_#{channel_id}") do
+    case Registry.lookup(Pincer.Ports.Session.registry(), "discord_session_worker_#{channel_id}") do
       [] ->
         case Pincer.Channels.Discord.SessionSupervisor.start_session(channel_id, session_id) do
           {:ok, pid} ->

@@ -3,9 +3,7 @@ defmodule Pincer.Channels.WhatsApp do
     Pincer.Core.Pairing,
     Pincer.Core.Policy,
     Pincer.Core.ProjectRouter,
-    Pincer.Core.Session.Registry,
-    Pincer.Core.Session.Server,
-    Pincer.Core.Session.Supervisor,
+    Pincer.Ports.Session.registry(),
     Pincer.Core.SessionResolver,
     Pincer.Core.UX,
     Pincer.Infra.PubSub,
@@ -27,7 +25,6 @@ defmodule Pincer.Channels.WhatsApp do
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.SessionResolver
   alias Pincer.Core.UX
-  alias Pincer.Core.Session.Server
 
   @default_bridge_module Pincer.Channels.WhatsApp.Bridge.Adapter
   @max_outbound_chunk_chars 3500
@@ -669,9 +666,9 @@ defmodule Pincer.Channels.WhatsApp do
       |> Pincer.Core.Session.Context.to_start_opts()
       |> Keyword.delete(:session_id)
 
-    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
+    case Registry.lookup(Pincer.Ports.Session.registry(), session_id) do
       [] ->
-        case Pincer.Core.Session.Supervisor.start_session(session_id, start_opts) do
+        case Pincer.Ports.Session.start_session(session_id, start_opts) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok
           {:error, reason} -> {:error, reason}
@@ -683,9 +680,9 @@ defmodule Pincer.Channels.WhatsApp do
   end
 
   defp default_ensure_session_started(session_id, _session_context) do
-    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
+    case Registry.lookup(Pincer.Ports.Session.registry(), session_id) do
       [] ->
-        case Pincer.Core.Session.Supervisor.start_session(session_id) do
+        case Pincer.Ports.Session.start_session(session_id) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok
           {:error, reason} -> {:error, reason}
@@ -724,13 +721,13 @@ defmodule Pincer.Channels.WhatsApp do
           IncomingMessage.new(session_id, text: text, attachments: atts)
       end
 
-    Server.process_input(session_id, incoming)
+    Pincer.Ports.Session.process_input(session_id, incoming)
   end
 
-  defp default_status(session_id), do: Pincer.Core.Session.Server.get_status(session_id)
+  defp default_status(session_id), do: Pincer.Ports.Session.get_status(session_id)
 
   defp default_set_model(session_id, provider, model) do
-    Server.set_model(session_id, provider, model)
+    Pincer.Ports.Session.set_model(session_id, provider, model)
     :ok
   end
 

@@ -1,8 +1,6 @@
 defmodule Pincer.Channels.Discord do
   @compile {:no_warn_undefined, [
-    Pincer.Core.Session.Server,
-    Pincer.Core.Session.Registry,
-    Pincer.Core.Session.Supervisor,
+    Pincer.Ports.Session.registry(),
     Pincer.Core.UX,
     Pincer.Core.UX.MenuPolicy,
     Pincer.Core.UX.ModelKeyboard,
@@ -26,7 +24,6 @@ defmodule Pincer.Channels.Discord do
   use Supervisor
   require Logger
   alias Pincer.Core.Structs.IncomingMessage
-  alias Pincer.Core.Session.Server
   alias Pincer.Core.UX
   alias Pincer.Core.UX.MenuPolicy
   alias Pincer.Utils.Text
@@ -243,10 +240,8 @@ defmodule Pincer.Channels.Discord do
 
   defmodule Consumer do
     @compile {:no_warn_undefined, [
-      Pincer.Core.Session.Server,
-      Pincer.Core.Session.Registry,
-      Pincer.Core.Session.Supervisor,
-      Pincer.Core.UX,
+        Pincer.Ports.Session.registry(),
+        Pincer.Core.UX,
       Pincer.Core.UX.MenuPolicy,
       Pincer.Core.UX.ModelKeyboard,
       Pincer.Core.Pairing,
@@ -267,8 +262,7 @@ defmodule Pincer.Channels.Discord do
     alias Pincer.Core.ProjectRouter
     alias Pincer.Core.SessionResolver
     alias Pincer.Core.UX
-    alias Pincer.Core.Session.Server
-
+  
     @impl true
     def handle_event({:MESSAGE_CREATE, msg, _ws_state}) do
       # Ignore messages from bots
@@ -353,7 +347,7 @@ defmodule Pincer.Channels.Discord do
                                 IncomingMessage.new(session_id, text: text, attachments: atts)
                             end
 
-                          Server.process_input(session_id, incoming)
+                          Pincer.Ports.Session.process_input(session_id, incoming)
                         else
                           Logger.debug(
                             "[DISCORD] Ignoring empty message without supported attachments."
@@ -594,7 +588,7 @@ defmodule Pincer.Channels.Discord do
       session_id = session_context.session_id
       ensure_brain_session_started(session_context)
 
-      case Pincer.Core.Session.Server.reset(session_id) do
+      case Pincer.Ports.Session.reset(session_id) do
         :ok ->
           Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔄 Session reset.")
 
@@ -622,7 +616,7 @@ defmodule Pincer.Channels.Discord do
 
       case String.split(String.trim(text), "/", parts: 2) do
         [provider, model] when provider != "" and model != "" ->
-          Pincer.Core.Session.Server.set_model(session_id, provider, model)
+          Pincer.Ports.Session.set_model(session_id, provider, model)
 
           Pincer.Channels.Discord.send_message(
             "#{msg.channel_id}",
@@ -649,7 +643,7 @@ defmodule Pincer.Channels.Discord do
       valid = ["off", "low", "medium", "high"]
 
       if level in valid do
-        Pincer.Core.Session.Server.set_thinking(session_id, level)
+        Pincer.Ports.Session.set_thinking(session_id, level)
         Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🧠 Thinking: `#{level}`")
       else
         Pincer.Channels.Discord.send_message(
@@ -670,11 +664,11 @@ defmodule Pincer.Channels.Discord do
 
       case String.trim(text) |> String.downcase() do
         "on" ->
-          Pincer.Core.Session.Server.set_reasoning_visible(session_id, true)
+          Pincer.Ports.Session.set_reasoning_visible(session_id, true)
           Pincer.Channels.Discord.send_message("#{msg.channel_id}", "👁 Reasoning: visible")
 
         "off" ->
-          Pincer.Core.Session.Server.set_reasoning_visible(session_id, false)
+          Pincer.Ports.Session.set_reasoning_visible(session_id, false)
 
           Pincer.Channels.Discord.send_message(
             "#{msg.channel_id}",
@@ -697,11 +691,11 @@ defmodule Pincer.Channels.Discord do
 
       case String.trim(text) |> String.downcase() do
         "on" ->
-          Pincer.Core.Session.Server.set_verbose(session_id, true)
+          Pincer.Ports.Session.set_verbose(session_id, true)
           Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔊 Verbose: on")
 
         "off" ->
-          Pincer.Core.Session.Server.set_verbose(session_id, false)
+          Pincer.Ports.Session.set_verbose(session_id, false)
           Pincer.Channels.Discord.send_message("#{msg.channel_id}", "🔇 Verbose: off")
 
         _ ->
@@ -721,7 +715,7 @@ defmodule Pincer.Channels.Discord do
       valid = ["off", "tokens", "full"]
 
       if display in valid do
-        Pincer.Core.Session.Server.set_usage(session_id, display)
+        Pincer.Ports.Session.set_usage(session_id, display)
         Pincer.Channels.Discord.send_message("#{msg.channel_id}", "📊 Usage display: `#{display}`")
       else
         Pincer.Channels.Discord.send_message("#{msg.channel_id}", "Uso: /usage off|tokens|full")
@@ -810,7 +804,7 @@ defmodule Pincer.Channels.Discord do
       ensure_brain_session_started(session_id)
 
       try do
-        case Pincer.Core.Session.Server.get_status(session_id) do
+        case Pincer.Ports.Session.get_status(session_id) do
           {:ok, state} ->
             provider = if state.model_override, do: state.model_override.provider, else: "Default"
             model = if state.model_override, do: state.model_override.model, else: "Default"
@@ -930,7 +924,7 @@ defmodule Pincer.Channels.Discord do
           session_id = session_context.session_id
 
           ensure_brain_session_started(session_context)
-          Server.set_model(session_id, provider_id, model)
+          Pincer.Ports.Session.set_model(session_id, provider_id, model)
 
           response = %{
             type: 7,
@@ -984,7 +978,7 @@ defmodule Pincer.Channels.Discord do
           session_context = resolve_session_context(interaction)
           ensure_brain_session_started(session_context)
           answer = if decision == :approved, do: "aprovo", else: "rejeito"
-          Server.process_input(session_context.session_id, answer)
+          Pincer.Ports.Session.process_input(session_context.session_id, answer)
           label = if decision == :approved, do: "✅ Aprovado", else: "❌ Rejeitado"
 
           response = %{
@@ -1000,7 +994,7 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp current_model_for_session(session_id) do
-      case Pincer.Core.Session.Server.get_status(session_id) do
+      case Pincer.Ports.Session.get_status(session_id) do
         {:ok, %{model_override: %{model: model}}} -> model
         _ -> nil
       end
@@ -1036,7 +1030,7 @@ defmodule Pincer.Channels.Discord do
             "Project Runner: #{kickoff.status_message}"
           )
 
-          _ = Server.process_input(context.session_id, kickoff.prompt)
+          _ = Pincer.Ports.Session.process_input(context.session_id, kickoff.prompt)
           :ok
 
         :not_ready ->
@@ -1058,13 +1052,13 @@ defmodule Pincer.Channels.Discord do
         |> Pincer.Core.Session.Context.to_start_opts()
         |> Keyword.delete(:session_id)
 
-      case Registry.lookup(Pincer.Core.Session.Registry, context.session_id) do
+      case Registry.lookup(Pincer.Ports.Session.registry(), context.session_id) do
         [] ->
           Logger.info(
             "[DISCORD] Creating new brain session: #{context.session_id} (root_agent=#{context.root_agent_id})"
           )
 
-          Pincer.Core.Session.Supervisor.start_session(context.session_id, start_opts)
+          Pincer.Ports.Session.start_session(context.session_id, start_opts)
 
         [_] ->
           :ok
@@ -1072,10 +1066,10 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp ensure_brain_session_started(session_id) do
-      case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
+      case Registry.lookup(Pincer.Ports.Session.registry(), session_id) do
         [] ->
           Logger.info("[DISCORD] Creating new brain session: #{session_id}")
-          Pincer.Core.Session.Supervisor.start_session(session_id)
+          Pincer.Ports.Session.start_session(session_id)
 
         [_] ->
           :ok

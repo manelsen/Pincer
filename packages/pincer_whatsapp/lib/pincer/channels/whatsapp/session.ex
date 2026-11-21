@@ -3,7 +3,6 @@ defmodule Pincer.Channels.WhatsApp.Session do
     Pincer.Core.ChannelEventPolicy,
     Pincer.Core.ProjectFlowDelivery,
     Pincer.Core.Session.Context,
-    Pincer.Core.Session.Server,
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM
   ]}
@@ -25,14 +24,14 @@ defmodule Pincer.Channels.WhatsApp.Session do
   end
 
   defp via_tuple(chat_id),
-    do: {:via, Registry, {Pincer.Core.Session.Registry, "whatsapp_session_worker_#{chat_id}"}}
+    do: {:via, Registry, {Pincer.Ports.Session.registry(), "whatsapp_session_worker_#{chat_id}"}}
 
   def ensure_started(chat_id, session_id \\ nil)
 
   def ensure_started(chat_id, session_id) do
     session_id = normalize_session_id(chat_id, session_id)
 
-    case Registry.lookup(Pincer.Core.Session.Registry, "whatsapp_session_worker_#{chat_id}") do
+    case Registry.lookup(Pincer.Ports.Session.registry(), "whatsapp_session_worker_#{chat_id}") do
       [] ->
         case Pincer.Channels.WhatsApp.SessionSupervisor.start_session(chat_id, session_id) do
           {:ok, pid} ->

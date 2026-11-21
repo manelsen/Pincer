@@ -9,8 +9,6 @@ defmodule Pincer.Channels.Telegram do
     Pincer.Core.ProjectOrchestrator,
     Pincer.Core.ProjectRouter,
     Pincer.Core.SessionResolver,
-    Pincer.Core.Session.Server,
-    Pincer.Core.Session.Supervisor,
     Pincer.Core.Structs.IncomingMessage,
     Pincer.Core.Telemetry,
     Pincer.Core.UX,
@@ -75,7 +73,7 @@ defmodule Pincer.Channels.Telegram do
   ## Message Flow
 
   1. UpdatesProvider polls Telegram API every 1 second
-  2. Incoming messages are routed to `Pincer.Core.Session.Server.process_input/2`
+  2. Incoming messages are routed to `Pincer.Ports.Session.process_input/2`
   3. Responses are sent back via `Telegex.send_message/2`
 
   ## Examples
@@ -89,7 +87,7 @@ defmodule Pincer.Channels.Telegram do
   ## See Also
 
   - `Pincer.Channels.Telegram.UpdatesProvider` - The polling GenServer
-  - `Pincer.Core.Session.Server` - Session message processing
+  - `Pincer.Ports.Session` - Session message processing
   - `Pincer.LLM.Client` - Model selection integration
   """
 
@@ -589,8 +587,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     Pincer.Core.ProjectOrchestrator,
     Pincer.Core.ProjectRouter,
     Pincer.Core.SessionResolver,
-    Pincer.Core.Session.Server,
-    Pincer.Core.Session.Supervisor,
     Pincer.Core.Structs.IncomingMessage,
     Pincer.Core.Telemetry,
     Pincer.Core.UX,
@@ -652,7 +648,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   alias Pincer.Core.ProjectRouter
   alias Pincer.Core.Telemetry, as: CoreTelemetry
   alias Pincer.Core.UX
-  alias Pincer.Core.Session.Server
 
   @base_poll_interval 1000
   @max_poll_interval 30_000
@@ -927,7 +922,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
               IncomingMessage.new(session_id, text: text, attachments: atts)
           end
 
-        case Server.process_input(session_id, incoming) do
+        case Pincer.Ports.Session.process_input(session_id, incoming) do
           {:ok, :started} ->
             :ok
 
@@ -1416,7 +1411,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     session_id = context.session_id
     ensure_session_started(context)
 
-    case Pincer.Core.Session.Server.reset(session_id) do
+    case Pincer.Ports.Session.reset(session_id) do
       :ok ->
         Pincer.Channels.Telegram.send_message(chat_id, "🔄 Session reset.")
 
@@ -1435,7 +1430,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
     case String.split(String.trim(text), "/", parts: 2) do
       [provider, model] when provider != "" and model != "" ->
-        Pincer.Core.Session.Server.set_model(session_id, provider, model)
+        Pincer.Ports.Session.set_model(session_id, provider, model)
 
         Pincer.Channels.Telegram.send_message(
           chat_id,
@@ -1462,12 +1457,12 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         level
       else
         # Toggle: cycle through levels
-        {:ok, status} = Pincer.Core.Session.Server.get_status(session_id)
+        {:ok, status} = Pincer.Ports.Session.get_status(session_id)
         current = status[:thinking_level] || "off"
         cycle_thinking(current)
       end
 
-    Pincer.Core.Session.Server.set_thinking(session_id, new_level)
+    Pincer.Ports.Session.set_thinking(session_id, new_level)
     Pincer.Channels.Telegram.send_message(chat_id, "🧠 Thinking: <code>#{new_level}</code>")
   end
 
@@ -1484,11 +1479,11 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         "off" -> false
         _ ->
           # Toggle based on current state
-          {:ok, status} = Pincer.Core.Session.Server.get_status(session_id)
+          {:ok, status} = Pincer.Ports.Session.get_status(session_id)
           not (status[:reasoning_visible] || false)
       end
 
-    Pincer.Core.Session.Server.set_reasoning_visible(session_id, new_visible)
+    Pincer.Ports.Session.set_reasoning_visible(session_id, new_visible)
 
     msg = if new_visible, do: "👁 Reasoning: visible", else: "🙈 Reasoning: oculto"
     Pincer.Channels.Telegram.send_message(chat_id, msg)
@@ -1501,11 +1496,11 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
     case String.trim(text) |> String.downcase() do
       "on" ->
-        Pincer.Core.Session.Server.set_verbose(session_id, true)
+        Pincer.Ports.Session.set_verbose(session_id, true)
         Pincer.Channels.Telegram.send_message(chat_id, "🔊 Verbose: on")
 
       "off" ->
-        Pincer.Core.Session.Server.set_verbose(session_id, false)
+        Pincer.Ports.Session.set_verbose(session_id, false)
         Pincer.Channels.Telegram.send_message(chat_id, "🔇 Verbose: off")
 
       _ ->
@@ -1521,7 +1516,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     valid = ["off", "tokens", "full"]
 
     if display in valid do
-      Pincer.Core.Session.Server.set_usage(session_id, display)
+      Pincer.Ports.Session.set_usage(session_id, display)
       Pincer.Channels.Telegram.send_message(chat_id, "📊 Usage display: <code>#{display}</code>")
     else
       Pincer.Channels.Telegram.send_message(chat_id, "Uso: /usage off|tokens|full")
@@ -1596,7 +1591,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       {:ok, {:select_model, provider_id, model}} ->
         ensure_session_started(context)
 
-        Server.set_model(session_id, provider_id, model)
+        Pincer.Ports.Session.set_model(session_id, provider_id, model)
 
         edit_callback_message(
           chat_id,
@@ -1631,15 +1626,15 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
         case decision do
           :approved ->
-            Server.process_input(session_id, "aprovo")
+            Pincer.Ports.Session.process_input(session_id, "aprovo")
             edit_callback_message(chat_id, message_id, "✅ Aprovado", parse_mode: "HTML")
 
           :rejected ->
-            Server.process_input(session_id, "rejeito")
+            Pincer.Ports.Session.process_input(session_id, "rejeito")
             edit_callback_message(chat_id, message_id, "❌ Rejeitado", parse_mode: "HTML")
 
           :approve_all ->
-            Server.approve_all(session_id, 600)
+            Pincer.Ports.Session.approve_all(session_id, 600)
 
             edit_callback_message(chat_id, message_id, "🔓 Auto-aprovação ativa por 10 minutos",
               parse_mode: "HTML"
@@ -1699,7 +1694,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
         case Pairing.approve_code(:telegram, chat_id, code) do
           :ok ->
-            Pincer.Core.Session.Supervisor.stop_session(old_session_id)
+            Pincer.Ports.Session.stop_session(old_session_id)
             Pincer.Channels.Telegram.send_message(chat_id, pairing_success_message(chat_id))
 
           {:error, :not_pending} ->
@@ -1776,13 +1771,13 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       |> Pincer.Core.Session.Context.to_start_opts()
       |> Keyword.delete(:session_id)
 
-    case Registry.lookup(Pincer.Core.Session.Registry, context.session_id) do
+    case Registry.lookup(Pincer.Ports.Session.registry(), context.session_id) do
       [] ->
         Logger.info(
           "[TELEGRAM] Creating new session: #{context.session_id} (root_agent=#{context.root_agent_id})"
         )
 
-        Pincer.Core.Session.Supervisor.start_session(context.session_id, start_opts)
+        Pincer.Ports.Session.start_session(context.session_id, start_opts)
 
       [_] ->
         :ok
@@ -1826,7 +1821,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp dispatch_project_task(session_id, prompt) when is_binary(prompt) do
-    case Server.process_input(session_id, prompt) do
+    case Pincer.Ports.Session.process_input(session_id, prompt) do
       {:ok, _status} ->
         :ok
 
@@ -1884,7 +1879,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp current_model_for_session(session_id) do
-    case Pincer.Core.Session.Server.get_status(session_id) do
+    case Pincer.Ports.Session.get_status(session_id) do
       {:ok, %{model_override: %{model: model}}} -> model
       _ -> nil
     end
