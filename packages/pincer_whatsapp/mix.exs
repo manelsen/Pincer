@@ -8,7 +8,7 @@ defmodule PincerWhatsApp.MixProject do
       elixir: "~> 1.14",
       start_permanent: false,
       compilers: Mix.compilers() ++ [:whatsapp_bridge],
-      deps: [{:pincer_ports, "~> 0.1"}, {:jason, "~> 1.4"}],
+      deps: [{:pincer_ports, "~> 0.1"}, {:pincer_shared, "~> 0.1"}, {:jason, "~> 1.4"}],
       description:
         "WhatsApp channel adapter and Go whatsapp_bridge compiler for the Pincer AI agent framework",
       package: [

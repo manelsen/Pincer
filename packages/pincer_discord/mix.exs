@@ -9,6 +9,7 @@ defmodule PincerDiscord.MixProject do
       start_permanent: false,
       deps: [
         {:pincer_ports, "~> 0.1"},
+        {:pincer_shared, "~> 0.1"},
         {:nostrum, "~> 0.10", runtime: false},
       {:req, "~> 0.5"}
       ],

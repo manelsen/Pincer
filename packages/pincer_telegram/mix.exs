@@ -31,6 +31,7 @@ defmodule PincerTelegram.MixProject do
   defp deps do
     [
       {:pincer_ports, "~> 0.1"},
+      {:pincer_shared, "~> 0.1"},
       {:telegex, "~> 1.8"},
       {:mox, "~> 1.0", only: :test}
     ]

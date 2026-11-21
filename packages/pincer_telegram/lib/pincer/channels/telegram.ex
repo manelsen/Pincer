@@ -601,6 +601,8 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     Req
   ]}
 
+  alias Pincer.Channels.Shared.Inbound
+
   @moduledoc """
   GenServer that polls Telegram for updates using long polling.
 
@@ -854,52 +856,46 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     chat_id = map_value(chat, :id)
     chat_type = map_value(chat, :type)
     text = map_value(message, :text)
-    trimmed = if is_binary(text), do: String.trim(text), else: ""
     has_attachments = has_supported_attachments?(message)
 
-    cond do
-      is_nil(chat_id) ->
-        Logger.debug("Ignoring malformed Telegram message without chat_id: #{inspect(message)}")
+    if is_nil(chat_id) do
+      Logger.debug("Ignoring malformed Telegram message without chat_id: #{inspect(message)}")
+    else
+      context = session_context_for_chat(chat_id, chat_type)
 
-      is_binary(text) and not has_attachments and String.starts_with?(trimmed, "/") ->
-        [cmd | rest] = String.split(trimmed, " ")
-        handle_command(chat_id, cmd, Enum.join(rest, " "), chat_type)
+      inbound = %{
+        text: text,
+        has_attachments: has_attachments,
+        session_id: context.session_id,
+        on_command: fn command -> run_command(chat_id, command, chat_type) end,
+        on_message: &do_process_message(chat_id, &1, chat_type),
+        on_project_response: fn response, session_id ->
+          send_project_message(chat_id, session_id, response)
+          maybe_start_project_execution(chat_id, context)
+        end,
+        on_ignored: fn
+          :unsupported ->
+            Logger.debug("Ignoring unsupported Telegram message payload: #{inspect(message)}")
 
-      is_binary(text) and not has_attachments ->
-        case UX.resolve_shortcut(trimmed) do
-          {:ok, command} ->
-            handle_command(chat_id, command, "", chat_type)
-
-          :error ->
-            context = session_context_for_chat(chat_id, chat_type)
-            session_id = context.session_id
-
-            case ProjectRouter.continue_if_collecting(session_id, text, has_attachments: false) do
-              {:handled, response} ->
-                send_project_message(chat_id, session_id, response)
-                maybe_start_project_execution(chat_id, context)
-
-              :not_handled ->
-                do_process_message(chat_id, text, chat_type)
-            end
-        end
-
-      has_attachments ->
-        case prepare_input_content(message) do
-          {:ok, input_content} ->
-            do_process_message(chat_id, input_content, chat_type)
-
-          :empty ->
+          _ ->
             Logger.debug("[TELEGRAM] Ignoring message without text/supportable attachments.")
         end
+      }
 
-      true ->
-        Logger.debug("Ignoring unsupported Telegram message payload: #{inspect(message)}")
+      Inbound.dispatch(inbound,
+        resolve_shortcut: &UX.resolve_shortcut/1,
+        continue_project: &ProjectRouter.continue_if_collecting/3
+      )
     end
   end
 
   defp process_update(update) do
     Logger.debug("Ignoring unsupported update or update without text: #{inspect(update)}")
+  end
+
+  defp run_command(chat_id, command, chat_type) do
+    {cmd, args} = Inbound.split_command(command)
+    handle_command(chat_id, cmd, args, chat_type)
   end
 
   alias Pincer.Core.Structs.IncomingMessage
