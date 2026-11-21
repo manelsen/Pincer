@@ -35,6 +35,17 @@ defmodule Pincer.Ports.Session do
   @callback stop_session(String.t()) :: term()
   @callback ensure_started(String.t(), keyword()) :: {:ok, pid()} | {:error, term()}
 
+  @doc """
+  Name of the registry where per-sender channel workers register themselves.
+
+  Channels need this to build `{:via, Registry, {name, key}}` tuples without
+  referencing the Core module that happens to hold the name today.
+  """
+  @spec registry() :: atom()
+  def registry do
+    Application.get_env(:pincer, :session_registry, Pincer.Core.Session.Registry)
+  end
+
   @doc false
   def adapter do
     Application.get_env(:pincer, :session_adapter, Pincer.Core.Session.Adapter)

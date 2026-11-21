@@ -1,9 +1,5 @@
 defmodule Pincer.Channels.Webhook do
   @compile {:no_warn_undefined, [
-    Pincer.Core.Session.Registry,
-    Pincer.Core.Session.Server,
-    Pincer.Core.Session.Supervisor,
-    Pincer.Core.Structs.IncomingMessage,
     Pincer.Infra.PubSub
   ]}
 
@@ -11,7 +7,7 @@ defmodule Pincer.Channels.Webhook do
   Universal receive-only webhook channel.
 
   This channel exposes `ingest/2` as a generic entrypoint for external events
-  and routes accepted payloads into `Pincer.Core.Session.Server`.
+  and routes accepted payloads into a session through `Pincer.Ports.Session`.
   """
 
   use Pincer.Ports.Channel
@@ -349,16 +345,10 @@ defmodule Pincer.Channels.Webhook do
   end
 
   defp default_ensure_session_started(session_id) do
-    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
-      [{_, _}] ->
-        :ok
-
-      [] ->
-        case Pincer.Core.Session.Supervisor.start_session(session_id) do
-          {:ok, _pid} -> :ok
-          {:error, {:already_started, _pid}} -> :ok
-          {:error, reason} -> {:error, reason}
-        end
+    case Pincer.Ports.Session.ensure_started(session_id, []) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -366,6 +356,6 @@ defmodule Pincer.Channels.Webhook do
 
   defp default_process_input(session_id, text) do
     incoming = IncomingMessage.new(session_id, text)
-    Pincer.Core.Session.Server.process_input(session_id, incoming)
+    Pincer.Ports.Session.process_input(session_id, incoming)
   end
 end

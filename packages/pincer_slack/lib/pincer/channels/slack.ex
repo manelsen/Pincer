@@ -1,8 +1,5 @@
 defmodule Pincer.Channels.Slack do
   @compile {:no_warn_undefined, [
-    Pincer.Core.Session.Server,
-    Pincer.Core.Session.Registry,
-    Pincer.Core.Session.Supervisor,
     Pincer.Infra.PubSub
   ]}
   @moduledoc """
@@ -93,17 +90,11 @@ defmodule Pincer.Channels.Slack do
 end
 
 defmodule Pincer.Channels.Slack.Handler do
-  @compile {:no_warn_undefined, [
-    Pincer.Core.Session.Server,
-    Pincer.Core.Session.Registry,
-    Pincer.Core.Session.Supervisor
-  ]}
   @moduledoc """
   Handles Slack events using the Slack.Bot behaviour.
   """
   use Slack.Bot
   require Logger
-  alias Pincer.Core.Session.Server
   alias Pincer.Core.Structs.IncomingMessage
 
   @impl true
@@ -120,7 +111,7 @@ defmodule Pincer.Channels.Slack.Handler do
     Pincer.Channels.Slack.Session.ensure_started(channel_id)
 
     incoming = IncomingMessage.new(session_id, text)
-    Server.process_input(session_id, incoming)
+    Pincer.Ports.Session.process_input(session_id, incoming)
     :ok
   end
 
@@ -130,12 +121,13 @@ defmodule Pincer.Channels.Slack.Handler do
   end
 
   defp ensure_session_started(session_id) do
-    case Registry.lookup(Pincer.Core.Session.Registry, session_id) do
-      [] ->
-        Logger.info("[SLACK] Creating new session: #{session_id}")
-        Pincer.Core.Session.Supervisor.start_session(session_id)
+    case Pincer.Ports.Session.ensure_started(session_id, []) do
+      {:ok, _pid} ->
+        Logger.info("[SLACK] Session ready: #{session_id}")
+        :ok
 
-      [_] ->
+      {:error, reason} ->
+        Logger.error("[SLACK] Could not start session #{session_id}: #{inspect(reason)}")
         :ok
     end
   end

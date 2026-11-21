@@ -1,6 +1,5 @@
 defmodule Pincer.Channels.Line.Session do
   @compile {:no_warn_undefined, [
-    Pincer.Core.Session.Registry,
     Pincer.Infra.PubSub
   ]}
   @moduledoc """
@@ -131,7 +130,7 @@ defmodule Pincer.Channels.Line.Session do
   end
 
   defp via_tuple(chat_id) do
-    {:via, Registry, {Pincer.Core.Session.Registry, "line_session_worker_#{chat_id}"}}
+    {:via, Registry, {Pincer.Ports.Session.registry(), "line_session_worker_#{chat_id}"}}
   end
 
   defp subscribe_session(session_id) do
