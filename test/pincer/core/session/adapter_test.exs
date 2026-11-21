@@ -14,6 +14,7 @@ defmodule Pincer.Core.Session.AdapterTest do
     def set_reasoning_visible(sid, v), do: {:set_reasoning_visible, sid, v}
     def set_verbose(sid, v), do: {:set_verbose, sid, v}
     def set_usage(sid, level), do: {:set_usage, sid, level}
+    def approve_all(sid, seconds), do: {:approve_all, sid, seconds}
     def start_session(sid, opts), do: {:start_session, sid, opts}
     def stop_session(sid), do: {:stop_session, sid}
     def ensure_started(sid, opts), do: {:ensure_started, sid, opts}

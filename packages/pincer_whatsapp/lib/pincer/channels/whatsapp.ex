@@ -20,6 +20,7 @@ defmodule Pincer.Channels.WhatsApp do
   use Pincer.Ports.Channel
   require Logger
 
+  alias Pincer.Channels.Shared.Inbound
   alias Pincer.Core.Policy
   alias Pincer.Core.Pairing
   alias Pincer.Core.ProjectRouter
@@ -174,30 +175,29 @@ defmodule Pincer.Channels.WhatsApp do
   end
 
   defp process_incoming(chat_id, sender_id, text, is_group, state) do
-    trimmed = String.trim(text)
     session_context = resolve_session_context(chat_id, sender_id, is_group, state.config)
     session_id = session_context.session_id
 
-    cond do
-      String.starts_with?(trimmed, "/") ->
-        handle_command(chat_id, sender_id, session_context, trimmed, is_group, state)
+    inbound = %{
+      text: text,
+      has_attachments: false,
+      session_id: session_id,
+      on_command: fn command ->
+        handle_command(chat_id, sender_id, session_context, command, is_group, state)
+      end,
+      on_message: fn content ->
+        route_to_session(chat_id, sender_id, session_context, content, is_group, state)
+      end,
+      on_project_response: fn response, _sid ->
+        deliver_message(state, chat_id, response)
+        maybe_start_project_execution(chat_id, session_context, state)
+      end
+    }
 
-      true ->
-        case UX.resolve_shortcut(trimmed) do
-          {:ok, command} ->
-            handle_command(chat_id, sender_id, session_context, command, is_group, state)
-
-          :error ->
-            case ProjectRouter.continue_if_collecting(session_id, trimmed, has_attachments: false) do
-              {:handled, response} ->
-                deliver_message(state, chat_id, response)
-                maybe_start_project_execution(chat_id, session_context, state)
-
-              :not_handled ->
-                route_to_session(chat_id, sender_id, session_context, text, is_group, state)
-            end
-        end
-    end
+    Inbound.dispatch(inbound,
+      resolve_shortcut: &UX.resolve_shortcut/1,
+      continue_project: &ProjectRouter.continue_if_collecting/3
+    )
   end
 
   defp route_to_session(chat_id, sender_id, session_context, text, is_group, state) do

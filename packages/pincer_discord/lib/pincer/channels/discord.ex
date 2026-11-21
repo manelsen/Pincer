@@ -256,6 +256,7 @@ defmodule Pincer.Channels.Discord do
     Consumes Discord events and routes messages to Pincer sessions.
     """
     use Nostrum.Consumer
+    alias Pincer.Channels.Shared.Inbound
     alias Pincer.Core.Policy
     alias Pincer.Core.ChannelInteractionPolicy
     alias Pincer.Core.Pairing
@@ -275,86 +276,30 @@ defmodule Pincer.Channels.Discord do
         else
           case authorize_dm_if_needed(msg) do
             :allow ->
-              if String.starts_with?(trimmed, "/") do
-                handle_command(msg, trimmed)
-              else
-                case UX.resolve_shortcut(trimmed) do
-                  {:ok, command} ->
-                    handle_command(msg, command)
+              session_context = resolve_session_context(msg)
+              session_id = session_context.session_id
 
-                  :error ->
-                    session_context = resolve_session_context(msg)
-                    session_id = session_context.session_id
-
-                    case ProjectRouter.continue_if_collecting(session_id, trimmed,
-                           has_attachments: not Enum.empty?(msg.attachments)
-                         ) do
-                      {:handled, response} ->
-                        Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
-                        maybe_start_project_execution(msg.channel_id, session_context)
-
-                      :not_handled ->
-                        Logger.info(
-                          "[DISCORD] Message from #{msg.author.username} in #{msg.channel_id}"
-                        )
-
-                        {attachment_text, attachment_refs} = process_attachments(msg.attachments)
-                        text_content = (trimmed <> "\n" <> attachment_text) |> String.trim()
-
-                        # Build the message content:
-                        # - plain string  when there are no multimodal attachments
-                        # - list of parts when there are PDFs/images (lazy refs resolved by Executor)
-                        full_content =
-                          if Enum.empty?(attachment_refs) do
-                            text_content
-                          else
-                            text_parts =
-                              if text_content != "",
-                                do: [%{"type" => "text", "text" => text_content}],
-                                else: []
-
-                            text_parts ++ attachment_refs
-                          end
-
-                        has_content =
-                          case full_content do
-                            s when is_binary(s) -> s != ""
-                            list when is_list(list) -> list != []
-                          end
-
-                        if has_content do
-                          ensure_brain_session_started(session_context)
-
-                          Pincer.Channels.Discord.Session.ensure_started(
-                            msg.channel_id,
-                            session_id
-                          )
-
-                          # Create agnostic IncomingMessage
-                          incoming =
-                            case full_content do
-                              text when is_binary(text) ->
-                                IncomingMessage.new(session_id, text)
-
-                              parts when is_list(parts) ->
-                                # Split text from attachments
-                                {text_parts, att_parts} =
-                                  Enum.split_with(parts, fn p -> p["type"] == "text" end)
-
-                                text = Enum.map_join(text_parts, "\n", & &1["text"])
-                                atts = Enum.map(att_parts, & &1["attachment"])
-
-                                IncomingMessage.new(session_id, text: text, attachments: atts)
-                            end
-
-                          Pincer.Ports.Session.process_input(session_id, incoming)
-                        else
-                          Logger.debug(
-                            "[DISCORD] Ignoring empty message without supported attachments."
-                          )
-                        end
-                    end
+              inbound = %{
+                text: trimmed,
+                has_attachments: false,
+                session_id: session_id,
+                on_command: fn command -> handle_command(msg, command) end,
+                on_message: fn _content -> :ok end,
+                on_project_response: fn response, _sid ->
+                  Pincer.Channels.Discord.send_message("#{msg.channel_id}", response)
+                  maybe_start_project_execution(msg.channel_id, session_context)
                 end
+              }
+
+              case Inbound.dispatch(inbound,
+                     resolve_shortcut: &UX.resolve_shortcut/1,
+                     continue_project: &ProjectRouter.continue_if_collecting/3
+                   ) do
+                {:message, _content} ->
+                  deliver_inbound_message(msg, session_context, trimmed)
+
+                _other ->
+                  :ok
               end
 
             {:deny, message} ->
@@ -402,6 +347,49 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp dm_event?(msg), do: Map.get(msg, :guild_id) in [nil, ""]
+
+    defp deliver_inbound_message(msg, session_context, trimmed) do
+      Logger.info("[DISCORD] Message from #{msg.author.username} in #{msg.channel_id}")
+
+      session_id = session_context.session_id
+      {attachment_text, attachment_refs} = process_attachments(msg.attachments)
+      text_content = (trimmed <> "\n" <> attachment_text) |> String.trim()
+
+      # A plain string when there are no multimodal attachments, otherwise a
+      # list of parts whose lazy refs the Executor resolves.
+      full_content =
+        if Enum.empty?(attachment_refs) do
+          text_content
+        else
+          text_parts = if text_content != "", do: [%{"type" => "text", "text" => text_content}], else: []
+          text_parts ++ attachment_refs
+        end
+
+      if has_content?(full_content) do
+        ensure_brain_session_started(session_context)
+        Pincer.Channels.Discord.Session.ensure_started(msg.channel_id, session_id)
+
+        Pincer.Ports.Session.process_input(session_id, build_incoming(session_id, full_content))
+      else
+        Logger.debug("[DISCORD] Ignoring empty message without supported attachments.")
+      end
+    end
+
+    defp has_content?(content) when is_binary(content), do: content != ""
+    defp has_content?(content) when is_list(content), do: content != []
+    defp has_content?(_), do: false
+
+    defp build_incoming(session_id, text) when is_binary(text) do
+      IncomingMessage.new(session_id, text)
+    end
+
+    defp build_incoming(session_id, parts) when is_list(parts) do
+      {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
+      text = Enum.map_join(text_parts, "\n", & &1["text"])
+      atts = Enum.map(att_parts, & &1["attachment"])
+
+      IncomingMessage.new(session_id, text: text, attachments: atts)
+    end
 
     defp read_sender_id(author) when is_map(author) do
       Map.get(author, :id) || Map.get(author, "id") || Map.get(author, :username) ||
