@@ -100,29 +100,24 @@ defmodule Pincer.Adapters.Tools.SafeShell do
 
   def approved_command_allowed?(command, opts) do
     workspace_restrict = Keyword.get(opts, :workspace_restrict, true)
+    workspace_root = opts |> Keyword.get(:workspace_root, File.cwd!()) |> Path.expand()
+    command = String.slice(command, 0, @max_command_length)
 
-    if not workspace_restrict do
-      :ok
-    else
-      workspace_root = opts |> Keyword.get(:workspace_root, File.cwd!()) |> Path.expand()
-      command = String.slice(command, 0, @max_command_length)
+    cond do
+      String.match?(command, @multiline_or_line_continuation) ->
+        {:error, "Detected multiline or line-continuation shell payload"}
 
-      cond do
-        String.match?(command, @multiline_or_line_continuation) ->
-          {:error, "Detected multiline or line-continuation shell payload"}
+      String.match?(command, @dangerous_chars) ->
+        {:error, "Detected dangerous shell characters"}
 
-        String.match?(command, @dangerous_chars) ->
-          {:error, "Detected dangerous shell characters"}
-
-        true ->
-          case parse_and_validate(command,
-                 workspace_restrict: true,
-                 workspace_root: workspace_root
-               ) do
-            {:ok, _sanitized_command} -> :ok
-            {:error, reason} -> {:error, reason}
-          end
-      end
+      true ->
+        case parse_and_validate(command,
+               workspace_restrict: workspace_restrict,
+               workspace_root: workspace_root
+             ) do
+          {:ok, _sanitized_command} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
     end
   end
 
@@ -156,12 +151,27 @@ defmodule Pincer.Adapters.Tools.SafeShell do
 
     cond do
       approval_granted ->
-        Logger.info("[SAFE-SHELL] Pre-approved command: #{command}")
+        # An approval only lifts the human decision, never the static safety
+        # checks: the exact command the user saw is validated again here.
+        case approved_command_allowed?(command,
+               workspace_restrict: workspace_restrict,
+               workspace_root: workspace_root
+             ) do
+          :ok ->
+            Logger.info("[SAFE-SHELL] Pre-approved command: #{command}")
 
-        execute_in_sandbox(command,
-          workspace_restrict: workspace_restrict,
-          workspace_root: workspace_root
-        )
+            execute_in_sandbox(command,
+              workspace_restrict: workspace_restrict,
+              workspace_root: workspace_root
+            )
+
+          {:error, reason} ->
+            Logger.warning(
+              "[SAFE-SHELL] Rejected approved command: #{command} (Reason: #{reason})"
+            )
+
+            {:error, {:approval_required, command}}
+        end
 
       String.match?(command, @multiline_or_line_continuation) ->
         audit_required(command, "Detected multiline or line-continuation shell payload")

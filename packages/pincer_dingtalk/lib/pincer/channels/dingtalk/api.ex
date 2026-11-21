@@ -12,6 +12,9 @@ defmodule Pincer.Channels.DingTalk.API do
 
   alias Pincer.Channels.Shared.TokenCache
 
+  @receive_timeout 30_000
+  @connect_timeout 10_000
+
   @base_url "https://oapi.dingtalk.com"
   @token_url "#{@base_url}/v1.0/oauth2/accessToken"
   @dm_url "#{@base_url}/v1.0/robot/oToMessages/batchSend"
@@ -42,7 +45,9 @@ defmodule Pincer.Channels.DingTalk.API do
                json: %{
                  "client_id" => client_id,
                  "client_secret" => client_secret
-               }
+               },
+               receive_timeout: @receive_timeout,
+               connect_timeout: @connect_timeout
              ) do
           {:ok, %{status: 200, body: body}} ->
             token = Map.fetch!(body, "accessToken")
@@ -213,7 +218,9 @@ defmodule Pincer.Channels.DingTalk.API do
 
     opts = [
       json: body,
-      headers: [{"x-acs-dingtalk-access-token", token}]
+      headers: [{"x-acs-dingtalk-access-token", token}],
+      receive_timeout: @receive_timeout,
+      connect_timeout: @connect_timeout
     ]
 
     {url, opts}

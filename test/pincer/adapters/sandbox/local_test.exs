@@ -124,13 +124,13 @@ defmodule Pincer.Adapters.Sandbox.LocalTest do
 
     test "executes real command cleanly with default runner", %{workspace: workspace} do
       assert {:ok, %{output: output, exit_code: 0, backend: :local}} =
-               Local.run("echo pincer_local_ok",
+               Local.run("pwd",
                  transport: :os,
                  workspace_path: workspace,
                  timeout_ms: 5_000
                )
 
-      assert String.trim(output) == "pincer_local_ok"
+      assert String.trim(output) == Path.expand(workspace)
     end
 
     test "enforces timeout_ms and returns {:error, :timeout}", %{workspace: workspace} do
@@ -140,11 +140,24 @@ defmodule Pincer.Adapters.Sandbox.LocalTest do
       end
 
       assert {:error, :timeout} =
-               Local.run("sleep 1",
+               Local.run("pwd",
                  transport: :os,
                  runner: slow_runner,
                  workspace_path: workspace,
                  timeout_ms: 30
+               )
+    end
+
+    test "rejects commands outside the allowlist before invoking the runner", %{
+      workspace: workspace
+    } do
+      runner = fn _cmd, _opts -> flunk("runner must not be invoked") end
+
+      assert {:error, {:command_not_allowed, _reason}} =
+               Local.run("curl http://evil.example",
+                 transport: :os,
+                 runner: runner,
+                 workspace_path: workspace
                )
     end
   end

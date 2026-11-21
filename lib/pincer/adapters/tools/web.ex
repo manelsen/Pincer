@@ -128,7 +128,13 @@ defmodule Pincer.Adapters.Tools.Web do
 
   defp execute_fetch(_args), do: {:error, "Missing required parameter: url"}
 
-  defp validate_url(url) do
+  @doc """
+  Validates a URL against the outbound-fetch policy (allowed schemes and SSRF
+  blocklist). Shared by every tool that reaches the network so no caller can
+  skip the check.
+  """
+  @spec validate_url(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def validate_url(url) when is_binary(url) do
     case URI.parse(url) do
       %URI{scheme: scheme, host: host} when not is_nil(scheme) and not is_nil(host) ->
         normalized_scheme = String.downcase(String.trim(scheme))

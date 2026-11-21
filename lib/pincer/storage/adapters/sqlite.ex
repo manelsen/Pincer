@@ -14,7 +14,7 @@ defmodule Pincer.Storage.Adapters.SQLite do
 
   @behaviour Pincer.Ports.Storage
 
-  alias Pincer.Core.MemoryTypes
+  alias Pincer.Storage.MemoryHelpers
   alias Pincer.Infra.SQLite
   alias Pincer.Storage.Checkpoint
 
@@ -1406,25 +1406,7 @@ defmodule Pincer.Storage.Adapters.SQLite do
     :ok
   end
 
-  defp document_result(node, scoring) do
-    %{
-      kind: :document,
-      role: "document",
-      content: node.data["content"],
-      source: node.data["path"],
-      citation: build_citation(node.data),
-      score: scoring.score,
-      signal: scoring.signal,
-      signal_score: scoring.signal_score,
-      signals: [scoring.signal],
-      score_components: scoring.score_components,
-      memory_type: node.data["memory_type"] || "reference",
-      importance: node.data["importance"] || 5,
-      access_count: (node.data["access_count"] || 0) + 1,
-      session_id: node.data["session_id"],
-      forgotten?: memory_forgotten?(node.data)
-    }
-  end
+  defp document_result(node, scoring), do: MemoryHelpers.document_result(node, scoring)
 
   defp knowledge_node_result(%{type: "decision", id: id, data: data}, tokens) do
     topic = data["topic"] || ""
@@ -1517,13 +1499,7 @@ defmodule Pincer.Storage.Adapters.SQLite do
     end
   end
 
-  defp search_tokens(query) do
-    query
-    |> to_string()
-    |> String.downcase()
-    |> String.split(~r/[^[:alnum:]_]+/u, trim: true)
-    |> Enum.filter(&(String.length(&1) >= 2))
-  end
+  defp search_tokens(query), do: MemoryHelpers.search_tokens(query)
 
   defp token_overlap_score(text, tokens) do
     downcased = String.downcase(text)
@@ -1534,90 +1510,23 @@ defmodule Pincer.Storage.Adapters.SQLite do
   defp normalize_bm25(score) when is_number(score), do: clamp_score(score / (score + 1.0))
   defp normalize_bm25(_), do: 0.5
 
-  defp clamp_score(score) when is_number(score), do: min(1.0, max(0.0, score * 1.0))
-  defp clamp_score(_), do: 0.0
+  defp clamp_score(score), do: MemoryHelpers.clamp_score(score)
 
-  defp build_memory_metadata(path, content, memory_type, opts) do
-    %{
-      "path" => path,
-      "content" => content,
-      "memory_type" => MemoryTypes.normalize(memory_type),
-      "importance" => normalize_importance(Keyword.get(opts, :importance, 5)),
-      "access_count" => Keyword.get(opts, :access_count, 0),
-      "last_accessed_at" => Keyword.get(opts, :last_accessed_at),
-      "forgotten_at" => Keyword.get(opts, :forgotten_at),
-      "session_id" => Keyword.get(opts, :session_id),
-      "workspace_root" => Keyword.get(opts, :workspace_root),
-      "line_start" => Keyword.get(opts, :line_start),
-      "line_end" => Keyword.get(opts, :line_end)
-    }
-    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
-    |> Map.new()
-  end
+  defp build_memory_metadata(path, content, memory_type, opts),
+    do: MemoryHelpers.build_memory_metadata(path, content, memory_type, opts)
 
-  defp normalize_importance(value) when is_integer(value), do: min(10, max(0, value))
-  defp normalize_importance(_), do: 5
+  defp document_matches_opts?(data, opts), do: MemoryHelpers.document_matches_opts?(data, opts)
+  defp match_workspace?(data, opts), do: MemoryHelpers.match_workspace?(data, opts)
+  defp memory_forgotten?(data), do: MemoryHelpers.memory_forgotten?(data)
+  defp incident_query?(tokens), do: MemoryHelpers.incident_query?(tokens)
+  defp build_citation(data), do: MemoryHelpers.build_citation(data)
+  defp extract_session_id(value), do: MemoryHelpers.extract_session_id(value)
 
-  defp document_matches_opts?(data, opts) do
-    type_match? =
-      case Keyword.get(opts, :memory_type) do
-        nil -> true
-        type -> data["memory_type"] == MemoryTypes.normalize(type)
-      end
+  defp build_structured_id(prefix, content),
+    do: MemoryHelpers.build_structured_id(prefix, content)
 
-    session_match? =
-      case Keyword.get(opts, :session_id) do
-        nil -> true
-        session_id -> data["session_id"] == session_id
-      end
-
-    type_match? and session_match?
-  end
-
-  defp match_workspace?(data, opts) do
-    case Keyword.get(opts, :workspace_root) do
-      nil -> true
-      workspace_root -> data["workspace_root"] == workspace_root
-    end
-  end
-
-  defp memory_forgotten?(data),
-    do: is_binary(data["forgotten_at"]) and String.trim(data["forgotten_at"]) != ""
-
-  defp incident_query?(tokens) do
-    Enum.any?(
-      tokens,
-      &(&1 in ["bug", "fix", "timeout", "incident", "deploy", "retry", "retries"])
-    )
-  end
-
-  defp build_citation(data) do
-    source = data["path"] || "memory"
-
-    case {data["line_start"], data["line_end"]} do
-      {s, e} when is_integer(s) and is_integer(e) -> "#{source}#L#{s}-L#{e}"
-      {s, _} when is_integer(s) -> "#{source}#L#{s}"
-      _ -> source
-    end
-  end
-
-  defp extract_session_id("session:" <> rest) do
-    rest |> String.split(":", parts: 3) |> hd()
-  end
-
-  defp extract_session_id(_), do: "unknown"
-
-  defp build_structured_id(prefix, content) do
-    date = Date.utc_today() |> Date.to_string() |> String.replace("-", "")
-    seq = :crypto.hash(:sha256, content) |> Base.encode16() |> String.slice(-8, 8)
-    "#{prefix}-#{date}-#{seq}"
-  end
-
-  defp build_pattern_key(category, summary) do
-    :crypto.hash(:sha256, category <> "::" <> summary)
-    |> Base.encode16()
-    |> String.slice(0, 8)
-  end
+  defp build_pattern_key(category, summary),
+    do: MemoryHelpers.build_pattern_key(category, summary)
 
   defp now_iso8601, do: DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 
@@ -1637,8 +1546,6 @@ defmodule Pincer.Storage.Adapters.SQLite do
     end
   end
 
-  defp maybe_put(map, _key, nil), do: map
-  defp maybe_put(map, key, value), do: Map.put(map, key, value)
-
-  defp stringify_keys(map), do: Map.new(map, fn {k, v} -> {to_string(k), v} end)
+  defp maybe_put(map, key, value), do: MemoryHelpers.maybe_put(map, key, value)
+  defp stringify_keys(map), do: MemoryHelpers.stringify_keys(map)
 end

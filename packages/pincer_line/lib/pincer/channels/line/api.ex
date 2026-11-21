@@ -10,6 +10,9 @@ defmodule Pincer.Channels.Line.API do
   tested without hitting the real API.
   """
 
+  @receive_timeout 30_000
+  @connect_timeout 10_000
+
   @reply_url "https://api.line.me/v2/bot/message/reply"
   @push_url "https://api.line.me/v2/bot/message/push"
   @profile_url "https://api.line.me/v2/bot/profile"
@@ -114,7 +117,9 @@ defmodule Pincer.Channels.Line.API do
 
     opts = [
       json: body,
-      headers: [{"Authorization", "Bearer #{token}"}]
+      headers: [{"Authorization", "Bearer #{token}"}],
+      receive_timeout: @receive_timeout,
+      connect_timeout: @connect_timeout
     ]
 
     {url, opts}
@@ -124,7 +129,9 @@ defmodule Pincer.Channels.Line.API do
     token = fetch_token()
 
     opts = [
-      headers: [{"Authorization", "Bearer #{token}"}]
+      headers: [{"Authorization", "Bearer #{token}"}],
+      receive_timeout: @receive_timeout,
+      connect_timeout: @connect_timeout
     ]
 
     {url, opts}

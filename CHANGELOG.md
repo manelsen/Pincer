@@ -15,6 +15,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Postgres-free `sqlite-smoke` CI gate, strict posture fixture checks (`doctor --strict` and `security_audit --strict`), and opt-in real container Docker E2E suite (`--only docker`).
 - Open-source governance files (`SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `CODE_OF_CONDUCT.md`).
 
+### Fixed
+- Approved `safe_shell` commands are re-validated against the static checks before execution, so approving a tool no longer bypasses the path and metacharacter guards.
+- The local sandbox `:os` transport, SSH remote workspaces, and `browser` navigation now enforce the same guards (command allowlist, remote path validation, SSRF blocklist) as the rest of the tool surface.
+- Changing the default model now edits only the `llm` section of `config.yaml` instead of regenerating the file and dropping unrelated sections; it also no longer re-reads `.env`.
+- LINE, Feishu, and DingTalk HTTP calls now set connect/receive timeouts.
+- Tool approval decisions are recorded in the audit log, and a configured role without `:approve_tools` cannot approve privileged tools.
+
+### Removed
+- Unused modules that were only referenced by their own tests (`ModelRouter`, `ProjectBoard`, `ContractEngine`, `Capabilities`, `Session.CommandQueue`, `ReleaseValidation`, `Storage.Port`, `Core.SubAgent`) and the incomplete Matrix channel tree, which pointed at a non-existent session module.
+- Manual debug scripts moved from `test/` to `scripts/manual/` so they no longer run as part of `mix test`.
+
 ### Security
 - Removed unvalidated MCP `shell_server.py` and Node `mcp_sidecar` PoC; blocked MCP `run_command` execution in `Pincer.Adapters.NativeToolRegistry`.
 - Hardened `SafeShell` to require approval for destructive/exec/file-writing `find` and `git log` flags.

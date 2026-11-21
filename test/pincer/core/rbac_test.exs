@@ -29,4 +29,23 @@ defmodule Pincer.Core.RBACTest do
   test "role_for defaults to :bot" do
     assert RBAC.role_for("unknown_agent") == :bot
   end
+
+  describe "configured_role_for/1" do
+    test "returns nil for agents without an explicit role" do
+      assert RBAC.configured_role_for("unknown_agent") == nil
+    end
+
+    test "returns the configured role" do
+      previous = Application.get_env(:pincer, :agents)
+
+      Application.put_env(:pincer, :agents, %{"agent-x" => %{role: "operator"}})
+      on_exit(fn -> restore_agents(previous) end)
+
+      assert RBAC.configured_role_for("agent-x") == :operator
+      assert RBAC.configured_role_for("missing") == nil
+    end
+
+    defp restore_agents(nil), do: Application.delete_env(:pincer, :agents)
+    defp restore_agents(value), do: Application.put_env(:pincer, :agents, value)
+  end
 end

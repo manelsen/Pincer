@@ -7,9 +7,11 @@ defmodule Pincer.Core.Executor.ToolRunner do
 
   require Logger
 
+  alias Pincer.Core.AuditLog
   alias Pincer.Core.Executor.Ctx
   alias Pincer.Core.Executor.ToolCall
   alias Pincer.Core.Policy
+  alias Pincer.Core.RBAC
   alias Pincer.Core.ToolRuntime
   alias Pincer.Infra.PubSub
 
@@ -189,7 +191,48 @@ defmodule Pincer.Core.Executor.ToolRunner do
     end
   end
 
+  defp record_audit(ctx, tool_name, outcome, command) do
+    AuditLog.record(:tool_approval, outcome,
+      actor: ctx.session_id,
+      target: tool_name,
+      session_id: ctx.session_id,
+      metadata: %{"command" => command}
+    )
+  end
+
   defp handle_approval(call_id, approval_data, runtime_ctx, ctx, steps) do
+    if rbac_forbidden?(ctx) do
+      handle_rbac_denial(approval_data, ctx, steps)
+    else
+      request_approval(call_id, approval_data, runtime_ctx, ctx, steps)
+    end
+  end
+
+  defp rbac_forbidden?(ctx) do
+    case RBAC.configured_role_for(ctx.session_id) do
+      nil -> false
+      role -> RBAC.authorize(role, :approve_tools) != :ok
+    end
+  end
+
+  defp handle_rbac_denial(approval_data, ctx, steps) do
+    tool_name = Map.get(approval_data, :tool) || Map.get(approval_data, "tool") || "safe_shell"
+
+    Logger.warning("[EXECUTOR] RBAC denied tool approval for #{tool_name} (#{ctx.session_id})")
+
+    record_audit(ctx, tool_name, :forbidden, nil)
+
+    recovery =
+      Policy.recover(:tool_approval_denied, %{
+        tool: tool_name,
+        class: :privileged,
+        reason: :forbidden
+      })
+
+    {"Approval denied for #{tool_name}. Recovery: #{inspect(recovery)}", steps, :ok}
+  end
+
+  defp request_approval(call_id, approval_data, runtime_ctx, ctx, steps) do
     command = Map.get(approval_data, :command) || Map.get(approval_data, "command") || ""
     tool_name = Map.get(approval_data, :tool) || Map.get(approval_data, "tool") || "safe_shell"
 
@@ -200,12 +243,14 @@ defmodule Pincer.Core.Executor.ToolRunner do
     approval_prompt = build_approval_prompt(command, tool_name)
 
     Logger.warning("[EXECUTOR] Waiting for approval for: #{approval_prompt}")
+    record_audit(ctx, tool_name, :approval_required, command)
     PubSub.broadcast("session:#{ctx.session_id}", {:approval_required, call_id, approval_prompt})
 
     receive do
       {:tool_approval_result, ^call_id, :approved} ->
         Logger.info("[EXECUTOR] Command approved: #{command}")
         steps = audit_step(ctx, steps, tool_name, tool_class, :approved)
+        record_audit(ctx, tool_name, :approved, command)
 
         result =
           case ToolRuntime.execute(
@@ -225,6 +270,7 @@ defmodule Pincer.Core.Executor.ToolRunner do
       {:tool_approval_result, ^call_id, :rejected} ->
         Logger.info("[EXECUTOR] Command rejected: #{command}")
         steps = audit_step(ctx, steps, tool_name, tool_class, :denied)
+        record_audit(ctx, tool_name, :denied, command)
 
         recovery =
           Policy.recover(:tool_approval_denied, %{

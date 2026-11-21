@@ -173,6 +173,63 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
     refute md_notice =~ "BOOTSTRAP.md"
   end
 
+  test "records an audit event when a privileged tool needs approval" do
+    session_id = "runner_audit_#{System.unique_integer([:positive])}"
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+    on_exit(fn -> Pincer.Infra.PubSub.unsubscribe("session:#{session_id}") end)
+
+    ctx =
+      Ctx.new(self(), session_id,
+        workspace_path: tmp_dir!(),
+        tool_registry: RegistryStub,
+        storage: StorageSpy
+      )
+
+    call = %{"id" => "c_audit", "function" => %{"name" => "approval_tool", "arguments" => "{}"}}
+
+    task =
+      Task.async(fn -> ToolRunner.execute_batch([call], %{ctx | session_pid: self()}) end)
+
+    assert_receive {:approval_required, "c_audit", _prompt}, 1_000
+    send(task.pid, {:tool_approval_result, "c_audit", :approved})
+    Task.await(task, 2_000)
+
+    events = Pincer.Core.AuditLog.by_actor(session_id)
+    assert Enum.any?(events, &(&1.event_type == "tool_approval"))
+    assert Enum.any?(events, &(&1.outcome == "approved"))
+  end
+
+  test "denies approval when the configured role lacks :approve_tools" do
+    session_id = "runner_rbac_#{System.unique_integer([:positive])}"
+    previous = Application.get_env(:pincer, :agents)
+
+    Application.put_env(:pincer, :agents, %{session_id => %{role: "bot"}})
+
+    on_exit(fn ->
+      case previous do
+        nil -> Application.delete_env(:pincer, :agents)
+        value -> Application.put_env(:pincer, :agents, value)
+      end
+    end)
+
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+    on_exit(fn -> Pincer.Infra.PubSub.unsubscribe("session:#{session_id}") end)
+
+    ctx =
+      Ctx.new(self(), session_id,
+        workspace_path: tmp_dir!(),
+        tool_registry: RegistryStub,
+        storage: StorageSpy
+      )
+
+    call = %{"id" => "c_deny", "function" => %{"name" => "approval_tool", "arguments" => "{}"}}
+
+    {[msg], _ctx} = ToolRunner.execute_batch([call], %{ctx | session_pid: self()})
+
+    assert msg["content"] =~ "Approval denied for approval_tool"
+    refute_received {:approval_required, _id, _prompt}
+  end
+
   test "handles approval granted and denied in sequential tool execution" do
     session_id = "runner_approval_#{System.unique_integer([:positive])}"
     Pincer.Infra.PubSub.subscribe("session:#{session_id}")

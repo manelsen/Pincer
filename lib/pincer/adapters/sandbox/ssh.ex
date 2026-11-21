@@ -39,7 +39,9 @@ defmodule Pincer.Adapters.Sandbox.SSH do
          {:ok, user} <- validate_user(Keyword.get(merged, :user)),
          {:ok, port} <- validate_port(Keyword.get(merged, :port, @default_port)),
          {:ok, env} <- Sandbox.validate_env(Keyword.get(merged, :env)),
-         :ok <- validate_local_cwd(merged) do
+         {:ok, remote_workspace} <- validate_remote_workspace(merged),
+         :ok <- validate_local_cwd(merged),
+         :ok <- validate_remote_command(command, merged) do
       target = if user, do: "#{user}@#{host}", else: host
 
       strict_host_key = Keyword.get(merged, :strict_host_key_checking, "yes")
@@ -47,7 +49,6 @@ defmodule Pincer.Adapters.Sandbox.SSH do
       identity_file = Keyword.get(merged, :identity_file)
       control_path = Keyword.get(merged, :control_path)
       control_persist = Keyword.get(merged, :control_persist, "60s")
-      remote_workspace = Keyword.get(merged, :remote_workspace)
 
       base_args = [
         "-o",
@@ -202,6 +203,46 @@ defmodule Pincer.Adapters.Sandbox.SSH do
 
       case WorkspaceGuard.confine_path(cwd, root: root, reject_parent_segments: true) do
         {:ok, _} -> :ok
+        {:error, _} = err -> err
+      end
+    else
+      :ok
+    end
+  end
+
+  # The remote working directory is prepended to the remote command, so it must
+  # never escape the remote workspace through `..` segments or shell metacharacters.
+  defp validate_remote_workspace(opts) do
+    case Keyword.get(opts, :remote_workspace) do
+      value when is_binary(value) ->
+        trimmed = String.trim(value)
+
+        cond do
+          trimmed == "" ->
+            {:ok, nil}
+
+          String.contains?(trimmed, "\0") ->
+            {:error, :invalid_remote_workspace}
+
+          String.contains?(trimmed, "..") ->
+            {:error, :invalid_remote_workspace}
+
+          String.match?(trimmed, ~r/[;&|`$<>]|\\(?:\r\n|\n|\r)|[\r\n]/) ->
+            {:error, :invalid_remote_workspace}
+
+          true ->
+            {:ok, trimmed}
+        end
+
+      _ ->
+        {:ok, nil}
+    end
+  end
+
+  defp validate_remote_command(command, opts) do
+    if Keyword.get(opts, :restrict_to_workspace, false) do
+      case WorkspaceGuard.command_allowed?(command, workspace_root: File.cwd!()) do
+        :ok -> :ok
         {:error, _} = err -> err
       end
     else

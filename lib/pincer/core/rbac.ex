@@ -52,13 +52,31 @@ defmodule Pincer.Core.RBAC do
   @doc "Returns the role for a given agent_id from config, defaulting to :bot."
   @spec role_for(String.t()) :: role()
   def role_for(agent_id) do
-    agents = Application.get_env(:pincer, :agents, %{})
-
-    case get_in(agents, [agent_id, :role]) do
+    case configured_role(agent_id) do
       "admin" -> :admin
       "operator" -> :operator
       _ -> :bot
     end
+  end
+
+  @doc """
+  Returns the role explicitly configured for an agent, or `nil` when the agent
+  has no role configured. Callers that gate behaviour use this to avoid applying
+  the conservative `:bot` default to unconfigured sessions.
+  """
+  @spec configured_role_for(String.t()) :: role() | nil
+  def configured_role_for(agent_id) do
+    case configured_role(agent_id) do
+      "admin" -> :admin
+      "operator" -> :operator
+      nil -> nil
+      _ -> :bot
+    end
+  end
+
+  defp configured_role(agent_id) do
+    agents = Application.get_env(:pincer, :agents, %{})
+    get_in(agents, [agent_id, :role])
   end
 
   @doc "Asserts the role has permission, returns {:error, :forbidden} if not."

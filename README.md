@@ -356,7 +356,7 @@ The `boundary` compiler plugin enforces dependency direction at compile time:
 
 - 247 root Elixir source files (`lib/`) + 72 package source files across 25 subpackages (`packages/`)
 - 250 test files (`*_test.exs`)
-- 14 LLM provider adapters, 9 channel packages (plus built-in Matrix), 18 native tool modules
+- 14 LLM provider adapters, 9 channel packages, 18 native tool modules
 - ~80 tool actions available to agents
 
 ## Governance & Security

@@ -66,6 +66,30 @@ defmodule Pincer.Adapters.Sandbox.SSHTest do
       assert String.contains?(remote_cmd, "export MIX_ENV='prod'")
       assert String.ends_with?(remote_cmd, "ls -la")
     end
+
+    test "rejects a remote workspace that escapes upward" do
+      assert {:error, :invalid_remote_workspace} =
+               SSH.build_args("ls",
+                 host: "ok.host",
+                 remote_workspace: "/srv/workspaces/../../etc"
+               )
+    end
+
+    test "rejects a remote workspace with shell metacharacters" do
+      assert {:error, :invalid_remote_workspace} =
+               SSH.build_args("ls",
+                 host: "ok.host",
+                 remote_workspace: "/srv/app; rm -rf /"
+               )
+    end
+
+    test "enforces the command allowlist when workspace restriction is on" do
+      assert {:error, "Command not in whitelist"} =
+               SSH.build_args("curl http://evil.example",
+                 host: "ok.host",
+                 restrict_to_workspace: true
+               )
+    end
   end
 
   describe "run/2 & cleanup/2" do

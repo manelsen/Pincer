@@ -18,7 +18,7 @@ defmodule Pincer.StorageSmokeTest do
   test "repo is using postgres adapter" do
     config = Pincer.Infra.Repo.config()
     assert config[:adapter] == Ecto.Adapters.Postgres
-    assert config[:database] == "pincer_test"
-    assert config[:hostname] == "localhost"
+    assert config[:database] == System.get_env("PINCER_DB_NAME", "pincer_test")
+    assert config[:hostname] == System.get_env("PINCER_DB_HOST", "localhost")
   end
 end

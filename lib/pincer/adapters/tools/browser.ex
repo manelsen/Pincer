@@ -126,7 +126,10 @@ defmodule Pincer.Adapters.Tools.Browser do
   # ---------------------------------------------------------------------------
 
   defp run_action("navigate", sid, %{"url" => url}, pool) do
-    pool.cmd(sid, "navigate", %{"url" => url})
+    case Pincer.Adapters.Tools.Web.validate_url(url) do
+      {:ok, validated_url} -> pool.cmd(sid, "navigate", %{"url" => validated_url})
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   defp run_action("navigate", _sid, _args, _pool),

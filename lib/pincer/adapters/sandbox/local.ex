@@ -5,8 +5,8 @@ defmodule Pincer.Adapters.Sandbox.Local do
   Supports two transports:
   - `:tool_registry` (default) — delegates `"run_command"` through `Pincer.Ports.ToolRegistry`,
     preserving MCP server execution and existing `SafeShell` integration behaviour.
-  - `:os` — executes via `sh -c` with explicit timeout enforcement and `WorkspaceGuard`
-    directory confinement.
+  - `:os` - executes via `sh -c` with explicit timeout enforcement, `WorkspaceGuard`
+    directory confinement and the same tokenized command allowlist enforced elsewhere.
   """
 
   @behaviour Pincer.Ports.Sandbox
@@ -106,26 +106,43 @@ defmodule Pincer.Adapters.Sandbox.Local do
     runner = Keyword.get(opts, :runner, &default_os_runner/2)
     timeout_ms = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
 
-    cmd_opts =
-      [stderr_to_stdout: true]
-      |> then(fn acc -> if cwd, do: Keyword.put(acc, :cd, cwd), else: acc end)
-      |> then(fn acc -> if env != [], do: Keyword.put(acc, :env, env), else: acc end)
+    with :ok <- ensure_os_command_allowed(command, cwd, opts) do
+      cmd_opts =
+        [stderr_to_stdout: true]
+        |> then(fn acc -> if cwd, do: Keyword.put(acc, :cd, cwd), else: acc end)
+        |> then(fn acc -> if env != [], do: Keyword.put(acc, :env, env), else: acc end)
 
-    case Sandbox.run_with_timeout(fn -> runner.(command, cmd_opts) end, timeout_ms) do
-      {:ok, {output, exit_code}} when is_integer(exit_code) ->
-        {:ok,
-         %{
-           output: to_string(output),
-           exit_code: exit_code,
-           backend: :local,
-           metadata: %{transport: :os}
-         }}
+      case Sandbox.run_with_timeout(fn -> runner.(command, cmd_opts) end, timeout_ms) do
+        {:ok, {output, exit_code}} when is_integer(exit_code) ->
+          {:ok,
+           %{
+             output: to_string(output),
+             exit_code: exit_code,
+             backend: :local,
+             metadata: %{transport: :os}
+           }}
 
-      {:ok, {:error, reason}} ->
-        {:error, reason}
+        {:ok, {:error, reason}} ->
+          {:error, reason}
 
-      {:error, _} = error ->
-        error
+        {:error, _} = error ->
+          error
+      end
+    end
+  end
+
+  # The `:os` transport executes an arbitrary shell string, so it must obey the
+  # same tokenized allowlist as every other execution path.
+  defp ensure_os_command_allowed(command, cwd, opts) do
+    workspace_root =
+      case cwd || Keyword.get(opts, :workspace_path) do
+        path when is_binary(path) and path != "" -> Path.expand(path)
+        _ -> File.cwd!()
+      end
+
+    case WorkspaceGuard.command_allowed?(command, workspace_root: workspace_root) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:command_not_allowed, reason}}
     end
   end
 

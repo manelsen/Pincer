@@ -112,4 +112,18 @@ defmodule Pincer.Channels.Line.APITest do
       assert url == "https://api.line.me/v2/bot/profile/#{user_id}"
     end
   end
+
+  describe "request timeouts" do
+    test "POST and GET requests carry receive/connect timeouts" do
+      {_url, post_opts} =
+        API.build_request(:post, "https://api.line.me/v2/bot/message/reply", %{})
+
+      {_url, get_opts} = API.build_request(:get, "https://api.line.me/v2/bot/profile/u1", nil)
+
+      for opts <- [post_opts, get_opts] do
+        assert is_integer(Keyword.get(opts, :receive_timeout))
+        assert is_integer(Keyword.get(opts, :connect_timeout))
+      end
+    end
+  end
 end

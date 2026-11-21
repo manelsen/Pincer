@@ -14,7 +14,7 @@ defmodule Pincer.Core.Routing do
   Channel Adapter (lib/pincer/channels/*.ex)
       │  Normalizes raw channel events to %ChannelMessage{}
       │  Implementations: Telegram, Discord, Slack, WhatsApp, CLI, Webhook,
-      │                   DingTalk, Feishu, LINE, Matrix
+      │                   DingTalk, Feishu, LINE
       │
       ▼
   Session.Server (lib/pincer/core/session/server.ex)

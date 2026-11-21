@@ -593,16 +593,11 @@ defmodule Pincer.Infra.Config do
       {:ok, config} ->
         current_provider = provider || Map.get(config["llm"], "provider", "openrouter")
 
-        new_llm =
-          config["llm"]
-          |> Map.put("provider", current_provider)
-          |> put_in([current_provider, "default_model"], model_id)
-
-        new_config = Map.put(config, "llm", new_llm)
-
-        case write_yaml(@config_file, new_config) do
+        case write_yaml(@config_file, current_provider, model_id) do
           :ok ->
-            load()
+            # Only the LLM section changed: reload it without re-parsing `.env`
+            # or rewriting unrelated runtime configuration.
+            load(load_dotenv: false)
             {:ok, model_id, current_provider}
 
           {:error, reason} ->
@@ -632,42 +627,147 @@ defmodule Pincer.Infra.Config do
     parse_bind_ip(candidate)
   end
 
-  defp write_yaml(path, config) do
-    mcp_section =
-      if config["mcp"] do
-        """
-        mcp:
-          servers:
-            #{Enum.map(config["mcp"]["servers"], fn {name, cfg} -> "#{name}:\n      command: \"#{cfg["command"]}\"\n      args: #{inspect(cfg["args"])}" end) |> Enum.join("\n    ")}
-        """
-      else
-        ""
-      end
+  # Edits the touched `llm` keys in place instead of regenerating the whole file,
+  # so unrelated sections (channels, tools, sandbox, ...) survive untouched.
+  defp write_yaml(path, provider, model_id) do
+    with {:ok, content} <- File.read(path) do
+      updated =
+        content
+        |> put_scalar(["llm", "provider"], provider)
+        |> put_scalar(["llm", provider, "default_model"], model_id)
 
-    content = """
-    database:
-      adapter: "#{config["database"]["adapter"]}"
-      database: "#{config["database"]["database"]}"
+      File.write(path, updated)
+    end
+  end
 
-    llm:
-      provider: "#{config["llm"]["provider"]}"
-      opencode_zen:
-        base_url: "#{config["llm"]["opencode_zen"]["base_url"]}"
-        default_model: "#{config["llm"]["opencode_zen"]["default_model"]}"
-      openrouter:
-        base_url: "#{config["llm"]["openrouter"]["base_url"]}"
-        default_model: "#{config["llm"]["openrouter"]["default_model"]}"
-      groq:
-        base_url: "#{config["llm"]["groq"]["base_url"]}"
-        default_model: "#{config["llm"]["groq"]["default_model"]}"
-      groq_whisper:
-        base_url: "#{config["llm"]["groq_whisper"]["base_url"]}"
-        default_model: "#{config["llm"]["groq_whisper"]["default_model"]}"
+  @doc false
+  @spec put_scalar(String.t(), [String.t()], String.t()) :: String.t()
+  def put_scalar(content, path, value) when is_binary(content) and is_list(path) and path != [] do
+    lines = String.split(content, "\n")
+    {updated, found?} = rewrite_path(lines, path, value, [])
 
-    #{mcp_section}
-    """
+    if found? do
+      Enum.join(updated, "\n")
+    else
+      Enum.join(append_path(lines, path, value, 0), "\n")
+    end
+  end
 
-    File.write(path, content)
+  # Replaces `path` when every key on the way exists.
+  defp rewrite_path([line | rest], path, value, acc) do
+    indent = leading_spaces(line)
+
+    case match_key(line, path, indent) do
+      :no_match ->
+        rewrite_path(rest, path, value, [line | acc])
+
+      {:match, sub_path} when length(sub_path) == 1 ->
+        {Enum.reverse(acc) ++ [scalar_line(indent, hd(sub_path), value) | rest], true}
+
+      {:match, sub_path} ->
+        case rewrite_path(rest, tl(sub_path), value, []) do
+          {inner, true} -> {Enum.reverse(acc) ++ [line | inner], true}
+          {_inner, false} -> rewrite_path(rest, path, value, [line | acc])
+        end
+    end
+  end
+
+  defp rewrite_path([], _path, _value, acc), do: {Enum.reverse(acc), false}
+
+  # Appends `path` (and any missing intermediate blocks) right after the last
+  # line of the deepest existing ancestor block.
+  defp append_path(lines, path, value, indent) do
+    {missing, insert_at, block_indent} =
+      descend_for_append(lines, path, indent, 0, length(lines) - 1)
+
+    addition = build_block(missing, value, block_indent)
+    {before, after_block} = Enum.split(lines, insert_at)
+    before ++ addition ++ after_block
+  end
+
+  defp descend_for_append(lines, [key | rest], indent, start, stop) do
+    case find_child(lines, start, stop, indent, key) do
+      nil ->
+        {[key | rest], max(stop, 0), indent}
+
+      index when rest == [] ->
+        {[], index + 1, indent}
+
+      index ->
+        block_start = index + 1
+        block_stop = max(next_sibling_line(lines, block_start, stop, indent) - 1, index)
+        child_indent = child_indent_at(lines, block_start, indent)
+
+        descend_for_append(lines, rest, child_indent, block_start, block_stop)
+    end
+  end
+
+  defp build_block(path, value, indent) do
+    path
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {key, i} when i == length(path) - 1 -> [scalar_line(indent + i * 2, key, value)]
+      {key, i} -> [String.duplicate(" ", indent + i * 2) <> key <> ":"]
+    end)
+    |> List.flatten()
+  end
+
+  defp scalar_line(indent, key, value),
+    do: String.duplicate(" ", indent) <> key <> ": " <> encode_scalar(value)
+
+  defp match_key(line, [key | _] = path, indent) do
+    if leading_spaces(line) == indent and key_matches?(line, key),
+      do: {:match, path},
+      else: :no_match
+  end
+
+  defp find_child(lines, start, stop, indent, key) when start <= stop do
+    Enum.find(start..stop//1, fn i ->
+      line = Enum.at(lines, i)
+      leading_spaces(line) == indent and key_matches?(line, key)
+    end)
+  end
+
+  defp find_child(_lines, _start, _stop, _indent, _key), do: nil
+
+  defp next_sibling_line(lines, from, stop, indent) when from <= stop do
+    Enum.find(from..stop//1, stop + 1, fn i ->
+      line = Enum.at(lines, i)
+      String.trim(line) != "" and not comment?(line) and leading_spaces(line) <= indent
+    end)
+  end
+
+  defp next_sibling_line(_lines, _from, stop, _indent), do: stop + 1
+
+  defp child_indent_at(lines, index, fallback) do
+    lines
+    |> Enum.drop(index)
+    |> Enum.reject(&(String.trim(&1) == "" or comment?(&1)))
+    |> case do
+      [line | _] -> leading_spaces(line)
+      [] -> fallback + 2
+    end
+  end
+
+  defp comment?(line), do: String.starts_with?(String.trim(line), "#")
+
+  defp key_matches?(line, key) do
+    stripped = line |> String.trim_leading() |> String.trim_trailing()
+    stripped == key <> ":" or String.starts_with?(stripped, key <> ": ")
+  end
+
+  defp leading_spaces(line) when is_binary(line) do
+    line |> String.to_charlist() |> Enum.take_while(&(&1 == ?\s)) |> length()
+  end
+
+  defp encode_scalar(value) do
+    escaped =
+      value
+      |> to_string()
+      |> String.replace("\\", "\\\\")
+      |> String.replace("\"", "\\\"")
+
+    "\"" <> escaped <> "\""
   end
 
   defp normalize_key(key) when is_atom(key), do: key |> Atom.to_string() |> normalize_key()

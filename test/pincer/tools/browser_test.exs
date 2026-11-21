@@ -169,6 +169,29 @@ defmodule Pincer.Adapters.Tools.BrowserTest do
     assert_received {:cmd, "s", "click", %{"selector" => "button#ok"}}
   end
 
+  test "navigate rejects internal hosts without touching the pool" do
+    assert {:error, "Access to internal hosts is not allowed"} =
+             Browser.execute(%{
+               "action" => "navigate",
+               "url" => "http://localhost:4000/admin",
+               "session_id" => "s"
+             })
+
+    refute_received {:cmd, _, "navigate", _}
+  end
+
+  test "navigate rejects non-http schemes" do
+    assert {:error, msg} =
+             Browser.execute(%{
+               "action" => "navigate",
+               "url" => "file:///etc/passwd",
+               "session_id" => "s"
+             })
+
+    assert msg =~ "not allowed"
+    refute_received {:cmd, _, "navigate", _}
+  end
+
   test "fill delegates selector and value to pool" do
     assert {:ok, _} =
              Browser.execute(%{

@@ -146,4 +146,40 @@ defmodule Pincer.Adapters.Tools.SafeShellTest do
       assert_received {:stub_sandbox_ran, "git log -n 5 --oneline", _opts}
     end
   end
+
+  describe "approval does not bypass validation" do
+    test "rejects an approved command that fails the static checks", %{workspace: workspace} do
+      cmd = "rm -rf /"
+
+      assert {:error, {:approval_required, ^cmd}} =
+               SafeShell.execute(
+                 %{"command" => cmd, "restrict_to_workspace" => true},
+                 %{"workspace_path" => workspace, "approval_granted" => true}
+               )
+
+      refute_received {:stub_sandbox_ran, _, _}
+    end
+
+    test "rejects an approved command with shell metacharacters", %{workspace: workspace} do
+      cmd = "ls .; rm -rf keep_me.txt"
+
+      assert {:error, {:approval_required, ^cmd}} =
+               SafeShell.execute(
+                 %{"command" => cmd, "restrict_to_workspace" => true},
+                 %{"workspace_path" => workspace, "approval_granted" => true}
+               )
+
+      refute_received {:stub_sandbox_ran, _, _}
+    end
+
+    test "still runs an approved command that passes validation", %{workspace: workspace} do
+      assert {:ok, "stub: ls ."} =
+               SafeShell.execute(
+                 %{"command" => "ls .", "restrict_to_workspace" => true},
+                 %{"workspace_path" => workspace, "approval_granted" => true}
+               )
+
+      assert_received {:stub_sandbox_ran, "ls .", _opts}
+    end
+  end
 end

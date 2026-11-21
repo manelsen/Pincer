@@ -16,6 +16,9 @@ defmodule Pincer.Channels.Feishu.API do
 
   alias Pincer.Channels.Shared.TokenCache
 
+  @receive_timeout 30_000
+  @connect_timeout 10_000
+
   @doc """
   Returns the configured Feishu/Lark base URL.
 
@@ -182,7 +185,9 @@ defmodule Pincer.Channels.Feishu.API do
     token = fetch_cached_token(cache_name)
 
     opts = [
-      headers: [{"Authorization", "Bearer #{token}"}]
+      headers: [{"Authorization", "Bearer #{token}"}],
+      receive_timeout: @receive_timeout,
+      connect_timeout: @connect_timeout
     ]
 
     {url, opts}
@@ -193,7 +198,9 @@ defmodule Pincer.Channels.Feishu.API do
 
     opts = [
       json: body,
-      headers: [{"Authorization", "Bearer #{token}"}]
+      headers: [{"Authorization", "Bearer #{token}"}],
+      receive_timeout: @receive_timeout,
+      connect_timeout: @connect_timeout
     ]
 
     {url, opts}
@@ -204,7 +211,9 @@ defmodule Pincer.Channels.Feishu.API do
 
     opts = [
       json: body,
-      headers: [{"Authorization", "Bearer #{token}"}]
+      headers: [{"Authorization", "Bearer #{token}"}],
+      receive_timeout: @receive_timeout,
+      connect_timeout: @connect_timeout
     ]
 
     {url, opts}
@@ -230,7 +239,11 @@ defmodule Pincer.Channels.Feishu.API do
       "app_secret" => app_secret
     }
 
-    case Req.post(url, json: body) do
+    case Req.post(url,
+           json: body,
+           receive_timeout: @receive_timeout,
+           connect_timeout: @connect_timeout
+         ) do
       {:ok, %{status: 200, body: %{"tenant_access_token" => token, "expire" => expire}}} ->
         {:ok, token, System.system_time(:second) + expire}
 
