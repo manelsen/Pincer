@@ -13,6 +13,7 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.EmptyResponseRecoveryPolicy
   alias Pincer.Core.Executor.Attachments
   alias Pincer.Core.Executor.Ctx
+  alias Pincer.Core.Executor.FallbackStrategy
   alias Pincer.Core.Executor.LoopGuard
   alias Pincer.Core.Executor.StreamAccumulator
   alias Pincer.Core.Executor.ToolCall
@@ -119,7 +120,8 @@ defmodule Pincer.Core.Executor do
     end
   end
 
-  defp prepare_prompt_history(history, %Ctx{} = ctx, opts \\ []) do
+  @doc false
+  def prepare_prompt_history(history, %Ctx{} = ctx, opts \\ []) do
     provider_name = Ctx.active_provider(ctx)
 
     provider_config =
@@ -276,74 +278,17 @@ defmodule Pincer.Core.Executor do
          client_opts,
          tools_spec
        ) do
-    Logger.warning("[EXECUTOR] Falling back to chat completion. Reason: #{inspect(reason)}")
-    ctx = Ctx.record_trace(ctx, :policy, "fallback_chat_completion", %{reason: inspect(reason)})
-
-    {fallback_history, chat_opts, ctx} =
-      build_fallback_request(
-        reason,
-        logical_history,
-        prompt_history,
-        ctx,
-        client_opts,
-        tools_spec
-      )
-
-    case ctx.deps.llm_client.chat_completion(fallback_history, chat_opts) do
-      {:ok, assistant_msg, usage} ->
-        ctx = Ctx.record_trace(ctx, :llm, "chat_completion_invoked", %{fallback: true})
-
-        finalize_assistant_message(
-          assistant_msg,
-          logical_history,
-          prompt_history,
-          depth,
-          ctx,
-          usage
-        )
-
-      {:error, err_reason} ->
-        Logger.error("[EXECUTOR] Fallback chat completion failed: #{inspect(err_reason)}")
-
-        ctx =
-          Ctx.record_trace(ctx, :error, "fallback_chat_completion_failed", %{
-            reason: inspect(err_reason)
-          })
-
-        {:error, err_reason, ctx}
-    end
-  end
-
-  defp build_fallback_request(
-         reason,
-         logical_history,
-         prompt_history,
-         ctx,
-         client_opts,
-         tools_spec
-       ) do
-    case Policy.recover(:stream_fallback, %{reason: reason, tools_present?: tools_spec != []}) do
-      {:rebuild_prompt, %{safe_limit_scale: safe_limit_scale, drop_tools?: drop_tools?}} ->
-        Logger.warning(
-          "[EXECUTOR] Context overflow detected. Rebuilding fallback prompt with scale=#{safe_limit_scale} and drop_tools?=#{drop_tools?}."
-        )
-
-        {fallback_history, ctx} =
-          prepare_prompt_history(logical_history, ctx, safe_limit_scale: safe_limit_scale)
-
-        fallback_opts = if drop_tools?, do: client_opts, else: [tools: tools_spec] ++ client_opts
-        {fallback_history, fallback_opts, ctx}
-
-      :drop_tools ->
-        Logger.warning(
-          "[EXECUTOR] Provider/model does not support tool calling. Retrying fallback chat completion without tools."
-        )
-
-        {prompt_history, client_opts, ctx}
-
-      :keep_tools ->
-        {prompt_history, [tools: tools_spec] ++ client_opts, ctx}
-    end
+    FallbackStrategy.run(
+      reason,
+      logical_history,
+      prompt_history,
+      depth,
+      ctx,
+      client_opts,
+      tools_spec,
+      prepare_history: &prepare_prompt_history/3,
+      finalize: &finalize_assistant_message/7
+    )
   end
 
   defp recover_empty_response(logical_history, prompt_history, depth, %Ctx{} = ctx, client_opts) do
@@ -391,15 +336,16 @@ defmodule Pincer.Core.Executor do
     end
   end
 
-  defp finalize_assistant_message(
-         assistant_msg,
-         logical_history,
-         prompt_history,
-         depth,
-         %Ctx{} = ctx,
-         usage,
-         opts \\ []
-       ) do
+  @doc false
+  def finalize_assistant_message(
+        assistant_msg,
+        logical_history,
+        prompt_history,
+        depth,
+        %Ctx{} = ctx,
+        usage,
+        opts \\ []
+      ) do
     content = assistant_msg["content"]
     Logger.debug("[EXECUTOR] RAW LLM CONTENT: #{inspect(content)}")
 

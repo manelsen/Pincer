@@ -38,12 +38,9 @@ defmodule Pincer.LLM.Client do
   alias Pincer.Core.RetryPolicy
   alias Pincer.Core.Structs.Usage
   alias Pincer.Core.Telemetry, as: CoreTelemetry
-
-  @default_max_retries 5
-  @default_initial_backoff 2000
-  @default_max_backoff 30_000
-  @default_jitter_ratio 0.20
-  @default_max_elapsed_ms 120_000
+  alias Pincer.LLM.CooldownRouting
+  alias Pincer.LLM.RetrySettings
+  alias Pincer.LLM.StreamFallback
 
   @type message :: Pincer.LLM.Provider.message()
   @type tool :: Pincer.LLM.Provider.tool()
@@ -57,10 +54,13 @@ defmodule Pincer.LLM.Client do
     Defaults to the first provider found or "mock".
   - `:model` - The model identifier to use. Defaults to the provider's default model.
   - `:tools` - A list of function tools for the model to call.
+
+  When the retry budget is exhausted, `Pincer.LLM.FailoverDispatch` either
+  re-enters here on another route or returns the final error.
   """
   @spec chat_completion([message()], keyword()) :: chat_result()
   def chat_completion(messages, opts \\ []) do
-    registry = provider_registry()
+    registry = CooldownRouting.provider_registry()
 
     # Setup default provider (fallback to first available if none specified)
     default_provider_key =
@@ -76,7 +76,7 @@ defmodule Pincer.LLM.Client do
     requested_provider_id = Keyword.get(opts, :provider, default_provider_key)
 
     provider_id =
-      maybe_route_around_cooldown(
+      CooldownRouting.route_around_cooldown(
         requested_provider_id,
         registry,
         Keyword.has_key?(opts, :provider)
@@ -158,7 +158,7 @@ defmodule Pincer.LLM.Client do
   """
   @spec provider_config(String.t()) :: map() | nil
   def provider_config(provider_id) do
-    registry = provider_registry()
+    registry = CooldownRouting.provider_registry()
     registry[provider_id]
   end
 
@@ -188,7 +188,7 @@ defmodule Pincer.LLM.Client do
     do: ModelRegistry.list_models("mock", model_selection_registry())
 
   defp fetch_models_from_provider(provider_id) do
-    registry = provider_registry()
+    registry = CooldownRouting.provider_registry()
     config = registry[provider_id]
     do_fetch_models(provider_id, config)
   end
@@ -259,7 +259,7 @@ defmodule Pincer.LLM.Client do
   """
   @spec stream_completion([message()], keyword()) :: {:ok, Enumerable.t()} | {:error, any()}
   def stream_completion(messages, opts \\ []) do
-    registry = provider_registry()
+    registry = CooldownRouting.provider_registry()
 
     default_provider_key =
       Application.get_env(
@@ -274,7 +274,7 @@ defmodule Pincer.LLM.Client do
     requested_provider_id = Keyword.get(opts, :provider, default_provider_key)
 
     provider_id =
-      maybe_route_around_cooldown(
+      CooldownRouting.route_around_cooldown(
         requested_provider_id,
         registry,
         Keyword.has_key?(opts, :provider)
@@ -340,7 +340,7 @@ defmodule Pincer.LLM.Client do
   end
 
   def transcribe_audio(file_path, opts \\ []) do
-    registry = provider_registry()
+    registry = CooldownRouting.provider_registry()
     provider_id = Keyword.get(opts, :provider, "groq_whisper")
     config = registry[provider_id]
 
@@ -363,7 +363,7 @@ defmodule Pincer.LLM.Client do
   end
 
   def generate_embedding(text, opts \\ []) do
-    registry = provider_registry()
+    registry = CooldownRouting.provider_registry()
     provider_id = Keyword.get(opts, :provider, "openrouter")
     config = registry[provider_id]
 
@@ -456,13 +456,13 @@ defmodule Pincer.LLM.Client do
 
     case result do
       {:ok, message, usage} when action == :chat_completion ->
-        maybe_clear_provider_cooldown(failover_state)
-        maybe_clear_auth_profile_cooldown(auth_context)
+        CooldownRouting.clear_provider_cooldown(failover_state)
+        CooldownRouting.clear_auth_profile_cooldown(auth_context)
         {:ok, Pincer.LLM.ToolParser.parse(message), Usage.normalize_optional(usage)}
 
       {:ok, stream, usage} when action == :stream_completion ->
-        maybe_clear_provider_cooldown(failover_state)
-        maybe_clear_auth_profile_cooldown(auth_context)
+        CooldownRouting.clear_provider_cooldown(failover_state)
+        CooldownRouting.clear_auth_profile_cooldown(auth_context)
 
         case normalize_success(action, stream) do
           {:ok, normalized} ->
@@ -487,8 +487,8 @@ defmodule Pincer.LLM.Client do
         end
 
       {:ok, stream} ->
-        maybe_clear_provider_cooldown(failover_state)
-        maybe_clear_auth_profile_cooldown(auth_context)
+        CooldownRouting.clear_provider_cooldown(failover_state)
+        CooldownRouting.clear_auth_profile_cooldown(auth_context)
 
         case normalize_success(action, stream) do
           {:ok, normalized} ->
@@ -569,13 +569,13 @@ defmodule Pincer.LLM.Client do
                 notify_runtime_status(%{
                   kind: :retry_wait,
                   action: action,
-                  reason: reason_label(reason),
+                  reason: CooldownRouting.reason_label(reason),
                   wait_ms: wait_ms,
                   retries_left: retries
                 })
 
                 Logger.warning(
-                  "Transient LLM failure (#{reason_label(reason)}). Waiting #{wait_ms}ms... (Retries left: #{retries})"
+                  "Transient LLM failure (#{CooldownRouting.reason_label(reason)}). Waiting #{wait_ms}ms... (Retries left: #{retries})"
                 )
 
                 receive do
@@ -735,7 +735,7 @@ defmodule Pincer.LLM.Client do
       {:error, reason}
     else
       state = failover_state || FailoverPolicy.initial_state()
-      maybe_cooldown_auth_profile(auth_context, reason)
+      CooldownRouting.cooldown_auth_profile(auth_context, reason)
       CooldownStore.cooldown_provider(state.current_provider, reason)
       {action, next_state} = FailoverPolicy.next_action(reason, state)
 
@@ -752,7 +752,7 @@ defmodule Pincer.LLM.Client do
             failover_action: :retry_same,
             provider: next_state.current_provider,
             model: next_state.current_model,
-            reason: reason_label(reason)
+            reason: CooldownRouting.reason_label(reason)
           })
 
           stream_completion(messages,
@@ -776,7 +776,7 @@ defmodule Pincer.LLM.Client do
             failover_action: :fallback_model,
             provider: provider,
             model: model,
-            reason: reason_label(reason)
+            reason: CooldownRouting.reason_label(reason)
           })
 
           stream_completion(messages,
@@ -800,7 +800,7 @@ defmodule Pincer.LLM.Client do
             failover_action: :fallback_provider,
             provider: provider,
             model: model,
-            reason: reason_label(reason)
+            reason: CooldownRouting.reason_label(reason)
           })
 
           stream_completion(messages,
@@ -825,7 +825,7 @@ defmodule Pincer.LLM.Client do
             failover_action: :stop,
             provider: next_state.current_provider,
             model: next_state.current_model,
-            reason: reason_label(reason)
+            reason: CooldownRouting.reason_label(reason)
           })
 
           {:error, reason}
@@ -853,7 +853,7 @@ defmodule Pincer.LLM.Client do
       {:error, reason}
     else
       state = failover_state || FailoverPolicy.initial_state()
-      maybe_cooldown_auth_profile(auth_context, reason)
+      CooldownRouting.cooldown_auth_profile(auth_context, reason)
       CooldownStore.cooldown_provider(state.current_provider, reason)
       {action, next_state} = FailoverPolicy.next_action(reason, state)
 
@@ -870,7 +870,7 @@ defmodule Pincer.LLM.Client do
             failover_action: :retry_same,
             provider: next_state.current_provider,
             model: next_state.current_model,
-            reason: reason_label(reason)
+            reason: CooldownRouting.reason_label(reason)
           })
 
           chat_completion(messages,
@@ -894,7 +894,7 @@ defmodule Pincer.LLM.Client do
             failover_action: :fallback_model,
             provider: provider,
             model: model,
-            reason: reason_label(reason)
+            reason: CooldownRouting.reason_label(reason)
           })
 
           chat_completion(messages,
@@ -918,7 +918,7 @@ defmodule Pincer.LLM.Client do
             failover_action: :fallback_provider,
             provider: provider,
             model: model,
-            reason: reason_label(reason)
+            reason: CooldownRouting.reason_label(reason)
           })
 
           chat_completion(messages,
@@ -943,7 +943,7 @@ defmodule Pincer.LLM.Client do
             failover_action: :stop,
             provider: next_state.current_provider,
             model: next_state.current_model,
-            reason: reason_label(reason)
+            reason: CooldownRouting.reason_label(reason)
           })
 
           {:error, reason}
@@ -998,35 +998,32 @@ defmodule Pincer.LLM.Client do
          failover_state,
          auth_context
        ) do
-    Logger.warning(
-      "[CLIENT] Streaming unavailable (#{reason_label(reason)}). Falling back to single-shot completion."
-    )
-
-    case do_request_with_retry(
-           :chat_completion,
-           adapter,
-           messages,
-           model,
-           config,
-           tools,
-           retries,
-           delay,
-           retry_policy,
-           started_at_ms,
-           failover_state,
-           auth_context
-         ) do
-      {:ok, message, _usage} ->
-        {:ok, chat_message_to_stream_chunks(message)}
-
-      {:error, fallback_reason} ->
+    StreamFallback.stream_to_chat(
+      :stream_completion,
+      reason,
+      fn ->
+        do_request_with_retry(
+          :chat_completion,
+          adapter,
+          messages,
+          model,
+          config,
+          tools,
+          retries,
+          delay,
+          retry_policy,
+          started_at_ms,
+          failover_state,
+          auth_context
+        )
+      end,
+      fn fallback_reason ->
         CoreTelemetry.emit_error(fallback_reason, %{
           action: :stream_completion,
           reason: :fallback_chat_failed
         })
-
-        {:error, fallback_reason}
-    end
+      end
+    )
   end
 
   defp maybe_fallback_stream_to_chat(
@@ -1044,47 +1041,10 @@ defmodule Pincer.LLM.Client do
          _failover_state,
          _auth_context
        ) do
-    CoreTelemetry.emit_error(reason, %{action: :chat_completion})
-    {:error, reason}
+    StreamFallback.stream_to_chat(:chat_completion, reason, fn -> {:error, reason} end, fn r ->
+      CoreTelemetry.emit_error(r, %{action: :chat_completion})
+    end)
   end
-
-  defp chat_message_to_stream_chunks(message) when is_map(message) do
-    content =
-      case message["content"] do
-        text when is_binary(text) -> text
-        _ -> ""
-      end
-
-    tool_calls = message["tool_calls"] || []
-
-    delta = %{}
-    delta = if content == "", do: delta, else: Map.put(delta, "content", content)
-
-    delta =
-      if is_list(tool_calls) and tool_calls != [] do
-        Map.put(
-          delta,
-          "tool_calls",
-          Enum.with_index(tool_calls)
-          |> Enum.map(fn {tool_call, index} ->
-            %{
-              "index" => index,
-              "id" => tool_call["id"],
-              "function" => %{
-                "name" => get_in(tool_call, ["function", "name"]) || "",
-                "arguments" => get_in(tool_call, ["function", "arguments"]) || ""
-              }
-            }
-          end)
-        )
-      else
-        delta
-      end
-
-    [%{"choices" => [%{"delta" => delta}]}]
-  end
-
-  defp chat_message_to_stream_chunks(_), do: [%{"choices" => [%{"delta" => %{"content" => ""}}]}]
 
   defp simulate_response(_messages) do
     {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your LLM providers."},
@@ -1101,81 +1061,7 @@ defmodule Pincer.LLM.Client do
     end
   end
 
-  defp retry_policy do
-    config = Application.get_env(:pincer, :llm_retry, [])
-
-    fetch = fn key, default ->
-      case config do
-        map when is_map(map) -> Map.get(map, key, default)
-        list when is_list(list) -> fetch_list_value(list, key, default)
-        _ -> default
-      end
-    end
-
-    %{
-      max_retries:
-        positive_integer(fetch.(:max_retries, @default_max_retries), @default_max_retries),
-      initial_backoff:
-        positive_integer(
-          fetch.(:initial_backoff, @default_initial_backoff),
-          @default_initial_backoff
-        ),
-      max_backoff:
-        positive_integer(fetch.(:max_backoff, @default_max_backoff), @default_max_backoff),
-      max_elapsed_ms:
-        positive_integer(
-          fetch.(:max_elapsed_ms, @default_max_elapsed_ms),
-          @default_max_elapsed_ms
-        ),
-      jitter_ratio:
-        float_in_range(
-          fetch.(:jitter_ratio, @default_jitter_ratio),
-          0.0,
-          1.0,
-          @default_jitter_ratio
-        )
-    }
-  end
-
-  defp fetch_list_value(list, key, default) when is_list(list) do
-    string_key = to_string(key)
-
-    cond do
-      Keyword.keyword?(list) ->
-        Keyword.get(list, key, default)
-
-      true ->
-        Enum.find_value(list, default, fn
-          {^key, value} ->
-            value
-
-          {list_key, value} when is_binary(list_key) and list_key == string_key ->
-            value
-
-          {list_key, value} when is_atom(list_key) ->
-            if Atom.to_string(list_key) == string_key, do: value, else: nil
-
-          %{} = map ->
-            Map.get(map, key) || Map.get(map, string_key)
-
-          _ ->
-            nil
-        end)
-    end
-  end
-
-  defp positive_integer(value, _default) when is_integer(value) and value > 0, do: value
-  defp positive_integer(_value, default), do: default
-
-  defp float_in_range(value, min_value, max_value, _default)
-       when is_float(value) and value >= min_value and value <= max_value,
-       do: value
-
-  defp float_in_range(value, min_value, max_value, _default)
-       when is_integer(value) and value >= min_value and value <= max_value,
-       do: value / 1
-
-  defp float_in_range(_value, _min, _max, default), do: default
+  defp retry_policy, do: RetrySettings.load(Application.get_env(:pincer, :llm_retry, []))
 
   defp normalize_reason({:error, reason}), do: normalize_reason(reason)
   defp normalize_reason({:EXIT, reason}), do: normalize_reason(reason)
@@ -1195,74 +1081,6 @@ defmodule Pincer.LLM.Client do
   def parse_retry_after(value, now_ms \\ System.system_time(:millisecond))
   def parse_retry_after(value, now_ms), do: RetryPolicy.parse_retry_after(value, now_ms)
 
-  defp maybe_route_around_cooldown(provider_id, _registry, true), do: provider_id
-
-  defp maybe_route_around_cooldown(provider_id, _registry, _) when provider_id in [nil, ""],
-    do: provider_id
-
-  defp maybe_route_around_cooldown("mock", _registry, _), do: "mock"
-
-  defp maybe_route_around_cooldown(provider_id, registry, _explicit?) when is_map(registry) do
-    if CooldownStore.cooling_down?(provider_id) do
-      candidates =
-        registry
-        |> ModelRegistry.list_providers()
-        |> Enum.map(& &1.id)
-        |> CooldownStore.available_providers()
-
-      case candidates do
-        [candidate | _] when is_binary(candidate) and candidate != "" ->
-          if candidate != provider_id do
-            Logger.warning(
-              "[CLIENT] Default provider #{provider_id} is cooling down. Routing request to #{candidate}."
-            )
-          end
-
-          candidate
-
-        _ ->
-          provider_id
-      end
-    else
-      provider_id
-    end
-  end
-
-  defp maybe_route_around_cooldown(provider_id, _registry, _), do: provider_id
-
-  defp provider_registry do
-    case Application.get_env(:pincer, :llm_providers, %{}) do
-      registry when is_map(registry) -> registry
-      _ -> %{}
-    end
-  end
-
-  defp maybe_clear_provider_cooldown(failover_state) when is_map(failover_state) do
-    case Map.get(failover_state, :current_provider) do
-      provider when is_binary(provider) and provider != "" ->
-        CooldownStore.clear_provider(provider)
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp maybe_clear_provider_cooldown(_), do: :ok
-
-  defp maybe_cooldown_auth_profile(%{provider_id: provider, profile: profile}, reason)
-       when is_binary(provider) and provider != "" and is_binary(profile) and profile != "" do
-    AuthProfiles.cooldown_profile(provider, profile, reason)
-  end
-
-  defp maybe_cooldown_auth_profile(_context, _reason), do: :ok
-
-  defp maybe_clear_auth_profile_cooldown(%{provider_id: provider, profile: profile})
-       when is_binary(provider) and provider != "" and is_binary(profile) and profile != "" do
-    AuthProfiles.clear_profile(provider, profile)
-  end
-
-  defp maybe_clear_auth_profile_cooldown(_context), do: :ok
-
   defp elapsed_since(started_at_ms), do: System.monotonic_time(:millisecond) - started_at_ms
 
   defp with_jitter(base_ms, jitter_ratio) when is_integer(base_ms) and base_ms >= 0 do
@@ -1275,12 +1093,6 @@ defmodule Pincer.LLM.Client do
       max(0, base_ms + random_delta)
     end
   end
-
-  defp reason_label({:http_error, status, _}), do: "HTTP #{status}"
-  defp reason_label({:http_error, status, _, _}), do: "HTTP #{status}"
-  defp reason_label(%Req.TransportError{reason: reason}), do: "transport #{inspect(reason)}"
-  defp reason_label({:timeout, _}), do: "internal timeout"
-  defp reason_label(other), do: inspect(other)
 
   defp notify_runtime_status(payload) when is_map(payload) do
     case Process.get(:session_pid) do
