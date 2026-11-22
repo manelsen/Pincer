@@ -92,8 +92,8 @@ defmodule Pincer.MixProject do
   defp deps do
     [
       # HTTP clients
-      {:req, "~> 0.5"},
-      {:finch, "~> 0.16"},
+      {:req, "~> 0.7"},
+      {:finch, "~> 0.25"},
       {:tesla, "~> 1.9"},
       {:hackney, "~> 1.20"},
       {:multipart, "~> 0.4"},
@@ -107,8 +107,8 @@ defmodule Pincer.MixProject do
       # Database
       {:ecto_sql, "~> 3.11"},
       {:postgrex, "~> 0.19"},
-      {:pgvector, "~> 0.3"},
-      {:exqlite, "~> 0.34"},
+      {:pgvector, "~> 0.4"},
+      {:exqlite, "~> 0.43"},
 
       # Channel plugins (monorepo path deps)
       {:pincer_ports, path: "packages/pincer_ports", override: true},
@@ -152,7 +152,7 @@ defmodule Pincer.MixProject do
       {:crontab, "~> 1.1"},
 
       # Boundary Enforcement
-      {:boundary, "~> 0.10", runtime: false},
+      {:boundary, "~> 0.12", runtime: false},
 
       # Observability
       {:prom_ex, "~> 1.11"},
