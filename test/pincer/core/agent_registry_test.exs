@@ -3,27 +3,25 @@ defmodule Pincer.Core.AgentRegistryTest do
 
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.AgentRegistry
+  alias Pincer.Test.WorkspaceEnv
 
   setup do
     tmp =
       Path.join(System.tmp_dir!(), "pincer_agent_registry_#{System.unique_integer([:positive])}")
 
     File.mkdir_p!(tmp)
-    cwd = File.cwd!()
-    File.cd!(tmp)
+    workspaces = WorkspaceEnv.put_absolute!(tmp)
 
-    File.mkdir_p!("tmp/test_workspaces/.template/.pincer")
-    File.write!("tmp/test_workspaces/.template/.pincer/BOOTSTRAP.md", "# Template Bootstrap\n")
-    File.write!("tmp/test_workspaces/.template/.pincer/IDENTITY.md", "# Template Identity\n")
-    File.write!("tmp/test_workspaces/.template/.pincer/SOUL.md", "# Template Soul\n")
-    File.write!("tmp/test_workspaces/.template/.pincer/USER.md", "# Template User\n")
-    File.write!("IDENTITY.md", "# Legacy Identity\n")
-    File.write!("SOUL.md", "# Legacy Soul\n")
+    template_dir = Path.join(workspaces, ".template/.pincer")
+    File.mkdir_p!(template_dir)
+    File.write!(Path.join(template_dir, "BOOTSTRAP.md"), "# Template Bootstrap\n")
+    File.write!(Path.join(template_dir, "IDENTITY.md"), "# Template Identity\n")
+    File.write!(Path.join(template_dir, "SOUL.md"), "# Template Soul\n")
+    File.write!(Path.join(template_dir, "USER.md"), "# Template User\n")
+    File.write!(Path.join(tmp, "IDENTITY.md"), "# Legacy Identity\n")
+    File.write!(Path.join(tmp, "SOUL.md"), "# Legacy Soul\n")
 
-    on_exit(fn ->
-      File.cd!(cwd)
-      File.rm_rf!(tmp)
-    end)
+    on_exit(fn -> File.rm_rf!(tmp) end)
 
     :ok
   end

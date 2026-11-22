@@ -7,6 +7,7 @@ defmodule Mix.Tasks.Pincer.SecurityAudit do
       mix pincer.security_audit
       mix pincer.security_audit --strict
       mix pincer.security_audit --config path/to/config.yaml
+      mix pincer.security_audit --root path/to/project
   """
 
   use Mix.Task
@@ -18,6 +19,7 @@ defmodule Mix.Tasks.Pincer.SecurityAudit do
 
   @switches [
     config: :string,
+    root: :string,
     strict: :boolean
   ]
 
@@ -32,7 +34,8 @@ defmodule Mix.Tasks.Pincer.SecurityAudit do
 
     config_file = opts[:config] || "config.yaml"
     strict? = opts[:strict] == true
-    report = SecurityAudit.run(config_file: config_file)
+    root = opts[:root] || File.cwd!()
+    report = SecurityAudit.run(config_file: config_file, root: root)
 
     print_report(report)
 

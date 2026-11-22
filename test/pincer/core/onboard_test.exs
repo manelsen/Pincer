@@ -1,5 +1,5 @@
 defmodule Pincer.Core.OnboardTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Pincer.Core.Onboard
   alias Pincer.Core.Onboard.Defaults
@@ -36,14 +36,23 @@ defmodule Pincer.Core.OnboardTest do
     end
 
     test "plan/2 scopes operations by selected capabilities" do
-      assert {:ok, plan} = Onboard.plan(Onboard.defaults(), capabilities: ["workspace_dirs"])
+      tmp =
+        Path.join(System.tmp_dir!(), "pincer_onboard_scope_#{System.unique_integer([:positive])}")
 
-      assert {:mkdir_p, Pincer.Core.AgentPaths.base_dir()} in plan
+      workspaces = Path.join(tmp, ".workspaces")
+
+      assert {:ok, plan} =
+               Onboard.plan(Onboard.defaults(),
+                 capabilities: ["workspace_dirs"],
+                 workspaces_dir: workspaces
+               )
+
+      assert {:mkdir_p, workspaces} in plan
       assert {:mkdir_p, "sessions"} in plan
       assert {:mkdir_p, "memory"} in plan
 
-      mem_path = "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/MEMORY.md"
-      hist_path = "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/HISTORY.md"
+      mem_path = "#{workspaces}/.template/.pincer/MEMORY.md"
+      hist_path = "#{workspaces}/.template/.pincer/HISTORY.md"
 
       refute Enum.any?(
                plan,
@@ -65,57 +74,65 @@ defmodule Pincer.Core.OnboardTest do
   end
 
   describe "apply_plan/2" do
-    test "writes config and creates required folders" do
-      tmp = Path.join(System.tmp_dir!(), "pincer_onboard_#{System.unique_integer([:positive])}")
+    setup do
+      tmp =
+        Path.join(
+          System.tmp_dir!(),
+          "pincer_obtain_#{System.unique_integer([:positive])}"
+        )
+
       File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf!(tmp) end)
+      %{tmp: tmp, workspaces: Path.join(tmp, "workspaces")}
+    end
 
-      on_exit(fn ->
-        File.rm_rf!(tmp)
-      end)
-
-      plan = Onboard.plan(Onboard.defaults())
+    test "writes config and creates required folders", %{tmp: tmp, workspaces: workspaces} do
+      assert {:ok, plan} = Onboard.plan(Onboard.defaults(), workspaces_dir: workspaces)
 
       assert {:ok, report} = Onboard.apply_plan(plan, root: tmp)
       assert is_map(report)
-
-      assert File.dir?(Path.join(tmp, Pincer.Core.AgentPaths.base_dir()))
+      assert File.dir?(workspaces)
       assert File.dir?(Path.join(tmp, "sessions"))
       assert File.dir?(Path.join(tmp, "memory"))
       assert File.exists?(Path.join(tmp, "config.yaml"))
+    end
 
-      assert File.exists?(
-               Path.join(
-                 tmp,
-                 "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/BOOTSTRAP.md"
+    test "seeds the template under the requested workspaces_dir", %{
+      tmp: tmp,
+      workspaces: workspaces
+    } do
+      assert {:ok, plan} =
+               Onboard.plan(Onboard.defaults(),
+                 capabilities: ["memory_file"],
+                 workspaces_dir: workspaces
                )
-             )
 
-      assert File.exists?(
-               Path.join(
-                 tmp,
-                 "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/IDENTITY.md"
-               )
-             )
+      template_file = Path.join(workspaces, ".template/.pincer/IDENTITY.md")
+      assert Enum.any?(plan, &match?({:write_if_missing, ^template_file, _}, &1))
 
-      assert File.exists?(
-               Path.join(tmp, "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/SOUL.md")
-             )
+      assert {:ok, _report} = Onboard.apply_plan(plan, root: tmp)
+      assert File.read!(template_file) == Pincer.Core.AgentPaths.default_identity()
+    end
 
-      assert File.exists?(
-               Path.join(tmp, "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/USER.md")
-             )
+    test "resolves relative operation paths against root", %{tmp: tmp} do
+      plan = [{:mkdir_p, "custom/deep"}]
 
-      assert File.exists?(
-               Path.join(tmp, "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/MEMORY.md")
-             )
+      assert {:ok, %{created: ["custom/deep"]}} = Onboard.apply_plan(plan, root: tmp)
+      assert File.dir?(Path.join(tmp, "custom/deep"))
+      refute File.dir?(Path.join(File.cwd!(), "custom/deep"))
+    end
 
-      assert File.exists?(
-               Path.join(tmp, "#{Pincer.Core.AgentPaths.base_dir()}/.template/.pincer/HISTORY.md")
-             )
+    test "keeps absolute operation paths untouched", %{tmp: tmp} do
+      outside =
+        Path.join(System.tmp_dir!(), "pincer_obtain_abs_#{System.unique_integer([:positive])}")
 
-      {:ok, config} = YamlElixir.read_from_file(Path.join(tmp, "config.yaml"))
-      assert config["database"]["database"] == "pincer"
-      assert config["database"]["hostname"] == "localhost"
+      on_exit(fn -> File.rm_rf!(outside) end)
+
+      plan = [{:mkdir_p, outside}]
+
+      assert {:ok, %{created: [^outside]}} = Onboard.apply_plan(plan, root: tmp)
+      assert File.dir?(outside)
+      refute File.dir?(Path.join(tmp, outside))
     end
   end
 

@@ -12,24 +12,21 @@ defmodule Mix.Tasks.Pincer.SecurityAuditTest do
       )
 
     File.mkdir_p!(tmp)
-    cwd = File.cwd!()
     telegram_token = System.get_env("TELEGRAM_BOT_TOKEN")
-    File.cd!(tmp)
 
     on_exit(fn ->
-      File.cd!(cwd)
       restore_env("TELEGRAM_BOT_TOKEN", telegram_token)
       File.rm_rf!(tmp)
       Mix.Task.reenable(@task)
     end)
 
-    :ok
+    %{tmp: tmp}
   end
 
-  test "prints warning report and succeeds when only warnings are present" do
+  test "prints warning report and succeeds when only warnings are present", %{tmp: tmp} do
     System.put_env("TELEGRAM_BOT_TOKEN", "token-ok")
 
-    write_config!("""
+    write_config!(tmp, """
     channels:
       telegram:
         enabled: true
@@ -40,7 +37,7 @@ defmodule Mix.Tasks.Pincer.SecurityAuditTest do
 
     output =
       capture_io(fn ->
-        Mix.Task.run(@task, [])
+        Mix.Task.run(@task, ["--root", tmp])
       end)
 
     assert output =~ "[WARN]"
@@ -48,10 +45,10 @@ defmodule Mix.Tasks.Pincer.SecurityAuditTest do
     assert output =~ "status: warn"
   end
 
-  test "raises when missing auth exists" do
+  test "raises when missing auth exists", %{tmp: tmp} do
     System.delete_env("TELEGRAM_BOT_TOKEN")
 
-    write_config!("""
+    write_config!(tmp, """
     channels:
       telegram:
         enabled: true
@@ -63,15 +60,15 @@ defmodule Mix.Tasks.Pincer.SecurityAuditTest do
 
     assert_raise Mix.Error, ~r/blocking security issues/i, fn ->
       capture_io(fn ->
-        Mix.Task.run(@task, [])
+        Mix.Task.run(@task, ["--root", tmp])
       end)
     end
   end
 
-  test "strict mode fails when warnings exist" do
+  test "strict mode fails when warnings exist", %{tmp: tmp} do
     System.put_env("TELEGRAM_BOT_TOKEN", "token-ok")
 
-    write_config!("""
+    write_config!(tmp, """
     channels:
       telegram:
         enabled: true
@@ -82,13 +79,13 @@ defmodule Mix.Tasks.Pincer.SecurityAuditTest do
 
     assert_raise Mix.Error, ~r/security warnings/i, fn ->
       capture_io(fn ->
-        Mix.Task.run(@task, ["--strict"])
+        Mix.Task.run(@task, ["--strict", "--root", tmp])
       end)
     end
   end
 
-  defp write_config!(content) do
-    File.write!("config.yaml", String.trim_leading(content))
+  defp write_config!(tmp, content) do
+    File.write!(Path.join(tmp, "config.yaml"), String.trim_leading(content))
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)

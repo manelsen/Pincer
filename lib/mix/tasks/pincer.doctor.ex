@@ -7,6 +7,7 @@ defmodule Mix.Tasks.Pincer.Doctor do
       mix pincer.doctor
       mix pincer.doctor --strict
       mix pincer.doctor --config path/to/config.yaml
+      mix pincer.doctor --root path/to/project
   """
 
   use Mix.Task
@@ -18,6 +19,7 @@ defmodule Mix.Tasks.Pincer.Doctor do
 
   @switches [
     config: :string,
+    root: :string,
     strict: :boolean
   ]
 
@@ -32,7 +34,8 @@ defmodule Mix.Tasks.Pincer.Doctor do
 
     config_file = opts[:config] || "config.yaml"
     strict? = opts[:strict] == true
-    report = Doctor.run(config_file: config_file)
+    root = opts[:root] || File.cwd!()
+    report = Doctor.run(config_file: config_file, root: root)
 
     print_report(report)
 

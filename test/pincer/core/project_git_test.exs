@@ -20,33 +20,34 @@ defmodule Pincer.Core.ProjectGitTest do
 
     File.mkdir_p!(root)
 
-    File.cd!(root, fn ->
-      # Ensure we are NOT in a repo
-      {_, code} =
-        System.cmd("git", ["rev-parse", "--is-inside-work-tree"], stderr_to_stdout: true)
+    # Ensure we are NOT in a repo
+    {_, code} =
+      System.cmd("git", ["rev-parse", "--is-inside-work-tree"],
+        cd: root,
+        stderr_to_stdout: true
+      )
 
-      assert code != 0, "Test folder #{root} should not be a git repository"
+    assert code != 0, "Test folder #{root} should not be a git repository"
 
-      case ProjectGit.ensure_branch("project/research-language-policy") do
-        {:ok, result} ->
-          assert result.status == :created,
-                 "Expected :created, got #{inspect(result.status)}. Repo path: #{result.repo_path}"
+    case ProjectGit.ensure_branch("project/research-language-policy", cwd: root) do
+      {:ok, result} ->
+        assert result.status == :created,
+               "Expected :created, got #{inspect(result.status)}. Repo path: #{result.repo_path}"
 
-          assert result.bootstrapped
-          assert is_binary(result.repo_path)
-          assert File.dir?(Path.join(result.repo_path, ".git"))
+        assert result.bootstrapped
+        assert is_binary(result.repo_path)
+        assert File.dir?(Path.join(result.repo_path, ".git"))
 
-          {branch_out, 0} =
-            System.cmd("git", ["symbolic-ref", "--short", "HEAD"],
-              cd: result.repo_path,
-              stderr_to_stdout: true
-            )
+        {branch_out, 0} =
+          System.cmd("git", ["symbolic-ref", "--short", "HEAD"],
+            cd: result.repo_path,
+            stderr_to_stdout: true
+          )
 
-          assert String.trim(branch_out) == "project/research-language-policy"
+        assert String.trim(branch_out) == "project/research-language-policy"
 
-        {:error, reason} ->
-          flunk("ProjectGit.ensure_branch failed with reason: #{inspect(reason)}")
-      end
-    end)
+      {:error, reason} ->
+        flunk("ProjectGit.ensure_branch failed with reason: #{inspect(reason)}")
+    end
   end
 end

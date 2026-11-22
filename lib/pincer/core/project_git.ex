@@ -22,10 +22,15 @@ defmodule Pincer.Core.ProjectGit do
 
   Returns metadata with status `:created` when branch is newly created, or
   `:existing` when it already exists.
+
+  ## Options
+  - `:cwd` - repository directory to operate on. Defaults to the process cwd.
   """
-  @spec ensure_branch(String.t()) :: branch_result()
-  def ensure_branch(branch_name) when is_binary(branch_name) do
-    cwd = File.cwd!()
+  @spec ensure_branch(String.t(), keyword()) :: branch_result()
+  def ensure_branch(branch_name, opts \\ [])
+
+  def ensure_branch(branch_name, opts) when is_binary(branch_name) and is_list(opts) do
+    cwd = Keyword.get(opts, :cwd, File.cwd!())
 
     case current_branch(cwd) do
       {:ok, source_branch} ->
@@ -39,7 +44,7 @@ defmodule Pincer.Core.ProjectGit do
     end
   end
 
-  def ensure_branch(_), do: {:error, :invalid_branch_name}
+  def ensure_branch(_branch_name, _opts), do: {:error, :invalid_branch_name}
 
   defp ensure_branch_in_repo(cwd, branch_name, source_branch, bootstrapped) do
     with {:ok, exists?} <- branch_exists?(cwd, branch_name),

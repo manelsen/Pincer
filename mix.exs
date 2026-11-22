@@ -21,6 +21,14 @@ defmodule Pincer.MixProject do
       elixirc_options: [warnings_as_errors: true],
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
+      # `test/bench/` and `test/fixtures/` hold Benchee scripts and on-disk
+      # fixtures, not ExUnit suites. Mix's test loader warns about any file it
+      # neither loads nor explicitly ignores, so name them here to keep
+      # `mix test` output clean without touching the files themselves.
+      test_ignore_filters: [
+        ~r{^test/bench/},
+        ~r{^test/fixtures/}
+      ],
       aliases: aliases(),
 
       # Hex

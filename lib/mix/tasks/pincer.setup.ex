@@ -36,6 +36,7 @@ defmodule Mix.Tasks.Pincer.Setup do
       --skip-migrations     Skip ecto.create + ecto.migrate (or SQLite init)
       --reconfigure         Force re-run of mix pincer.onboard even if already configured
       --config path         Config file path (forwarded to onboard, default: config.yaml)
+      --root path           Project root for relative paths (default: current directory)
 
   ## Examples
 
@@ -60,7 +61,8 @@ defmodule Mix.Tasks.Pincer.Setup do
     skip_deps: :boolean,
     skip_migrations: :boolean,
     reconfigure: :boolean,
-    config: :string
+    config: :string,
+    root: :string
   ]
 
   @db_retry_interval_ms 1_000
@@ -182,7 +184,7 @@ defmodule Mix.Tasks.Pincer.Setup do
   end
 
   defp step_wait_postgres(opts) do
-    config = load_db_config(opts[:config] || "config.yaml")
+    config = load_db_config(resolve_config_path(opts, resolve_root(opts)))
     host = Map.get(config, "hostname", "localhost")
     port = Map.get(config, "port", 5432)
     port = if is_binary(port), do: String.to_integer(port), else: port
@@ -206,17 +208,24 @@ defmodule Mix.Tasks.Pincer.Setup do
   end
 
   defp step_onboard(opts, mode) do
-    config_path = opts[:config] || "config.yaml"
+    root = resolve_root(opts)
+    config_path = resolve_config_path(opts, root)
     already_configured? = File.exists?(config_path)
 
     if already_configured? and not opts[:reconfigure] do
       {:skip, "#{config_path} já existe. Use --reconfigure para reconfigurar."}
     else
       onboard_args =
-        ["--accept-risk", "--storage", Atom.to_string(mode)] ++
+        ["--accept-risk", "--storage", Atom.to_string(mode), "--root", root] ++
           if(opts[:yes], do: ["--non-interactive", "--yes"], else: []) ++
           if(opts[:config], do: ["--config", opts[:config]], else: []) ++
-          if(opts[:sqlite_path], do: ["--sqlite-path", opts[:sqlite_path]], else: [])
+          if(opts[:sqlite_path],
+            do: [
+              "--sqlite-path",
+              Path.expand(opts[:sqlite_path], root)
+            ],
+            else: []
+          )
 
       Mix.Task.reenable("pincer.onboard")
       Mix.Task.run("pincer.onboard", onboard_args)
@@ -245,13 +254,22 @@ defmodule Mix.Tasks.Pincer.Setup do
   # Private helpers
   # ---------------------------------------------------------------------------
 
+  defp resolve_root(opts) do
+    case opts[:root] do
+      nil -> File.cwd!()
+      root -> Path.expand(root)
+    end
+  end
+
+  defp resolve_config_path(opts, root), do: Path.expand(opts[:config] || "config.yaml", root)
+
   defp resolve_from_env_or_config(opts, env_fetcher) do
     case SQLite.parse_storage_backend(env_fetcher.("PINCER_STORAGE")) do
       {:ok, backend} ->
         backend
 
       _ ->
-        config_path = opts[:config] || "config.yaml"
+        config_path = resolve_config_path(opts, resolve_root(opts))
 
         case Config.load_file(config_path) do
           {:ok, config} -> SQLite.detect_storage_backend(config, nil)
@@ -261,7 +279,7 @@ defmodule Mix.Tasks.Pincer.Setup do
   end
 
   defp resolve_sqlite_path(opts) do
-    config_path = opts[:config] || "config.yaml"
+    config_path = resolve_config_path(opts, resolve_root(opts))
 
     configured_path =
       case Config.load_file(config_path) do

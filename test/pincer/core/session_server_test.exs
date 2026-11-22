@@ -260,20 +260,14 @@ defmodule Pincer.Core.Session.ServerTest do
   test "system prompt reads workspace-local .pincer files instead of legacy root files" do
     tmp = Path.join(System.tmp_dir!(), "pincer_prompt_#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
-    cwd = File.cwd!()
     session_id = "session_server_prompt_#{System.unique_integer([:positive])}"
     workspace = Path.join(tmp, "workspaces/#{session_id}")
 
-    File.cd!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
 
-    on_exit(fn ->
-      File.cd!(cwd)
-      File.rm_rf!(tmp)
-    end)
-
-    File.write!("SOUL.md", "# Legacy Soul")
-    File.write!("IDENTITY.md", "# Legacy Identity")
-    File.write!("USER.md", "# Legacy User")
+    File.write!(Path.join(tmp, "SOUL.md"), "# Legacy Soul")
+    File.write!(Path.join(tmp, "IDENTITY.md"), "# Legacy Identity")
+    File.write!(Path.join(tmp, "USER.md"), "# Legacy User")
 
     AgentPaths.ensure_workspace!(workspace, bootstrap?: false)
     File.write!(AgentPaths.identity_path(workspace), "# Workspace Identity")
@@ -302,23 +296,18 @@ defmodule Pincer.Core.Session.ServerTest do
       )
 
     File.mkdir_p!(tmp)
-    cwd = File.cwd!()
     workspace = Path.join(tmp, "workspaces/template_agent")
 
-    File.cd!(tmp)
+    on_exit(fn -> File.rm_rf!(tmp) end)
 
-    on_exit(fn ->
-      File.cd!(cwd)
-      File.rm_rf!(tmp)
-    end)
+    template_dir = Path.join(tmp, "workspaces/.template/.pincer")
+    File.mkdir_p!(template_dir)
+    File.write!(Path.join(template_dir, "IDENTITY.md"), "# Template Identity\n")
+    File.write!(Path.join(template_dir, "SOUL.md"), "# Template Soul\n")
+    File.write!(Path.join(template_dir, "USER.md"), "# Template User\n")
+    File.write!(Path.join(template_dir, "BOOTSTRAP.md"), "# Template Bootstrap\n")
 
-    File.mkdir_p!("workspaces/.template/.pincer")
-    File.write!("workspaces/.template/.pincer/IDENTITY.md", "# Template Identity\n")
-    File.write!("workspaces/.template/.pincer/SOUL.md", "# Template Soul\n")
-    File.write!("workspaces/.template/.pincer/USER.md", "# Template User\n")
-    File.write!("workspaces/.template/.pincer/BOOTSTRAP.md", "# Template Bootstrap\n")
-
-    AgentPaths.ensure_workspace!(workspace)
+    AgentPaths.ensure_workspace!(workspace, template_root: Path.join(tmp, "workspaces"))
 
     # IDENTITY and SOUL are NOT seeded — deferred to bootstrap ritual
     refute File.exists?(AgentPaths.identity_path(workspace))

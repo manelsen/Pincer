@@ -118,14 +118,28 @@ defmodule Pincer.Core.Onboard do
     if unknown == [] do
       config_file = Keyword.get(opts, :config_file, "config.yaml")
 
+      plan_opts =
+        [config_file: config_file, workspaces_dir: resolve_workspaces_dir(opts)]
+
       operations =
         capabilities
         |> Enum.uniq()
-        |> Enum.flat_map(&Defaults.capability_operations(&1, config, config_file: config_file))
+        |> Enum.flat_map(&Defaults.capability_operations(&1, config, plan_opts))
 
       {:ok, operations}
     else
       {:error, {:unknown_capabilities, unknown}}
+    end
+  end
+
+  # Workspace operations are applied relative to `:root`, so a relative
+  # `workspaces_dir` must be expressed relative to that root rather than to
+  # whatever directory the process happens to run in.
+  defp resolve_workspaces_dir(opts) do
+    case Keyword.get(opts, :workspaces_dir) do
+      nil -> nil
+      false -> false
+      dir when is_binary(dir) -> dir
     end
   end
 
@@ -228,6 +242,8 @@ defmodule Pincer.Core.Onboard do
   Options:
   - `:root` workspace path (default: current directory)
   - `:force` overwrite existing files when true
+
+  Operation paths are resolved against `root`; absolute paths are kept as-is.
   """
   @spec apply_plan([operation()], keyword()) :: {:ok, report()} | {:error, term()}
   def apply_plan(operations, opts \\ []) when is_list(operations) do
@@ -264,8 +280,12 @@ defmodule Pincer.Core.Onboard do
     end
   end
 
+  defp resolve_path(root, path) do
+    if Path.type(path) == :absolute, do: path, else: Path.join(root, path)
+  end
+
   defp apply_operation({:mkdir_p, rel_path}, root, _force?) do
-    abs_path = Path.join(root, rel_path)
+    abs_path = resolve_path(root, rel_path)
 
     case File.mkdir_p(abs_path) do
       :ok -> {:ok, :created, rel_path}
@@ -274,7 +294,7 @@ defmodule Pincer.Core.Onboard do
   end
 
   defp apply_operation({:write_if_missing, rel_path, content}, root, force?) do
-    abs_path = Path.join(root, rel_path)
+    abs_path = resolve_path(root, rel_path)
 
     if File.exists?(abs_path) and not force? do
       {:ok, :skipped, rel_path}

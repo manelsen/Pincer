@@ -136,16 +136,12 @@ defmodule Mix.Tasks.Pincer.SetupTest do
   test "run/1 with --storage sqlite initializes config and SQLite database without Postgres" do
     tmp = Path.join(System.tmp_dir!(), "pincer_setup_zi_#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
-    cwd = File.cwd!()
-    File.cd!(tmp)
+    File.mkdir_p!(Path.join(tmp, "custom_setup"))
 
-    on_exit(fn ->
-      File.cd!(cwd)
-      File.rm_rf!(tmp)
-    end)
+    on_exit(fn -> File.rm_rf!(tmp) end)
 
-    cfg_path = "custom_setup/config.yaml"
-    db_path = "custom_setup/pincer_local.db"
+    cfg_path = Path.join(tmp, "custom_setup/config.yaml")
+    db_path = Path.join(tmp, "custom_setup/pincer_local.db")
 
     output =
       capture_io(fn ->
@@ -157,7 +153,9 @@ defmodule Mix.Tasks.Pincer.SetupTest do
           "--config",
           cfg_path,
           "--sqlite-path",
-          db_path
+          db_path,
+          "--root",
+          tmp
         ])
       end)
 

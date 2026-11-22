@@ -4,33 +4,34 @@ defmodule Mix.Tasks.Pincer.AgentTest do
 
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.Pairing
+  alias Pincer.Test.WorkspaceEnv
 
   @task "pincer.agent"
 
   setup do
     tmp = Path.join(System.tmp_dir!(), "pincer_agent_task_#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
-    cwd = File.cwd!()
-    File.cd!(tmp)
+    workspaces = WorkspaceEnv.put_absolute!(tmp)
 
-    File.mkdir_p!("tmp/test_workspaces/.template/.pincer")
-    File.write!("tmp/test_workspaces/.template/.pincer/BOOTSTRAP.md", "# Template Bootstrap\n")
-    File.write!("tmp/test_workspaces/.template/.pincer/MEMORY.md", "# Template Memory\n")
-    File.write!("tmp/test_workspaces/.template/.pincer/HISTORY.md", "# Template History\n")
-    File.write!("tmp/test_workspaces/.template/.pincer/IDENTITY.md", "# Template Identity\n")
-    File.write!("tmp/test_workspaces/.template/.pincer/SOUL.md", "# Template Soul\n")
-    File.write!("tmp/test_workspaces/.template/.pincer/USER.md", "# Template User\n")
+    template_dir = Path.join(workspaces, ".template/.pincer")
+    File.mkdir_p!(template_dir)
+    File.write!(Path.join(template_dir, "BOOTSTRAP.md"), "# Template Bootstrap\n")
+    File.write!(Path.join(template_dir, "MEMORY.md"), "# Template Memory\n")
+    File.write!(Path.join(template_dir, "HISTORY.md"), "# Template History\n")
+    File.write!(Path.join(template_dir, "IDENTITY.md"), "# Template Identity\n")
+    File.write!(Path.join(template_dir, "SOUL.md"), "# Template Soul\n")
+    File.write!(Path.join(template_dir, "USER.md"), "# Template User\n")
 
-    File.write!("IDENTITY.md", "# Legacy Identity\n")
-    File.write!("SOUL.md", "# Legacy Soul\n")
-    File.write!("USER.md", "# Legacy User\n")
-    File.write!("BOOTSTRAP.md", "# Legacy Bootstrap\n")
+    File.write!(Path.join(tmp, "IDENTITY.md"), "# Legacy Identity\n")
+    File.write!(Path.join(tmp, "SOUL.md"), "# Legacy Soul\n")
+    File.write!(Path.join(tmp, "USER.md"), "# Legacy User\n")
+    File.write!(Path.join(tmp, "BOOTSTRAP.md"), "# Legacy Bootstrap\n")
 
     previous_pairing = Application.get_env(:pincer, :pairing, %{})
 
     Application.put_env(:pincer, :pairing, %{
       persist: true,
-      store_path: "sessions/pairing_store.dets"
+      store_path: Path.join(tmp, "sessions/pairing_store.dets")
     })
 
     Pairing.reset()
@@ -38,7 +39,6 @@ defmodule Mix.Tasks.Pincer.AgentTest do
     on_exit(fn ->
       Pairing.reset()
       Application.put_env(:pincer, :pairing, previous_pairing)
-      File.cd!(cwd)
       File.rm_rf!(tmp)
       Mix.Task.reenable(@task)
     end)
@@ -64,7 +64,7 @@ defmodule Mix.Tasks.Pincer.AgentTest do
     refute File.exists?(AgentPaths.soul_path(workspace))
     assert File.read!(AgentPaths.user_path(workspace)) =~ "Template User"
 
-    assert output =~ "workspaces/annie/.pincer"
+    assert output =~ AgentPaths.pincer_dir(AgentPaths.workspace_root("annie"))
   end
 
   test "new without args creates an opaque agent id" do

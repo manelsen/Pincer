@@ -210,8 +210,8 @@ defmodule Pincer.Core.Onboard.Defaults do
   @spec capability_operations(String.t(), map(), keyword()) :: [Pincer.Core.Onboard.operation()]
   def capability_operations(capability, config, opts \\ [])
 
-  def capability_operations("workspace_dirs", _config, _opts) do
-    base = Pincer.Core.AgentPaths.base_dir()
+  def capability_operations("workspace_dirs", _config, opts) do
+    base = workspaces_dir(opts)
 
     [
       {:mkdir_p, base},
@@ -220,8 +220,8 @@ defmodule Pincer.Core.Onboard.Defaults do
     ]
   end
 
-  def capability_operations("memory_file", _config, _opts) do
-    tpl = Pincer.Core.AgentPaths.template_workspace()
+  def capability_operations("memory_file", _config, opts) do
+    tpl = Path.join(workspaces_dir(opts), ".template")
 
     [
       {:mkdir_p, Path.join(tpl, ".pincer")},
@@ -246,4 +246,13 @@ defmodule Pincer.Core.Onboard.Defaults do
   end
 
   def capability_operations(_unknown, _config, _opts), do: []
+
+  # The plan carries paths relative to the onboarding root, so this default is
+  # relative too; callers pin an absolute default when they know the root.
+  defp workspaces_dir(opts) do
+    case Keyword.get(opts, :workspaces_dir) do
+      dir when is_binary(dir) and dir != "" -> dir
+      _ -> Pincer.Core.AgentPaths.base_dir()
+    end
+  end
 end

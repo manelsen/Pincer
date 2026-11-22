@@ -13,6 +13,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
 
   use Mix.Task
   use Boundary, classify_to: Pincer.Mix
+  alias Pincer.Core.AgentPaths
   alias Pincer.Core.Onboard
   alias Pincer.Core.Onboard.Defaults
   alias Pincer.Infra.SQLite
@@ -39,6 +40,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
     if_missing: :boolean,
     accept_risk: :boolean,
     config: :string,
+    root: :string,
     storage: :string,
     sqlite_path: :string,
     db_name: :string,
@@ -61,17 +63,24 @@ defmodule Mix.Tasks.Pincer.Onboard do
       Mix.raise("Invalid flags for pincer.onboard: #{invalid_flags}")
     end
 
-    config_file = opts[:config] || "config.yaml"
+    root = resolve_root(opts[:root])
+    config_file = resolve_config_file(root, opts[:config])
 
-    if opts[:if_missing] && Onboard.onboarded?(File.cwd!()) && File.exists?(config_file) do
+    if opts[:if_missing] && Onboard.onboarded?(root) && File.exists?(config_file) do
       Mix.shell().info("Workspace already onboarded. Skipping.")
       :ok
     else
-      do_run(opts, config_file)
+      do_run(opts, root, config_file)
     end
   end
 
-  defp do_run(opts, config_file) do
+  defp resolve_root(nil), do: File.cwd!()
+  defp resolve_root(root) when is_binary(root), do: Path.expand(root)
+
+  defp resolve_config_file(root, nil), do: Path.join(root, "config.yaml")
+  defp resolve_config_file(root, config_file), do: Path.expand(config_file, root)
+
+  defp do_run(opts, root, config_file) do
     require_risk_acknowledgement(opts)
 
     mode = parse_mode!(opts[:mode])
@@ -79,7 +88,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
     base_config = resolve_base_config(config_file, explicit_storage)
     target_storage = resolve_target_storage(explicit_storage, base_config)
     onboarding_config = resolve_config(base_config, opts, target_storage)
-    maybe_capture_api_key(onboarding_config, opts)
+    maybe_capture_api_key(onboarding_config, opts, root)
 
     capabilities = parse_capabilities(opts[:capabilities])
     validate_option_matrix!(opts, capabilities)
@@ -88,7 +97,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
     case mode do
       :local ->
         force? = resolve_force?(opts, config_file)
-        apply_local_plan!(onboarding_config, capabilities, force?, config_file)
+        apply_local_plan!(onboarding_config, capabilities, force?, config_file, root)
 
       :remote ->
         run_remote_assisted!(onboarding_config, opts, capabilities || [])
@@ -465,9 +474,15 @@ defmodule Mix.Tasks.Pincer.Onboard do
     end
   end
 
-  defp apply_local_plan!(onboarding_config, capabilities, force?, config_file) do
+  defp apply_local_plan!(onboarding_config, capabilities, force?, config_file, root) do
+    workspaces_dir = Path.expand(AgentPaths.base_dir(), root)
+
     plan =
-      case Onboard.plan(onboarding_config, capabilities: capabilities, config_file: config_file) do
+      case Onboard.plan(onboarding_config,
+             capabilities: capabilities,
+             config_file: config_file,
+             workspaces_dir: workspaces_dir
+           ) do
         {:ok, operations} ->
           operations
 
@@ -478,11 +493,11 @@ defmodule Mix.Tasks.Pincer.Onboard do
           Mix.raise("Invalid onboarding capabilities: #{invalid}. Valid values: #{valid}")
       end
 
-    case Onboard.apply_plan(plan, root: File.cwd!(), force: force?) do
+    case Onboard.apply_plan(plan, root: root, force: force?) do
       {:ok, report} ->
         print_summary(report, onboarding_config, config_file)
         check_db_connectivity(onboarding_config)
-        run_doctor_report(onboarding_config, config_file)
+        run_doctor_report(onboarding_config, config_file, root)
         :ok
 
       {:error, reason} ->
@@ -506,12 +521,12 @@ defmodule Mix.Tasks.Pincer.Onboard do
     end
   end
 
-  defp run_doctor_report(_config, config_path) do
+  defp run_doctor_report(_config, config_path, root) do
     if File.exists?(config_path) do
       Mix.shell().info("")
       Mix.shell().info("─── Relatório de saúde pós-configuração ─────────────────────")
 
-      report = Pincer.Core.Doctor.run(config_file: config_path)
+      report = Pincer.Core.Doctor.run(config_file: config_path, root: root)
 
       Enum.each(report.checks, fn check ->
         icon =
@@ -608,7 +623,8 @@ defmodule Mix.Tasks.Pincer.Onboard do
     end)
   end
 
-  defp maybe_capture_api_key(config, opts) do
+  defp maybe_capture_api_key(config, opts, root) do
+    env_file = Path.join(root, ".env")
     provider = get_in(config, ["llm", "provider"])
     env_key = Pincer.Core.Onboard.Defaults.provider_env_key(provider)
 
@@ -617,7 +633,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
         api_key = opts[:api_key]
 
         if api_key && env_key do
-          write_env_key(".env", env_key, api_key)
+          write_env_key(env_file, env_key, api_key, root)
           System.put_env(env_key, api_key)
           Mix.shell().info("  ✓ #{env_key} escrito em .env")
         end
@@ -629,7 +645,7 @@ defmodule Mix.Tasks.Pincer.Onboard do
         key = String.trim(answer)
 
         if key != "" do
-          write_env_key(".env", env_key, key)
+          write_env_key(env_file, env_key, key, root)
           System.put_env(env_key, key)
           Mix.shell().info("  ✓ #{env_key} escrito em .env")
         else
@@ -645,14 +661,14 @@ defmodule Mix.Tasks.Pincer.Onboard do
     config
   end
 
-  defp write_env_key(path, key, value) do
+  defp write_env_key(path, key, value, root) do
     content =
       case File.read(path) do
         {:ok, c} ->
           c
 
         {:error, _} ->
-          case File.read(".env.example") do
+          case File.read(Path.join(root, ".env.example")) do
             {:ok, c} -> c
             {:error, _} -> ""
           end

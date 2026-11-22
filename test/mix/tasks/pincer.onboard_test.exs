@@ -126,6 +126,37 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     end
   end
 
+  test "writes the workspace template under --root even when root is not the cwd" do
+    root =
+      Path.join(System.tmp_dir!(), "pincer_onboard_root_#{System.unique_integer([:positive])}")
+
+    File.mkdir_p!(root)
+    on_exit(fn -> File.rm_rf!(root) end)
+
+    workspaces = Path.join(root, "tmp/test_workspaces")
+    File.mkdir_p!(workspaces)
+    File.write!(Path.join(workspaces, "marker.txt"), "keep me")
+
+    capture_io(fn ->
+      Mix.Task.run(@task, ["--root", root, "--non-interactive", "--yes"])
+    end)
+
+    template_dir = Path.join(workspaces, ".template/.pincer")
+
+    assert File.exists?(Path.join(template_dir, "BOOTSTRAP.md"))
+    assert File.exists?(Path.join(template_dir, "IDENTITY.md"))
+    assert File.exists?(Path.join(template_dir, "SOUL.md"))
+    assert File.exists?(Path.join(template_dir, "USER.md"))
+    assert File.exists?(Path.join(template_dir, "MEMORY.md"))
+    assert File.exists?(Path.join(template_dir, "HISTORY.md"))
+    assert File.exists?(Path.join(root, "config.yaml"))
+    assert File.dir?(Path.join(root, "sessions"))
+    assert File.exists?(Path.join(workspaces, "marker.txt"))
+
+    refute File.exists?(Path.join(File.cwd!(), ".template"))
+    refute File.exists?(Path.join(File.cwd!(), "sessions/marker.txt"))
+  end
+
   test "merges existing config.yaml preserving custom sections" do
     File.write!(
       "config.yaml",
