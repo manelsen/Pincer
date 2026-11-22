@@ -52,11 +52,10 @@ defmodule Pincer.Core.Project.HardeningTest do
 
     # Para o projeto
     Server.stop(id)
-    Process.sleep(100)
 
-    refute Process.alive?(pid)
+    assert wait_until(fn -> Process.alive?(pid) end) == :gone
     # BLINDAGEM: O worker também deve ter morrido via terminate/2
-    refute Process.alive?(worker_pid)
+    assert wait_until(fn -> Process.alive?(worker_pid) end) == :gone
   end
 
   @doc "BLINDAGEM 3: Impedir execução sem aprovação"
@@ -69,7 +68,9 @@ defmodule Pincer.Core.Project.HardeningTest do
 
     # Tentamos forçar o handle_info de execução enviando mensagem direta ao processo
     send(pid, :execute_next)
-    Process.sleep(100)
+    # The server replies only after processing the message, so this call proves
+    # `:execute_next` was handled before we read the state.
+    _ = Server.get_status(id)
 
     {:ok, state} = Server.get_status(id)
     assert state.status == :awaiting_approval
@@ -110,6 +111,23 @@ defmodule Pincer.Core.Project.HardeningTest do
           Process.sleep(50)
           wait_for_status(id, target_status, attempts - 1)
       end
+    end
+  end
+
+  # Waits until `predicate` becomes false. Returns `:gone` when it did, or
+  # `:still_alive` after the budget runs out - a fixed sleep either flakes or
+  # wastes time, and this is what every timing assertion here actually needs.
+  defp wait_until(predicate, attempts \\ 100) do
+    cond do
+      not predicate.() ->
+        :gone
+
+      attempts == 0 ->
+        :still_alive
+
+      true ->
+        Process.sleep(10)
+        wait_until(predicate, attempts - 1)
     end
   end
 
