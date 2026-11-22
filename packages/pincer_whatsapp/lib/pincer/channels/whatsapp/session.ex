@@ -1,7 +1,5 @@
 defmodule Pincer.Channels.WhatsApp.Session do
   @compile {:no_warn_undefined, [
-    Pincer.Core.ChannelEventPolicy,
-    Pincer.Core.ProjectFlowDelivery,
     Pincer.Core.Session.Context,
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM
@@ -11,7 +9,6 @@ defmodule Pincer.Channels.WhatsApp.Session do
   WhatsApp session worker that forwards session PubSub events to a chat ID.
   """
   use Pincer.Ports.Channel
-  alias Pincer.Core.ProjectFlowDelivery
 
   @impl Pincer.Ports.Channel
   def start_link(%{chat_id: chat_id} = args) do
@@ -145,14 +142,14 @@ defmodule Pincer.Channels.WhatsApp.Session do
     do: Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
 
   defp maybe_advance_project_flow(state) do
-    ProjectFlowDelivery.on_response(
+    Pincer.Ports.Project.on_agent_response(
       state.session_id,
       send_message: fn text -> Pincer.Channels.WhatsApp.send_message(state.chat_id, text) end
     )
   end
 
   defp maybe_recover_project_flow(state) do
-    ProjectFlowDelivery.on_error(
+    Pincer.Ports.Project.on_agent_error(
       state.session_id,
       send_message: fn text -> Pincer.Channels.WhatsApp.send_message(state.chat_id, text) end
     )

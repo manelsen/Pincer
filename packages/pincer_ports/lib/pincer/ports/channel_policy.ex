@@ -32,6 +32,7 @@ defmodule Pincer.Ports.ChannelPolicy do
   @callback error_message(channel(), String.t()) :: String.t()
   @callback approval_message(channel(), String.t()) :: String.t()
   @callback status_kind(String.t()) :: term()
+  @callback emit_error(term(), map()) :: term()
 
   @doc false
   def adapter do
@@ -57,4 +58,5 @@ defmodule Pincer.Ports.ChannelPolicy do
   def error_message(channel, text), do: adapter().error_message(channel, text)
   def approval_message(channel, command), do: adapter().approval_message(channel, command)
   def status_kind(text), do: adapter().status_kind(text)
+  def emit_error(reason, meta \\ %{}), do: adapter().emit_error(reason, meta)
 end

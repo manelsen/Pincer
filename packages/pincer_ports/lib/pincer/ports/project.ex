@@ -25,8 +25,8 @@ defmodule Pincer.Ports.Project do
   @callback kanban(session_id()) :: term()
   @callback project(session_id(), term()) :: term()
   @callback phase(session_id()) :: term()
-  @callback on_agent_response(session_id()) :: term()
-  @callback on_agent_error(session_id()) :: term()
+  @callback on_agent_response(session_id(), keyword()) :: term()
+  @callback on_agent_error(session_id(), keyword()) :: term()
 
   @doc false
   def adapter do
@@ -43,6 +43,6 @@ defmodule Pincer.Ports.Project do
   def kanban(session_id), do: adapter().kanban(session_id)
   def project(session_id, seed \\ nil), do: adapter().project(session_id, seed)
   def phase(session_id), do: adapter().phase(session_id)
-  def on_agent_response(session_id), do: adapter().on_agent_response(session_id)
-  def on_agent_error(session_id), do: adapter().on_agent_error(session_id)
+  def on_agent_response(session_id, opts \\ []), do: adapter().on_agent_response(session_id, opts)
+  def on_agent_error(session_id, opts \\ []), do: adapter().on_agent_error(session_id, opts)
 end

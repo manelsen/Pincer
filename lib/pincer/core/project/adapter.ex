@@ -31,8 +31,8 @@ defmodule Pincer.Core.Project.Adapter do
   def phase(session_id), do: ProjectOrchestrator.phase(session_id)
 
   @impl true
-  def on_agent_response(session_id), do: ProjectFlowDelivery.on_response(session_id, [])
+  def on_agent_response(session_id, opts), do: ProjectFlowDelivery.on_response(session_id, opts)
 
   @impl true
-  def on_agent_error(session_id), do: ProjectFlowDelivery.on_error(session_id, [])
+  def on_agent_error(session_id, opts), do: ProjectFlowDelivery.on_error(session_id, opts)
 end

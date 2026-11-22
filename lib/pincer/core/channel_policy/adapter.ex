@@ -52,4 +52,7 @@ defmodule Pincer.Core.ChannelPolicy.Adapter do
 
   @impl true
   def status_kind(text), do: ChannelEventPolicy.status_kind(text)
+
+  @impl true
+  def emit_error(reason, meta), do: Pincer.Core.Telemetry.emit_error(reason, meta)
 end

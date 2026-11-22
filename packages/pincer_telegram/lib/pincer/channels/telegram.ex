@@ -3,14 +3,7 @@ defmodule Pincer.Channels.Telegram do
   # runtime but not at pincer_telegram compile time.
   @compile {:no_warn_undefined, [
     Earmark,
-    Pincer.Core.ChannelInteractionPolicy,
-    Pincer.Core.Pairing,
-    Pincer.Core.Policy,
-    Pincer.Core.ProjectOrchestrator,
-    Pincer.Core.ProjectRouter,
-    Pincer.Core.SessionResolver,
     Pincer.Core.Structs.IncomingMessage,
-    Pincer.Core.Telemetry,
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM,
     Pincer.Utils.Text,
@@ -55,7 +48,7 @@ defmodule Pincer.Channels.Telegram do
 
   ## Session Mapping
 
-  Session IDs are resolved by `Pincer.Core.SessionScopePolicy`.
+  Session IDs are resolved by the session scope policy.
   Default behavior keeps per-chat IDs (`telegram_<chat_id>`), while DM chats can
   be configured to use shared `telegram_main`.
 
@@ -576,14 +569,7 @@ end
 
 defmodule Pincer.Channels.Telegram.UpdatesProvider do
   @compile {:no_warn_undefined, [
-    Pincer.Core.ChannelInteractionPolicy,
-    Pincer.Core.Pairing,
-    Pincer.Core.Policy,
-    Pincer.Core.ProjectOrchestrator,
-    Pincer.Core.ProjectRouter,
-    Pincer.Core.SessionResolver,
     Pincer.Core.Structs.IncomingMessage,
-    Pincer.Core.Telemetry,
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM,
     Req
@@ -621,7 +607,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   ## Session Management
 
   Sessions are created on-demand using IDs resolved by
-  `Pincer.Core.SessionScopePolicy`.
+  the session scope policy.
 
   ## Examples
 
@@ -633,7 +619,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   use GenServer
   require Logger
-  alias Pincer.Core.Telemetry, as: CoreTelemetry
 
   @base_poll_interval 1000
   @max_poll_interval 30_000
@@ -778,7 +763,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
       {:error, reason} ->
         next_failures = failures + 1
-        CoreTelemetry.emit_error(reason, %{component: :telegram_poller, failures: next_failures})
+        Pincer.Ports.ChannelPolicy.emit_error(reason, %{component: :telegram_poller, failures: next_failures})
         interval_ms = next_poll_interval(next_failures)
 
         if Pincer.Ports.ChannelPolicy.classify(:transient, %{reason: reason}) do

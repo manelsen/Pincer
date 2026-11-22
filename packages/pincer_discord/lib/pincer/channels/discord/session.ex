@@ -1,14 +1,6 @@
 defmodule Pincer.Channels.Discord.Session do
   @compile {:no_warn_undefined, [
-    Pincer.Core.ChannelEventPolicy,
-    Pincer.Core.ChannelInteractionPolicy,
-    Pincer.Core.ProjectFlowDelivery,
     Pincer.Ports.Session.registry(),
-    Pincer.Core.StatusDelivery,
-    Pincer.Core.StatusMessagePolicy,
-    Pincer.Core.StreamDelivery,
-    Pincer.Core.StreamingPolicy,
-    Pincer.Core.SubAgentProgress,
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM
   ]}
@@ -17,12 +9,6 @@ defmodule Pincer.Channels.Discord.Session do
   One process per active Discord channel that listens to PubSub and sends messages via Nostrum.
   """
   use Pincer.Ports.Channel
-  alias Pincer.Core.ProjectFlowDelivery
-  alias Pincer.Core.StatusDelivery
-  alias Pincer.Core.StatusMessagePolicy
-  alias Pincer.Core.StreamDelivery
-  alias Pincer.Core.StreamingPolicy
-  alias Pincer.Core.SubAgentProgress
 
   @impl Pincer.Ports.Channel
   def start_link(%{channel_id: channel_id} = args) do
@@ -115,7 +101,7 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def on_agent_partial(token, state) do
-    StreamDelivery.handle_partial(
+    Pincer.Ports.Streaming.handle_partial(
       state,
       token,
       System.system_time(:millisecond),
@@ -125,7 +111,7 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def on_agent_response(text, _usage, state) do
-    state = StreamDelivery.handle_final(state, text, stream_transport(state))
+    state = Pincer.Ports.Streaming.handle_final(state, text, stream_transport(state))
     maybe_advance_project_flow(state)
     state
   end
@@ -159,8 +145,8 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def on_subagent_progress(event, state) do
-    tracker = SubAgentProgress.apply_event(state.subagent_progress_tracker, event)
-    dashboard = SubAgentProgress.render_dashboard(tracker)
+    tracker = Pincer.Ports.Streaming.progress_apply_event(state.subagent_progress_tracker, event)
+    dashboard = Pincer.Ports.Streaming.progress_render_dashboard(tracker)
 
     %{state | subagent_progress_tracker: tracker}
     |> deliver_subagent_dashboard(dashboard)
@@ -194,7 +180,7 @@ defmodule Pincer.Channels.Discord.Session do
   defp deliver_subagent_dashboard(state, text) do
     channel_id = "#{state.channel_id}"
 
-    StatusDelivery.deliver(
+    Pincer.Ports.Streaming.deliver_status(
       state,
       text,
       send: fn content -> Pincer.Channels.Discord.send_message(channel_id, content) end,
@@ -219,7 +205,7 @@ defmodule Pincer.Channels.Discord.Session do
   defp deliver_subagent_status(state, text) do
     channel_id = "#{state.channel_id}"
 
-    StatusDelivery.deliver(
+    Pincer.Ports.Streaming.deliver_status(
       state,
       text,
       send: fn content -> Pincer.Channels.Discord.send_message(channel_id, content) end,
@@ -230,7 +216,7 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   defp maybe_advance_project_flow(state) do
-    ProjectFlowDelivery.on_response(
+    Pincer.Ports.Project.on_agent_response(
       state.session_id,
       send_message: fn text ->
         Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
@@ -239,7 +225,7 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   defp maybe_recover_project_flow(state) do
-    ProjectFlowDelivery.on_error(
+    Pincer.Ports.Project.on_agent_error(
       state.session_id,
       send_message: fn text ->
         Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
@@ -268,9 +254,9 @@ defmodule Pincer.Channels.Discord.Session do
           session_id: session_id,
           subagent_progress_tracker: %{}
         },
-        StatusMessagePolicy.initial_state()
+        Pincer.Ports.Streaming.status_initial_state()
       ),
-      StreamingPolicy.initial_state()
+      Pincer.Ports.Streaming.stream_initial_state()
     )
   end
 end

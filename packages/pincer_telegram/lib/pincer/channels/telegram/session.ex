@@ -1,13 +1,5 @@
 defmodule Pincer.Channels.Telegram.Session do
   @compile {:no_warn_undefined, [
-    Pincer.Core.ChannelEventPolicy,
-    Pincer.Core.ChannelInteractionPolicy,
-    Pincer.Core.ProjectFlowDelivery,
-    Pincer.Core.StatusDelivery,
-    Pincer.Core.StatusMessagePolicy,
-    Pincer.Core.StreamDelivery,
-    Pincer.Core.StreamingPolicy,
-    Pincer.Core.SubAgentProgress,
     Pincer.Infra.PubSub
   ]}
 
@@ -17,12 +9,6 @@ defmodule Pincer.Channels.Telegram.Session do
   """
   use Pincer.Ports.Channel
   alias Pincer.Channels.Telegram.ResponseEnvelope
-  alias Pincer.Core.ProjectFlowDelivery
-  alias Pincer.Core.StatusDelivery
-  alias Pincer.Core.SubAgentProgress
-  alias Pincer.Core.StatusMessagePolicy
-  alias Pincer.Core.StreamDelivery
-  alias Pincer.Core.StreamingPolicy
 
   @preview_suppress_threshold 500
 
@@ -118,7 +104,7 @@ defmodule Pincer.Channels.Telegram.Session do
   def on_agent_partial(token, state) do
     session_status = session_status(state.session_id)
 
-    StreamDelivery.handle_partial(
+    Pincer.Ports.Streaming.handle_partial(
       state,
       token,
       System.system_time(:millisecond),
@@ -142,7 +128,7 @@ defmodule Pincer.Channels.Telegram.Session do
 
     if text_with_usage != "" do
       state =
-        StreamDelivery.handle_final(
+        Pincer.Ports.Streaming.handle_final(
           state,
           text_with_usage,
           stream_transport(state, session_status, skip_formatting: false)
@@ -181,8 +167,8 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def on_subagent_progress(event, state) do
-    tracker = SubAgentProgress.apply_event(state.subagent_progress_tracker, event)
-    dashboard = SubAgentProgress.render_dashboard(tracker)
+    tracker = Pincer.Ports.Streaming.progress_apply_event(state.subagent_progress_tracker, event)
+    dashboard = Pincer.Ports.Streaming.progress_render_dashboard(tracker)
 
     %{state | subagent_progress_tracker: tracker}
     |> deliver_subagent_dashboard(dashboard)
@@ -264,7 +250,7 @@ defmodule Pincer.Channels.Telegram.Session do
     rendered = render_tool_window(state.orchestration_note, updated_calls)
 
     %{state | tool_calls: updated_calls}
-    |> StatusDelivery.deliver(
+    |> Pincer.Ports.Streaming.deliver_status(
       rendered,
       send: fn content -> Pincer.Channels.Telegram.send_message(state.chat_id, content) end,
       edit: fn message_id, content ->
@@ -279,7 +265,7 @@ defmodule Pincer.Channels.Telegram.Session do
     rendered = render_tool_window(note, updated.tool_calls)
 
     updated
-    |> StatusDelivery.deliver(
+    |> Pincer.Ports.Streaming.deliver_status(
       rendered,
       send: fn content -> Pincer.Channels.Telegram.send_message(state.chat_id, content) end,
       edit: fn message_id, content ->
@@ -331,13 +317,13 @@ defmodule Pincer.Channels.Telegram.Session do
     state
     |> Map.put(:tool_calls, [])
     |> Map.put(:orchestration_note, nil)
-    |> Map.merge(StatusMessagePolicy.initial_state())
+    |> Map.merge(Pincer.Ports.Streaming.status_initial_state())
   end
 
   defp deliver_subagent_dashboard(state, nil), do: state
 
   defp deliver_subagent_dashboard(state, text) do
-    StatusDelivery.deliver(
+    Pincer.Ports.Streaming.deliver_status(
       state,
       text,
       send: fn content -> Pincer.Channels.Telegram.send_message(state.chat_id, content) end,
@@ -348,14 +334,14 @@ defmodule Pincer.Channels.Telegram.Session do
   end
 
   defp maybe_advance_project_flow(state) do
-    ProjectFlowDelivery.on_response(
+    Pincer.Ports.Project.on_agent_response(
       state.session_id,
       send_message: fn text -> Pincer.Channels.Telegram.send_message(state.chat_id, text) end
     )
   end
 
   defp maybe_recover_project_flow(state) do
-    ProjectFlowDelivery.on_error(
+    Pincer.Ports.Project.on_agent_error(
       state.session_id,
       send_message: fn text -> Pincer.Channels.Telegram.send_message(state.chat_id, text) end
     )
@@ -384,16 +370,16 @@ defmodule Pincer.Channels.Telegram.Session do
           tool_calls: [],
           orchestration_note: nil
         },
-        StatusMessagePolicy.initial_state()
+        Pincer.Ports.Streaming.status_initial_state()
       ),
-      StreamingPolicy.initial_state()
+      Pincer.Ports.Streaming.stream_initial_state()
     )
   end
 
   defp suppress_preview?(%{preview_suppressed: true}, _token), do: true
 
   defp suppress_preview?(state, token) do
-    stream_state = StreamingPolicy.extract(state)
+    stream_state = Pincer.Ports.Streaming.stream_extract(state)
 
     is_nil(stream_state.message_id) and stream_state.buffer == "" and synthetic_partial?(token)
   end

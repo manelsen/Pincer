@@ -1,10 +1,6 @@
 defmodule Pincer.Channels.WhatsApp do
   @compile {:no_warn_undefined, [
-    Pincer.Core.Pairing,
-    Pincer.Core.Policy,
-    Pincer.Core.ProjectRouter,
     Pincer.Ports.Session.registry(),
-    Pincer.Core.SessionResolver,
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM
   ]}

@@ -1,11 +1,6 @@
 defmodule Pincer.Channels.Discord do
   @compile {:no_warn_undefined, [
     Pincer.Ports.Session.registry(),
-    Pincer.Core.Pairing,
-    Pincer.Core.Policy,
-    Pincer.Core.ProjectRouter,
-    Pincer.Core.SessionResolver,
-    Pincer.Core.ChannelInteractionPolicy,
     Pincer.Ports.LLM,
     Pincer.Utils.Text
   ]}
@@ -236,12 +231,7 @@ defmodule Pincer.Channels.Discord do
   defmodule Consumer do
     @compile {:no_warn_undefined, [
         Pincer.Ports.Session.registry(),
-              Pincer.Core.Pairing,
-      Pincer.Core.Policy,
-      Pincer.Core.ProjectRouter,
-      Pincer.Core.SessionResolver,
-      Pincer.Core.ChannelInteractionPolicy,
-      Pincer.Ports.LLM
+                        Pincer.Ports.LLM
     ]}
 
     @moduledoc """
