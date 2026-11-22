@@ -122,6 +122,21 @@ It is a per-call parameter, not a global Crush setting, so there is nothing to c
 once. When a command is expected to outlive that window (`mix test`, `mix compile --force`,
 repo-wide scans) also pass `run_in_background: true` so it starts as a job immediately.
 
+**Never wait on a job.** `job_output` is called without `wait: true` in every condition -
+no "the result is the next step" case, no "nothing else to do" case, no trivial case.
+`wait: true` is not valid for anything. If the result is needed before continuing, the
+command was sized wrong, not the read.
+
+**Never wait with `sleep`.** It is a synchronous stall in disguise and was the same
+mistake wearing different clothes. Start the work as a job (or a subagent) and move on.
+
+Both rules are enforced by a `PreToolUse` hook (`~/.config/crush/hooks/no-blocking-wait.sh`,
+registered in `~/.config/crush/crush.json`), which blocks `job_output` carrying the wait
+flag and any `bash` command that runs `sleep`. A blocked call means the rule was broken,
+not that the hook is wrong - fix the command, do not work around the block. The hook logs
+every intercepted tool input under `~/.config/crush/hooks/log/`, so a schema change shows
+up as a visible mismatch instead of a silently-passing hook.
+
 Extra tool calls are cheap here; a stalled turn is not. Never trade a background job for a
 lower call count, and never shorten a safety check (`timeout`, scope limits) to save calls.
 
