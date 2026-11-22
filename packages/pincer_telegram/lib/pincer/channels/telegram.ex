@@ -878,15 +878,23 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
   # Photos and documents arrive without `text`, so routing the raw text field
   # gave `do_process_message/3` a nil and crashed the poller on every media
-  # message. Building the content from the message itself covers both cases.
+  # message. Text-only messages keep their text; anything else is prepared from
+  # the message itself, and only after the sender passed the DM policy, so a
+  # denied sender cannot trigger a download or a transcription.
   defp handle_inbound_message(chat_id, message, chat_type) do
-    case prepare_input_content(message) do
-      :empty ->
-        Logger.debug("[TELEGRAM] Ignoring message without text or supported attachments.")
-        :ok
+    if is_nil(map_value(message, :text)) do
+      with :allow <- authorize_private_dm(chat_id, chat_type) do
+        case prepare_input_content(message) do
+          :empty ->
+            Logger.debug("[TELEGRAM] Ignoring message without text or supported attachments.")
+            :ok
 
-      {:ok, content} ->
-        do_process_message(chat_id, content, chat_type)
+          {:ok, content} ->
+            do_process_message(chat_id, content, chat_type)
+        end
+      end
+    else
+      do_process_message(chat_id, map_value(message, :text), chat_type)
     end
   end
 
@@ -957,9 +965,11 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   def prepare_input_content(message, api_client \\ Pincer.Channels.Telegram.api_client())
 
   def prepare_input_content(message, api_client) when is_map(message) do
+    # A plain text message carries no caption, so reading only `caption`
+    # reported it as empty and the message was silently dropped.
     base_text =
       message
-      |> map_value(:caption)
+      |> text_or_caption()
       |> normalize_text()
 
     {attachment_text, refs} = extract_attachment_parts(message, api_client)
@@ -985,6 +995,13 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   def prepare_input_content(_message, _api_client), do: :empty
+
+  defp text_or_caption(message) do
+    case map_value(message, :text) do
+      text when is_binary(text) -> text
+      _ -> map_value(message, :caption)
+    end
+  end
 
   defp has_supported_attachments?(message) when is_map(message) do
     has_document?(message) or has_photo?(message) or has_audio?(message)
@@ -1321,6 +1338,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       text -> text
     end
   end
+
+  # `nil` is an atom, and `Atom.to_string(nil)` is "nil" - converting it turned
+  # an absent caption into the literal text "nil".
+  defp normalize_binary(nil), do: nil
 
   defp normalize_binary(value) when is_atom(value),
     do: value |> Atom.to_string() |> normalize_binary()

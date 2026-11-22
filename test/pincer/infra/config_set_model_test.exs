@@ -5,7 +5,7 @@ defmodule Pincer.Infra.ConfigSetModelTest do
 
   @config_path Path.expand("config.yaml", File.cwd!())
 
-  @runtime_keys [:default_llm_provider, :llm]
+  @runtime_keys [:channels, :default_llm_provider, :llm]
 
   @sample_config """
   channels:
