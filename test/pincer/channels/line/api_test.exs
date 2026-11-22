@@ -122,7 +122,14 @@ defmodule Pincer.Channels.Line.APITest do
 
       for opts <- [post_opts, get_opts] do
         assert is_integer(Keyword.get(opts, :receive_timeout))
-        assert is_integer(Keyword.get(opts, :connect_timeout))
+
+        # Req rejects any option it does not register, so naming the wrong key
+        # here would surface as an ArgumentError at request time rather than a
+        # slow connection. This is the regression guard for that mistake.
+        assert [timeout: timeout] = Keyword.get(opts, :connect_options)
+        assert is_integer(timeout)
+        refute Keyword.has_key?(opts, :connect_timeout)
+        assert %Req.Request{} = Req.new(Keyword.put(opts, :url, "https://api.line.me"))
       end
     end
   end

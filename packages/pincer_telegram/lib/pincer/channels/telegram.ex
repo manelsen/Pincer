@@ -1,14 +1,15 @@
 defmodule Pincer.Channels.Telegram do
   # All modules below live in the host pincer project and are available at
   # runtime but not at pincer_telegram compile time.
-  @compile {:no_warn_undefined, [
-    Earmark,
-    Pincer.Core.Structs.IncomingMessage,
-    Pincer.Infra.PubSub,
-    Pincer.Ports.LLM,
-    Pincer.Utils.Text,
-    Req
-  ]}
+  @compile {:no_warn_undefined,
+            [
+              Earmark,
+              Pincer.Core.Structs.IncomingMessage,
+              Pincer.Infra.PubSub,
+              Pincer.Ports.LLM,
+              Pincer.Utils.Text,
+              Req
+            ]}
 
   @moduledoc """
   Telegram bot channel implementation using the Telegex library.
@@ -132,7 +133,10 @@ defmodule Pincer.Channels.Telegram do
       children =
         if Mix.env() == :test,
           do: [Pincer.Channels.Telegram.SessionSupervisor],
-          else: [Pincer.Channels.Telegram.SessionSupervisor, Pincer.Channels.Telegram.UpdatesProvider]
+          else: [
+            Pincer.Channels.Telegram.SessionSupervisor,
+            Pincer.Channels.Telegram.UpdatesProvider
+          ]
 
       Supervisor.init(children, strategy: :one_for_one)
     else
@@ -568,12 +572,13 @@ defmodule Pincer.Channels.Telegram do
 end
 
 defmodule Pincer.Channels.Telegram.UpdatesProvider do
-  @compile {:no_warn_undefined, [
-    Pincer.Core.Structs.IncomingMessage,
-    Pincer.Infra.PubSub,
-    Pincer.Ports.LLM,
-    Req
-  ]}
+  @compile {:no_warn_undefined,
+            [
+              Pincer.Core.Structs.IncomingMessage,
+              Pincer.Infra.PubSub,
+              Pincer.Ports.LLM,
+              Req
+            ]}
 
   alias Pincer.Channels.Shared.Inbound
 
@@ -763,7 +768,12 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
       {:error, reason} ->
         next_failures = failures + 1
-        Pincer.Ports.ChannelPolicy.emit_error(reason, %{component: :telegram_poller, failures: next_failures})
+
+        Pincer.Ports.ChannelPolicy.emit_error(reason, %{
+          component: :telegram_poller,
+          failures: next_failures
+        })
+
         interval_ms = next_poll_interval(next_failures)
 
         if Pincer.Ports.ChannelPolicy.classify(:transient, %{reason: reason}) do
@@ -834,7 +844,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         has_attachments: has_attachments,
         session_id: context.session_id,
         on_command: fn command -> run_command(chat_id, command, chat_type) end,
-        on_message: &do_process_message(chat_id, &1, chat_type),
+        on_message: fn _content -> handle_inbound_message(chat_id, message, chat_type) end,
         on_project_response: fn response, session_id ->
           send_project_message(chat_id, session_id, response)
           maybe_start_project_execution(chat_id, context)
@@ -865,6 +875,33 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   alias Pincer.Core.Structs.IncomingMessage
+
+  # Photos and documents arrive without `text`, so routing the raw text field
+  # gave `do_process_message/3` a nil and crashed the poller on every media
+  # message. Text-only messages keep their text; anything else is prepared from
+  # the message itself, and only after the sender passed the DM policy, so a
+  # denied sender cannot trigger a download or a transcription.
+  defp handle_inbound_message(chat_id, message, chat_type) do
+    if is_nil(map_value(message, :text)) do
+      case authorize_private_dm(chat_id, chat_type) do
+        :allow -> prepare_and_process(chat_id, message, chat_type)
+        {:deny, reason} -> reply_denied(chat_id, reason)
+      end
+    else
+      do_process_message(chat_id, map_value(message, :text), chat_type)
+    end
+  end
+
+  defp prepare_and_process(chat_id, message, chat_type) do
+    case prepare_input_content(message) do
+      :empty ->
+        Logger.debug("[TELEGRAM] Ignoring message without text or supported attachments.")
+        :ok
+
+      {:ok, content} ->
+        do_process_message(chat_id, content, chat_type)
+    end
+  end
 
   defp do_process_message(chat_id, input_content, chat_type) do
     case authorize_private_dm(chat_id, chat_type) do
@@ -922,10 +959,16 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         end
 
       {:deny, message} ->
-        Pincer.Channels.Telegram.send_message(chat_id, message,
-          reply_markup: Pincer.Channels.Telegram.menu_reply_markup()
-        )
+        reply_denied(chat_id, message)
     end
+  end
+
+  # A denied sender still needs the policy explanation (or pairing
+  # instructions), so every denial path answers through here.
+  defp reply_denied(chat_id, message) do
+    Pincer.Channels.Telegram.send_message(chat_id, message,
+      reply_markup: Pincer.Channels.Telegram.menu_reply_markup()
+    )
   end
 
   @doc false
@@ -933,9 +976,11 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   def prepare_input_content(message, api_client \\ Pincer.Channels.Telegram.api_client())
 
   def prepare_input_content(message, api_client) when is_map(message) do
+    # A plain text message carries no caption, so reading only `caption`
+    # reported it as empty and the message was silently dropped.
     base_text =
       message
-      |> map_value(:caption)
+      |> text_or_caption()
       |> normalize_text()
 
     {attachment_text, refs} = extract_attachment_parts(message, api_client)
@@ -961,6 +1006,13 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   def prepare_input_content(_message, _api_client), do: :empty
+
+  defp text_or_caption(message) do
+    case map_value(message, :text) do
+      text when is_binary(text) -> text
+      _ -> map_value(message, :caption)
+    end
+  end
 
   defp has_supported_attachments?(message) when is_map(message) do
     has_document?(message) or has_photo?(message) or has_audio?(message)
@@ -1298,6 +1350,10 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     end
   end
 
+  # `nil` is an atom, and `Atom.to_string(nil)` is "nil" - converting it turned
+  # an absent caption into the literal text "nil".
+  defp normalize_binary(nil), do: nil
+
   defp normalize_binary(value) when is_atom(value),
     do: value |> Atom.to_string() |> normalize_binary()
 
@@ -1446,8 +1502,12 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
     new_visible =
       case arg do
-        "on" -> true
-        "off" -> false
+        "on" ->
+          true
+
+        "off" ->
+          false
+
         _ ->
           # Toggle based on current state
           {:ok, status} = Pincer.Ports.Session.get_status(session_id)

@@ -24,6 +24,33 @@ defmodule Pincer.Channels.Telegram.UpdatesProviderTest do
     {:ok, offset_path: offset_path}
   end
 
+  describe "prepare_input_content/2" do
+    test "keeps the text of a plain message" do
+      # Reading only the caption reported plain messages as empty, so the
+      # provider dropped every text message it received.
+      assert {:ok, "hello"} =
+               UpdatesProvider.prepare_input_content(
+                 %{text: "hello"},
+                 Pincer.Channels.TestAdapter
+               )
+    end
+
+    test "combines a caption with its attachment reference" do
+      message = %{caption: "summarise this", photo: [%{"file_id" => "abc"}]}
+
+      assert {:ok, parts} =
+               UpdatesProvider.prepare_input_content(message, Pincer.Channels.TestAdapter)
+
+      assert Enum.any?(parts, &(&1["type"] == "text" and &1["text"] == "summarise this"))
+      assert Enum.any?(parts, &(&1["type"] == "attachment_ref"))
+    end
+
+    test "reports a message with neither text nor attachment as empty" do
+      assert :empty =
+               UpdatesProvider.prepare_input_content(%{}, Pincer.Channels.TestAdapter)
+    end
+  end
+
   test "loads persisted offset on boot and persists the next offset after polling", %{
     offset_path: offset_path
   } do

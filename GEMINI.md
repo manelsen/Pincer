@@ -21,7 +21,7 @@ As defined in `AGENTS.md` and `SPECS.md`, all development must follow these rule
 
 ## 🛠️ Technical Stack
 
--   **Backend:** Elixir 1.14+ (OTP, Phoenix PubSub for messaging).
+-   **Backend:** Elixir 1.17+ (OTP, Phoenix PubSub for messaging).
 -   **Native:** Rust (via `rustler` for `pincer_lancedb`).
 -   **Sidecar:** Node.js/TypeScript (for MCP tools).
 -   **Storage:** SQLite (Ecto) for persistence, LanceDB for vector/graph memory.

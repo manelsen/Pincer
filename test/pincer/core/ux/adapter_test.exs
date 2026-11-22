@@ -1,5 +1,7 @@
 defmodule Pincer.Core.UX.AdapterTest do
-  use ExUnit.Case, async: true
+  # The port-dispatch block swaps the global `:ux_adapter` that every channel
+  # reads, so this module must not run alongside others.
+  use ExUnit.Case, async: false
 
   alias Pincer.Core.UX.Adapter
 

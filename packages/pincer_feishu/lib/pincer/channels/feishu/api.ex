@@ -187,7 +187,7 @@ defmodule Pincer.Channels.Feishu.API do
     opts = [
       headers: [{"Authorization", "Bearer #{token}"}],
       receive_timeout: @receive_timeout,
-      connect_timeout: @connect_timeout
+      connect_options: [timeout: @connect_timeout]
     ]
 
     {url, opts}
@@ -200,7 +200,7 @@ defmodule Pincer.Channels.Feishu.API do
       json: body,
       headers: [{"Authorization", "Bearer #{token}"}],
       receive_timeout: @receive_timeout,
-      connect_timeout: @connect_timeout
+      connect_options: [timeout: @connect_timeout]
     ]
 
     {url, opts}
@@ -213,7 +213,7 @@ defmodule Pincer.Channels.Feishu.API do
       json: body,
       headers: [{"Authorization", "Bearer #{token}"}],
       receive_timeout: @receive_timeout,
-      connect_timeout: @connect_timeout
+      connect_options: [timeout: @connect_timeout]
     ]
 
     {url, opts}
@@ -242,7 +242,7 @@ defmodule Pincer.Channels.Feishu.API do
     case Req.post(url,
            json: body,
            receive_timeout: @receive_timeout,
-           connect_timeout: @connect_timeout
+           connect_options: [timeout: @connect_timeout]
          ) do
       {:ok, %{status: 200, body: %{"tenant_access_token" => token, "expire" => expire}}} ->
         {:ok, token, System.system_time(:second) + expire}

@@ -16,11 +16,13 @@ defmodule Pincer.Adapters.Tools.TimerServerTest do
   } do
     {:ok, _} = Registry.register(reg, "sess_1", nil)
 
-    assert {:ok, timer_id} = TimerServer.schedule(srv, "sess_1", "wake up", 25)
+    # The delay must be long enough that the pending-state check cannot lose
+    # the race against the timer under load, while still keeping the test fast.
+    assert {:ok, timer_id} = TimerServer.schedule(srv, "sess_1", "wake up", 300)
     assert is_binary(timer_id)
     assert length(TimerServer.list(srv)) == 1
 
-    assert_receive {:cron_trigger, "wake up"}, 400
+    assert_receive {:cron_trigger, "wake up"}, 1_000
     Process.sleep(10)
     assert TimerServer.list(srv) == []
   end
@@ -28,11 +30,11 @@ defmodule Pincer.Adapters.Tools.TimerServerTest do
   test "cancel/2 cancels scheduled timer before it fires", %{registry: reg, srv: srv} do
     {:ok, _} = Registry.register(reg, "sess_2", nil)
 
-    assert {:ok, timer_id} = TimerServer.schedule(srv, "sess_2", "never fire", 40)
+    assert {:ok, timer_id} = TimerServer.schedule(srv, "sess_2", "never fire", 300)
     assert :ok = TimerServer.cancel(srv, timer_id)
     assert {:error, :not_found} = TimerServer.cancel(srv, timer_id)
 
-    refute_receive {:cron_trigger, _}, 120
+    refute_receive {:cron_trigger, _}, 500
     assert TimerServer.list(srv) == []
   end
 
