@@ -113,20 +113,21 @@ PINCER_WHATSAPP=1 mix test --warnings-as-errors \
 Toolchain: `mise.toml` pins Elixir 1.19.5 / OTP 27 (plus Go); `.tool-versions` and CI use
 Elixir 1.18 / OTP 27.2; `mix.exs` only requires `~> 1.14`.
 
-**Pick the bash execution mode per call.** The bash tool blocks for 60 seconds by
-default; that threshold is a per-call parameter (`auto_background_after`), not a global
-Crush setting, so there is nothing to configure once:
+**Every command sets `auto_background_after: 10`.** No exceptions, no categories, no
+"trivial" case, and no distinction between tools: the tool blocks for 60 seconds by
+default, and this per-call parameter is the only thing that lowers it. Every execution
+carries it, so nothing can stall a turn for longer than ten seconds.
 
-| Command | Mode |
-|---|---|
-| Known-trivial (`git status`, `grep`, `ls`, `wc`) | synchronous |
-| Unknown duration | `auto_background_after: 10` |
-| Known-slow (`mix test`, `mix compile --force`, repo-wide scans) | `run_in_background: true` |
+It is a per-call parameter, not a global Crush setting, so there is nothing to configure
+once. When a command is expected to outlive that window (`mix test`, `mix compile --force`,
+repo-wide scans) also pass `run_in_background: true` so it starts as a job immediately.
+
+Extra tool calls are cheap here; a stalled turn is not. Never trade a background job for a
+lower call count, and never shorten a safety check (`timeout`, scope limits) to save calls.
 
 Read results with `job_output` (`wait: true` when the result is the next step) and stop
 runaway jobs with `job_kill`; do not assume a command finished because the call returned.
-`Esc` cancels a running command (`Ctrl-C` only opens the quit dialog), which is why
-synchronous mode is acceptable for the trivial cases.
+`Esc` cancels a running command (`Ctrl-C` only opens the quit dialog).
 
 Commands that read stdin (password prompts, `sudo`, interactive generators) obey neither
 the timer nor `Esc`, because the process stays alive waiting for input. Never start one.
