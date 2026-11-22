@@ -5,6 +5,8 @@ defmodule Pincer.Infra.ConfigSetModelTest do
 
   @config_path Path.expand("config.yaml", File.cwd!())
 
+  @runtime_keys [:default_llm_provider, :llm]
+
   @sample_config """
   channels:
     cli:
@@ -23,7 +25,21 @@ defmodule Pincer.Infra.ConfigSetModelTest do
     original = File.read!(@config_path)
     File.write!(@config_path, @sample_config)
 
-    on_exit(fn -> File.write!(@config_path, original) end)
+    # `set_model/2` reloads the YAML into the application env, so the file alone
+    # is not enough to restore the previous state: the provider keys this suite
+    # rewrites must be put back too, or later tests resolve a real provider
+    # instead of the test double.
+    previous = Enum.map(@runtime_keys, &{&1, Application.fetch_env(:pincer, &1)})
+
+    on_exit(fn ->
+      File.write!(@config_path, original)
+
+      Enum.each(previous, fn
+        {key, {:ok, value}} -> Application.put_env(:pincer, key, value)
+        {key, :error} -> Application.delete_env(:pincer, key)
+      end)
+    end)
+
     :ok
   end
 

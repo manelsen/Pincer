@@ -13,7 +13,7 @@ defmodule Pincer.Test.WorkspaceEnv do
 
   @spec put_absolute!(String.t()) :: String.t()
   def put_absolute!(tmp) when is_binary(tmp) do
-    previous = Application.get_env(:pincer, @key)
+    previous = Application.fetch_env(:pincer, @key)
 
     Application.put_env(:pincer, @key, tmp, persistent: true)
     ExUnit.Callbacks.on_exit(fn -> restore(previous) end)
@@ -21,6 +21,11 @@ defmodule Pincer.Test.WorkspaceEnv do
     tmp
   end
 
-  defp restore(nil), do: Application.put_env(:pincer, @key, nil, persistent: true)
-  defp restore(value), do: Application.put_env(:pincer, @key, value, persistent: true)
+  # Deleting (rather than storing a persistent nil) matters: a nil value is
+  # found by `get_env/3`, so `AgentPaths.base_dir/0` would stop falling back to
+  # "workspaces" and start returning nil for every later test.
+  defp restore(:error), do: Application.delete_env(:pincer, @key, persistent: true)
+
+  defp restore({:ok, value}),
+    do: Application.put_env(:pincer, @key, value, persistent: true)
 end
