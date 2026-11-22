@@ -50,6 +50,17 @@ defmodule Pincer.MixProject do
     ]
   end
 
+  # Both gates end in `test`, which refuses to run under the default `:dev` env.
+  def cli do
+    [
+      preferred_envs: [
+        qa: :test,
+        "sprint.check": :test,
+        "test.quick": :test
+      ]
+    ]
+  end
+
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
