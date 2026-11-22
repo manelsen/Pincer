@@ -883,18 +883,23 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   # denied sender cannot trigger a download or a transcription.
   defp handle_inbound_message(chat_id, message, chat_type) do
     if is_nil(map_value(message, :text)) do
-      with :allow <- authorize_private_dm(chat_id, chat_type) do
-        case prepare_input_content(message) do
-          :empty ->
-            Logger.debug("[TELEGRAM] Ignoring message without text or supported attachments.")
-            :ok
-
-          {:ok, content} ->
-            do_process_message(chat_id, content, chat_type)
-        end
+      case authorize_private_dm(chat_id, chat_type) do
+        :allow -> prepare_and_process(chat_id, message, chat_type)
+        {:deny, reason} -> reply_denied(chat_id, reason)
       end
     else
       do_process_message(chat_id, map_value(message, :text), chat_type)
+    end
+  end
+
+  defp prepare_and_process(chat_id, message, chat_type) do
+    case prepare_input_content(message) do
+      :empty ->
+        Logger.debug("[TELEGRAM] Ignoring message without text or supported attachments.")
+        :ok
+
+      {:ok, content} ->
+        do_process_message(chat_id, content, chat_type)
     end
   end
 
@@ -954,10 +959,16 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         end
 
       {:deny, message} ->
-        Pincer.Channels.Telegram.send_message(chat_id, message,
-          reply_markup: Pincer.Channels.Telegram.menu_reply_markup()
-        )
+        reply_denied(chat_id, message)
     end
+  end
+
+  # A denied sender still needs the policy explanation (or pairing
+  # instructions), so every denial path answers through here.
+  defp reply_denied(chat_id, message) do
+    Pincer.Channels.Telegram.send_message(chat_id, message,
+      reply_markup: Pincer.Channels.Telegram.menu_reply_markup()
+    )
   end
 
   @doc false
