@@ -259,12 +259,11 @@ defmodule Pincer.Adapters.Tools.Workflow do
   end
 
   defp run_action("create_task", %{"title" => title} = args, _sid, workspace, _deps) do
-    tasks = load_tasks(workspace)
-    next_id = next_task_id(tasks)
+    id = reserve_task_id(workspace, next_task_id(load_tasks(workspace)))
     now = DateTime.utc_now() |> DateTime.to_iso8601()
 
     task = %{
-      "id" => next_id,
+      "id" => id,
       "title" => title,
       "description" => Map.get(args, "description", ""),
       "status" => "pending",
@@ -272,8 +271,8 @@ defmodule Pincer.Adapters.Tools.Workflow do
       "updated_at" => now
     }
 
-    save_tasks(workspace, [task | tasks])
-    {:ok, "Task #{next_id} created: #{title}"}
+    save_tasks(workspace, [task | load_tasks(workspace)])
+    {:ok, "Task #{id} created: #{title}"}
   end
 
   defp run_action("create_task", _args, _sid, _ws, _deps),
@@ -321,8 +320,7 @@ defmodule Pincer.Adapters.Tools.Workflow do
           |> maybe_update("description", Map.get(args, "description"))
           |> Map.put("updated_at", now)
 
-        new_tasks = List.replace_at(tasks, idx, updated)
-        save_tasks(workspace, new_tasks)
+        save_tasks(workspace, List.replace_at(tasks, idx, updated))
         {:ok, "Task #{task_id} updated. Status: #{updated["status"]}"}
     end
   end
@@ -356,12 +354,37 @@ defmodule Pincer.Adapters.Tools.Workflow do
     _ -> []
   end
 
+  # Reserving the id with an exclusively created file is the one operation that
+  # is atomic without a lock: two concurrent creates cannot both win the same
+  # name, so the loser simply retries with the next id.
+  defp reserve_task_id(workspace, id) do
+    path = Path.join([workspace, ".pincer", "ids", "#{id}.id"])
+    File.mkdir_p!(Path.dirname(path))
+
+    case File.open(path, [:write, :exclusive]) do
+      {:ok, fd} ->
+        File.close(fd)
+        id
+
+      {:error, :eexist} ->
+        reserve_task_id(workspace, increment_task_id(id))
+
+      {:error, reason} ->
+        Logger.warning("[WORKFLOW] Could not reserve task id: #{inspect(reason)}")
+        id
+    end
+  end
+
+  defp increment_task_id("T" <> number), do: "T#{String.to_integer(number) + 1}"
+
   defp save_tasks(workspace, tasks) do
     path = tasks_path(workspace)
+    tmp = "#{path}.#{System.unique_integer([:positive, :monotonic])}.tmp"
 
     with :ok <- File.mkdir_p(Path.dirname(path)),
          {:ok, json} <- Jason.encode(tasks, pretty: true),
-         :ok <- File.write(path, json) do
+         :ok <- File.write(tmp, json),
+         :ok <- File.rename(tmp, path) do
       :ok
     else
       {:error, reason} ->

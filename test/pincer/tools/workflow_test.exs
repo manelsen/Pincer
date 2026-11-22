@@ -47,10 +47,17 @@ defmodule Pincer.Adapters.Tools.WorkflowTest do
   # Workspace helpers
   # ---------------------------------------------------------------------------
 
+  # The suite runs async, so every workspace needs a name no other test can
+  # draw; a random integer collides often enough to fail under load.
   defp tmp_workspace do
-    id = :rand.uniform(999_999)
-    path = Path.join(@tmp_dir, "pincer_workflow_test_#{id}")
+    path =
+      Path.join(
+        @tmp_dir,
+        "pincer_workflow_test_#{System.unique_integer([:positive, :monotonic])}"
+      )
+
     File.mkdir_p!(path)
+    on_exit(fn -> File.rm_rf!(path) end)
     path
   end
 
@@ -323,6 +330,31 @@ defmodule Pincer.Adapters.Tools.WorkflowTest do
     {:ok, text} = execute(%{"action" => "list_tasks", "filter" => "done"}, ws)
     assert text =~ "No tasks"
     assert text =~ "done"
+  end
+
+  # ---------------------------------------------------------------------------
+  # Concurrent task creation
+  # ---------------------------------------------------------------------------
+
+  test "concurrent creates on one workspace get distinct ids" do
+    ws = tmp_workspace()
+
+    ids =
+      1..16
+      |> Enum.map(fn n ->
+        Task.async(fn ->
+          {:ok, msg} = execute(%{"action" => "create_task", "title" => "task #{n}"}, ws)
+          msg
+        end)
+      end)
+      |> Task.await_many(10_000)
+      |> Enum.map(fn msg ->
+        [_, id] = Regex.run(~r/^Task (T\d+) created/, msg)
+        id
+      end)
+
+    assert ids == Enum.uniq(ids)
+    assert length(ids) == 16
   end
 
   # ---------------------------------------------------------------------------
