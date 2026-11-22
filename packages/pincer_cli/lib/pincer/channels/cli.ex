@@ -2,10 +2,7 @@ defmodule Pincer.Channels.CLI do
   # These modules live in the host pincer project and are available at runtime
   # but not at pincer_cli compile time. Suppress the "undefined module" warnings.
   @compile {:no_warn_undefined, [
-    Pincer.Infra.PubSub,
-    Pincer.Core.Session.Registry,
-    Pincer.Core.Session.Server,
-    Pincer.Core.Structs.IncomingMessage
+    Pincer.Infra.PubSub
   ]}
   @moduledoc """
   Command-line interface channel for direct terminal interaction.
@@ -79,6 +76,8 @@ defmodule Pincer.Channels.CLI do
 
   use Pincer.Ports.Channel
 
+  alias Pincer.Ports.Session
+
   @impl Pincer.Ports.Channel
   def start_link(_config) do
     GenServer.start_link(__MODULE__, %{frontend_pid: nil}, name: __MODULE__)
@@ -105,10 +104,7 @@ defmodule Pincer.Channels.CLI do
 
   @impl GenServer
   def handle_call(:attach, {from_pid, _tag}, state) do
-    case Registry.lookup(Pincer.Core.Session.Registry, "cli_user") do
-      [{_, _}] -> :ok
-      [] -> Pincer.Core.Session.Server.start_link(session_id: "cli_user")
-    end
+    _ = Session.ensure_started("cli_user", [])
 
     {:reply, :ok, %{state | frontend_pid: from_pid}}
   end
@@ -145,7 +141,7 @@ defmodule Pincer.Channels.CLI do
   @impl true
   def handle_cast({:user_input, text}, state) do
     incoming = IncomingMessage.new("cli_user", text)
-    Pincer.Core.Session.Server.process_input("cli_user", incoming)
+    Session.process_input("cli_user", incoming)
     {:noreply, state}
   end
 
