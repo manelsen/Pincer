@@ -1,14 +1,15 @@
 defmodule Pincer.Channels.Telegram do
   # All modules below live in the host pincer project and are available at
   # runtime but not at pincer_telegram compile time.
-  @compile {:no_warn_undefined, [
-    Earmark,
-    Pincer.Core.Structs.IncomingMessage,
-    Pincer.Infra.PubSub,
-    Pincer.Ports.LLM,
-    Pincer.Utils.Text,
-    Req
-  ]}
+  @compile {:no_warn_undefined,
+            [
+              Earmark,
+              Pincer.Core.Structs.IncomingMessage,
+              Pincer.Infra.PubSub,
+              Pincer.Ports.LLM,
+              Pincer.Utils.Text,
+              Req
+            ]}
 
   @moduledoc """
   Telegram bot channel implementation using the Telegex library.
@@ -132,7 +133,10 @@ defmodule Pincer.Channels.Telegram do
       children =
         if Mix.env() == :test,
           do: [Pincer.Channels.Telegram.SessionSupervisor],
-          else: [Pincer.Channels.Telegram.SessionSupervisor, Pincer.Channels.Telegram.UpdatesProvider]
+          else: [
+            Pincer.Channels.Telegram.SessionSupervisor,
+            Pincer.Channels.Telegram.UpdatesProvider
+          ]
 
       Supervisor.init(children, strategy: :one_for_one)
     else
@@ -568,12 +572,13 @@ defmodule Pincer.Channels.Telegram do
 end
 
 defmodule Pincer.Channels.Telegram.UpdatesProvider do
-  @compile {:no_warn_undefined, [
-    Pincer.Core.Structs.IncomingMessage,
-    Pincer.Infra.PubSub,
-    Pincer.Ports.LLM,
-    Req
-  ]}
+  @compile {:no_warn_undefined,
+            [
+              Pincer.Core.Structs.IncomingMessage,
+              Pincer.Infra.PubSub,
+              Pincer.Ports.LLM,
+              Req
+            ]}
 
   alias Pincer.Channels.Shared.Inbound
 
@@ -763,7 +768,12 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
       {:error, reason} ->
         next_failures = failures + 1
-        Pincer.Ports.ChannelPolicy.emit_error(reason, %{component: :telegram_poller, failures: next_failures})
+
+        Pincer.Ports.ChannelPolicy.emit_error(reason, %{
+          component: :telegram_poller,
+          failures: next_failures
+        })
+
         interval_ms = next_poll_interval(next_failures)
 
         if Pincer.Ports.ChannelPolicy.classify(:transient, %{reason: reason}) do
@@ -834,7 +844,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         has_attachments: has_attachments,
         session_id: context.session_id,
         on_command: fn command -> run_command(chat_id, command, chat_type) end,
-        on_message: &do_process_message(chat_id, &1, chat_type),
+        on_message: fn _content -> handle_inbound_message(chat_id, message, chat_type) end,
         on_project_response: fn response, session_id ->
           send_project_message(chat_id, session_id, response)
           maybe_start_project_execution(chat_id, context)
@@ -865,6 +875,20 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   alias Pincer.Core.Structs.IncomingMessage
+
+  # Photos and documents arrive without `text`, so routing the raw text field
+  # gave `do_process_message/3` a nil and crashed the poller on every media
+  # message. Building the content from the message itself covers both cases.
+  defp handle_inbound_message(chat_id, message, chat_type) do
+    case prepare_input_content(message) do
+      :empty ->
+        Logger.debug("[TELEGRAM] Ignoring message without text or supported attachments.")
+        :ok
+
+      {:ok, content} ->
+        do_process_message(chat_id, content, chat_type)
+    end
+  end
 
   defp do_process_message(chat_id, input_content, chat_type) do
     case authorize_private_dm(chat_id, chat_type) do
@@ -1446,8 +1470,12 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
     new_visible =
       case arg do
-        "on" -> true
-        "off" -> false
+        "on" ->
+          true
+
+        "off" ->
+          false
+
         _ ->
           # Toggle based on current state
           {:ok, status} = Pincer.Ports.Session.get_status(session_id)

@@ -64,8 +64,12 @@ defmodule Pincer.Channels.Shared.Inbound do
   Runs the inbound decision tree.
 
   Command and shortcut branches win over project collection, which in turn wins
-  over normal message handling. Attachment-only payloads skip the text
-  branches entirely.
+  over normal message handling.
+
+  Any payload carrying attachments goes straight to message handling, so a
+  slash command sent together with a file is delivered as a message rather than
+  executed as a command. Attachment-only payloads therefore take the same
+  path as captioned ones.
   """
   @spec dispatch(inbound(), opts()) :: result()
   def dispatch(inbound, opts \\ []) do

@@ -1,9 +1,10 @@
 defmodule Pincer.Channels.Discord do
-  @compile {:no_warn_undefined, [
-    Pincer.Ports.Session.registry(),
-    Pincer.Ports.LLM,
-    Pincer.Utils.Text
-  ]}
+  @compile {:no_warn_undefined,
+            [
+              Pincer.Ports.Session.registry(),
+              Pincer.Ports.LLM,
+              Pincer.Utils.Text
+            ]}
   @moduledoc """
   Discord channel adapter using Nostrum.
 
@@ -229,17 +230,18 @@ defmodule Pincer.Channels.Discord do
   end
 
   defmodule Consumer do
-    @compile {:no_warn_undefined, [
-        Pincer.Ports.Session.registry(),
-                        Pincer.Ports.LLM
-    ]}
+    @compile {:no_warn_undefined,
+              [
+                Pincer.Ports.Session.registry(),
+                Pincer.Ports.LLM
+              ]}
 
     @moduledoc """
     Consumes Discord events and routes messages to Pincer sessions.
     """
     use Nostrum.Consumer
     alias Pincer.Channels.Shared.Inbound
-              
+
     @impl true
     def handle_event({:MESSAGE_CREATE, msg, _ws_state}) do
       # Ignore messages from bots
@@ -257,7 +259,10 @@ defmodule Pincer.Channels.Discord do
 
               inbound = %{
                 text: trimmed,
-                has_attachments: false,
+                # A captioned attachment must not be routed as text-only: the
+                # project wizard would consume the caption and the file would
+                # never be delivered.
+                has_attachments: msg.attachments != nil and msg.attachments != [],
                 session_id: session_id,
                 on_command: fn command -> handle_command(msg, command) end,
                 on_message: fn _content -> :ok end,
@@ -337,7 +342,9 @@ defmodule Pincer.Channels.Discord do
         if Enum.empty?(attachment_refs) do
           text_content
         else
-          text_parts = if text_content != "", do: [%{"type" => "text", "text" => text_content}], else: []
+          text_parts =
+            if text_content != "", do: [%{"type" => "text", "text" => text_content}], else: []
+
           text_parts ++ attachment_refs
         end
 
@@ -362,7 +369,11 @@ defmodule Pincer.Channels.Discord do
     defp build_incoming(session_id, parts) when is_list(parts) do
       {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
       text = Enum.map_join(text_parts, "\n", & &1["text"])
-      atts = Enum.map(att_parts, & &1["attachment"])
+
+      # Attachment entries are the lazy reference maps themselves; there is no
+      # nested "attachment" key, so reading one produced `[nil]` and lost the
+      # URL and mime type the executor needs to resolve the file.
+      atts = Enum.filter(att_parts, &(&1["type"] == "attachment_ref"))
 
       IncomingMessage.new(session_id, text: text, attachments: atts)
     end
@@ -437,7 +448,10 @@ defmodule Pincer.Channels.Discord do
         _ ->
           response = %{
             type: 4,
-            data: %{content: "❓ Unknown command: `#{command_name}`\n#{Pincer.Ports.UX.unknown_command_hint()}"}
+            data: %{
+              content:
+                "❓ Unknown command: `#{command_name}`\n#{Pincer.Ports.UX.unknown_command_hint()}"
+            }
           }
 
           send_interaction_response(interaction, response)
@@ -449,7 +463,10 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_command(msg, "/menu") do
-      Pincer.Channels.Discord.send_message("#{msg.channel_id}", Pincer.Ports.UX.help_text(:discord))
+      Pincer.Channels.Discord.send_message(
+        "#{msg.channel_id}",
+        Pincer.Ports.UX.help_text(:discord)
+      )
     end
 
     defp handle_command(msg, "/status") do
@@ -465,7 +482,8 @@ defmodule Pincer.Channels.Discord do
       buttons =
         case Pincer.Ports.ChannelPolicy.menu_id(:discord) do
           {:ok, id} ->
-            buttons ++ [%{type: 2, style: 2, label: Pincer.Ports.UX.menu_button_label(), custom_id: id}]
+            buttons ++
+              [%{type: 2, style: 2, label: Pincer.Ports.UX.menu_button_label(), custom_id: id}]
 
           _ ->
             buttons
@@ -721,7 +739,8 @@ defmodule Pincer.Channels.Discord do
       buttons =
         case Pincer.Ports.ChannelPolicy.menu_id(:discord) do
           {:ok, id} ->
-            buttons ++ [%{type: 2, style: 2, label: Pincer.Ports.UX.menu_button_label(), custom_id: id}]
+            buttons ++
+              [%{type: 2, style: 2, label: Pincer.Ports.UX.menu_button_label(), custom_id: id}]
 
           _ ->
             buttons
@@ -909,7 +928,15 @@ defmodule Pincer.Channels.Discord do
           buttons =
             case Pincer.Ports.ChannelPolicy.menu_id(:discord) do
               {:ok, id} ->
-                buttons ++ [%{type: 2, style: 2, label: Pincer.Ports.UX.menu_button_label(), custom_id: id}]
+                buttons ++
+                  [
+                    %{
+                      type: 2,
+                      style: 2,
+                      label: Pincer.Ports.UX.menu_button_label(),
+                      custom_id: id
+                    }
+                  ]
 
               _ ->
                 buttons
@@ -969,14 +996,18 @@ defmodule Pincer.Channels.Discord do
     defp unknown_interaction_response do
       menu_btn =
         case Pincer.Ports.ChannelPolicy.menu_id(:discord) do
-          {:ok, id} -> [%{type: 2, style: 2, label: Pincer.Ports.UX.menu_button_label(), custom_id: id}]
-          _ -> []
+          {:ok, id} ->
+            [%{type: 2, style: 2, label: Pincer.Ports.UX.menu_button_label(), custom_id: id}]
+
+          _ ->
+            []
         end
 
       %{
         type: 7,
         data: %{
-          content: "❓ #{Pincer.Ports.UX.unknown_interaction_hint()}\n#{Pincer.Ports.UX.unknown_command_hint()}",
+          content:
+            "❓ #{Pincer.Ports.UX.unknown_interaction_hint()}\n#{Pincer.Ports.UX.unknown_command_hint()}",
           components: chunk_buttons(menu_btn)
         }
       }
