@@ -47,7 +47,7 @@ defmodule Pincer.Channels.DingTalk.API do
                  "client_secret" => client_secret
                },
                receive_timeout: @receive_timeout,
-               connect_timeout: @connect_timeout
+               connect_options: [timeout: @connect_timeout]
              ) do
           {:ok, %{status: 200, body: body}} ->
             token = Map.fetch!(body, "accessToken")
@@ -220,7 +220,7 @@ defmodule Pincer.Channels.DingTalk.API do
       json: body,
       headers: [{"x-acs-dingtalk-access-token", token}],
       receive_timeout: @receive_timeout,
-      connect_timeout: @connect_timeout
+      connect_options: [timeout: @connect_timeout]
     ]
 
     {url, opts}

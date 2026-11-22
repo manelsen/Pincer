@@ -119,7 +119,7 @@ defmodule Pincer.Channels.Line.API do
       json: body,
       headers: [{"Authorization", "Bearer #{token}"}],
       receive_timeout: @receive_timeout,
-      connect_timeout: @connect_timeout
+      connect_options: [timeout: @connect_timeout]
     ]
 
     {url, opts}
@@ -131,7 +131,7 @@ defmodule Pincer.Channels.Line.API do
     opts = [
       headers: [{"Authorization", "Bearer #{token}"}],
       receive_timeout: @receive_timeout,
-      connect_timeout: @connect_timeout
+      connect_options: [timeout: @connect_timeout]
     ]
 
     {url, opts}
