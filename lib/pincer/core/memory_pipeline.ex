@@ -10,7 +10,28 @@ defmodule Pincer.Core.MemoryPipeline do
   alias Pincer.Utils.ETSHelper
   alias Pincer.Utils.Time
 
+  use GenServer
+
   @table __MODULE__
+
+  @doc """
+  Owns the budget-counter table.
+
+  The counters live in a public named ETS table. Creating it lazily from
+  `run/2` tied its lifetime to whichever caller happened to be first: a
+  short-lived session task dying took the table with it and silently reset
+  every budget. The table is created here, under the application supervisor,
+  so it lives as long as the node.
+  """
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
+  @impl true
+  def init(_opts) do
+    ensure_table()
+    {:ok, %{}}
+  end
 
   @spec run(map(), keyword()) :: {:ok, map()} | {:error, term()}
   def run(input, opts \\ []) when is_map(input) and is_list(opts) do

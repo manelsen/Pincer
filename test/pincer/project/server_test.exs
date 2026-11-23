@@ -4,6 +4,7 @@ defmodule Pincer.Core.Project.ServerTest do
 
   alias Pincer.Core.Project.Server
   alias Pincer.Core.Orchestration.Blackboard
+  alias Pincer.Test.ProjectServer
 
   setup :set_mox_from_context
 
@@ -39,7 +40,7 @@ defmodule Pincer.Core.Project.ServerTest do
 
     id = "p-awaiting-#{System.unique_integer([:positive])}"
     {:ok, pid} = Server.start_link(id: id, session_id: "s1", objective: "Objective 1")
-    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
+    on_exit(fn -> ProjectServer.stop(pid) end)
 
     wait_for_status(id, :awaiting_approval)
 
@@ -58,7 +59,7 @@ defmodule Pincer.Core.Project.ServerTest do
 
     id = "p-approval-#{System.unique_integer([:positive])}"
     {:ok, pid} = Server.start_link(id: id, session_id: "s2", objective: "Task Test")
-    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
+    on_exit(fn -> ProjectServer.stop(pid) end)
 
     wait_for_status(id, :awaiting_approval)
     Server.approve(id)

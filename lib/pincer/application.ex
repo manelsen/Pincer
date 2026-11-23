@@ -164,6 +164,7 @@ defmodule Pincer.Application do
       Pincer.Core.Cluster.NodeObserver,
       Pincer.Core.CircuitBreaker,
       Pincer.Core.RateLimiter,
+      Pincer.Core.MemoryPipeline,
       Pincer.Core.HookDispatcher,
       Pincer.Core.Session.Supervisor,
       {Pincer.Core.Registry, name: Pincer.Core.Project.Registry, backend: :local},

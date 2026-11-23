@@ -4,6 +4,7 @@ defmodule Pincer.Core.Project.HardeningTest do
 
   alias Pincer.Core.Project.Server
   alias Pincer.Core.Orchestration.Blackboard
+  alias Pincer.Test.ProjectServer
 
   # Usamos stub global para que os processos asíncronos (handle_continue)
   # consigam chamar o mock sem erro de ownership.
@@ -41,7 +42,7 @@ defmodule Pincer.Core.Project.HardeningTest do
   test "stop/1 terminates the worker process immediately" do
     id = "p-zombie-#{System.unique_integer([:positive])}"
     {:ok, pid} = Server.start_link(id: id, session_id: "s1", objective: "Heavy Task")
-    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
+    on_exit(fn -> ProjectServer.stop(pid) end)
 
     wait_for_status(id, :awaiting_approval)
     Server.approve(id)
@@ -62,7 +63,7 @@ defmodule Pincer.Core.Project.HardeningTest do
   test "execution logic is ignored if status is not :running" do
     id = "p-bypass-#{System.unique_integer([:positive])}"
     {:ok, pid} = Server.start_link(id: id, session_id: "s1", objective: "Forbidden task")
-    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
+    on_exit(fn -> ProjectServer.stop(pid) end)
 
     wait_for_status(id, :awaiting_approval)
 

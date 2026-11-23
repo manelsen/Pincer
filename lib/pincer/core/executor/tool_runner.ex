@@ -243,8 +243,13 @@ defmodule Pincer.Core.Executor.ToolRunner do
     approval_prompt = build_approval_prompt(command, tool_name)
 
     Logger.warning("[EXECUTOR] Waiting for approval for: #{approval_prompt}")
-    record_audit(ctx, tool_name, :approval_required, command)
+
+    # Notify first, persist after: `record_audit/4` takes a database connection,
+    # and a saturated pool delayed the prompt long enough for the caller to see
+    # no approval request at all. The audit event does not need to gate the
+    # user-visible one.
     PubSub.broadcast("session:#{ctx.session_id}", {:approval_required, call_id, approval_prompt})
+    record_audit(ctx, tool_name, :approval_required, command)
 
     receive do
       {:tool_approval_result, ^call_id, :approved} ->

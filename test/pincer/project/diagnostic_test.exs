@@ -5,6 +5,7 @@ defmodule Pincer.Core.Project.DiagnosticTest do
   alias Pincer.Core.LLM.CooldownStore
   alias Pincer.Core.Orchestration.Blackboard
   alias Pincer.Core.Project.Server
+  alias Pincer.Test.ProjectServer
 
   setup :set_mox_from_context
 
@@ -66,7 +67,7 @@ defmodule Pincer.Core.Project.DiagnosticTest do
         max_retries: 1
       )
 
-    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
+    on_exit(fn -> ProjectServer.stop(pid) end)
 
     wait_for_status(id, :awaiting_approval)
     Server.approve(id)
@@ -100,7 +101,7 @@ defmodule Pincer.Core.Project.DiagnosticTest do
         max_retries: 1
       )
 
-    on_exit(fn -> if Process.alive?(pid), do: Server.stop(id) end)
+    on_exit(fn -> ProjectServer.stop(pid) end)
 
     wait_for_status(id, :awaiting_approval)
 
