@@ -37,6 +37,25 @@ defmodule Pincer.Ports.SandboxTest do
     end
   end
 
+  defmodule ProbeSandboxAdapter do
+    @behaviour Sandbox
+
+    @impl true
+    def backend_name, do: :probe_sandbox
+
+    @impl true
+    def available?, do: false
+
+    @impl true
+    def run(_command, _opts), do: {:error, :unavailable}
+
+    @impl true
+    def cleanup(_scope_id), do: :ok
+
+    @impl true
+    def probe, do: {:error, :nope}
+  end
+
   setup do
     previous = Application.get_env(:pincer, :sandbox_adapter)
     Application.put_env(:pincer, :sandbox_adapter, FakeSandboxAdapter)
@@ -131,6 +150,21 @@ defmodule Pincer.Ports.SandboxTest do
       assert_received {:fake_sandbox_cleanup, "scope-123"}
     after
       Process.delete(:fake_sandbox_notify_pid)
+    end
+  end
+
+  describe "probe/0" do
+    test "returns :ok when the configured adapter does not export probe/0" do
+      assert Sandbox.adapter() == FakeSandboxAdapter
+      refute function_exported?(FakeSandboxAdapter, :probe, 0)
+
+      assert Sandbox.probe() == :ok
+    end
+
+    test "dispatches to the adapter probe/0 when exported" do
+      Application.put_env(:pincer, :sandbox_adapter, ProbeSandboxAdapter)
+
+      assert Sandbox.probe() == {:error, :nope}
     end
   end
 

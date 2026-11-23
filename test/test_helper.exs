@@ -25,7 +25,9 @@ end
 # must not compete with the rest of the suite. Run them explicitly with
 # `mix test --only chaos` / `--only stress`.
 excludes =
-  if sqlite_mode?, do: [:docker, :chaos, :stress], else: [:docker, :sqlite_smoke, :chaos, :stress]
+  if sqlite_mode?,
+    do: [:docker, :bwrap, :chaos, :stress],
+    else: [:docker, :bwrap, :sqlite_smoke, :chaos, :stress]
 
 ExUnit.start(exclude: excludes)
 

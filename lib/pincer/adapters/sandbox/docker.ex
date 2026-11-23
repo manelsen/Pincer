@@ -32,6 +32,12 @@ defmodule Pincer.Adapters.Sandbox.Docker do
   @spec available?() :: boolean()
   def available?, do: find_runtime([]) != nil
 
+  @impl true
+  @spec probe() :: :ok | {:error, term()}
+  def probe do
+    if find_runtime([]), do: :ok, else: {:error, :docker_unavailable}
+  end
+
   @doc """
   Finds the configured container CLI (`docker` or `podman`), or returns `nil`.
   """

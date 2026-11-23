@@ -7,8 +7,9 @@ defmodule Pincer.Core.StartupGuard do
   Checks are run in order and stop at the first error:
 
   1. `check_config/0` — validates `config.yaml` exists and is parseable.
-  2. `check_database/0` — verifies TCP reachability of the configured DB host/port.
-  3. `check_migrations/0` — ensures no pending Ecto migrations remain.
+  2. `check_sandbox/0` — probes the configured sandbox backend; bwrap failures are fatal.
+  3. `check_database/0` — verifies TCP reachability of the configured DB host/port.
+  4. `check_migrations/0` — ensures no pending Ecto migrations remain.
 
   The DB and migrations checks are skipped when
   `Application.get_env(:pincer, :skip_startup_guard, false)` is `true`
@@ -17,6 +18,7 @@ defmodule Pincer.Core.StartupGuard do
 
   require Logger
   alias Pincer.Infra.SQLite
+  alias Pincer.Ports.Sandbox
 
   @type check_result :: :ok | {:error, atom(), String.t()}
 
@@ -29,6 +31,7 @@ defmodule Pincer.Core.StartupGuard do
   @spec run() :: check_result()
   def run do
     with :ok <- check_config(),
+         :ok <- check_sandbox(),
          :ok <- maybe_check_database(),
          :ok <- maybe_check_migrations() do
       :ok
@@ -54,6 +57,23 @@ defmodule Pincer.Core.StartupGuard do
       end
     else
       {:error, :config_missing, "config.yaml não encontrado. Execute: mix pincer.onboard"}
+    end
+  end
+
+  @doc """
+  Probes the configured sandbox backend.
+
+  A backend probe failure is fatal (fail-closed) so a sandbox cannot silently
+  degrade to unsandboxed execution at boot.
+  """
+  @spec check_sandbox() :: check_result()
+  def check_sandbox do
+    case Sandbox.probe() do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        {:error, :sandbox_unavailable, "Sandbox indisponível: #{format_reason(reason)}"}
     end
   end
 

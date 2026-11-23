@@ -1,6 +1,7 @@
 defmodule Pincer.Adapters.Sandbox.LocalTest do
   use ExUnit.Case, async: false
 
+  alias Pincer.Adapters.Sandbox.Bwrap
   alias Pincer.Adapters.Sandbox.Local
 
   defmodule FakeToolRegistry do
@@ -160,5 +161,264 @@ defmodule Pincer.Adapters.Sandbox.LocalTest do
                  workspace_path: workspace
                )
     end
+  end
+
+  describe "bwrap transport" do
+    test "routes to bwrap and builds an isolated argv", %{workspace: workspace} do
+      fake_bwrap = fake_executable!(workspace, "bwrap")
+      fake_prlimit = fake_executable!(workspace, "prlimit")
+      test_pid = self()
+
+      runner = fn exe, args, cmd_opts ->
+        send(test_pid, {:bwrap_runner, exe, args, cmd_opts})
+        {"bwrap-output\n", 0}
+      end
+
+      assert {:ok,
+              %{
+                output: "bwrap-output\n",
+                exit_code: 0,
+                backend: :local,
+                metadata: %{transport: :bwrap, network: :none}
+              }} =
+               Local.run("pwd",
+                 transport: "bwrap",
+                 workspace_path: workspace,
+                 cwd: workspace,
+                 bwrap_available: true,
+                 bwrap_runner: runner,
+                 bwrap: %{
+                   "executable" => fake_bwrap,
+                   "prlimit_executable" => fake_prlimit,
+                   "limits" => :disabled,
+                   "network" => "none"
+                 }
+               )
+
+      assert_received {:bwrap_runner, ^fake_bwrap, args, cmd_opts}
+      assert pair_at?(args, "--bind", Path.expand(workspace))
+      assert pair_at?(args, "--chdir", "/workspace")
+      assert Enum.take(args, -4) == ["--", "/bin/sh", "-c", "pwd"]
+      assert Keyword.get(cmd_opts, :stderr_to_stdout) == true
+    end
+
+    test "forwards validated env into bwrap", %{workspace: workspace} do
+      fake_bwrap = fake_executable!(workspace, "bwrap")
+      fake_prlimit = fake_executable!(workspace, "prlimit")
+      test_pid = self()
+
+      runner = fn _exe, args, _cmd_opts ->
+        send(test_pid, {:bwrap_args, args})
+        {"", 0}
+      end
+
+      assert {:ok, _result} =
+               Local.run("pwd",
+                 transport: :bwrap,
+                 workspace_path: workspace,
+                 bwrap_available: true,
+                 bwrap_runner: runner,
+                 env: [{"FOO", "bar"}],
+                 bwrap: %{
+                   executable: fake_bwrap,
+                   prlimit_executable: fake_prlimit,
+                   limits: :disabled
+                 }
+               )
+
+      assert_received {:bwrap_args, args}
+      assert setenv?(args, "FOO", "bar")
+    end
+
+    test "fails closed when bwrap is unavailable and never calls the runner", %{
+      workspace: workspace
+    } do
+      test_pid = self()
+
+      runner = fn _exe, _args, _cmd_opts ->
+        send(test_pid, :bwrap_runner_called)
+        {"", 0}
+      end
+
+      assert {:error, {:bwrap_unavailable, _reason}} =
+               Local.run("pwd",
+                 transport: "bwrap",
+                 workspace_path: workspace,
+                 bwrap_available: false,
+                 bwrap_runner: runner
+               )
+
+      refute_received :bwrap_runner_called
+    end
+
+    test "fails closed via a bwrap_probe function", %{workspace: workspace} do
+      test_pid = self()
+
+      runner = fn _exe, _args, _cmd_opts ->
+        send(test_pid, :bwrap_runner_called)
+        {"", 0}
+      end
+
+      assert {:error, {:bwrap_unavailable, _reason}} =
+               Local.run("pwd",
+                 transport: "bwrap",
+                 workspace_path: workspace,
+                 bwrap_probe: fn -> {:error, :no_user_namespaces} end,
+                 bwrap_runner: runner
+               )
+
+      refute_received :bwrap_runner_called
+    end
+
+    test "keeps WorkspaceGuard in the path and rejects blocked commands", %{
+      workspace: workspace
+    } do
+      runner = fn _exe, _args, _cmd_opts -> flunk("bwrap runner must not be invoked") end
+
+      assert {:error, {:command_not_allowed, _reason}} =
+               Local.run("curl http://evil.example",
+                 transport: "bwrap",
+                 workspace_path: workspace,
+                 bwrap_available: true,
+                 bwrap_runner: runner
+               )
+    end
+
+    test "bwrap: true opts in when transport is absent", %{workspace: workspace} do
+      fake_bwrap = fake_executable!(workspace, "bwrap")
+      fake_prlimit = fake_executable!(workspace, "prlimit")
+
+      Application.put_env(:pincer, :sandbox, %{
+        "local" => %{
+          "bwrap" => %{
+            "executable" => fake_bwrap,
+            "prlimit_executable" => fake_prlimit,
+            "limits" => :disabled
+          }
+        }
+      })
+
+      runner = fn _exe, _args, _cmd_opts -> {"opted-in\n", 0} end
+
+      assert {:ok, %{metadata: %{transport: :bwrap}}} =
+               Local.run("pwd",
+                 workspace_path: workspace,
+                 bwrap_available: true,
+                 bwrap_runner: runner
+               )
+    end
+
+    test "an explicit transport wins over bwrap: true", %{workspace: workspace} do
+      Application.put_env(:pincer, :sandbox, %{
+        "local" => %{"transport" => "os", "bwrap" => true}
+      })
+
+      test_pid = self()
+
+      os_runner = fn cmd, _cmd_opts ->
+        send(test_pid, {:os_runner, cmd})
+        {"", 0}
+      end
+
+      assert {:ok, %{metadata: %{transport: :os}}} =
+               Local.run("pwd",
+                 workspace_path: workspace,
+                 runner: os_runner,
+                 bwrap_available: false
+               )
+
+      assert_received {:os_runner, "pwd"}
+    end
+
+    test "available?/0 and probe/0 use bwrap when configured", %{workspace: workspace} do
+      bwrap_script = fake_executable!(workspace, "bwrap-probe")
+
+      with_bwrap_binary(bwrap_script, fn ->
+        Application.put_env(:pincer, :sandbox, %{
+          "local" => %{
+            "transport" => "bwrap",
+            "bwrap" => %{"limits" => "disabled"}
+          }
+        })
+
+        assert Local.available?()
+        assert Local.probe() == :ok
+      end)
+    end
+
+    test "probe/0 fails when active limits lack prlimit", %{workspace: workspace} do
+      bwrap_script = fake_executable!(workspace, "bwrap-probe-ok")
+      missing = Path.join(workspace, "missing-prlimit")
+
+      with_bwrap_binary(bwrap_script, fn ->
+        Application.put_env(:pincer, :sandbox, %{
+          "local" => %{
+            "transport" => "bwrap",
+            "bwrap" => %{"prlimit_executable" => missing}
+          }
+        })
+
+        refute Local.available?()
+        assert Local.probe() == {:error, {:prlimit_unavailable, missing}}
+      end)
+    end
+
+    test "a failing bwrap probe never falls back to os", %{workspace: workspace} do
+      bwrap_script = fake_executable!(workspace, "bwrap-fail", "#!/bin/sh\nexit 1\n")
+
+      with_bwrap_binary(bwrap_script, fn ->
+        Application.put_env(:pincer, :sandbox, %{
+          "local" => %{"transport" => "bwrap"}
+        })
+
+        refute Local.available?()
+        assert {:error, _reason} = Local.probe()
+      end)
+    end
+
+    test "probe/0 returns :ok for the os transport" do
+      Application.put_env(:pincer, :sandbox, %{"local" => %{"transport" => "os"}})
+
+      assert Local.available?()
+      assert Local.probe() == :ok
+    end
+  end
+
+  # --- Helpers ---
+
+  defp fake_executable!(dir, name, body \\ "#!/bin/sh\nexit 0\n") do
+    path = Path.join(dir, name)
+    File.write!(path, body)
+    File.chmod!(path, 0o755)
+    path
+  end
+
+  defp with_bwrap_binary(path, fun) do
+    previous = System.get_env("PINCER_BWRAP_BINARY")
+    System.put_env("PINCER_BWRAP_BINARY", path)
+    Bwrap.reset_probe()
+
+    on_exit(fn ->
+      Bwrap.reset_probe()
+
+      case previous do
+        nil -> System.delete_env("PINCER_BWRAP_BINARY")
+        value -> System.put_env("PINCER_BWRAP_BINARY", value)
+      end
+    end)
+
+    fun.()
+  end
+
+  defp pair_at?(args, flag, value) do
+    args
+    |> Enum.chunk_every(2, 1, :discard)
+    |> Enum.any?(fn [left, right] -> left == flag and right == value end)
+  end
+
+  defp setenv?(args, key, value) do
+    args
+    |> Enum.chunk_every(3, 1, :discard)
+    |> Enum.any?(fn [flag, k, v] -> flag == "--setenv" and k == key and v == value end)
   end
 end

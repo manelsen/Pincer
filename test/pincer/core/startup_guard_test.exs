@@ -4,6 +4,46 @@ defmodule Pincer.Core.StartupGuardTest do
 
   alias Pincer.Core.StartupGuard
 
+  defmodule ProbeOkSandbox do
+    @behaviour Pincer.Ports.Sandbox
+
+    @impl true
+    def backend_name, do: :probe_ok
+
+    @impl true
+    def available?, do: true
+
+    @impl true
+    def run(_command, _opts) do
+      {:ok, %{output: "", exit_code: 0, backend: :probe_ok, metadata: %{}}}
+    end
+
+    @impl true
+    def cleanup(_scope_id), do: :ok
+
+    @impl true
+    def probe, do: :ok
+  end
+
+  defmodule ProbeFailSandbox do
+    @behaviour Pincer.Ports.Sandbox
+
+    @impl true
+    def backend_name, do: :probe_fail
+
+    @impl true
+    def available?, do: false
+
+    @impl true
+    def run(_command, _opts), do: {:error, :unavailable}
+
+    @impl true
+    def cleanup(_scope_id), do: :ok
+
+    @impl true
+    def probe, do: {:error, :nope}
+  end
+
   setup do
     # Ensure DB/migrations checks are skipped during tests so the guard
     # does not block the test suite from starting.
@@ -15,6 +55,7 @@ defmodule Pincer.Core.StartupGuardTest do
     original_repo_config = Application.get_env(:pincer, Pincer.Infra.Repo)
     original_storage = Application.get_env(:pincer, :storage_adapter)
     original_sqlite_path = Application.get_env(:pincer, :sqlite_path)
+    original_sandbox_adapter = Application.get_env(:pincer, :sandbox_adapter)
 
     on_exit(fn ->
       Application.delete_env(:pincer, :skip_startup_guard)
@@ -37,6 +78,12 @@ defmodule Pincer.Core.StartupGuardTest do
         Application.put_env(:pincer, :sqlite_path, original_sqlite_path)
       else
         Application.delete_env(:pincer, :sqlite_path)
+      end
+
+      if original_sandbox_adapter do
+        Application.put_env(:pincer, :sandbox_adapter, original_sandbox_adapter)
+      else
+        Application.delete_env(:pincer, :sandbox_adapter)
       end
     end)
 
@@ -116,6 +163,26 @@ defmodule Pincer.Core.StartupGuardTest do
   end
 
   # ---------------------------------------------------------------------------
+  # check_sandbox/0
+  # ---------------------------------------------------------------------------
+
+  describe "check_sandbox/0" do
+    test "returns :ok when the sandbox probe succeeds" do
+      Application.put_env(:pincer, :sandbox_adapter, ProbeOkSandbox)
+
+      assert StartupGuard.check_sandbox() == :ok
+    end
+
+    test "maps a probe failure to {:error, :sandbox_unavailable, message}" do
+      Application.put_env(:pincer, :sandbox_adapter, ProbeFailSandbox)
+
+      assert {:error, :sandbox_unavailable, message} = StartupGuard.check_sandbox()
+      assert String.contains?(message, "Sandbox indisponível")
+      assert String.contains?(message, "nope")
+    end
+  end
+
+  # ---------------------------------------------------------------------------
   # run/0 — integration of all checks
   # ---------------------------------------------------------------------------
 
@@ -133,6 +200,15 @@ defmodule Pincer.Core.StartupGuardTest do
       Application.put_env(:pincer, :skip_startup_guard, true)
 
       assert {:error, :config_missing, _msg} = StartupGuard.run()
+    end
+
+    test "fails closed on sandbox probe after config and before DB checks" do
+      path = write_tmp_yaml!("database:\n  hostname: localhost\n  port: 5432\n")
+      Application.put_env(:pincer, :config_path, path)
+      Application.put_env(:pincer, :skip_startup_guard, true)
+      Application.put_env(:pincer, :sandbox_adapter, ProbeFailSandbox)
+
+      assert {:error, :sandbox_unavailable, _msg} = StartupGuard.run()
     end
 
     test "succeeds in SQLite mode even when PostgreSQL is unreachable" do

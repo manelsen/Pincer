@@ -97,6 +97,17 @@ sandbox:
   adapter: "local"
   local:
     transport: "os"
+    # Opt in to the Linux-only bubblewrap transport (requires bubblewrap and
+    # unprivileged user namespaces; on Ubuntu 24.04+ install the
+    # `bwrap-userns-restrict` AppArmor profile). Fail-closed when unavailable.
+    # transport: "bwrap"
+    # bwrap:
+    #   network: "none"    # none | host
+    #   limits:
+    #     memory_mb: 1024
+    #     cpu_seconds: 120
+    #     pids: 4096
+    #     open_files: 1024
 tools:
   restrict_to_workspace: true
 # log_utc_offset: 0  # No longer needed — TZ is set in docker-compose.yml

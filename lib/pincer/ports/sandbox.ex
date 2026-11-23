@@ -19,9 +19,12 @@ defmodule Pincer.Ports.Sandbox do
 
   @callback backend_name() :: atom()
   @callback available?() :: boolean()
+  @callback probe() :: :ok | {:error, term()}
   @callback run(command :: String.t(), opts :: keyword()) ::
               {:ok, run_result()} | {:error, term()}
   @callback cleanup(scope_id :: String.t()) :: :ok | {:error, term()}
+
+  @optional_callbacks probe: 0
 
   @env_key_regex ~r/^[A-Za-z_][A-Za-z0-9_]*$/
   @forbidden_env_keys MapSet.new([
@@ -102,6 +105,22 @@ defmodule Pincer.Ports.Sandbox do
   @doc "Returns whether the active sandbox backend is currently available."
   @spec available?() :: boolean()
   def available?, do: adapter().available?()
+
+  @doc """
+  Runs the active backend's capability probe.
+
+  Adapters that do not export `probe/0` are assumed to be available.
+  """
+  @spec probe() :: :ok | {:error, term()}
+  def probe do
+    mod = adapter()
+
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :probe, 0) do
+      mod.probe()
+    else
+      :ok
+    end
+  end
 
   @doc """
   Executes a validated command inside the active sandbox adapter.

@@ -301,8 +301,9 @@ requires touching the package's `mix.exs`/`CHANGELOG.md` too.
   automatically. Tests touching Postgres do `Application.ensure_all_started(:pincer)`,
   then `:ok = Ecto.Adapters.SQL.Sandbox.checkout(Pincer.Infra.Repo)` and clean tables
   explicitly in `setup` (see `test/mix/tasks/pincer.memory.report_test.exs`).
-- ExUnit excludes `:docker` always, and `:sqlite_smoke` unless in SQLite mode. Only `:chaos`
-  and `:stress` tags exist besides those; run them explicitly (`--only chaos`).
+- ExUnit excludes `:docker`, `:bwrap`, and (unless in SQLite mode) `:sqlite_smoke`;
+  `:chaos` and `:stress` are load/performance suites. Run excluded or integration
+  tests explicitly (`--only chaos`, `--include bwrap` for the real bubblewrap test).
 - `test/fixtures/` holds on-disk fixtures (`file_system_workspace/`, `telegram/`, and
   `ci_posture/config.yaml` used by the CI posture gates);
   `test/bench/` holds Benchee scripts (not run by `mix test`; `benchee` is `only: :bench`);
@@ -339,8 +340,15 @@ requires touching the package's `mix.exs`/`CHANGELOG.md` too.
   returns only global messages; don't "fix" it into a full read.
 - **Sandbox execution** goes through `Pincer.Adapters.Sandbox.{Local,Docker,SSH}` selected
   by `sandbox.adapter` / `:sandbox_adapter`. `Local` can run over the tool registry, OS
-  transport, or Docker; Docker-backed tests are tagged `:docker` and only run on
-  `workflow_dispatch` CI using `alpine:3.20`.
+  transport, or the Linux-only bubblewrap transport (`bwrap: true` / `transport: "bwrap"`);
+  Docker-backed tests are tagged `:docker` and only run on `workflow_dispatch` CI using
+  `alpine:3.20`. The bwrap transport is fail-closed (StartupGuard refuses to boot when the
+  probe fails) and still passes through `SafeShell` + `WorkspaceGuard`. Resource limits
+  use `prlimit` (default: 1 GiB address space, 120 s CPU, 4096 pids, 1024 open files;
+  `limits: :disabled` or a limit map replaces the defaults, with 0/absent disabling a
+  single limit). The boot probe also checks `prlimit` availability. On Ubuntu 24.04+
+  unprivileged user namespaces require the `bwrap-userns-restrict` AppArmor profile; the
+  real integration test is tagged `:bwrap` (`mix test --include bwrap`).
 - **Executor limits are compile-time config**, set in `config/config.exs`:
   `:max_recursion_depth`, `:tool_result_max_chars`, `:max_inline_bytes`,
   `:approval_timeout_ms`, `:fs_*`, `:llm_retry`, `:circuit_breaker_*`,

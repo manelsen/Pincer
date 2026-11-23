@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The local sandbox adapter can run commands over a Linux-only bubblewrap transport (`transport: "bwrap"` or `bwrap: true`): a minimal read-only root, workspace bind, network `none`/`host`, `prlimit`-based memory/CPU/PID/file limits, a capability probe cached per executable, and fail-closed startup via `StartupGuard.check_sandbox/0`.
 - The `pincer_webhook` channel now runs an HTTP listener (Bandit + Plug) under the channels supervisor, configurable with `bind` (loopback by default), `port`, `path`, `max_body_bytes`, and `rate_limit_per_minute`; deliveries are token-gated and validated before ingestion.
 - Webhook ingress is rate limited per client IP (60 requests/minute by default, `0` disables) with `429` + `Retry-After`; an unavailable limiter fails closed with `503`.
 - The security audit warns when an enabled webhook binds to all interfaces (`0.0.0.0`, `::`).

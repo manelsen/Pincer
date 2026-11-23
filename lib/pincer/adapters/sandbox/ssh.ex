@@ -28,6 +28,10 @@ defmodule Pincer.Adapters.Sandbox.SSH do
   @spec available?() :: boolean()
   def available?, do: find_ssh([]) != nil
 
+  @impl true
+  @spec probe() :: :ok
+  def probe, do: :ok
+
   @doc """
   Builds the SSH argument vector after validating target parameters, workspace, and env.
   """
