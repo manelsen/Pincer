@@ -33,107 +33,112 @@ defmodule Pincer.Core.Skills.Guard do
           findings: [finding()]
         }
 
-  @rules [
-    %{
-      id: :env_exfil_http,
-      severity: :critical,
-      category: :exfiltration,
-      regex:
-        ~r/(?:curl|wget|fetch|httpx?\.|requests\.)[^\n]*\$\{?\w*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)S?\b/i,
-      description: "HTTP command/call interpolating secret environment variable",
-      exempt_if: &__MODULE__.loopback_exempt?/1
-    },
-    %{
-      id: :credential_dir_access,
-      severity: :critical,
-      category: :exfiltration,
-      regex: ~r/(?:\$HOME|~)\/\.(?:ssh|aws|gnupg|kube|docker)\b/,
-      description: "References sensitive user credential directory"
-    },
-    %{
-      id: :read_secrets_file,
-      severity: :critical,
-      category: :exfiltration,
-      regex:
-        ~r/\bcat\s+(?!>)[^\n]*(?:\.env\b|credentials\b|\.netrc\b|\.pgpass\b|\.npmrc\b|\.pypirc\b|id_(?:rsa|ed25519|ecdsa|dsa)(?!\.pub))/i,
-      description: "Reads known credential or private key file"
-    },
-    %{
-      id: :dump_all_env,
-      severity: :critical,
-      category: :exfiltration,
-      regex: ~r/\bprintenv\b|(?<![A-Za-z0-9_])env\s*\|(?!\|)/i,
-      description: "Dumps environment variables"
-    },
-    %{
-      id: :dns_exfil,
-      severity: :critical,
-      category: :exfiltration,
-      regex: ~r/\b(?:dig|nslookup|host)\s+[^\n]*\$(?:\{[^}\s]*\}|\([^\n]*\)|\w+)[^\s]*\.[a-z]/i,
-      description: "DNS query with variable interpolation (potential DNS exfiltration)"
-    },
-    %{
-      id: :md_image_exfil,
-      severity: :critical,
-      category: :exfiltration,
-      regex: ~r/!\[[^\]]*\]\(https?:\/\/[^\)]*\$\{?/i,
-      description: "Markdown image URL with variable interpolation"
-    },
-    %{
-      id: :pipe_to_shell,
-      severity: :critical,
-      category: :destructive,
-      regex: ~r/(?:curl|wget)\b[^\n]*\|\s*(?:sudo\s+)?(?:ba|z|k|da)?sh\b/i,
-      description: "Downloads remote script and pipes directly to shell"
-    },
-    %{
-      id: :rm_rf_root,
-      severity: :critical,
-      category: :destructive,
-      regex:
-        ~r/\brm\s+[^\n]*-(?:[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r)\s+(?:\/\s*$|\/(?:\s|--no-preserve-root|\*)|~\/?\*)/,
-      description: "Destructive recursive delete targeting root or home directory"
-    },
-    %{
-      id: :reverse_shell,
-      severity: :critical,
-      category: :destructive,
-      regex: ~r/\bnc\b[^\n]*\s-e\s|\bbash\s+-i\s+>&\s+\/dev\/tcp\//i,
-      description: "Reverse shell invocation pattern"
-    },
-    %{
-      id: :agent_config_shell_write,
-      severity: :critical,
-      category: :persistence,
-      regex:
-        ~r/(?:>>|\S\s*>|\bsed\b[^\n]*\s-[A-Za-z]*i|\btee\s+(?:-a\s+)?)[^\n]*\b(?:SOUL\.md|IDENTITY\.md|AGENTS\.md|CLAUDE\.md|USER\.md|STYLE\.md|config\.yaml|\.cursorrules)\b/,
-      description: "Shell command modifies protected agent config or persona file"
-    },
-    %{
-      id: :agent_config_imperative,
-      severity: :critical,
-      category: :persistence,
-      regex:
-        ~r/(?:^\s*(?:[-*+]\s+|\d+[.)]\s+)?|\b(?:you\s+(?:must|should|need\s+to)|please|always|make\s+sure\s+to)\s+)\b(?:edit|modify|write|overwrite|append|replace|update|alter)\b[^\n]{0,60}\b(?:SOUL\.md|IDENTITY\.md|AGENTS\.md|CLAUDE\.md|USER\.md|STYLE\.md|config\.yaml|\.cursorrules)\b/i,
-      description: "Instruction directs modification of protected agent config or persona file",
-      exempt_if: &__MODULE__.negated_modify?/1
-    },
-    %{
-      id: :prompt_injection,
-      severity: :critical,
-      category: :injection,
-      regex:
-        ~r/\b(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above|system)\s+(?:instructions|prompts?|rules?)\b|\bbypass\s+approval\b/i,
-      description: "Prompt-injection or approval-bypass instruction"
-    },
-    %{
-      id: :invisible_unicode,
-      severity: :critical,
-      category: :injection,
-      regex: ~r/[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]/u,
-      description: "Hidden or bidirectional Unicode control characters"
-    }
-  ]
+  # Regex structs contain compiled-pattern references that Elixir 1.18.6
+  # refuses to escape out of a module attribute, so build the rule list inside
+  # a function and pass it once per scan.
+  defp rules do
+    [
+      %{
+        id: :env_exfil_http,
+        severity: :critical,
+        category: :exfiltration,
+        regex:
+          ~r/(?:curl|wget|fetch|httpx?\.|requests\.)[^\n]*\$\{?\w*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)S?\b/i,
+        description: "HTTP command/call interpolating secret environment variable",
+        exempt: :loopback_url
+      },
+      %{
+        id: :credential_dir_access,
+        severity: :critical,
+        category: :exfiltration,
+        regex: ~r/(?:\$HOME|~)\/\.(?:ssh|aws|gnupg|kube|docker)\b/,
+        description: "References sensitive user credential directory"
+      },
+      %{
+        id: :read_secrets_file,
+        severity: :critical,
+        category: :exfiltration,
+        regex:
+          ~r/\bcat\s+(?!>)[^\n]*(?:\.env\b|credentials\b|\.netrc\b|\.pgpass\b|\.npmrc\b|\.pypirc\b|id_(?:rsa|ed25519|ecdsa|dsa)(?!\.pub))/i,
+        description: "Reads known credential or private key file"
+      },
+      %{
+        id: :dump_all_env,
+        severity: :critical,
+        category: :exfiltration,
+        regex: ~r/\bprintenv\b|(?<![A-Za-z0-9_])env\s*\|(?!\|)/i,
+        description: "Dumps environment variables"
+      },
+      %{
+        id: :dns_exfil,
+        severity: :critical,
+        category: :exfiltration,
+        regex: ~r/\b(?:dig|nslookup|host)\s+[^\n]*\$(?:\{[^}\s]*\}|\([^\n]*\)|\w+)[^\s]*\.[a-z]/i,
+        description: "DNS query with variable interpolation (potential DNS exfiltration)"
+      },
+      %{
+        id: :md_image_exfil,
+        severity: :critical,
+        category: :exfiltration,
+        regex: ~r/!\[[^\]]*\]\(https?:\/\/[^\)]*\$\{?/i,
+        description: "Markdown image URL with variable interpolation"
+      },
+      %{
+        id: :pipe_to_shell,
+        severity: :critical,
+        category: :destructive,
+        regex: ~r/(?:curl|wget)\b[^\n]*\|\s*(?:sudo\s+)?(?:ba|z|k|da)?sh\b/i,
+        description: "Downloads remote script and pipes directly to shell"
+      },
+      %{
+        id: :rm_rf_root,
+        severity: :critical,
+        category: :destructive,
+        regex:
+          ~r/\brm\s+[^\n]*-(?:[a-zA-Z]*r[a-zA-Z]*f|[a-zA-Z]*f[a-zA-Z]*r)\s+(?:\/\s*$|\/(?:\s|--no-preserve-root|\*)|~\/?\*)/,
+        description: "Destructive recursive delete targeting root or home directory"
+      },
+      %{
+        id: :reverse_shell,
+        severity: :critical,
+        category: :destructive,
+        regex: ~r/\bnc\b[^\n]*\s-e\s|\bbash\s+-i\s+>&\s+\/dev\/tcp\//i,
+        description: "Reverse shell invocation pattern"
+      },
+      %{
+        id: :agent_config_shell_write,
+        severity: :critical,
+        category: :persistence,
+        regex:
+          ~r/(?:>>|\S\s*>|\bsed\b[^\n]*\s-[A-Za-z]*i|\btee\s+(?:-a\s+)?)[^\n]*\b(?:SOUL\.md|IDENTITY\.md|AGENTS\.md|CLAUDE\.md|USER\.md|STYLE\.md|config\.yaml|\.cursorrules)\b/,
+        description: "Shell command modifies protected agent config or persona file"
+      },
+      %{
+        id: :agent_config_imperative,
+        severity: :critical,
+        category: :persistence,
+        regex:
+          ~r/(?:^\s*(?:[-*+]\s+|\d+[.)]\s+)?|\b(?:you\s+(?:must|should|need\s+to)|please|always|make\s+sure\s+to)\s+)\b(?:edit|modify|write|overwrite|append|replace|update|alter)\b[^\n]{0,60}\b(?:SOUL\.md|IDENTITY\.md|AGENTS\.md|CLAUDE\.md|USER\.md|STYLE\.md|config\.yaml|\.cursorrules)\b/i,
+        description: "Instruction directs modification of protected agent config or persona file",
+        exempt: :negated_modify
+      },
+      %{
+        id: :prompt_injection,
+        severity: :critical,
+        category: :injection,
+        regex:
+          ~r/\b(?:ignore|disregard|forget)\s+(?:all\s+)?(?:previous|prior|above|system)\s+(?:instructions|prompts?|rules?)\b|\bbypass\s+approval\b/i,
+        description: "Prompt-injection or approval-bypass instruction"
+      },
+      %{
+        id: :invisible_unicode,
+        severity: :critical,
+        category: :injection,
+        regex: ~r/[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]/u,
+        description: "Hidden or bidirectional Unicode control characters"
+      }
+    ]
+  end
 
   @doc "Validates a skill directory/manifest slug."
   @spec validate_slug(term()) :: :ok | {:error, :invalid_skill_slug}
@@ -152,11 +157,13 @@ defmodule Pincer.Core.Skills.Guard do
   """
   @spec scan(String.t()) :: scan_result()
   def scan(content) when is_binary(content) do
+    rules = rules()
+
     findings =
       content
       |> String.split(~r/\r\n|\n|\r/)
       |> Enum.with_index(1)
-      |> Enum.flat_map(fn {line, line_no} -> scan_line(line, line_no) end)
+      |> Enum.flat_map(fn {line, line_no} -> scan_line(line, line_no, rules) end)
 
     %{
       verdict: compute_verdict(findings),
@@ -197,13 +204,15 @@ defmodule Pincer.Core.Skills.Guard do
 
   # --- Private ---
 
-  defp scan_line(line, line_no) do
-    Enum.reduce(@rules, [], fn rule, acc ->
+  defp exempt?(nil, _line), do: false
+  defp exempt?(:loopback_url, line), do: loopback_exempt?(line)
+  defp exempt?(:negated_modify, line), do: negated_modify?(line)
+
+  defp scan_line(line, line_no, rules) do
+    Enum.reduce(rules, [], fn rule, acc ->
       case Regex.run(rule.regex, line) do
         [matched | _] ->
-          exempt_fun = Map.get(rule, :exempt_if)
-
-          if exempt_fun && exempt_fun.(line) do
+          if exempt?(Map.get(rule, :exempt), line) do
             acc
           else
             finding = %{
