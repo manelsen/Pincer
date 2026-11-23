@@ -6,7 +6,7 @@ defmodule Pincer.Core.Introspection.LessonExtractorTest do
   @agent "extractor_test_agent"
 
   setup do
-    Pincer.Infra.Repo.delete_all(Pincer.Core.Introspection.LessonSchema)
+    :ok = Pincer.Infra.SQLite.execute("DELETE FROM lessons")
     :ok
   end
 

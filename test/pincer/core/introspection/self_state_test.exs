@@ -4,7 +4,7 @@ defmodule Pincer.Core.Introspection.SelfStateTest do
   alias Pincer.Core.Introspection.SelfState
 
   setup do
-    Pincer.Infra.Repo.delete_all(Pincer.Core.Introspection.Schema)
+    :ok = Pincer.Infra.SQLite.execute("DELETE FROM self_states")
     :ok
   end
 

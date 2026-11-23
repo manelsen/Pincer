@@ -90,10 +90,8 @@ defmodule Pincer.E2E.ZeroInfraSQLiteBootE2ETest do
   end
 
   @tag :sqlite_smoke
-  test "boots full Pincer.Application supervision tree in SQLite mode with Postgres Repo absent" do
-    assert SQLite.sqlite_mode?()
+  test "boots full Pincer.Application supervision tree in SQLite mode" do
     assert Process.whereis(Pincer.Infra.SQLite) != nil
-    assert Process.whereis(Pincer.Infra.Repo) == nil
 
     Application.put_env(:pincer, :skip_startup_guard, false)
     assert :ok = StartupGuard.run()

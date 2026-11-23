@@ -4,8 +4,6 @@ defmodule Pincer.Infra do
     exports: [
       PubSub,
       Config,
-      Repo,
-      SQLite,
-      CircuitBreakerSnapshot
+      SQLite
     ]
 end

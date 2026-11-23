@@ -3,9 +3,10 @@
 # Usage: copy to config.yaml, fill in your tokens, and run:
 #   docker compose up --build -d
 
-database:
-  url: "ecto://pincer:pincer@postgres/pincer"
-  pool_size: 10
+storage:
+  adapter: "sqlite"
+  path: "data/slack_assistant.db"
+  vec: "auto"
 
 llm:
   default_provider: openrouter

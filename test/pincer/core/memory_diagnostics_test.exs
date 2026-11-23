@@ -5,17 +5,16 @@ defmodule Pincer.Core.MemoryDiagnosticsTest do
   alias Pincer.Core.MemoryDiagnostics
   alias Pincer.Core.MemoryObservability
   alias Pincer.Core.Telemetry
-  alias Pincer.Infra.Repo
-  alias Pincer.Storage.Adapters.Postgres
+  alias Pincer.Infra.SQLite
+  alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
 
   setup do
     Application.ensure_all_started(:pincer)
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
     :ok = MemoryObservability.reset()
 
-    {:ok, _} = Ecto.Adapters.SQL.query(Repo, "DELETE FROM edges", [])
-    {:ok, _} = Ecto.Adapters.SQL.query(Repo, "DELETE FROM nodes", [])
-    {:ok, _} = Ecto.Adapters.SQL.query(Repo, "DELETE FROM messages", [])
+    :ok = SQLite.execute("DELETE FROM edges")
+    :ok = SQLite.execute("DELETE FROM nodes")
+    :ok = SQLite.execute("DELETE FROM messages")
 
     tmp =
       Path.join(
@@ -45,7 +44,7 @@ defmodule Pincer.Core.MemoryDiagnosticsTest do
 
   test "report/1 combines runtime snapshot with persisted memory inventory" do
     assert :ok =
-             Postgres.index_memory(
+             SQLiteStorage.index_memory(
                "session://ops/snippet/1",
                "Webhook timeout must stay at 60 seconds after deploys.",
                "architecture_decision",
@@ -56,7 +55,7 @@ defmodule Pincer.Core.MemoryDiagnosticsTest do
              )
 
     assert :ok =
-             Postgres.index_memory(
+             SQLiteStorage.index_memory(
                "session://ops/snippet/2",
                "Old workaround for webhook timeout drift.",
                "technical_fact",
@@ -93,14 +92,14 @@ defmodule Pincer.Core.MemoryDiagnosticsTest do
 
   test "explain/2 returns recall diagnostics and related sessions", %{workspace: workspace} do
     assert {:ok, _} =
-             Postgres.save_message(
+             SQLiteStorage.save_message(
                "session-a",
                "assistant",
                "Deploy timeout was fixed after webhook retries were limited."
              )
 
     assert :ok =
-             Postgres.index_memory(
+             SQLiteStorage.index_memory(
                "session://explain/snippet/1",
                "Deploy timeout runbook says to inspect webhook retries first.",
                "technical_fact",
@@ -112,7 +111,7 @@ defmodule Pincer.Core.MemoryDiagnosticsTest do
     explanation =
       MemoryDiagnostics.explain("deploy timeout webhook",
         workspace_path: workspace,
-        storage: Postgres,
+        storage: SQLiteStorage,
         limit: 5,
         embedding_fun: fn _query -> {:error, :disabled} end
       )

@@ -47,9 +47,7 @@ defmodule Pincer.Adapters.Cron.Storage do
       {:ok, _} = Pincer.Adapters.Cron.Storage.delete_job(job_id)
   """
   import Ecto.Changeset, only: [apply_changes: 1]
-  import Ecto.Query
   alias Pincer.Adapters.Cron.Job
-  alias Pincer.Infra.Repo
   alias Pincer.Infra.SQLite
 
   @doc """
@@ -81,17 +79,11 @@ defmodule Pincer.Adapters.Cron.Storage do
   """
   @spec list_due_jobs(DateTime.t()) :: [Job.t()]
   def list_due_jobs(now \\ DateTime.utc_now()) do
-    if SQLite.sqlite_mode?() do
-      sqlite_list_jobs()
-      |> Enum.filter(fn job ->
-        job.enabled == true and job.next_run_at != nil and
-          DateTime.compare(job.next_run_at, now) != :gt
-      end)
-    else
-      Job
-      |> where([j], j.enabled == true and j.next_run_at <= ^now)
-      |> Repo.all()
-    end
+    sqlite_list_jobs()
+    |> Enum.filter(fn job ->
+      job.enabled == true and job.next_run_at != nil and
+        DateTime.compare(job.next_run_at, now) != :gt
+    end)
   end
 
   @doc """
@@ -175,14 +167,7 @@ defmodule Pincer.Adapters.Cron.Storage do
   def create_job(attrs) do
     changeset = Job.changeset(%Job{}, attrs)
 
-    result =
-      if SQLite.sqlite_mode?() do
-        sqlite_insert_job(changeset)
-      else
-        Repo.insert(changeset)
-      end
-
-    case result do
+    case sqlite_insert_job(changeset) do
       {:ok, job} -> {:ok, update_next_run!(job)}
       error -> error
     end
@@ -218,7 +203,7 @@ defmodule Pincer.Adapters.Cron.Storage do
 
       job ->
         changeset = Job.changeset(job, %{enabled: false})
-        if SQLite.sqlite_mode?(), do: sqlite_update_job(changeset), else: Repo.update(changeset)
+        sqlite_update_job(changeset)
     end
   end
 
@@ -241,7 +226,7 @@ defmodule Pincer.Adapters.Cron.Storage do
   """
   @spec list_jobs() :: [Job.t()]
   def list_jobs do
-    if SQLite.sqlite_mode?(), do: sqlite_list_jobs(), else: Repo.all(Job)
+    sqlite_list_jobs()
   end
 
   @doc """
@@ -272,15 +257,11 @@ defmodule Pincer.Adapters.Cron.Storage do
         {:error, :not_found}
 
       job ->
-        if SQLite.sqlite_mode?() do
-          case SQLite.execute(SQLite.default_server(), "DELETE FROM cron_jobs WHERE id = ?1", [
-                 job.id
-               ]) do
-            :ok -> {:ok, job}
-            error -> error
-          end
-        else
-          Repo.delete(job)
+        case SQLite.execute(SQLite.default_server(), "DELETE FROM cron_jobs WHERE id = ?1", [
+               job.id
+             ]) do
+          :ok -> {:ok, job}
+          error -> error
         end
     end
   end
@@ -288,16 +269,12 @@ defmodule Pincer.Adapters.Cron.Storage do
   # --- SQLite persistence helpers ---
 
   defp fetch_job(id) do
-    if SQLite.sqlite_mode?(), do: sqlite_get_job(id), else: Repo.get(Job, id)
+    sqlite_get_job(id)
   end
 
   defp persist_job_update!(changeset) do
-    if SQLite.sqlite_mode?() do
-      {:ok, job} = sqlite_update_job(changeset)
-      job
-    else
-      Repo.update!(changeset)
-    end
+    {:ok, job} = sqlite_update_job(changeset)
+    job
   end
 
   defp sqlite_insert_job(changeset) do

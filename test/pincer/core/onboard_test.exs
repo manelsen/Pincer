@@ -6,11 +6,12 @@ defmodule Pincer.Core.OnboardTest do
   alias Pincer.Core.Onboard.Preflight
 
   describe "defaults/0" do
-    test "includes postgres database defaults" do
+    test "includes embedded SQLite storage defaults" do
       defaults = Onboard.defaults()
-      assert get_in(defaults, ["database", "adapter"]) == "Ecto.Adapters.PostgreSQL"
-      assert get_in(defaults, ["database", "hostname"]) == "localhost"
-      assert get_in(defaults, ["database", "database"]) == "pincer"
+      refute Map.has_key?(defaults, "database")
+      assert get_in(defaults, ["storage", "adapter"]) == "sqlite"
+      assert get_in(defaults, ["storage", "path"]) == "data/pincer.db"
+      assert get_in(defaults, ["storage", "vec"]) == "auto"
     end
 
     test "includes whatsapp channel scaffold disabled by default" do
@@ -177,14 +178,14 @@ defmodule Pincer.Core.OnboardTest do
       assert :ok = Onboard.preflight(Onboard.defaults())
     end
 
-    test "returns error issues with hint for invalid database name" do
-      config = put_in(Onboard.defaults(), ["database", "database"], "../outside")
+    test "returns error issues with hint for an unwritable SQLite path" do
+      config = put_in(Onboard.defaults(), ["storage", "path"], "../outside/pincer.db")
 
       assert {:error, issues} = Onboard.preflight(config)
 
       assert Enum.any?(issues, fn issue ->
-               issue.id == :invalid_db_name and
-                 String.contains?(issue.hint, "database name")
+               issue.id == :invalid_sqlite_path and
+                 String.contains?(issue.hint, "writable")
              end)
     end
 
@@ -207,18 +208,18 @@ defmodule Pincer.Core.OnboardTest do
       assert Defaults.available_capabilities() == Onboard.available_capabilities()
     end
 
-    test "preflight module validates invalid db names explicitly" do
-      config = put_in(Onboard.defaults(), ["database", "database"], "../outside")
+    test "preflight module validates invalid SQLite paths explicitly" do
+      config = put_in(Onboard.defaults(), ["storage", "path"], "../outside/pincer.db")
 
       assert {:error, issues} = Preflight.preflight(config)
-      assert Enum.any?(issues, &(&1.id == :invalid_db_name))
+      assert Enum.any?(issues, &(&1.id == :invalid_sqlite_path))
     end
   end
 
   describe "merge_config/2" do
     test "deep-merges defaults and existing config without dropping custom keys" do
       existing = %{
-        "database" => %{"database" => "existing_db", "hostname" => "db.internal"},
+        "storage" => %{"adapter" => "sqlite", "path" => "data/existing.db", "vec" => "false"},
         "llm" => %{
           "provider" => "z_ai",
           "z_ai" => %{
@@ -235,8 +236,8 @@ defmodule Pincer.Core.OnboardTest do
 
       merged = Onboard.merge_config(Onboard.defaults(), existing)
 
-      assert get_in(merged, ["database", "database"]) == "existing_db"
-      assert get_in(merged, ["database", "hostname"]) == "db.internal"
+      assert get_in(merged, ["storage", "path"]) == "data/existing.db"
+      assert get_in(merged, ["storage", "vec"]) == "false"
       assert get_in(merged, ["llm", "z_ai", "base_url"]) == "https://custom.example/v1"
       assert get_in(merged, ["llm", "custom_provider", "default_model"]) == "cp-model"
       assert get_in(merged, ["custom_section", "keep_me"]) == true
@@ -299,8 +300,7 @@ defmodule Pincer.Core.OnboardTest do
 
     test "builds deterministic remote bootstrap command and steps" do
       config =
-        Onboard.defaults()
-        |> put_in(["database", "database"], "remote_db")
+        Onboard.defaults(storage: :sqlite, sqlite_path: "data/remote.db")
         |> put_in(["llm", "provider"], "openrouter")
         |> put_in(["llm", "openrouter", "default_model"], "openrouter/free")
 
@@ -315,7 +315,8 @@ defmodule Pincer.Core.OnboardTest do
       assert plan.target == "deploy@vps.example.com"
       assert plan.project_path == "/srv/pincer"
       assert String.contains?(plan.onboard_command, "mix pincer.onboard --non-interactive --yes")
-      assert String.contains?(plan.onboard_command, "--db-name 'remote_db'")
+      assert String.contains?(plan.onboard_command, "--storage 'sqlite'")
+      assert String.contains?(plan.onboard_command, "--sqlite-path 'data/remote.db'")
       assert String.contains?(plan.onboard_command, "--provider 'openrouter'")
       assert String.contains?(plan.onboard_command, "--model 'openrouter/free'")
       assert String.contains?(plan.onboard_command, "--capabilities 'workspace_dirs,config_yaml'")

@@ -2,10 +2,10 @@ defmodule Pincer.Core.DeadLetterQueueTest do
   use ExUnit.Case, async: false
 
   alias Pincer.Core.DeadLetterQueue
-  alias Pincer.Infra.Repo
+  alias Pincer.Infra.SQLite
 
   setup do
-    Repo.delete_all(DeadLetterQueue)
+    :ok = SQLite.execute("DELETE FROM dead_letter_queue")
     :ok
   end
 

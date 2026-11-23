@@ -1,5 +1,5 @@
 defmodule Pincer.Core.StartupGuardTest do
-  # async: false because tests modify global Application env (Pincer.Infra.Repo config)
+  # async: false because tests modify global Application env (SQLite path/backend)
   use ExUnit.Case, async: false
 
   alias Pincer.Core.StartupGuard
@@ -49,10 +49,6 @@ defmodule Pincer.Core.StartupGuardTest do
     # does not block the test suite from starting.
     Application.put_env(:pincer, :skip_startup_guard, true)
 
-    # Snapshot the Repo config before each test so we can restore it afterward.
-    # The check_database/0 tests modify and then delete this key, which
-    # would leave the application unable to connect to the DB in subsequent tests.
-    original_repo_config = Application.get_env(:pincer, Pincer.Infra.Repo)
     original_storage = Application.get_env(:pincer, :storage_adapter)
     original_sqlite_path = Application.get_env(:pincer, :sqlite_path)
     original_sandbox_adapter = Application.get_env(:pincer, :sandbox_adapter)
@@ -60,13 +56,6 @@ defmodule Pincer.Core.StartupGuardTest do
     on_exit(fn ->
       Application.delete_env(:pincer, :skip_startup_guard)
       Application.delete_env(:pincer, :config_path)
-
-      # Restore the Repo config to what it was before this test.
-      if original_repo_config do
-        Application.put_env(:pincer, Pincer.Infra.Repo, original_repo_config)
-      else
-        Application.delete_env(:pincer, Pincer.Infra.Repo)
-      end
 
       if original_storage do
         Application.put_env(:pincer, :storage_adapter, original_storage)
@@ -95,8 +84,8 @@ defmodule Pincer.Core.StartupGuardTest do
   # ---------------------------------------------------------------------------
 
   describe "check_config/0" do
-    test "returns :ok for a valid YAML file" do
-      path = write_tmp_yaml!("database:\n  hostname: localhost\n  port: 5432\n")
+    test "returns :ok for a valid SQLite YAML file" do
+      path = write_tmp_yaml!("storage:\n  adapter: sqlite\n  path: data/pincer.db\n")
       Application.put_env(:pincer, :config_path, path)
 
       assert StartupGuard.check_config() == :ok
@@ -115,50 +104,6 @@ defmodule Pincer.Core.StartupGuardTest do
 
       assert {:error, :config_missing, msg} = StartupGuard.check_config()
       assert String.contains?(msg, "mix pincer.onboard")
-    end
-  end
-
-  # ---------------------------------------------------------------------------
-  # check_database/0
-  # ---------------------------------------------------------------------------
-
-  describe "check_database/0" do
-    test "returns :ok when the port is reachable" do
-      # Start a temporary TCP listener on a random port so we have something to connect to.
-      {:ok, listener} = :gen_tcp.listen(0, [:binary, reuseaddr: true])
-      {:ok, port} = :inet.port(listener)
-
-      Application.put_env(:pincer, Pincer.Infra.Repo,
-        hostname: "127.0.0.1",
-        port: port
-      )
-
-      assert StartupGuard.check_database() == :ok
-
-      :gen_tcp.close(listener)
-    after
-      Application.delete_env(:pincer, Pincer.Infra.Repo)
-    end
-
-    test "returns {:error, :db_unreachable, _} for a closed port" do
-      # Use a high-numbered port very unlikely to be in use.
-      Application.put_env(:pincer, Pincer.Infra.Repo,
-        hostname: "127.0.0.1",
-        port: 19_999
-      )
-
-      result = StartupGuard.check_database()
-
-      # Accept both :ok (if something happens to be on that port) and the error.
-      case result do
-        :ok ->
-          :ok
-
-        {:error, :db_unreachable, msg} ->
-          assert String.contains?(msg, "docker compose up -d postgres")
-      end
-    after
-      Application.delete_env(:pincer, Pincer.Infra.Repo)
     end
   end
 
@@ -183,12 +128,12 @@ defmodule Pincer.Core.StartupGuardTest do
   end
 
   # ---------------------------------------------------------------------------
-  # run/0 — integration of all checks
+  # run/0 — integration of the checks
   # ---------------------------------------------------------------------------
 
   describe "run/0" do
     test "returns :ok when config is valid and guard is skipped for DB/migrations" do
-      path = write_tmp_yaml!("database:\n  hostname: localhost\n  port: 5432\n")
+      path = write_tmp_yaml!("storage:\n  adapter: sqlite\n")
       Application.put_env(:pincer, :config_path, path)
       Application.put_env(:pincer, :skip_startup_guard, true)
 
@@ -203,7 +148,7 @@ defmodule Pincer.Core.StartupGuardTest do
     end
 
     test "fails closed on sandbox probe after config and before DB checks" do
-      path = write_tmp_yaml!("database:\n  hostname: localhost\n  port: 5432\n")
+      path = write_tmp_yaml!("storage:\n  adapter: sqlite\n")
       Application.put_env(:pincer, :config_path, path)
       Application.put_env(:pincer, :skip_startup_guard, true)
       Application.put_env(:pincer, :sandbox_adapter, ProbeFailSandbox)
@@ -211,8 +156,8 @@ defmodule Pincer.Core.StartupGuardTest do
       assert {:error, :sandbox_unavailable, _msg} = StartupGuard.run()
     end
 
-    test "succeeds in SQLite mode even when PostgreSQL is unreachable" do
-      path = write_tmp_yaml!("database:\n  adapter: sqlite\n")
+    test "succeeds in SQLite mode with a writable database path" do
+      path = write_tmp_yaml!("storage:\n  adapter: sqlite\n")
       on_exit(fn -> File.rm_rf(path) end)
 
       db_dir =
@@ -225,7 +170,18 @@ defmodule Pincer.Core.StartupGuardTest do
       Application.put_env(:pincer, :skip_startup_guard, false)
       Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
       Application.put_env(:pincer, :sqlite_path, db_path)
-      Application.put_env(:pincer, Pincer.Infra.Repo, hostname: "127.0.0.1", port: 19_999)
+
+      assert StartupGuard.run() == :ok
+    end
+
+    test "succeeds in SQLite mode when the database path is in-memory" do
+      path = write_tmp_yaml!("storage:\n  adapter: sqlite\n  path: \":memory:\"\n")
+      on_exit(fn -> File.rm_rf(path) end)
+
+      Application.put_env(:pincer, :config_path, path)
+      Application.put_env(:pincer, :skip_startup_guard, false)
+      Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
+      Application.put_env(:pincer, :sqlite_path, ":memory:")
 
       assert StartupGuard.run() == :ok
     end

@@ -6,9 +6,7 @@ defmodule Pincer.Core.AuditLog do
   """
   use Ecto.Schema
   import Ecto.Changeset
-  import Ecto.Query
 
-  alias Pincer.Infra.Repo
   alias Pincer.Infra.SQLite
 
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -48,14 +46,7 @@ defmodule Pincer.Core.AuditLog do
 
     changeset = changeset(%__MODULE__{}, params)
 
-    result =
-      if SQLite.sqlite_mode?() do
-        sqlite_insert(changeset)
-      else
-        Repo.insert(changeset)
-      end
-
-    case result do
+    case sqlite_insert(changeset) do
       {:ok, _} ->
         :ok
 
@@ -68,49 +59,23 @@ defmodule Pincer.Core.AuditLog do
 
   @doc "Query recent audit events, newest first."
   def recent(limit \\ 100) do
-    if SQLite.sqlite_mode?() do
-      sqlite_query("ORDER BY inserted_at DESC, rowid DESC LIMIT ?1", [limit])
-    else
-      from(a in __MODULE__,
-        order_by: [desc: a.inserted_at],
-        limit: ^limit
-      )
-      |> Repo.all()
-    end
+    sqlite_query("ORDER BY inserted_at DESC, rowid DESC LIMIT ?1", [limit])
   end
 
   @doc "Query audit events by actor."
   def by_actor(actor, limit \\ 50) do
-    if SQLite.sqlite_mode?() do
-      sqlite_query("WHERE actor = ?1 ORDER BY inserted_at DESC, rowid DESC LIMIT ?2", [
-        actor,
-        limit
-      ])
-    else
-      from(a in __MODULE__,
-        where: a.actor == ^actor,
-        order_by: [desc: a.inserted_at],
-        limit: ^limit
-      )
-      |> Repo.all()
-    end
+    sqlite_query("WHERE actor = ?1 ORDER BY inserted_at DESC, rowid DESC LIMIT ?2", [
+      actor,
+      limit
+    ])
   end
 
   @doc "Query audit events by event type."
   def by_type(event_type, limit \\ 50) do
-    if SQLite.sqlite_mode?() do
-      sqlite_query(
-        "WHERE event_type = ?1 ORDER BY inserted_at DESC, rowid DESC LIMIT ?2",
-        [event_type, limit]
-      )
-    else
-      from(a in __MODULE__,
-        where: a.event_type == ^event_type,
-        order_by: [desc: a.inserted_at],
-        limit: ^limit
-      )
-      |> Repo.all()
-    end
+    sqlite_query(
+      "WHERE event_type = ?1 ORDER BY inserted_at DESC, rowid DESC LIMIT ?2",
+      [event_type, limit]
+    )
   end
 
   defp sqlite_insert(changeset) do

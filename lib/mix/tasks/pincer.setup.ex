@@ -1,39 +1,23 @@
 defmodule Mix.Tasks.Pincer.Setup do
   @moduledoc """
-  First-run setup wizard. Orchestrates the full bootstrap sequence:
+  First-run setup wizard for the embedded SQLite backend. Orchestrates the full
+  bootstrap sequence:
 
       mix pincer.setup
 
-  Supports both **PostgreSQL + pgvector** (default) and **Zero-Infra SQLite + FTS5**:
-
-      # Zero-Infra SQLite (no Postgres/Docker required)
-      mix pincer.setup --storage sqlite --yes
-
-      # PostgreSQL + pgvector
-      mix pincer.setup --storage postgres --yes
-
-  Steps (PostgreSQL mode):
+  Steps:
 
   1. `mix deps.get`           — install Elixir dependencies
-  2. PostgreSQL readiness     — wait up to 15 s for the DB to accept connections
-  3. `mix ecto.create`        — create the database (idempotent)
-  4. `mix ecto.migrate`       — apply pending migrations
-  5. `mix pincer.onboard`     — scaffold config.yaml and workspaces (if needed)
-
-  Steps (SQLite mode):
-
-  1. `mix deps.get`           — install Elixir dependencies
-  2. Skip PostgreSQL/Ecto     — zero-infra mode needs no external DB server
-  3. `mix pincer.onboard`     — scaffold SQLite config.yaml and workspaces
-  4. SQLite initialization    — initialize embedded tables, triggers, and FTS5 indices
+  2. `mix pincer.onboard`     — scaffold `config.yaml` and workspaces (if needed)
+  3. SQLite initialization    — initialize embedded tables, triggers, and FTS5 indices
 
   ## Options
 
       --yes / -y            Accept all defaults non-interactively
-      --storage mode        Storage backend: sqlite or postgres (auto-detected if omitted)
-      --sqlite-path path    Database file path for sqlite mode (default: data/pincer.db)
+      --storage mode        Storage backend (only `sqlite` is supported)
+      --sqlite-path path    Database file path (default: data/pincer.db)
       --skip-deps           Skip mix deps.get
-      --skip-migrations     Skip ecto.create + ecto.migrate (or SQLite init)
+      --skip-migrations     Skip embedded SQLite initialization
       --reconfigure         Force re-run of mix pincer.onboard even if already configured
       --config path         Config file path (forwarded to onboard, default: config.yaml)
       --root path           Project root for relative paths (default: current directory)
@@ -42,7 +26,7 @@ defmodule Mix.Tasks.Pincer.Setup do
 
       mix pincer.setup
       mix pincer.setup --yes
-      mix pincer.setup --storage sqlite --yes
+      mix pincer.setup --yes --sqlite-path data/custom.db
       mix pincer.setup --yes --skip-deps --reconfigure
   """
 
@@ -52,7 +36,7 @@ defmodule Mix.Tasks.Pincer.Setup do
   alias Pincer.Infra.Config
   alias Pincer.Infra.SQLite
 
-  @shortdoc "First-run bootstrap: deps → storage setup (Postgres or SQLite) → onboard"
+  @shortdoc "First-run bootstrap: deps → onboard → embedded SQLite initialization"
 
   @switches [
     yes: :boolean,
@@ -65,8 +49,6 @@ defmodule Mix.Tasks.Pincer.Setup do
     root: :string
   ]
 
-  @db_retry_interval_ms 1_000
-  @db_max_retries 15
   @default_sqlite_path "data/pincer.db"
 
   @impl Mix.Task
@@ -83,65 +65,29 @@ defmodule Mix.Tasks.Pincer.Setup do
     Mix.shell().info("\nPincer Setup\n")
 
     case run_steps(steps) do
-      :ok -> :ok
-      {:error, message} -> Mix.raise(message)
+      :ok ->
+        Mix.shell().info("\n✓ Setup concluído.")
+        :ok
+
+      {:error, message} ->
+        Mix.raise(message)
     end
   end
 
   @doc false
-  @spec resolve_storage_mode(keyword(), (String.t() -> String.t() | nil)) :: :sqlite | :postgres
-  def resolve_storage_mode(opts, env_fetcher \\ &System.get_env/1) when is_list(opts) do
-    case opts[:storage] do
-      nil ->
-        resolve_from_env_or_config(opts, env_fetcher)
-
-      explicit ->
-        case SQLite.parse_storage_backend(explicit) do
-          {:ok, backend} ->
-            backend
-
-          _ ->
-            Mix.raise(
-              "Invalid storage backend for pincer.setup: #{inspect(explicit)}. Valid values: sqlite, postgres"
-            )
-        end
-    end
-  end
-
-  @doc false
-  @spec build_steps(keyword(), (String.t() -> String.t() | nil)) ::
+  @spec build_steps(keyword()) ::
           [{String.t(), (-> :ok | {:skip, String.t()} | {:error, String.t()})}]
-  def build_steps(opts, env_fetcher \\ &System.get_env/1) when is_list(opts) do
-    mode = resolve_storage_mode(opts, env_fetcher)
+  def build_steps(opts) when is_list(opts) do
+    validate_storage!(opts[:storage])
 
     deps_step = unless(opts[:skip_deps], do: {"Dependências (mix deps.get)", &step_deps/0})
 
-    storage_steps =
-      case mode do
-        :sqlite ->
-          [
-            {"PostgreSQL",
-             fn -> {:skip, "Modo SQLite selecionado — PostgreSQL/Ecto não necessário"} end},
-            {"Configuração (mix pincer.onboard)", fn -> step_onboard(opts, :sqlite) end},
-            unless(opts[:skip_migrations],
-              do: {"Banco embutido SQLite", fn -> step_init_sqlite(opts) end}
-            )
-          ]
-
-        :postgres ->
-          [
-            unless(opts[:skip_migrations],
-              do: {"PostgreSQL", fn -> step_wait_postgres(opts) end}
-            ),
-            unless(opts[:skip_migrations],
-              do: {"Banco de dados (mix ecto.create)", &step_ecto_create/0}
-            ),
-            unless(opts[:skip_migrations],
-              do: {"Migrações (mix ecto.migrate)", &step_ecto_migrate/0}
-            ),
-            {"Configuração (mix pincer.onboard)", fn -> step_onboard(opts, :postgres) end}
-          ]
-      end
+    storage_steps = [
+      {"Configuração (mix pincer.onboard)", fn -> step_onboard(opts) end},
+      unless(opts[:skip_migrations],
+        do: {"Banco embutido SQLite", fn -> step_init_sqlite(opts) end}
+      )
+    ]
 
     Enum.reject([deps_step | storage_steps], &is_nil/1)
   end
@@ -183,31 +129,7 @@ defmodule Mix.Tasks.Pincer.Setup do
     e -> {:error, "deps.get falhou: #{Exception.message(e)}"}
   end
 
-  defp step_wait_postgres(opts) do
-    config = load_db_config(resolve_config_path(opts, resolve_root(opts)))
-    host = Map.get(config, "hostname", "localhost")
-    port = Map.get(config, "port", 5432)
-    port = if is_binary(port), do: String.to_integer(port), else: port
-
-    Mix.shell().info("      Aguardando PostgreSQL em #{host}:#{port}...")
-    wait_postgres(host, port, @db_max_retries)
-  end
-
-  defp step_ecto_create do
-    Mix.Task.run("ecto.create", ["--quiet"])
-    :ok
-  rescue
-    e -> {:error, "ecto.create falhou: #{Exception.message(e)}"}
-  end
-
-  defp step_ecto_migrate do
-    Mix.Task.run("ecto.migrate", ["--quiet"])
-    :ok
-  rescue
-    e -> {:error, "ecto.migrate falhou: #{Exception.message(e)}"}
-  end
-
-  defp step_onboard(opts, mode) do
+  defp step_onboard(opts) do
     root = resolve_root(opts)
     config_path = resolve_config_path(opts, root)
     already_configured? = File.exists?(config_path)
@@ -216,14 +138,11 @@ defmodule Mix.Tasks.Pincer.Setup do
       {:skip, "#{config_path} já existe. Use --reconfigure para reconfigurar."}
     else
       onboard_args =
-        ["--accept-risk", "--storage", Atom.to_string(mode), "--root", root] ++
+        ["--accept-risk", "--root", root] ++
           if(opts[:yes], do: ["--non-interactive", "--yes"], else: []) ++
           if(opts[:config], do: ["--config", opts[:config]], else: []) ++
           if(opts[:sqlite_path],
-            do: [
-              "--sqlite-path",
-              Path.expand(opts[:sqlite_path], root)
-            ],
+            do: ["--sqlite-path", Path.expand(opts[:sqlite_path], root)],
             else: []
           )
 
@@ -254,6 +173,20 @@ defmodule Mix.Tasks.Pincer.Setup do
   # Private helpers
   # ---------------------------------------------------------------------------
 
+  defp validate_storage!(nil), do: :sqlite
+
+  defp validate_storage!(value) do
+    case SQLite.parse_storage_backend(value) do
+      {:ok, :sqlite} ->
+        :sqlite
+
+      _ ->
+        Mix.raise(
+          "Invalid storage backend for pincer.setup: #{inspect(value)}. Valid values: sqlite"
+        )
+    end
+  end
+
   defp resolve_root(opts) do
     case opts[:root] do
       nil -> File.cwd!()
@@ -263,68 +196,32 @@ defmodule Mix.Tasks.Pincer.Setup do
 
   defp resolve_config_path(opts, root), do: Path.expand(opts[:config] || "config.yaml", root)
 
-  defp resolve_from_env_or_config(opts, env_fetcher) do
-    case SQLite.parse_storage_backend(env_fetcher.("PINCER_STORAGE")) do
-      {:ok, backend} ->
-        backend
-
-      _ ->
-        config_path = resolve_config_path(opts, resolve_root(opts))
-
-        case Config.load_file(config_path) do
-          {:ok, config} -> SQLite.detect_storage_backend(config, nil)
-          _ -> :postgres
-        end
-    end
-  end
-
   defp resolve_sqlite_path(opts) do
-    config_path = resolve_config_path(opts, resolve_root(opts))
+    root = resolve_root(opts)
+    config_path = resolve_config_path(opts, root)
 
     configured_path =
       case Config.load_file(config_path) do
-        {:ok, cfg} ->
-          get_in(cfg, ["storage", "path"]) || get_in(cfg, ["database", "path"])
-
-        _ ->
-          nil
+        {:ok, cfg} -> get_in(cfg, ["storage", "path"])
+        _ -> nil
       end
 
-    Enum.find(
-      [
-        opts[:sqlite_path],
-        System.get_env("PINCER_SQLITE_PATH"),
-        configured_path,
-        @default_sqlite_path
-      ],
-      &(is_binary(&1) and String.trim(&1) != "")
-    )
+    [
+      opts[:sqlite_path],
+      System.get_env("PINCER_SQLITE_PATH"),
+      configured_path,
+      @default_sqlite_path
+    ]
+    |> Enum.find(&(is_binary(&1) and String.trim(&1) != ""))
     |> String.trim()
+    |> expand_sqlite_path(root)
   end
 
-  defp wait_postgres(_host, _port, 0) do
-    {:error,
-     "PostgreSQL não respondeu após #{@db_max_retries} tentativas.\n" <>
-       "   Inicie o banco: docker compose up -d postgres"}
-  end
-
-  defp wait_postgres(host, port, retries_left) do
-    case :gen_tcp.connect(String.to_charlist(host), port, [], 1_000) do
-      {:ok, socket} ->
-        :gen_tcp.close(socket)
-        Mix.shell().info("      ✓ conectado em #{host}:#{port}")
-        :ok
-
-      {:error, _} ->
-        Process.sleep(@db_retry_interval_ms)
-        wait_postgres(host, port, retries_left - 1)
-    end
-  end
-
-  defp load_db_config(config_path) do
-    case Config.load_file(config_path) do
-      {:ok, %{"database" => db}} when is_map(db) -> db
-      _ -> %{}
+  defp expand_sqlite_path(path, root) do
+    cond do
+      path == ":memory:" or String.starts_with?(path, "file::memory:") -> path
+      Path.type(path) == :relative -> Path.expand(path, root)
+      true -> Path.expand(path)
     end
   end
 end

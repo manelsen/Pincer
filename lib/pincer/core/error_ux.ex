@@ -104,10 +104,10 @@ defmodule Pincer.Core.ErrorUX do
     do: "Atingi o tempo maximo de tentativas para este provedor. Tente novamente em instantes."
 
   defp friendly_classified(:db_schema, _reason, _scope),
-    do: "O banco nao esta migrado (tabela ausente). Execute as migracoes e tente novamente."
+    do: "O banco SQLite nao tem o schema esperado. Reinicie o Pincer para recria-lo."
 
   defp friendly_classified(:db, _reason, _scope),
-    do: "Falha no banco PostgreSQL. Verifique migracoes e disponibilidade do servico."
+    do: "Falha no armazenamento SQLite. Verifique o caminho do banco e as permissoes."
 
   defp friendly_classified(:internal, %UndefinedFunctionError{}, _scope),
     do: "Encontrei uma incompatibilidade interna de versao/codigo. Reinicie e tente novamente."

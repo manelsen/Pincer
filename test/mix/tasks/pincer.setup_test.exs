@@ -83,54 +83,21 @@ defmodule Mix.Tasks.Pincer.SetupTest do
     assert_received :s3
   end
 
-  test "resolve_storage_mode/2 follows --storage > PINCER_STORAGE > config.yaml > :postgres" do
-    tmp =
-      Path.join(System.tmp_dir!(), "pincer_setup_mode_#{System.unique_integer([:positive])}")
+  test "build_steps/1 emits only embedded SQLite steps" do
+    labels =
+      [skip_deps: true]
+      |> Setup.build_steps()
+      |> Enum.map(&elem(&1, 0))
 
-    File.mkdir_p!(tmp)
-    on_exit(fn -> File.rm_rf!(tmp) end)
-
-    sqlite_cfg = Path.join(tmp, "sqlite.yaml")
-    File.write!(sqlite_cfg, "storage:\n  adapter: sqlite\n  path: data/pincer.db\n")
-
-    assert :sqlite = Setup.resolve_storage_mode([storage: "sqlite"], fn _ -> "postgres" end)
-    assert :postgres = Setup.resolve_storage_mode([storage: "postgres"], fn _ -> "sqlite" end)
-
-    assert :sqlite =
-             Setup.resolve_storage_mode([config: sqlite_cfg], fn
-               "PINCER_STORAGE" -> "sqlite"
-               _ -> nil
-             end)
-
-    assert :sqlite = Setup.resolve_storage_mode([config: sqlite_cfg], fn _ -> nil end)
-
-    assert :postgres =
-             Setup.resolve_storage_mode([config: Path.join(tmp, "missing.yaml")], fn _ -> nil end)
-
-    assert_raise Mix.Error, ~r/Invalid storage backend/, fn ->
-      Setup.resolve_storage_mode([storage: "mongo"], fn _ -> nil end)
-    end
+    assert "Configuração (mix pincer.onboard)" in labels
+    assert "Banco embutido SQLite" in labels
+    refute Enum.any?(labels, &String.contains?(&1, "ecto"))
   end
 
-  test "build_steps/2 emits SQLite steps when sqlite mode is resolved and Postgres steps otherwise" do
-    sqlite_labels =
-      [storage: "sqlite", skip_deps: true]
-      |> Setup.build_steps(fn _ -> nil end)
-      |> Enum.map(&elem(&1, 0))
-
-    assert "Configuração (mix pincer.onboard)" in sqlite_labels
-    assert "Banco embutido SQLite" in sqlite_labels
-    refute "Banco de dados (mix ecto.create)" in sqlite_labels
-    refute "Migrações (mix ecto.migrate)" in sqlite_labels
-
-    postgres_labels =
-      [storage: "postgres", skip_deps: true]
-      |> Setup.build_steps(fn _ -> nil end)
-      |> Enum.map(&elem(&1, 0))
-
-    assert "Banco de dados (mix ecto.create)" in postgres_labels
-    assert "Migrações (mix ecto.migrate)" in postgres_labels
-    refute "Banco embutido SQLite" in postgres_labels
+  test "build_steps/1 rejects a postgres storage backend" do
+    assert_raise Mix.Error, ~r/Invalid storage backend/, fn ->
+      Setup.build_steps(storage: "postgres", skip_deps: true)
+    end
   end
 
   test "run/1 with --storage sqlite initializes config and SQLite database without Postgres" do
@@ -165,7 +132,6 @@ defmodule Mix.Tasks.Pincer.SetupTest do
     assert get_in(cfg, ["storage", "adapter"]) == "sqlite"
     assert get_in(cfg, ["storage", "path"]) == db_path
     assert output =~ "SQLite"
-    assert output =~ "PostgreSQL/Ecto não necessário"
   end
 
   test "run/1 raises Mix.Error on unknown flags" do

@@ -145,13 +145,13 @@ defmodule Pincer.Storage.ZeroInfraSQLiteIntegrationTest do
 
     assert [] = DeadLetterQueue.pending("webhook")
 
-    # 7. CircuitBreaker runs cleanly without Postgres Repo
+    # 7. CircuitBreaker runs cleanly without an external database
     cb_name = "sqlite_cb_#{System.unique_integer([:positive])}"
     assert :ok = CircuitBreaker.call(cb_name, fn -> :ok end)
     CircuitBreaker.reset(cb_name)
   end
 
-  test "closed-loop Introspection.Kernel -> SKILL.md -> PromptIndex runs on SQLite without Postgres",
+  test "closed-loop Introspection.Kernel -> SKILL.md -> PromptIndex runs on embedded SQLite",
        %{db: db} do
     workspace =
       Path.join(System.tmp_dir!(), "pincer_zi_loop_#{System.unique_integer([:positive])}")

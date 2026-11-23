@@ -10,7 +10,9 @@ defmodule Pincer.Infra.SQLite do
     `pairing_states`) and operational subsystem tables (`self_states`, `lessons`,
     `cron_jobs`, `audit_log`, `dead_letter_queue`)
   - Serializes connection access through an OTP `GenServer` with atomic `BEGIN IMMEDIATE`
-    transaction support via `{:sqlite_tx, conn}` handles
+    transaction support via `{:sqlite_tx, conn, vec_enabled}` handles
+  - Optionally loads the `sqlite-vec` extension and maintains a `vec_nodes` KNN index;
+    without the extension, vector search falls back to in-process cosine similarity
   """
 
   use GenServer
@@ -19,19 +21,14 @@ defmodule Pincer.Infra.SQLite do
   alias Exqlite.Sqlite3
 
   @default_db_path "data/pincer.db"
+  @default_vec_dimensions 1024
+  @vec_extension_candidates ["priv/sqlite_vec/vec0.so", "priv/sqlite_vec/vec0"]
   @sqlite_aliases MapSet.new([
                     "sqlite",
                     "sqlite3",
                     "ecto.adapters.sqlite3",
                     "pincer.storage.adapters.sqlite"
                   ])
-  @postgres_aliases MapSet.new([
-                      "postgres",
-                      "postgresql",
-                      "ecto.adapters.postgresql",
-                      "pincer.storage.adapters.postgres"
-                    ])
-
   @schema_sql """
   CREATE TABLE IF NOT EXISTS messages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -215,24 +212,33 @@ defmodule Pincer.Infra.SQLite do
     Application.get_env(:pincer, :sqlite_server) || __MODULE__
   end
 
-  @doc "Returns `true` when `:storage_adapter` is set to `Pincer.Storage.Adapters.SQLite`."
-  @spec sqlite_mode?() :: boolean()
-  def sqlite_mode? do
-    Application.get_env(:pincer, :storage_adapter) ==
-      Module.concat(["Pincer", "Storage", "Adapters", "SQLite"])
-  end
-
   @doc "Returns the configured SQLite database file path."
   @spec db_path() :: String.t()
   def db_path do
     Application.get_env(:pincer, :sqlite_path) || @default_db_path
   end
 
+  @doc "Returns true when the sqlite-vec extension is loaded for `server`."
+  @spec vec_enabled?(GenServer.server() | {:sqlite_tx, Sqlite3.db(), boolean()}) :: boolean()
+  def vec_enabled?(target \\ default_server())
+
+  def vec_enabled?({:sqlite_tx, _conn, enabled}), do: enabled
+
+  def vec_enabled?(server) do
+    GenServer.call(server, :vec_enabled, 30_000)
+  end
+
+  @doc "Returns the configured embedding dimension used by the `vec0` index."
+  @spec vec_dimensions() :: pos_integer()
+  def vec_dimensions do
+    Application.get_env(:pincer, :sqlite_vec_dimensions, @default_vec_dimensions)
+  end
+
   @doc """
-  Parses a raw storage backend identifier into `:sqlite` or `:postgres`.
+  Parses a raw storage backend identifier. Only SQLite is supported.
   """
   @spec parse_storage_backend(term()) ::
-          {:ok, :sqlite | :postgres} | :unset | {:error, {:invalid_storage_backend, term()}}
+          {:ok, :sqlite} | :unset | {:error, {:unsupported_storage_backend, term()}}
   def parse_storage_backend(nil), do: :unset
 
   def parse_storage_backend(value) when is_atom(value) do
@@ -245,40 +251,11 @@ defmodule Pincer.Infra.SQLite do
     cond do
       normalized == "" -> :unset
       MapSet.member?(@sqlite_aliases, normalized) -> {:ok, :sqlite}
-      MapSet.member?(@postgres_aliases, normalized) -> {:ok, :postgres}
-      true -> {:error, {:invalid_storage_backend, value}}
+      true -> {:error, {:unsupported_storage_backend, value}}
     end
   end
 
-  def parse_storage_backend(other), do: {:error, {:invalid_storage_backend, other}}
-
-  @doc """
-  Resolves the effective storage backend (`:sqlite` or `:postgres`) from env + parsed config map.
-  """
-  @spec detect_storage_backend(map(), term()) :: :sqlite | :postgres
-  def detect_storage_backend(config, env_storage \\ nil)
-
-  def detect_storage_backend(config, env_storage) when is_map(config) do
-    candidates = [
-      env_storage,
-      read_nested_string_or_atom(config, "storage", "adapter"),
-      read_nested_string_or_atom(config, "database", "adapter")
-    ]
-
-    Enum.find_value(candidates, :postgres, fn candidate ->
-      case parse_storage_backend(candidate) do
-        {:ok, backend} -> backend
-        _ -> nil
-      end
-    end)
-  end
-
-  def detect_storage_backend(_config, env_storage) do
-    case parse_storage_backend(env_storage) do
-      {:ok, backend} -> backend
-      _ -> :postgres
-    end
-  end
+  def parse_storage_backend(other), do: {:error, {:unsupported_storage_backend, other}}
 
   @doc """
   Validates that `path` is safe (no `..` traversal) and its target/ancestor directory is writable.
@@ -357,26 +334,6 @@ defmodule Pincer.Infra.SQLite do
     end
   end
 
-  defp read_nested_string_or_atom(map, section, key) do
-    section_atom = if section == "storage", do: :storage, else: :database
-    key_atom = :adapter
-
-    sub =
-      case Map.get(map, section) do
-        nil -> Map.get(map, section_atom)
-        val -> val
-      end
-
-    if is_map(sub) do
-      case Map.get(sub, key) do
-        nil -> Map.get(sub, key_atom)
-        val -> val
-      end
-    else
-      nil
-    end
-  end
-
   @doc "Generates a standard UUID v4 string."
   @spec uuid() :: String.t()
   def uuid, do: Ecto.UUID.generate()
@@ -411,13 +368,14 @@ defmodule Pincer.Infra.SQLite do
 
   @doc """
   Executes a SELECT/PRAGMA query and returns `{:ok, %{columns: cols, rows: rows}}`.
-  Accepts either a GenServer server or an in-transaction `{:sqlite_tx, conn}` handle.
+  Accepts either a GenServer server or an in-transaction `{:sqlite_tx, conn, vec_enabled}` handle.
   """
-  @spec query(GenServer.server() | {:sqlite_tx, Sqlite3.db()}, String.t(), list()) ::
+  @spec query(GenServer.server() | {:sqlite_tx, Sqlite3.db(), boolean()}, String.t(), list()) ::
           {:ok, %{columns: [String.t()], rows: [list()]}} | {:error, term()}
   def query(target \\ default_server(), sql, params \\ [])
 
-  def query({:sqlite_tx, conn}, sql, params) when is_binary(sql) and is_list(params) do
+  def query({:sqlite_tx, conn, _vec_enabled}, sql, params)
+      when is_binary(sql) and is_list(params) do
     run_query(conn, sql, params)
   end
 
@@ -427,13 +385,14 @@ defmodule Pincer.Infra.SQLite do
 
   @doc """
   Executes an INSERT/UPDATE/DELETE statement and returns `:ok` or `{:error, reason}`.
-  Accepts either a GenServer server or an in-transaction `{:sqlite_tx, conn}` handle.
+  Accepts either a GenServer server or an in-transaction `{:sqlite_tx, conn, vec_enabled}` handle.
   """
-  @spec execute(GenServer.server() | {:sqlite_tx, Sqlite3.db()}, String.t(), list()) ::
+  @spec execute(GenServer.server() | {:sqlite_tx, Sqlite3.db(), boolean()}, String.t(), list()) ::
           :ok | {:error, term()}
   def execute(target \\ default_server(), sql, params \\ [])
 
-  def execute({:sqlite_tx, conn}, sql, params) when is_binary(sql) and is_list(params) do
+  def execute({:sqlite_tx, conn, _vec_enabled}, sql, params)
+      when is_binary(sql) and is_list(params) do
     run_execute(conn, sql, params)
   end
 
@@ -442,10 +401,12 @@ defmodule Pincer.Infra.SQLite do
   end
 
   @doc """
-  Runs `fun` inside a `BEGIN IMMEDIATE` transaction passing a `{:sqlite_tx, conn}` handle.
+  Runs `fun` inside a `BEGIN IMMEDIATE` transaction passing a
+  `{:sqlite_tx, conn, vec_enabled}` handle.
   Commits on `:ok` or `{:ok, value}`; rolls back on `{:error, reason}` or raised exception.
   """
-  @spec transaction(GenServer.server(), ({:sqlite_tx, Sqlite3.db()} -> term())) :: term()
+  @spec transaction(GenServer.server(), ({:sqlite_tx, Sqlite3.db(), boolean()} -> term())) ::
+          term()
   def transaction(server \\ default_server(), fun) when is_function(fun, 1) do
     GenServer.call(server, {:transaction, fun}, 30_000)
   end
@@ -455,16 +416,28 @@ defmodule Pincer.Infra.SQLite do
   @impl true
   def init(opts) do
     path = Keyword.get(opts, :db_path) || db_path()
+    vec_dimensions = Keyword.get(opts, :vec_dimensions, vec_dimensions())
 
     with :ok <- ensure_parent_dir(path),
          {:ok, conn} <- Sqlite3.open(path),
          :ok <- apply_pragmas(conn, path),
+         {:ok, vec_enabled} <- maybe_load_vec_extension(conn, opts),
+         :ok <- maybe_create_vec_table(conn, vec_enabled, vec_dimensions),
          :ok <- Sqlite3.execute(conn, @schema_sql) do
-      Logger.info("[SQLITE] Initialized SQLite storage at #{path}")
-      {:ok, %{conn: conn, db_path: path}}
+      Logger.info(
+        "[SQLITE] Initialized SQLite storage at #{path} " <>
+          "(vector search: #{if vec_enabled, do: "sqlite-vec/#{vec_dimensions}d", else: "cosine fallback"})"
+      )
+
+      {:ok, %{conn: conn, db_path: path, vec_enabled: vec_enabled}}
     else
       {:error, reason} -> {:stop, reason}
     end
+  end
+
+  @impl true
+  def handle_call(:vec_enabled, _from, state) do
+    {:reply, state.vec_enabled, state}
   end
 
   @impl true
@@ -484,7 +457,7 @@ defmodule Pincer.Infra.SQLite do
     reply =
       with :ok <- Sqlite3.execute(conn, "BEGIN IMMEDIATE;") do
         try do
-          result = fun.({:sqlite_tx, conn})
+          result = fun.({:sqlite_tx, conn, state.vec_enabled})
 
           case result do
             {:error, _} = err ->
@@ -549,6 +522,97 @@ defmodule Pincer.Infra.SQLite do
 
   defp memory_path?(path) do
     path == ":memory:" or String.starts_with?(path, "file::memory:")
+  end
+
+  defp maybe_load_vec_extension(conn, opts) do
+    case Keyword.get(opts, :vec, Application.get_env(:pincer, :sqlite_vec, :auto)) do
+      false ->
+        {:ok, false}
+
+      setting ->
+        path = vec_extension_path(opts, setting)
+
+        case path && load_vec_extension(conn, path) do
+          :ok ->
+            {:ok, true}
+
+          _ ->
+            Logger.info(
+              "[SQLITE] sqlite-vec extension not loaded; vector search will use cosine fallback"
+            )
+
+            {:ok, false}
+        end
+    end
+  end
+
+  defp vec_extension_path(opts, setting) do
+    explicit =
+      Keyword.get(opts, :vec_path) ||
+        System.get_env("PINCER_SQLITE_VEC_PATH") ||
+        Application.get_env(:pincer, :sqlite_vec_path) ||
+        (is_binary(setting) && setting)
+
+    cond do
+      is_binary(explicit) and explicit not in ["", "auto", "true", ":auto"] ->
+        if File.regular?(explicit), do: explicit, else: nil
+
+      true ->
+        Enum.find(vec_extension_candidates(), &File.regular?/1)
+    end
+  end
+
+  defp vec_extension_candidates do
+    priv =
+      case :code.priv_dir(:pincer) do
+        path when is_list(path) -> List.to_string(path)
+        _ -> nil
+      end
+
+    paths =
+      Enum.flat_map(@vec_extension_candidates, fn relative ->
+        [Path.expand(relative), priv && Path.join(priv, Path.basename(relative))]
+      end)
+
+    paths
+    |> Enum.reject(&is_nil/1)
+    |> Enum.concat([
+      Path.expand("priv/sqlite_vec/vec0.dylib"),
+      priv && Path.join(priv, "sqlite_vec/vec0.dylib")
+    ])
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+  end
+
+  defp load_vec_extension(conn, path) do
+    with :ok <- Sqlite3.enable_load_extension(conn, true),
+         {:ok, stmt} <- Sqlite3.prepare(conn, "SELECT load_extension(?1)") do
+      try do
+        with :ok <- Sqlite3.bind(stmt, [path]),
+             {:ok, _rows} <- Sqlite3.fetch_all(conn, stmt) do
+          :ok
+        end
+      after
+        _ = Sqlite3.release(conn, stmt)
+      end
+    end
+  end
+
+  defp maybe_create_vec_table(_conn, false, _dimensions), do: :ok
+
+  defp maybe_create_vec_table(conn, true, dimensions)
+       when is_integer(dimensions) and dimensions > 0 do
+    Sqlite3.execute(
+      conn,
+      """
+      CREATE VIRTUAL TABLE IF NOT EXISTS vec_nodes
+      USING vec0(rowid INTEGER PRIMARY KEY, embedding float[#{dimensions}] distance_metric=cosine)
+      """
+    )
+  end
+
+  defp maybe_create_vec_table(_conn, true, dimensions) do
+    {:error, {:invalid_vec_dimensions, dimensions}}
   end
 
   defp run_query(conn, sql, params) do

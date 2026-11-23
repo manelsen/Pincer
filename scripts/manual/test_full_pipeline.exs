@@ -10,9 +10,9 @@ case Application.ensure_all_started(:pincer) do
 end
 
 # Alias modules
-alias Pincer.Storage.Adapters.Postgres
+alias Pincer.Storage.Adapters.SQLite
 
-IO.puts("\n1. Using Postgres storage adapter...")
+IO.puts("\n1. Using SQLite storage adapter...")
 
 # Define test data
 role = "user"
@@ -20,10 +20,10 @@ content = "Why does the sun shine?"
 session_id = "session_test_123"
 
 IO.puts("\n2. Saving message (Generating Embedding + Indexing)...")
-# This persists the transcript in Postgres.
-case Postgres.save_message(session_id, role, content) do
-  {:ok, %{id: id}} ->
-    IO.puts("   [OK] Message saved with ID: #{inspect(id)}")
+# This persists the transcript in SQLite.
+case SQLite.save_message(session_id, role, content) do
+  {:ok, %{} = message} ->
+    IO.puts("   [OK] Message saved: #{inspect(message)}")
 
   {:error, e} ->
     IO.puts("   [FAIL] Save error: #{inspect(e)}")
@@ -34,7 +34,7 @@ end
 query = "sun shine"
 IO.puts("\n3. Searching transcript hits...")
 
-case Postgres.search_messages(query, 2) do
+case SQLite.search_messages(query, 2) do
   {:ok, results} when length(results) > 0 ->
     IO.puts("   [OK] Found #{length(results)} results.")
 

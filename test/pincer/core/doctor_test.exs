@@ -347,32 +347,6 @@ defmodule Pincer.Core.DoctorTest do
                c.id == :sqlite_path and c.severity == :error
              end)
     end
-
-    test "reports postgres storage backend and validates invalid database port cleanly" do
-      tmp = tmp_dir!()
-
-      write_config!(
-        tmp,
-        """
-        database:
-          adapter: "Ecto.Adapters.PostgreSQL"
-          hostname: "localhost"
-          port: 70000
-          database: "pincer"
-        """
-      )
-
-      report = Doctor.run(root: tmp, env_fetcher: fn _ -> nil end)
-      assert report.status == :error
-
-      assert Enum.any?(report.checks, fn c ->
-               c.id == :storage_backend and c.severity == :ok and c.meta[:backend] == :postgres
-             end)
-
-      assert Enum.any?(report.checks, fn c ->
-               c.id == :postgres_config and c.severity == :error
-             end)
-    end
   end
 
   defp tmp_dir! do

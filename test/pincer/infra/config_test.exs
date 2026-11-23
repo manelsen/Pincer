@@ -10,9 +10,7 @@ defmodule Pincer.Infra.ConfigTest do
       :sandbox_adapter,
       :storage_adapter,
       :sqlite_path,
-      :database,
       :storage,
-      :repo,
       :llm,
       :default_llm_provider,
       :introspection,
@@ -235,10 +233,10 @@ defmodule Pincer.Infra.ConfigTest do
   end
 
   describe "sqlite storage config" do
-    test "configures Pincer.Storage.Adapters.SQLite via database.adapter and database.path" do
+    test "configures Pincer.Storage.Adapters.SQLite via storage.adapter and storage.path" do
       yaml =
         write_yaml!("""
-        database:
+        storage:
           adapter: "sqlite"
           path: "tmp/test_zero_infra.db"
         """)
@@ -251,12 +249,12 @@ defmodule Pincer.Infra.ConfigTest do
       assert Application.get_env(:pincer, :sqlite_path) == "tmp/test_zero_infra.db"
     end
 
-    test "supports storage.adapter and PINCER_STORAGE / PINCER_SQLITE_PATH overrides" do
+    test "supports PINCER_STORAGE / PINCER_SQLITE_PATH overrides" do
       yaml =
         write_yaml!("""
-        database:
-          adapter: "Ecto.Adapters.PostgreSQL"
-          hostname: "localhost"
+        storage:
+          adapter: "sqlite"
+          path: "tmp/yaml.db"
         """)
 
       System.put_env("PINCER_STORAGE", "sqlite")
@@ -266,10 +264,24 @@ defmodule Pincer.Infra.ConfigTest do
       assert Application.get_env(:pincer, :storage_adapter) == Pincer.Storage.Adapters.SQLite
       assert Application.get_env(:pincer, :sqlite_path) == "/tmp/pincer_override.db"
     end
+
+    test "rejects a postgres storage adapter" do
+      yaml =
+        write_yaml!("""
+        storage:
+          adapter: "postgres"
+        """)
+
+      System.delete_env("PINCER_STORAGE")
+
+      assert_raise ArgumentError, ~r/PostgreSQL storage is no longer supported/, fn ->
+        Config.load(config_file: yaml, load_dotenv: false)
+      end
+    end
   end
 
   describe "atom allowlist hardening" do
-    test "ignores unknown top-level and database YAML keys without creating BEAM atoms" do
+    test "ignores unknown top-level and storage YAML keys without creating BEAM atoms" do
       suffix = System.unique_integer([:positive])
       unknown_top = "unknown_top_atom_#{suffix}"
       unknown_db = "unknown_db_atom_#{suffix}"
@@ -278,9 +290,9 @@ defmodule Pincer.Infra.ConfigTest do
         write_yaml!("""
         #{unknown_top}:
           nested: true
-        database:
-          adapter: "Ecto.Adapters.PostgreSQL"
-          hostname: "localhost"
+        storage:
+          adapter: "sqlite"
+          path: "tmp/atoms.db"
           #{unknown_db}: "evil_value"
         tools:
           restrict_to_workspace: true
@@ -294,7 +306,7 @@ defmodule Pincer.Infra.ConfigTest do
       assert log =~ unknown_top
       assert log =~ unknown_db
       assert Config.get(:tools) == %{"restrict_to_workspace" => true}
-      assert Keyword.get(Config.get(:repo), :hostname) == "localhost"
+      assert Application.get_env(:pincer, :storage_adapter) == Pincer.Storage.Adapters.SQLite
 
       assert_raise ArgumentError, fn ->
         String.to_existing_atom(unknown_top)

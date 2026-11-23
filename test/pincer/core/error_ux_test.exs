@@ -74,7 +74,7 @@ defmodule Pincer.Core.ErrorUXTest do
 
     test "maps database schema issue" do
       msg = ErrorUX.friendly(%RuntimeError{message: "undefined table: cron_jobs"})
-      assert msg =~ "nao esta migrado"
+      assert msg =~ "schema esperado"
     end
 
     test "maps decode/match/function class errors" do

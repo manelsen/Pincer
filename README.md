@@ -2,7 +2,7 @@
 
 Autonomous AI agents on the BEAM — OTP supervision, multi-channel messaging, MCP tool integration, and provider-agnostic LLM access with automatic failover.
 
-**What it does**: Pincer is an Elixir/OTP framework that runs persistent AI agents. Each agent gets a supervised GenServer session, can use 80+ tool actions across 18 native tool modules, talks to humans through Telegram/Discord/CLI/webhook, and remembers conversations across restarts using a tiered memory system backed by PostgreSQL + pgvector or embedded SQLite3 (FTS5).
+**What it does**: Pincer is an Elixir/OTP framework that runs persistent AI agents. Each agent gets a supervised GenServer session, can use 80+ tool actions across 18 native tool modules, talks to humans through Telegram/Discord/CLI/webhook, and remembers conversations across restarts using a tiered memory system backed by embedded SQLite3 (FTS5, with optional sqlite-vec semantic search).
 
 **Who it's for**: Developers building long-running AI assistants that need fault tolerance, multi-channel presence, and structured memory — without babysitting.
 
@@ -22,34 +22,26 @@ docker compose up --build -d
 docker compose exec pincer-server mix pincer.chat
 ```
 
-The Docker build starts PostgreSQL with pgvector, runs migrations, and boots the supervision tree.
+The image builds `sqlite-vec` (optional vector search) and boots the single-container supervision tree. No external database service is started or required.
 
-### Local (PostgreSQL + pgvector)
+### Local (Elixir)
+
+No Docker or external database required — storage is embedded SQLite3 + FTS5 + WAL (`exqlite`):
 
 ```bash
 git clone https://github.com/manelsen/Pincer.git && cd Pincer
-docker compose up -d postgres   # or point to an existing PostgreSQL instance
-mix pincer.setup                # deps → DB → migrations → wizard → health check
+mix deps.get
+mix pincer.setup --yes   # deps → SQLite onboard → initializes data/pincer.db
 mix pincer.chat
 ```
 
-### Zero-Infra / SQLite (Local without Docker)
-
-No PostgreSQL or Docker required — uses embedded SQLite3 + FTS5 + WAL (`exqlite`):
-
-```bash
-git clone https://github.com/manelsen/Pincer.git && cd Pincer
-mix pincer.setup --storage sqlite --yes   # deps → SQLite onboard → initializes data/pincer.db
-PINCER_STORAGE=sqlite mix pincer.chat
-```
-
-`mix pincer.setup` guides you through the full first-run sequence interactively. Use `--yes` for a non-interactive run with defaults, `--storage sqlite|postgres` to pick the backend explicitly, and `--sqlite-path <path>` to customize the SQLite file location.
+`mix pincer.setup` guides you through the full first-run sequence interactively. Use `--yes` for a non-interactive run with defaults and `--sqlite-path <path>` to customize the SQLite file location. `storage.adapter` accepts only `"sqlite"`; PostgreSQL is rejected at boot.
 
 ### Reconfigure / Diagnose
 
 ```bash
 mix pincer.onboard              # re-run configuration wizard
-mix pincer.doctor               # health check: config, storage, tokens, LLM, migrations
+mix pincer.doctor               # health check: config, storage, tokens, LLM, sqlite-vec
 mix pincer.doctor --strict      # same, but fail on warnings
 ```
 
@@ -59,8 +51,8 @@ mix pincer.doctor --strict      # same, but fail on warnings
 |---|---|---|
 | Elixir | 1.20.5+ | Compilation target |
 | Erlang/OTP | 27+ | `boundary` compiler plugin |
-| SQLite3 (embedded via `exqlite`) | Built-in (FTS5) | Zero-infra message + graph/FTS5 storage (no external server) |
-| PostgreSQL | 18+ with pgvector *(optional)* | Scalable graph memory + native pgvector semantic search |
+| SQLite3 (embedded via `exqlite`) | Built-in (FTS5) | Message, graph, and FTS5 storage (no external server) |
+| C toolchain (`git`, `make`, `cc`) | *(optional)* | Builds `sqlite-vec` via `./scripts/build_sqlite_vec.sh` for native vector search; search falls back to in-process cosine similarity when absent |
 | Node.js | 18+ *(optional)* | MCP sidecar servers |
 | Docker / Podman | *(optional)* | Hardened container sandbox backend (`sandbox.adapter: "docker"`) |
 
@@ -86,10 +78,41 @@ Runtime config lives in `config.yaml`, not `config/*.exs`. The `Pincer.Infra.Con
 - **LLM providers** — set `llm.provider` and add API keys to `.env`
 - **Channels** — enable/disable Telegram, Discord, CLI, webhook, WhatsApp, LINE, DingTalk, Feishu/Lark
 - **MCP servers** — add external tool servers under `mcp.servers`
-- **Storage / Database** — use zero-infra SQLite (`storage.adapter: "sqlite"`, `storage.path: "data/pincer.db"`, or `PINCER_STORAGE=sqlite` / `PINCER_SQLITE_PATH`) or PostgreSQL (`database.*` / `PINCER_DB_*` env vars)
+- **Storage** — embedded SQLite only: `storage.adapter: "sqlite"`, `storage.path: "data/pincer.db"`, and optional `storage.vec` / `vec_path` / `vec_dimensions` (see [Storage](#storage-sqlite))
 - **Sandbox execution** — set `sandbox.adapter` (`"local"`, `"docker"`, `"ssh"`) or override with `PINCER_SANDBOX_ADAPTER`
 - **Workspace isolation** — `tools.restrict_to_workspace: true` (default) confines file/shell tools to the agent's workspace
 
+### Storage (SQLite)
+
+SQLite is the only storage backend. It runs in-process (`Pincer.Infra.SQLite`), needs no database service, and boot rejects `postgres`/`postgresql` adapters.
+
+```yaml
+# config.yaml
+storage:
+  adapter: "sqlite"                    # only "sqlite" is accepted
+  path: "data/pincer.db"
+  vec: "auto"                          # auto | true | false
+  vec_path: "priv/sqlite_vec/vec0.so"  # optional explicit extension path
+  # vec_dimensions: 1024               # embedding width (default 1024)
+```
+
+Environment overrides:
+
+| Variable | Effect |
+|---|---|
+| `PINCER_SQLITE_PATH` | Database file (default `data/pincer.db`; `:memory:` for ephemeral) |
+| `PINCER_STORAGE` | Backend selector; must be `sqlite`/`sqlite3` |
+| `PINCER_SQLITE_VEC` | `auto`, `true`, `false`, `1`, `0` — enable sqlite-vec |
+| `PINCER_SQLITE_VEC_PATH` | Path to `vec0.so` |
+| `PINCER_SQLITE_VEC_DIMENSIONS` | Embedding dimensions (default 1024) |
+
+**Vector search:** semantic recall uses [sqlite-vec](https://github.com/asg017/sqlite-vec) when available. Build the extension once with:
+
+```bash
+./scripts/build_sqlite_vec.sh          # clones v0.1.10-alpha.4 and writes priv/sqlite_vec/vec0.so
+```
+
+The Docker image does this at build time. With `storage.vec: "auto"` or `"true"`, the loader tries `vec_path` and falls back gracefully. Set `PINCER_SQLITE_VEC=0` to disable it explicitly; search then uses in-process cosine similarity over stored vectors. FTS5 full-text search is always available.
 
 ### DingTalk
 
@@ -148,7 +171,7 @@ Core           Domain logic: Executor, Session, Orchestration, Memory, Introspec
     ↓
 Ports          Behaviour contracts (LLM, Storage, Channel, Tool, Sandbox)
     ↓
-Infra          PubSub, Config, Ecto Repo / Embedded SQLite3 (FTS5)
+Infra          PubSub, Config, Embedded SQLite3 (FTS5 + optional sqlite-vec)
 ```
 
 The `boundary` compiler plugin enforces this at compile time. `mix compile --warnings-as-errors` will fail if an inner layer reaches outward.
@@ -173,7 +196,7 @@ Every component is supervised. If the LLM client crashes, it restarts. If a user
 Pincer.Supervisor (one_for_one)
 ├── Infra.PubSub
 ├── Finch                       HTTP connection pool
-├── Infra.Repo                  Ecto/PostgreSQL
+├── Infra.SQLite                Embedded SQLite3 (raw connection)
 ├── Heartbeat                   Health checks + GitHub watcher
 ├── Dispatcher.Registry         Message dispatcher
 ├── MCP.Supervisor              DynamicSupervisor for MCP servers
@@ -214,7 +237,7 @@ Three layers, each serving a different recall horizon:
 |---|---|---|
 | **Session** | `HISTORY.md` | Rolling log of the current session |
 | **Curated** | `MEMORY.md` | Consolidated insights extracted by the Archivist |
-| **Semantic** | PostgreSQL + pgvector **or** SQLite3 + FTS5 | Structured knowledge graph: bugs, decisions, patterns, people, entities |
+| **Semantic** | SQLite3 + FTS5 (optional sqlite-vec) | Structured knowledge graph: bugs, decisions, patterns, people, entities |
 
 Before each LLM call, `MemoryRecall` searches all three layers and injects relevant context into the prompt. Memory content is sanitized to prevent prompt injection.
 
@@ -317,8 +340,8 @@ mcp:
 |---|---|
 | `mix pincer.chat` | Interactive CLI agent |
 | `mix pincer.server` | Start persistent node (all enabled channels) |
-| `mix pincer.setup` | First-run bootstrap (`--storage sqlite\|postgres`, deps, DB/SQLite, onboard) |
-| `mix pincer.onboard` | Bootstrap config (`--storage sqlite\|postgres`, `--sqlite-path`) and agent workspaces |
+| `mix pincer.setup` | First-run bootstrap (deps, SQLite init, onboard; `--yes`, `--sqlite-path`) |
+| `mix pincer.onboard` | Bootstrap config and agent workspaces (`--sqlite-path`) |
 | `mix pincer.agent new <id>` | Create a new agent workspace |
 | `mix pincer.agent pair <id>` | Generate a Telegram pairing code |
 | `mix pincer.doctor [--strict]` | Operational diagnostics |
@@ -341,13 +364,13 @@ Runs `format --check-formatted`, `compile --warnings-as-errors`, and `test --war
 ### Running Tests
 
 ```bash
-docker compose up -d postgres     # database required for Postgres test suite
-mix test                          # all tests (excludes opt-in :docker and :sqlite_smoke)
+mix test                          # all tests (excludes opt-in :docker, :bwrap, :chaos, :stress)
 mix test.quick                    # stale tests only
-PINCER_STORAGE=sqlite PINCER_SQLITE_PATH=tmp/ci_smoke.db mix test test/pincer/e2e/zero_infra_sqlite_boot_e2e_test.exs  # Postgres-free SQLite E2E
 mix test --only docker            # opt-in real Docker container sandbox E2E
 mix test test/pincer/core/executor_test.exs   # single file
 ```
+
+The full suite runs on embedded SQLite with `PINCER_SQLITE_PATH=:memory:` (set in `config/test.exs`); no database service, Compose stack, or migration step is needed. `sqlite-vec` is optional for tests — when the extension is absent, storage tests use the cosine-similarity fallback.
 
 ### Development Protocol
 

@@ -2,17 +2,20 @@ defmodule Pincer.Storage.Adapters.SQLite do
   @moduledoc """
   Unified zero-infrastructure SQLite storage adapter implementing `Pincer.Ports.Storage`.
 
-  Provides an embedded PostgreSQL-free alternative backed by `Pincer.Infra.SQLite`
+  Provides the embedded storage backend via `Pincer.Infra.SQLite`
   (Exqlite + WAL + FTS5) with:
   - Message persistence and FTS5 full-text search (plus safe substring fallback)
   - JSON-backed graph nodes and edges (bug fixes, decisions, patterns, entities)
   - Learning and tool-error deduplication (`pattern_key`)
   - Document/memory indexing with FTS5 search, metadata scoring, soft forget, and reports
-  - Pure-Elixir cosine similarity over stored float vectors for `search_similar/3`
+  - `search_similar/3` through the optional `sqlite-vec` `vec0` KNN index, with
+    pure-Elixir cosine similarity as the fallback when the extension is absent
   - Binary checkpoint snapshots and durable pairing state persistence
   """
 
   @behaviour Pincer.Ports.Storage
+
+  require Logger
 
   alias Pincer.Storage.MemoryHelpers
   alias Pincer.Infra.SQLite
@@ -325,7 +328,8 @@ defmodule Pincer.Storage.Adapters.SQLite do
       case find_node_by_path(tx, "document", path, workspace_root) do
         nil ->
           with {:ok, node} <- create_node(tx, "document", metadata, embedding_json),
-               :ok <- upsert_document_fts(tx, node.id, content, path) do
+               :ok <- upsert_document_fts(tx, node.id, content, path),
+               :ok <- sync_vec_node(tx, node.id, vector) do
             :ok
           end
 
@@ -342,7 +346,8 @@ defmodule Pincer.Storage.Adapters.SQLite do
                    """,
                    [Jason.encode!(metadata), embedding_json, now, existing.id]
                  ),
-               :ok <- upsert_document_fts(tx, existing.id, content, path) do
+               :ok <- upsert_document_fts(tx, existing.id, content, path),
+               :ok <- sync_vec_node(tx, existing.id, vector) do
             :ok
           end
       end
@@ -506,9 +511,9 @@ defmodule Pincer.Storage.Adapters.SQLite do
       node ->
         next_data = Map.put(node.data, "forgotten_at", now_iso8601())
 
-        case update_node_data(server, node.id, next_data) do
-          {:ok, _} -> :ok
-          error -> error
+        with {:ok, _} <- update_node_data(server, node.id, next_data),
+             :ok <- sync_vec_node(server, node.id, nil) do
+          :ok
         end
     end
   end
@@ -516,6 +521,72 @@ defmodule Pincer.Storage.Adapters.SQLite do
   @impl true
   @spec search_similar(String.t(), [float()], integer()) :: {:ok, [map()]} | {:error, term()}
   def search_similar(type, query_vector, limit \\ 5) do
+    case search_similar_vec(type, query_vector, limit) do
+      {:ok, []} -> search_similar_cosine(type, query_vector, limit)
+      {:error, _reason} -> search_similar_cosine(type, query_vector, limit)
+      result -> result
+    end
+  end
+
+  defp search_similar_vec(type, query_vector, limit) do
+    server = SQLite.default_server()
+
+    with true <- SQLite.vec_enabled?(server),
+         true <- valid_vector?(query_vector) do
+      candidates = max(limit * 10, 50)
+
+      case SQLite.query(
+             server,
+             """
+             SELECT n.id, n.data, n.access_count, n.inserted_at, v.distance
+             FROM (
+               SELECT rowid, distance
+               FROM vec_nodes
+               WHERE embedding MATCH ?1
+               ORDER BY distance
+               LIMIT ?2
+             ) AS v
+             JOIN nodes AS n ON n.rowid = v.rowid
+             WHERE n.type = ?3
+               AND COALESCE(json_extract(n.data, '$.forgotten_at'), '') = ''
+             ORDER BY v.distance
+             LIMIT ?4
+             """,
+             [Jason.encode!(query_vector), candidates, type, limit]
+           ) do
+        {:ok, %{rows: rows}} ->
+          results =
+            Enum.map(rows, fn [id, json, access_count, inserted_at, distance] ->
+              node = %{
+                id: id,
+                data: decode_json(json),
+                access_count: access_count || 0,
+                inserted_at: inserted_at
+              }
+
+              similarity = 1.0 - distance
+              scoring = score_document(server, node, :semantic, similarity, [])
+
+              result =
+                node
+                |> Map.put(:access_count, access_count || 0)
+                |> document_result(scoring)
+
+              touch_memory_access(server, node)
+              result
+            end)
+
+          {:ok, results}
+
+        error ->
+          error
+      end
+    else
+      false -> {:ok, []}
+    end
+  end
+
+  defp search_similar_cosine(type, query_vector, limit) do
     server = SQLite.default_server()
 
     case SQLite.query(
@@ -586,6 +657,22 @@ defmodule Pincer.Storage.Adapters.SQLite do
     end
   end
 
+  defp delete_vec_nodes(_tx, []), do: :ok
+
+  defp delete_vec_nodes(tx, ids) do
+    if SQLite.vec_enabled?(tx) do
+      placeholders = Enum.map_join(1..length(ids), ", ", &"?#{&1}")
+
+      SQLite.execute(
+        tx,
+        "DELETE FROM vec_nodes WHERE rowid IN (SELECT rowid FROM nodes WHERE id IN (#{placeholders}))",
+        ids
+      )
+    else
+      :ok
+    end
+  end
+
   defp delete_document_ids(_tx, []), do: :ok
 
   defp delete_document_ids(tx, ids) do
@@ -602,6 +689,7 @@ defmodule Pincer.Storage.Adapters.SQLite do
                "DELETE FROM documents_fts WHERE node_id IN (#{placeholders})",
                chunk
              ),
+           :ok <- delete_vec_nodes(tx, chunk),
            :ok <-
              SQLite.execute(
                tx,
@@ -929,6 +1017,49 @@ defmodule Pincer.Storage.Adapters.SQLite do
       node -> {:ok, node}
     end
   end
+
+  defp sync_vec_node(target, node_id, vector) do
+    if SQLite.vec_enabled?(target) do
+      with {:ok, %{rows: [[rowid]]}} <-
+             SQLite.query(target, "SELECT rowid FROM nodes WHERE id = ?1", [node_id]),
+           :ok <- SQLite.execute(target, "DELETE FROM vec_nodes WHERE rowid = ?1", [rowid]) do
+        maybe_insert_vec_node(target, rowid, vector)
+      else
+        _ -> :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp maybe_insert_vec_node(_target, _rowid, vector) when not is_list(vector) or vector == [] do
+    :ok
+  end
+
+  defp maybe_insert_vec_node(target, rowid, vector) do
+    if valid_vector?(vector) do
+      case SQLite.execute(
+             target,
+             "INSERT INTO vec_nodes(rowid, embedding) VALUES (?1, ?2)",
+             [rowid, Jason.encode!(vector)]
+           ) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.debug("[SQLITE] vec0 insert skipped: #{inspect(reason)}")
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp valid_vector?(vector) when is_list(vector) and vector != [] do
+    Enum.all?(vector, &is_number/1)
+  end
+
+  defp valid_vector?(_vector), do: false
 
   defp create_node(target, type, data, embedding_json \\ nil) do
     id = SQLite.uuid()

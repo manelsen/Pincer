@@ -1,13 +1,13 @@
 import Config
 
-config :pincer,
-  ecto_repos: [Pincer.Infra.Repo]
-
 config :telegex,
   token: System.get_env("TELEGRAM_BOT_TOKEN"),
   caller_adapter: {Finch, [name: Pincer.Finch]}
 
-config :pincer, :storage_adapter, Pincer.Storage.Adapters.Postgres
+config :pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite
+config :pincer, :sqlite_path, System.get_env("PINCER_SQLITE_PATH", "data/pincer.db")
+config :pincer, :sqlite_vec, :auto
+config :pincer, :sqlite_vec_dimensions, 1024
 config :pincer, :sandbox_adapter, Pincer.Adapters.Sandbox.Local
 config :pincer, :session_adapter, Pincer.Core.Session.Adapter
 config :pincer, :ux_adapter, Pincer.Core.UX.Adapter
@@ -84,11 +84,6 @@ config :logger,
 config :logger, :default_formatter,
   format: {Pincer.Utils.LoggerFormatter, :format},
   metadata: [:session_id, :project_id, :module]
-
-config :pincer, Pincer.Infra.Repo,
-  adapter: Ecto.Adapters.Postgres,
-  types: Pincer.Infra.PostgrexTypes,
-  log: false
 
 config :pincer, :log_mcp, false
 

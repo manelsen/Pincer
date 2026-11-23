@@ -14,11 +14,9 @@ defmodule Pincer.Core.DeadLetterQueue do
   """
   use Ecto.Schema
   import Ecto.Changeset
-  import Ecto.Query
 
   require Logger
 
-  alias Pincer.Infra.Repo
   alias Pincer.Infra.SQLite
 
   @primary_key {:id, :binary_id, autogenerate: true}
@@ -57,8 +55,7 @@ defmodule Pincer.Core.DeadLetterQueue do
 
     changeset = changeset(%__MODULE__{}, params)
 
-    result =
-      if SQLite.sqlite_mode?(), do: sqlite_insert(changeset), else: Repo.insert(changeset)
+    result = sqlite_insert(changeset)
 
     result
     |> tap(fn
@@ -73,24 +70,7 @@ defmodule Pincer.Core.DeadLetterQueue do
   @doc "List unresolved DLQ entries, optionally filtered by operation_type."
   @spec pending(String.t() | nil) :: [%__MODULE__{}]
   def pending(operation_type \\ nil) do
-    if SQLite.sqlite_mode?() do
-      sqlite_pending(operation_type)
-    else
-      query =
-        from(d in __MODULE__,
-          where: is_nil(d.resolved_at),
-          order_by: [asc: d.inserted_at]
-        )
-
-      query =
-        if operation_type do
-          where(query, [d], d.operation_type == ^operation_type)
-        else
-          query
-        end
-
-      Repo.all(query)
-    end
+    sqlite_pending(operation_type)
   end
 
   @doc "Mark a DLQ entry as resolved."
@@ -102,7 +82,7 @@ defmodule Pincer.Core.DeadLetterQueue do
 
       entry ->
         changeset = changeset(entry, %{resolved_at: DateTime.utc_now(), resolution: resolution})
-        if SQLite.sqlite_mode?(), do: sqlite_update(changeset), else: Repo.update(changeset)
+        sqlite_update(changeset)
     end
   end
 
@@ -120,14 +100,14 @@ defmodule Pincer.Core.DeadLetterQueue do
             last_attempted_at: DateTime.utc_now()
           })
 
-        if SQLite.sqlite_mode?(), do: sqlite_update(changeset), else: Repo.update(changeset)
+        sqlite_update(changeset)
     end
   end
 
   # --- SQLite persistence helpers ---
 
   defp fetch_entry(id) do
-    if SQLite.sqlite_mode?(), do: sqlite_get(id), else: Repo.get(__MODULE__, id)
+    sqlite_get(id)
   end
 
   defp sqlite_insert(changeset) do

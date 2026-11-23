@@ -469,8 +469,8 @@ defmodule Pincer.Core.Pairing do
   end
 
   defp bootstrap_from_store do
-    # Pairs are durable — loaded from Postgres into ETS (survives Docker restart)
-    load_pairs_from_postgres()
+    # Pairs are durable — loaded from the storage adapter into ETS (survives Docker restart)
+    load_pairs_from_store()
 
     # Pending/invite are ephemeral — loaded from DETS (they expire anyway)
     _ =
@@ -504,7 +504,7 @@ defmodule Pincer.Core.Pairing do
 
   defp put_pair(key, pair_data) do
     :ets.insert(@table_pairs, {key, pair_data})
-    persist_pair_to_postgres(key, pair_data)
+    persist_pair_to_store(key, pair_data)
     :ok
   end
 
@@ -839,11 +839,11 @@ defmodule Pincer.Core.Pairing do
     |> String.upcase()
   end
 
-  # --- Postgres-backed durable pair storage ---
+  # --- Durable pair storage ---
 
-  # Persists a pair to Postgres (durable) while ETS holds it for speed.
+  # Persists a pair to durable storage while ETS holds it for speed.
   # Called after every successful bind/approve so pairs survive restarts.
-  defp persist_pair_to_postgres({channel, sender_id}, pair_data) do
+  defp persist_pair_to_store({channel, sender_id}, pair_data) do
     channel_str = normalize_channel(channel)
     sender_str = normalize_sender(sender_id)
 
@@ -875,7 +875,7 @@ defmodule Pincer.Core.Pairing do
   rescue
     _ ->
       # Fail silently — pairing still works via ETS, just no durability
-      Logger.warning("[PAIRING] Could not persist pair to Postgres",
+      Logger.warning("[PAIRING] Could not persist pair to storage",
         channel: normalize_channel(channel),
         sender_id: normalize_sender(sender_id)
       )
@@ -883,9 +883,9 @@ defmodule Pincer.Core.Pairing do
       :ok
   end
 
-  # Loads all durable pairs from Postgres into ETS on startup.
+  # Loads all durable pairs from storage into ETS on startup.
   # This is called from bootstrap_from_store so existing pairs survive reboots.
-  defp load_pairs_from_postgres do
+  defp load_pairs_from_store do
     for channel <- [:telegram, :discord, :whatsapp, "telegram", "discord", "whatsapp"] do
       channel_str = normalize_channel(channel)
 
@@ -904,7 +904,10 @@ defmodule Pincer.Core.Pairing do
     end
   rescue
     _ ->
-      Logger.warning("[PAIRING] Could not load pairs from Postgres — tables may not exist yet")
+      Logger.warning(
+        "[PAIRING] Could not load pairs from storage — schema may not be initialized yet"
+      )
+
       :ok
   end
 end

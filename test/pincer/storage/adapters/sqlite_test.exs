@@ -45,6 +45,7 @@ defmodule Pincer.Storage.Adapters.SQLiteTest do
       assert hit.kind == :message
       assert hit.content =~ "timeout"
       assert hit.source =~ "session:s1:message:"
+      assert hit.citation =~ "session s1"
 
       # Punctuation / FTS5 special operators must not raise syntax errors
       assert {:ok, [special_hit]} = SQLiteStorage.search_messages("foo-bar: (module)*", 5)
@@ -62,6 +63,8 @@ defmodule Pincer.Storage.Adapters.SQLiteTest do
       assert top.session_id == "sess-a"
       assert top.hit_count == 2
       assert length(top.hits) == 2
+      assert top.preview =~ "pgvector"
+      assert Enum.any?(top.hits, &String.contains?(&1.citation, "session sess-a"))
     end
   end
 
@@ -85,7 +88,12 @@ defmodule Pincer.Storage.Adapters.SQLiteTest do
 
       assert {:ok, [hit | _]} = SQLiteStorage.search_graph_history("webhook timeout", 5)
       assert hit.kind == :graph
+      assert hit.bug == "Timeout in webhook handler"
+      assert hit.fix == "Increased pool timeout"
       assert hit.file == "lib/webhook.ex"
+      assert hit.source == "graph://lib/webhook.ex"
+      assert hit.citation == "graph lib/webhook.ex"
+      assert hit.score > 0.0
     end
 
     test "ingest_decision, pattern, person, animal, and idempotent entity relation" do
@@ -145,6 +153,7 @@ defmodule Pincer.Storage.Adapters.SQLiteTest do
 
       assert {:ok, [doc]} = SQLiteStorage.search_documents("sandbox", 5)
       assert doc.source == "docs/arch.md"
+      assert doc.citation == "docs/arch.md"
 
       assert {:ok, [mem]} =
                SQLiteStorage.search_documents("runbook", 5,
@@ -155,6 +164,96 @@ defmodule Pincer.Storage.Adapters.SQLiteTest do
 
       assert mem.citation == "notes/runbook.md#L10-L20"
       assert mem.memory_type == "technical_fact"
+    end
+
+    test "search_documents/3 ranks typed memory by importance and returns rich citations" do
+      low_path = "session://s-low/snippet/1"
+      high_path = "session://s-high/snippet/1"
+      vector = [1.0 | List.duplicate(0.0, 1023)]
+
+      assert :ok =
+               SQLiteStorage.index_memory(
+                 low_path,
+                 "Deploy timeout after webhook retries.",
+                 "technical_fact",
+                 vector,
+                 importance: 2,
+                 session_id: "s-low",
+                 line_start: 20,
+                 line_end: 22
+               )
+
+      assert :ok =
+               SQLiteStorage.index_memory(
+                 high_path,
+                 "Deploy timeout after webhook retries.",
+                 "architecture_decision",
+                 vector,
+                 importance: 9,
+                 session_id: "s-high",
+                 line_start: 3,
+                 line_end: 4
+               )
+
+      assert {:ok, [first, second | _]} =
+               SQLiteStorage.search_documents("deploy timeout webhook", 5)
+
+      assert first.source == high_path
+      assert first.memory_type == "architecture_decision"
+      assert first.importance == 9
+      assert first.citation == "#{high_path}#L3-L4"
+      assert first.access_count == 1
+      assert first.score > second.score
+
+      assert second.source == low_path
+      assert second.memory_type == "technical_fact"
+
+      assert {:ok, [filtered]} =
+               SQLiteStorage.search_documents("deploy timeout webhook", 5,
+                 memory_type: "technical_fact"
+               )
+
+      assert filtered.source == low_path
+    end
+
+    test "search_documents/3 boosts graph-backed file memories over equivalent unanchored docs" do
+      deploy_path = "lib/pincer/deploy.ex"
+      notes_path = "lib/pincer/notes.ex"
+      content = "Deploy timeout after webhook retries needs a 60 second timeout."
+
+      assert :ok =
+               SQLiteStorage.index_memory(
+                 deploy_path,
+                 content,
+                 "technical_fact",
+                 [1.0 | List.duplicate(0.0, 1023)],
+                 importance: 5
+               )
+
+      assert :ok =
+               SQLiteStorage.index_memory(
+                 notes_path,
+                 content,
+                 "technical_fact",
+                 [1.0 | List.duplicate(0.0, 1023)],
+                 importance: 5
+               )
+
+      assert :ok =
+               SQLiteStorage.ingest_bug_fix(
+                 "Deploy timeout after webhook retries",
+                 "Raised timeout to 60 seconds",
+                 deploy_path
+               )
+
+      assert {:ok, [first, second | _]} =
+               SQLiteStorage.search_documents("deploy timeout webhook retries", 5)
+
+      assert first.source == deploy_path
+      assert second.source == notes_path
+      assert first.score > second.score
+      assert get_in(first, [:score_components, :graph]) > 0.0
+      assert get_in(second, [:score_components, :graph]) == 0.0
     end
 
     test "search_similar ranks by cosine similarity and excludes forgotten memories" do
@@ -182,7 +281,9 @@ defmodule Pincer.Storage.Adapters.SQLiteTest do
                SQLiteStorage.search_similar("document", [1.0, 0.0, 0.0], 5)
 
       assert first.source == "mem/a.md"
+      assert first.citation == "mem/a.md"
       assert first.signal == :semantic
+      refute first.forgotten?
 
       assert :ok = SQLiteStorage.forget_memory("mem/a.md")
       assert {:error, :not_found} = SQLiteStorage.forget_memory("mem/does-not-exist.md")
@@ -195,6 +296,7 @@ defmodule Pincer.Storage.Adapters.SQLiteTest do
                SQLiteStorage.search_documents("Vector close match", 5, include_forgotten: true)
 
       assert length(included) == 1
+      assert hd(included).forgotten?
 
       assert {:ok, report} = SQLiteStorage.memory_report(5)
       assert report.total_documents == 2

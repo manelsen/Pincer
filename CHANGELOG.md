@@ -8,9 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Storage is SQLite-only: PostgreSQL/pgvector support, `Ecto.Repo`, migrations, `mix ecto.*` setup, `PINCER_DB_*` overrides, and the Postgres test path are removed. `storage.adapter` accepts only `"sqlite"` (PostgreSQL is rejected at boot) and the full test suite runs on in-memory SQLite with no external database service.
+- `.env.example` documents the `PINCER_SQLITE_*` knobs instead of `PINCER_DB_*`, and the `priv/profiles/*.yaml` templates now ship a `storage:` block with a per-profile SQLite file instead of `database.url: ecto://...`.
 - Require Elixir 1.20.5 / OTP 27 across `mix.exs`, mise/asdf, the Docker image, and CI. Remove compiler warnings surfaced by 1.20 (unused `require Logger` and unreachable/redundant clauses) so `warnings_as_errors` stays clean.
 
 ### Added
+- Optional `sqlite-vec` semantic search, loaded from `priv/sqlite_vec/vec0.so` (built by `./scripts/build_sqlite_vec.sh`, version pinned in the script). Configure with `storage.vec` / `storage.vec_path` / `storage.vec_dimensions` or `PINCER_SQLITE_VEC*`; when the extension is absent or disabled, search falls back to in-process cosine similarity.
 - The local sandbox adapter can run commands over a Linux-only bubblewrap transport (`transport: "bwrap"` or `bwrap: true`): a minimal read-only root, workspace bind, network `none`/`host`, `prlimit`-based memory/CPU/PID/file limits, a capability probe cached per executable, and fail-closed startup via `StartupGuard.check_sandbox/0`.
 - The `pincer_webhook` channel now runs an HTTP listener (Bandit + Plug) under the channels supervisor, configurable with `bind` (loopback by default), `port`, `path`, `max_body_bytes`, and `rate_limit_per_minute`; deliveries are token-gated and validated before ingestion.
 - Webhook ingress is rate limited per client IP (60 requests/minute by default, `0` disables) with `429` + `Retry-After`; an unavailable limiter fails closed with `503`.

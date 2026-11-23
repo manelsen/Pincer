@@ -2,10 +2,10 @@ defmodule Pincer.Core.AuditLogTest do
   use ExUnit.Case, async: false
 
   alias Pincer.Core.AuditLog
-  alias Pincer.Infra.Repo
+  alias Pincer.Infra.SQLite
 
   setup do
-    Repo.delete_all(AuditLog)
+    :ok = SQLite.execute("DELETE FROM audit_log")
     :ok
   end
 

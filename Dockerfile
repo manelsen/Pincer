@@ -1,12 +1,12 @@
 FROM elixir:1.20.5-otp-27-slim AS builder
 
 ENV MIX_ENV=prod \
-    MIX_BUILD_PATH=/app/_build \
+    MIX_BUILD_PATH=/app/_build/prod \
     LANG=C.UTF-8 \
     LC_ALL=C.UTF-8
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends build-essential git ca-certificates && \
+    apt-get install -y --no-install-recommends build-essential git ca-certificates gettext libsqlite3-dev && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -26,11 +26,12 @@ RUN mix deps.get --only prod && \
 
 COPY lib ./lib
 COPY priv ./priv
+COPY scripts ./scripts
 COPY config.yaml ./config.yaml
 COPY README.md ./README.md
 COPY LICENSE ./LICENSE
 
-RUN mix compile
+RUN ./scripts/build_sqlite_vec.sh --force && mix compile
 
 FROM elixir:1.20.5-otp-27-slim AS runtime
 
@@ -45,7 +46,7 @@ ENV MIX_ENV=prod \
     HEX_HOME=/app/.hex
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ca-certificates inotify-tools git nodejs npm postgresql-client bubblewrap util-linux && \
+    apt-get install -y --no-install-recommends ca-certificates inotify-tools git nodejs npm bubblewrap util-linux && \
     rm -rf /var/lib/apt/lists/* && \
     groupadd --gid "${APP_GID}" pincer && \
     useradd --uid "${APP_UID}" --gid pincer --home /app --shell /bin/sh --create-home pincer
@@ -67,7 +68,7 @@ COPY --from=builder /root/.mix /app/.mix
 COPY --from=builder /root/.hex /app/.hex
 COPY infrastructure/docker/entrypoint.sh /app/infrastructure/docker/entrypoint.sh
 
-RUN mkdir -p /app/logs /app/sessions /app/memory /app/workspaces && \
+RUN mkdir -p /app/data /app/logs /app/sessions /app/memory /app/workspaces && \
     chmod +x /app/infrastructure/docker/entrypoint.sh && \
     chown -R pincer:pincer /app
 

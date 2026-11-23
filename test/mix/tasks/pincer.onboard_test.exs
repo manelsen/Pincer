@@ -48,8 +48,8 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     assert File.exists?(Path.join(template_dir(root), "HISTORY.md"))
 
     {:ok, config} = YamlElixir.read_from_file(config_path(root))
-    assert config["database"]["database"] == "pincer"
-    assert config["database"]["hostname"] == "localhost"
+    assert get_in(config, ["storage", "adapter"]) == "sqlite"
+    assert get_in(config, ["storage", "path"]) == "data/pincer.db"
     assert output =~ "add {:pincer_whatsapp"
     assert output =~ "channels.whatsapp.enabled=true"
   end
@@ -69,13 +69,14 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     assert output =~ "already onboarded"
   end
 
-  test "db-name flag overrides database output", %{root: root} do
+  test "--sqlite-path flag overrides storage path", %{root: root} do
     capture_io(fn ->
-      run_task(root, ["--db-name", "custom_db"])
+      run_task(root, ["--sqlite-path", "data/custom.db"])
     end)
 
     {:ok, config} = YamlElixir.read_from_file(config_path(root))
-    assert config["database"]["database"] == "custom_db"
+    assert get_in(config, ["storage", "adapter"]) == "sqlite"
+    assert get_in(config, ["storage", "path"]) == "data/custom.db"
   end
 
   test "capabilities flag limits onboarding operations", %{root: root} do
@@ -101,15 +102,23 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
   test "fails when config overrides are used without config_yaml capability", %{root: root} do
     assert_raise Mix.Error, ~r/requires config_yaml capability/, fn ->
       capture_io(fn ->
-        run_task(root, ["--capabilities", "workspace_dirs,memory_file", "--db-name", "custom_db"])
+        run_task(root, [
+          "--capabilities",
+          "workspace_dirs,memory_file",
+          "--sqlite-path",
+          "data/custom.db"
+        ])
       end)
     end
   end
 
-  test "preflight fails with hint for invalid database name", %{root: root} do
+  test "preflight fails for an unwritable SQLite path", %{root: root} do
+    blocker = Path.join(root, "not_a_dir")
+    File.write!(blocker, "file")
+
     assert_raise Mix.Error, ~r/Onboarding preflight failed/, fn ->
       capture_io(fn ->
-        run_task(root, ["--db-name", "../outside"])
+        run_task(root, ["--sqlite-path", Path.join(blocker, "pincer.db")])
       end)
     end
   end
@@ -140,9 +149,10 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     File.write!(
       config_path(root),
       """
-      database:
-        database: "existing_db"
-        hostname: "db.internal"
+      storage:
+        adapter: "sqlite"
+        path: "data/existing.db"
+        vec: "false"
       llm:
         provider: "z_ai"
         z_ai:
@@ -157,13 +167,13 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
     )
 
     capture_io(fn ->
-      run_task(root, ["--db-name", "merged_db"])
+      run_task(root, ["--sqlite-path", "data/merged.db"])
     end)
 
     {:ok, config} = YamlElixir.read_from_file(config_path(root))
 
-    assert config["database"]["database"] == "merged_db"
-    assert config["database"]["hostname"] == "db.internal"
+    assert get_in(config, ["storage", "path"]) == "data/merged.db"
+    assert get_in(config, ["storage", "vec"]) == "false"
     assert config["custom_section"]["keep_me"] == true
     assert config["llm"]["custom_provider"]["default_model"] == "cp-model"
     assert config["llm"]["z_ai"]["base_url"] == "https://custom.example/v1"
@@ -191,8 +201,8 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
           "/srv/pincer",
           "--capabilities",
           "workspace_dirs,config_yaml",
-          "--db-name",
-          "remote_db",
+          "--sqlite-path",
+          "data/remote.db",
           "--provider",
           "openrouter",
           "--model",
@@ -278,18 +288,21 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
   end
 
   describe "check_db_connectivity" do
-    test "returns :ok when port is open" do
-      {:ok, listen} = :gen_tcp.listen(0, [])
-      {:ok, port} = :inet.port(listen)
-      config = %{"database" => %{"hostname" => "localhost", "port" => port}}
+    test "returns :ok for a writable SQLite path" do
+      tmp =
+        Path.join(System.tmp_dir!(), "pincer_onboard_conn_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(tmp)
+      on_exit(fn -> File.rm_rf(tmp) end)
+
+      config = %{"storage" => %{"adapter" => "sqlite", "path" => Path.join(tmp, "pincer.db")}}
       assert :ok = Preflight.check_db_connectivity(config)
-      :gen_tcp.close(listen)
     end
 
-    test "returns {:warn, _} when port is closed" do
-      config = %{"database" => %{"hostname" => "localhost", "port" => 19999}}
+    test "returns {:warn, _} when the SQLite path escapes its root" do
+      config = %{"storage" => %{"adapter" => "sqlite", "path" => "../outside/pincer.db"}}
       assert {:warn, msg} = Preflight.check_db_connectivity(config)
-      assert msg =~ "inacessível"
+      assert msg =~ "SQLite indisponível"
     end
   end
 

@@ -23,11 +23,9 @@ defmodule Pincer.Core.Introspection.LessonStore do
   """
 
   alias Pincer.Core.Introspection.LessonSchema
-  alias Pincer.Infra.Repo
   alias Pincer.Infra.SQLite
 
   import Ecto.Changeset, only: [apply_changes: 1]
-  import Ecto.Query
 
   @novelty_threshold 0.85
   @recency_half_life_days 30
@@ -48,12 +46,7 @@ defmodule Pincer.Core.Introspection.LessonStore do
       {:error, :duplicate}
     else
       changeset = LessonSchema.changeset(%LessonSchema{}, Map.put(attrs, :agent_id, agent_id))
-
-      if SQLite.sqlite_mode?() do
-        sqlite_insert(changeset)
-      else
-        Repo.insert(changeset)
-      end
+      sqlite_insert(changeset)
     end
   end
 
@@ -67,16 +60,7 @@ defmodule Pincer.Core.Introspection.LessonStore do
   def top_lessons(agent_id, limit \\ 5, opts \\ []) do
     min_conf = Keyword.get(opts, :min_confidence, 0.0)
 
-    if SQLite.sqlite_mode?() do
-      sqlite_top_lessons(agent_id, limit, min_conf)
-    else
-      from(l in LessonSchema,
-        where: l.agent_id == ^agent_id and l.active == true and l.confidence >= ^min_conf,
-        order_by: [desc: l.confidence],
-        limit: ^limit
-      )
-      |> Repo.all()
-    end
+    sqlite_top_lessons(agent_id, limit, min_conf)
   end
 
   @doc """
@@ -157,7 +141,7 @@ defmodule Pincer.Core.Introspection.LessonStore do
 
       lesson ->
         next_meta =
-          (lesson.meta || %{})
+          lesson.meta
           |> Map.put("promoted_skill", skill_name)
           |> Map.put("promoted_at", promoted_at)
 
@@ -199,30 +183,17 @@ defmodule Pincer.Core.Introspection.LessonStore do
   @doc "Returns all active lessons for an agent."
   @spec list_active(String.t()) :: [LessonSchema.t()]
   def list_active(agent_id) do
-    if SQLite.sqlite_mode?() do
-      sqlite_list_active(agent_id)
-    else
-      from(l in LessonSchema, where: l.agent_id == ^agent_id and l.active == true)
-      |> Repo.all()
-    end
+    sqlite_list_active(agent_id)
   end
 
   # --- Private ---
 
   defp fetch_lesson(lesson_id) do
-    if SQLite.sqlite_mode?() do
-      sqlite_get(lesson_id)
-    else
-      Repo.get(LessonSchema, lesson_id)
-    end
+    sqlite_get(lesson_id)
   end
 
   defp persist_update(changeset) do
-    if SQLite.sqlite_mode?() do
-      sqlite_update(changeset)
-    else
-      Repo.update(changeset)
-    end
+    sqlite_update(changeset)
   end
 
   defp sqlite_insert(changeset) do

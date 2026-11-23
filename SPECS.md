@@ -32,14 +32,22 @@ TELEGRAM_BOT_TOKEN=...    # if Telegram channel enabled
 
 Copy `.env.example` to `.env` and fill in the keys for providers you use.
 
-### Database overrides
+### Storage overrides
 
-Optional env vars can override `config.yaml` database settings:
+Storage is embedded SQLite only. Optional env vars override `config.yaml`:
 
 ```
-PINCER_DB_HOST, PINCER_DB_PORT, PINCER_DB_USER, PINCER_DB_PASSWORD,
-PINCER_DB_NAME, PINCER_DB_POOL_SIZE, PINCER_DB_SSL
+PINCER_STORAGE                  # must be sqlite/sqlite3
+PINCER_SQLITE_PATH              # database file, default data/pincer.db; :memory: is ephemeral
+PINCER_SQLITE_VEC               # auto (default) | true | false
+PINCER_SQLITE_VEC_PATH          # path to vec0.so, default priv/sqlite_vec/vec0.so
+PINCER_SQLITE_VEC_DIMENSIONS    # embedding width, default 1024
 ```
+
+`sqlite-vec` is optional: `./scripts/build_sqlite_vec.sh` builds the pinned extension
+(`v0.1.10-alpha.4` by default) into `priv/sqlite_vec/vec0.so`. With `vec: "auto"`/`"true"`
+the loader attempts to load it; otherwise `search_similar/3` uses in-process cosine
+similarity. FTS5 full-text search is always available.
 
 ---
 
@@ -163,8 +171,8 @@ Semantic memory and graph indexing use `Pincer.LLM.Client.generate_embedding/2`.
 - For `openrouter`, the default embedding model remains `baai/bge-m3`.
 - If OpenRouter returns the router-side error `No successful provider responses.`
   for `baai/bge-m3`, the client retries once with `baai/bge-large-en-v1.5`.
-- Both default and fallback models are 1024-dimensional, preserving pgvector
-  column compatibility for the current HNSW indexes.
+- Both default and fallback models are 1024-dimensional, matching
+  `storage.vec_dimensions` (default 1024) and the cosine-similarity fallback.
 
 ### 9. Execution Context & Correlated Outcomes (`Pincer.Core.Executor.Ctx`, `Pincer.Core.TaskSupervisor`)
 
@@ -286,10 +294,10 @@ active agent prompts.
     `Session.Server` processes, which rebuild the system prompt header immediately using
     `Pincer.Core.Skills.PromptIndex.build/2` (`Loader.discover/1` + requirements filtering).
 
-### 16. Optional Zero-Infra SQLite Storage (`Pincer.Infra.SQLite` + `Pincer.Storage.Adapters.SQLite`)
+### 16. Embedded SQLite Storage (`Pincer.Infra.SQLite` + `Pincer.Storage.Adapters.SQLite`)
 
-Allows booting and running Pincer with zero external database infrastructure using embedded
-`exqlite` SQLite3 + FTS5 + WAL mode, while keeping PostgreSQL + pgvector as the default.
+The only storage backend. Pincer boots and runs with zero external database
+infrastructure using embedded `exqlite` SQLite3 + FTS5 + WAL mode.
 
 - **Engine (`Pincer.Infra.SQLite`)**:
   - GenServer owning an `Exqlite.Sqlite3` connection with `PRAGMA foreign_keys = ON`,
@@ -300,18 +308,23 @@ Allows booting and running Pincer with zero external database infrastructure usi
     and subsystem tables (`self_states`, `lessons`, `cron_jobs`, `audit_log`,
     `dead_letter_queue`).
 - **Storage Adapter (`Pincer.Storage.Adapters.SQLite`)**:
-  - Implements every callback of `Pincer.Ports.Storage` with Postgres-compatible map/struct
-    contracts, FTS5 full-text search (with safe query quoting and substring fallback), and
-    pure-Elixir cosine similarity over stored float vectors for `search_similar/3`.
-- **Zero-Infra Boot & Secondary Persistence**:
-  - Enabled via `database.adapter: "sqlite"` or `storage.adapter: "sqlite"` in `config.yaml`,
-    or `PINCER_STORAGE=sqlite` (`PINCER_SQLITE_PATH` defaults to `"data/pincer.db"`).
-  - `Pincer.Core.StartupGuard` verifies SQLite parent-dir/file writability and skips
-    PostgreSQL TCP & Ecto migration checks when SQLite mode is active.
-  - `Pincer.Application` starts `Pincer.Infra.SQLite` instead of `Pincer.Infra.Repo`.
+  - Implements every callback of `Pincer.Ports.Storage`, FTS5 full-text search (with safe
+    query quoting and substring fallback), and vector search.
+  - **Vector search**: when `sqlite-vec` is loaded (`storage.vec: "auto" | true`), vectors
+    live in a `vec0` virtual table with native nearest-neighbour search. When the extension
+    is unavailable or `storage.vec: false` / `PINCER_SQLITE_VEC=0`, stored float vectors are
+    ranked in-process with cosine similarity and identical adapter contracts.
+- **Boot & Secondary Persistence**:
+  - Enabled via `storage.adapter: "sqlite"` in `config.yaml` (the only valid value);
+    `PINCER_STORAGE` can select it explicitly. `PINCER_STORAGE=postgres`/`postgresql`
+    raises `ArgumentError` at config load. `PINCER_SQLITE_PATH` defaults to
+    `"data/pincer.db"`.
+  - `Pincer.Core.StartupGuard` verifies SQLite parent-dir/file writability and sqlite-vec
+    loadability when vector search is enabled. There are no migrations.
+  - `Pincer.Application` starts `Pincer.Infra.SQLite`.
   - `SelfState`, `LessonStore`, `Cron.Storage`, `AuditLog`, `DeadLetterQueue`, and
     `CircuitBreaker` route cleanly to `Pincer.Infra.SQLite` (or ETS-only for circuit
-    snapshots) when SQLite mode is active.
+    snapshots).
 
 ### 17. Inspiration & Attribution (`~/git/hermes-agent`)
 
@@ -321,58 +334,57 @@ idiomatically to Elixir/OTP and Pincer's Hexagonal Boundaries:
 
 1. **Isolated Execution & Conformance (`~/git/hermes-agent/tools/environments/{base,docker,ssh,sandbox_conformance}.py`)** → Inspired `Pincer.Ports.Sandbox`, hardened `Docker` container flags (`--cap-drop ALL`, `no-new-privileges`, bounded `/tmp` & `/var/tmp` tmpfs mounts, default `--network none`, Docker/Podman detection, sanitized tracking labels), hardened `SSH` validation/ControlMaster patterns, and the shared `Pincer.Test.Support.SandboxConformance` contract suite.
 2. **Skill Validation & Threat Guard (`~/git/hermes-agent/tools/{skills_guard,skill_manager_tool}.py`)** → Inspired `Pincer.Core.Skills.Guard` threat categories (`exfiltration`, `destructive`, `persistence`, `injection`, invisible Unicode chars) with loopback exemptions and descriptive-prose safeguards, slug/size budgets, atomic temp-file writes, and fail-closed gating for agent-authored skills generated by `Pincer.Core.Skills.Generator`.
-3. **Zero-Infra SQLite & FTS5 Persistence (`~/git/hermes-agent/persistence/sqlite/{_schema_ddl,_backend}.py`)** → Inspired `Pincer.Infra.SQLite` WAL/busy-timeout pragmas, idempotent startup DDL, FTS5 virtual tables kept synchronized via triggers/mutations, and safe FTS5 query tokenization/quoting in `Pincer.Storage.Adapters.SQLite`.
+3. **Embedded SQLite & FTS5 Persistence (`~/git/hermes-agent/persistence/sqlite/{_schema_ddl,_backend}.py`)** → Inspired `Pincer.Infra.SQLite` WAL/busy-timeout pragmas, idempotent startup DDL, FTS5 virtual tables kept synchronized via triggers/mutations, and safe FTS5 query tokenization/quoting in `Pincer.Storage.Adapters.SQLite`.
 
-### 18. Multi-Backend Index Purge & Config Atom Allowlist
+### 18. Index Purge & Config Atom Allowlist
 
-Follow-up hardening consolidating post-merge behavior across PostgreSQL and SQLite:
+Follow-up hardening for the single SQLite backend:
 
 - **`Pincer.Ports.Storage.purge_invalid_documents/1`**:
   - Contract: `purge_invalid_documents(prefixes :: [String.t()]) :: {:ok, non_neg_integer()} | {:error, term()}` (default prefixes `["tmp/", "workspaces/"]`).
-  - `Pincer.Storage.Adapters.Postgres` deletes `document` nodes matching JSONB `data->>'path' LIKE ... ESCAPE '!'`.
   - `Pincer.Storage.Adapters.SQLite` executes atomically inside `Pincer.Infra.SQLite.transaction/2`, removing matching `document` rows in `nodes` (`json_extract(data, '$.path') LIKE ... ESCAPE '!'`) **and** corresponding entries in `documents_fts` so no orphan FTS5 records remain.
-  - `Mix.Tasks.Pincer.PurgeIndices` delegates to `Pincer.Ports.Storage` rather than coupling directly to `Pincer.Infra.Repo`.
+  - `Mix.Tasks.Pincer.PurgeIndices` delegates to `Pincer.Ports.Storage` rather than coupling directly to the storage module.
 - **`Pincer.Infra.Config` Atom Allowlists**:
   - `load/1` maps YAML top-level keys only through an explicit `@allowed_top_level_keys` table; unknown keys log a warning and are ignored without calling `String.to_atom/1`.
-  - `configure_database/1` maps Ecto/Postgrex `database` options only through `@allowed_ecto_keys`; unknown keys log a warning and are ignored without calling `String.to_atom/1`.
+  - `storage` keys are filtered through `@allowed_storage_keys` (`adapter`, `path`, `vec`, `vec_path`, `vec_dimensions`); unknown keys log a warning and are ignored.
 
-### 19. Zero-Infra SQLite Onboarding & Diagnostics
+### 19. SQLite Onboarding & Diagnostics
 
 Extends `setup`, `onboard`, `doctor`, and user documentation so Pincer can be bootstrapped
-and validated with zero external PostgreSQL/Docker dependencies:
+and validated without any external database or Docker dependency:
 
 - **`Pincer.Infra.SQLite.health_check/0`**:
   - Opens an in-memory SQLite3 connection (`:memory:`), creates and drops a temporary
     `fts5` virtual table, and closes the connection cleanly, returning `:ok` or
     `{:error, reason}`.
-- **Storage Mode Resolution (`mix pincer.setup` & `mix pincer.onboard`)**:
-  - Flags: `--storage <sqlite|postgres>`, `--sqlite-path <path>` (default `"data/pincer.db"`),
-    and `--config <path>` (default `"config.yaml"`).
+- **Storage Resolution (`mix pincer.setup` & `mix pincer.onboard`)**:
+  - Flags: `--storage sqlite` (only valid value), `--sqlite-path <path>`
+    (default `"data/pincer.db"`), and `--config <path>` (default `"config.yaml"`).
   - Precedence when `--storage` is omitted: `PINCER_STORAGE` env var > configured
-    `storage.adapter` / `database.adapter` in `--config` / `config.yaml` > `:postgres` default.
-  - Under `:sqlite`, `mix pincer.setup` skips PostgreSQL TCP wait / `ecto.create` /
-    `ecto.migrate`, forwards `--storage`, `--sqlite-path`, and `--config` to
-    `mix pincer.onboard`, and runs idempotent SQLite schema initialization.
+    `storage.adapter` in `--config` / `config.yaml` > `"sqlite"` default.
+  - `mix pincer.setup` initializes the SQLite file, forwards `--sqlite-path` and
+    `--config` to `mix pincer.onboard`, and runs idempotent schema initialization.
   - `Pincer.Core.Onboard.Defaults.defaults/1` emits `storage: {adapter: "sqlite", path: ...}`
-    and `sandbox: {adapter: "local"}` for `:sqlite` without requiring a `database` block.
+    and `sandbox: {adapter: "local"}` without requiring a `database` block.
   - `Pincer.Core.Onboard.Preflight` validates `storage.path` writability (rejecting empty
     strings, `..` traversal segments, and non-directory/file parents) and uses
     `SQLite.health_check/0` in `check_db_connectivity/1`.
 - **Diagnostics (`Pincer.Core.Doctor`)**:
   - Adds `storage_checks` emitting `:storage_backend` (`:ok`), `:sqlite_path` (`:ok` / `:error`),
-    and `:sqlite_engine` (`:ok` / `:error`) in SQLite mode with zero PostgreSQL false positives,
-    plus basic `database` shape validation in Postgres mode without blocking network calls.
+    and `:sqlite_engine` (`:ok` / `:error`), plus `sqlite-vec` loadability reported
+    separately so a missing extension is a warning, not a failure.
 
 ### 20. E2E Verification & CI Posture Gates
 
 Consolidates real end-to-end verification and continuous security/health posture enforcement:
 
-- **Postgres-free Test & Smoke Boot (`test/test_helper.exs` + `sqlite-smoke` CI job)**:
-  - When `PINCER_STORAGE=sqlite` (or `sqlite3`), `test/test_helper.exs` skips
-    `ecto.drop` / `ecto.create` / `ecto.migrate` against PostgreSQL and includes `:sqlite_smoke`
-    tests verifying `StartupGuard.run/0`, `Pincer.Application` supervision without `Repo`,
-    `Pincer.Ports.Storage` round-trips, FTS5 search, checkpoints, pairing state, and `PurgeIndices`.
-  - Default `ExUnit.start/1` excludes opt-in `:docker` E2E tests (and `:sqlite_smoke` under Postgres mode).
+- **SQLite Test & Smoke Boot (`test/test_helper.exs` + `sqlite-smoke` CI job)**:
+  - `config/test.exs` sets `PINCER_STORAGE=sqlite` and `PINCER_SQLITE_PATH=:memory:`;
+    `test/test_helper.exs` deletes `tmp/test_workspaces` and starts ExUnit, with no
+    database creation or migrations. `:sqlite_smoke` tests run in the normal suite and
+    verify `StartupGuard.run/0`, `Pincer.Application` supervision, `Pincer.Ports.Storage`
+    round-trips, FTS5 search, checkpoints, pairing state, and `PurgeIndices`.
+  - Default `ExUnit.start/1` excludes opt-in `:docker`, `:bwrap`, `:chaos`, and `:stress`.
 - **Opt-in Real Container E2E (`@tag :docker`)**:
   - `test/pincer/e2e/docker_sandbox_e2e_test.exs` runs `Pincer.Adapters.Sandbox.Docker.run/2`
     against `alpine:3.20` (executes via `mix test --only docker` or manual `workflow_dispatch`),

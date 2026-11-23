@@ -32,6 +32,13 @@ defmodule Pincer.Core.Doctor do
   alias Pincer.Utils.MapHelpers
 
   @default_config_file "config.yaml"
+  @default_sqlite_path "data/pincer.db"
+
+  @vec_extension_candidates [
+    "priv/sqlite_vec/vec0.so",
+    "priv/sqlite_vec/vec0",
+    "priv/sqlite_vec/vec0.dylib"
+  ]
 
   @doc """
   Runs doctor checks and returns a structured report.
@@ -152,22 +159,38 @@ defmodule Pincer.Core.Doctor do
   end
 
   defp storage_checks(config, root, env_fetcher) do
-    backend = SQLite.detect_storage_backend(config, env_fetcher.("PINCER_STORAGE"))
+    case storage_backend(config, env_fetcher) do
+      :sqlite ->
+        [ok_check(:storage_backend, "Storage backend configured: sqlite", %{backend: :sqlite})] ++
+          sqlite_storage_checks(config, root, env_fetcher) ++ sqlite_vec_checks(config)
 
-    backend_check =
-      ok_check(
-        :storage_backend,
-        "Storage backend configured: #{backend}",
-        %{backend: backend}
-      )
+      {:unsupported, backend} ->
+        [
+          error_check(
+            :storage_backend,
+            "Unsupported storage backend: #{inspect(backend)}. Only embedded SQLite is supported.",
+            %{backend: backend}
+          )
+        ]
+    end
+  end
 
-    detail_checks =
-      case backend do
-        :sqlite -> sqlite_storage_checks(config, root, env_fetcher)
-        :postgres -> postgres_storage_checks(config)
+  defp storage_backend(config, env_fetcher) do
+    storage_cfg = MapHelpers.read_field(config, :storage)
+    legacy_cfg = MapHelpers.read_field(config, :database)
+
+    [
+      env_fetcher.("PINCER_STORAGE"),
+      read_sub(storage_cfg, :adapter),
+      read_sub(legacy_cfg, :adapter)
+    ]
+    |> Enum.find_value(:sqlite, fn candidate ->
+      case SQLite.parse_storage_backend(candidate) do
+        {:ok, :sqlite} -> :sqlite
+        {:error, {:unsupported_storage_backend, backend}} -> {:unsupported, backend}
+        _ -> nil
       end
-
-    [backend_check | detail_checks]
+    end)
   end
 
   defp sqlite_storage_checks(config, root, env_fetcher) do
@@ -202,62 +225,117 @@ defmodule Pincer.Core.Doctor do
     [path_check, engine_check]
   end
 
-  defp postgres_storage_checks(config) do
-    case MapHelpers.read_field(config, :database) do
-      db when is_map(db) ->
-        port = MapHelpers.read_field(db, :port)
-        database = MapHelpers.read_field(db, :database)
+  defp sqlite_vec_checks(config) do
+    storage_cfg = MapHelpers.read_field(config, :storage)
+    setting = read_sub(storage_cfg, :vec)
+    explicit_path = read_sub(storage_cfg, :vec_path)
 
-        cond do
-          port != nil and not valid_port?(port) ->
-            [
-              error_check(
-                :postgres_config,
-                "Invalid PostgreSQL port in database config: #{inspect(port)}",
-                %{port: port}
-              )
-            ]
+    cond do
+      vec_disabled?(setting) ->
+        [
+          ok_check(
+            :sqlite_vec,
+            "SQLite vector extension disabled; semantic search will use cosine fallback",
+            %{enabled: false, reason: :disabled}
+          )
+        ]
 
-          database != nil and not MapHelpers.present?(database) ->
-            [
-              error_check(
-                :postgres_config,
-                "database.database must be a non-empty string",
-                %{database: database}
-              )
-            ]
+      vec_extension_available?(explicit_path, setting) ->
+        [
+          ok_check(
+            :sqlite_vec,
+            "SQLite vector extension is available",
+            %{enabled: true}
+          )
+        ]
 
-          true ->
-            []
-        end
-
-      _ ->
-        []
+      true ->
+        [
+          warn_check(
+            :sqlite_vec,
+            "SQLite vector extension not found; semantic search will use cosine fallback",
+            %{enabled: false, reason: :missing_extension}
+          )
+        ]
     end
   end
 
-  defp valid_port?(port) when is_integer(port), do: port >= 1 and port <= 65_535
+  defp vec_disabled?(false), do: true
+  defp vec_disabled?(0), do: true
 
-  defp valid_port?(port) when is_binary(port) do
-    case Integer.parse(String.trim(port)) do
-      {num, ""} -> valid_port?(num)
-      _ -> false
+  defp vec_disabled?(value) when is_binary(value) do
+    String.downcase(String.trim(value)) in ["false", "off", "disabled", "none"]
+  end
+
+  defp vec_disabled?(_value), do: false
+
+  defp vec_extension_available?(explicit_path, setting) do
+    path =
+      normalize_path(explicit_path) ||
+        normalize_path(System.get_env("PINCER_SQLITE_VEC_PATH")) ||
+        normalize_vec_setting_path(setting)
+
+    case path do
+      nil -> Enum.any?(default_vec_extension_paths(), &File.regular?/1)
+      path -> File.regular?(path)
     end
   end
 
-  defp valid_port?(_), do: false
+  defp normalize_vec_setting_path(value) when is_binary(value) do
+    trimmed = String.trim(value)
+
+    if String.downcase(trimmed) in [
+         "",
+         "auto",
+         "true",
+         ":auto",
+         "false",
+         "off",
+         "disabled",
+         "none"
+       ] do
+      nil
+    else
+      trimmed
+    end
+  end
+
+  defp normalize_vec_setting_path(_value), do: nil
+
+  defp normalize_path(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_path(_value), do: nil
+
+  defp default_vec_extension_paths do
+    priv_dir =
+      case :code.priv_dir(:pincer) do
+        path when is_list(path) -> List.to_string(path)
+        _ -> nil
+      end
+
+    @vec_extension_candidates
+    |> Enum.flat_map(fn relative ->
+      [Path.expand(relative)] ++
+        if(is_binary(priv_dir),
+          do: [Path.join(priv_dir, Path.basename(relative))],
+          else: []
+        )
+    end)
+    |> Enum.uniq()
+  end
 
   defp resolve_sqlite_path_for_doctor(config, env_fetcher) do
     storage_cfg = MapHelpers.read_field(config, :storage)
-    db_cfg = MapHelpers.read_field(config, :database)
-    db_is_sqlite? = SQLite.parse_storage_backend(read_sub(db_cfg, :adapter)) == {:ok, :sqlite}
 
     candidates = [
       env_fetcher.("PINCER_SQLITE_PATH"),
       read_sub(storage_cfg, :path),
-      read_sub(db_cfg, :path),
-      if(db_is_sqlite?, do: read_sub(db_cfg, :database), else: nil),
-      "data/pincer.db"
+      @default_sqlite_path
     ]
 
     candidates

@@ -1,16 +1,13 @@
 import Config
 
-config :pincer, Pincer.Infra.Repo,
-  adapter: Ecto.Adapters.Postgres,
-  username: System.get_env("PINCER_DB_USER", "postgres"),
-  password: System.get_env("PINCER_DB_PASSWORD", "postgres"),
-  hostname: System.get_env("PINCER_DB_HOST", "localhost"),
-  port: String.to_integer(System.get_env("PINCER_DB_PORT", "5432")),
-  database: System.get_env("PINCER_DB_NAME", "pincer_test"),
-  pool: Ecto.Adapters.SQL.Sandbox,
-  pool_size: 20,
-  types: Pincer.Infra.PostgrexTypes,
-  ssl: false
+System.put_env("PINCER_STORAGE", "sqlite")
+System.put_env("PINCER_SQLITE_PATH", System.get_env("PINCER_SQLITE_PATH", ":memory:"))
+
+config :pincer,
+  storage_adapter: Pincer.Storage.Adapters.SQLite,
+  sqlite_path: System.get_env("PINCER_SQLITE_PATH", ":memory:"),
+  sqlite_vec: :auto,
+  sqlite_vec_dimensions: 1024
 
 config :nostrum, token: "DUMMY_TOKEN"
 
@@ -18,8 +15,6 @@ config :pincer,
   discord_api: Pincer.Channels.TestAdapter,
   telegram_api: Pincer.Channels.TestAdapter,
   slack_api: Pincer.Channels.TestAdapter
-
-config :pincer, storage_adapter: Pincer.Storage.Adapters.Postgres
 
 config :pincer, workspaces_dir: "tmp/test_workspaces"
 

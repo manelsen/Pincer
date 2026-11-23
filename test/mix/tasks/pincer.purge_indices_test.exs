@@ -4,85 +4,94 @@ defmodule Mix.Tasks.Pincer.PurgeIndicesTest do
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Pincer.PurgeIndices
-  alias Pincer.Infra.Repo
   alias Pincer.Infra.SQLite
-  alias Pincer.Storage.Adapters.Postgres, as: PostgresStorage
   alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
-  alias Pincer.Storage.Graph.Node
 
   setup do
-    Application.ensure_all_started(:pincer)
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    Repo.delete_all(Node)
-    :ok
-  end
-
-  test "purge/2 deletes matching document nodes under tmp/ and workspaces/ on Postgres adapter" do
-    tmp_doc =
-      Repo.insert!(%Node{type: "document", data: %{"path" => "tmp/scratch.md"}})
-
-    ws_doc =
-      Repo.insert!(%Node{type: "document", data: %{"path" => "workspaces/agent_1/notes.md"}})
-
-    percent_doc =
-      Repo.insert!(%Node{type: "document", data: %{"path" => "tmpX/not_matching.md"}})
-
-    valid_doc =
-      Repo.insert!(%Node{type: "document", data: %{"path" => "lib/pincer/app.ex"}})
-
-    non_doc_tmp =
-      Repo.insert!(%Node{type: "file", data: %{"path" => "tmp/file_node.ex"}})
-
-    no_path_doc =
-      Repo.insert!(%Node{type: "document", data: %{"title" => "untitled"}})
-
-    assert {:ok, 2} = PurgeIndices.purge(PostgresStorage)
-
-    remaining_ids =
-      Repo.all(Node)
-      |> Enum.map(& &1.id)
-      |> MapSet.new()
-
-    refute MapSet.member?(remaining_ids, tmp_doc.id)
-    refute MapSet.member?(remaining_ids, ws_doc.id)
-    assert MapSet.member?(remaining_ids, percent_doc.id)
-    assert MapSet.member?(remaining_ids, valid_doc.id)
-    assert MapSet.member?(remaining_ids, non_doc_tmp.id)
-    assert MapSet.member?(remaining_ids, no_path_doc.id)
-  end
-
-  test "purge/2 handles wildcard escapes and empty prefix list on Postgres adapter" do
-    exact_doc =
-      Repo.insert!(%Node{type: "document", data: %{"path" => "a_b%/file.md"}})
-
-    wildcard_doc =
-      Repo.insert!(%Node{type: "document", data: %{"path" => "axbanything/file.md"}})
-
-    assert {:ok, 0} = PurgeIndices.purge(PostgresStorage, [])
-    assert {:ok, 1} = PurgeIndices.purge(PostgresStorage, ["a_b%/"])
-
-    refute Repo.get(Node, exact_doc.id)
-    assert Repo.get(Node, wildcard_doc.id)
-  end
-
-  test "delegates to active storage adapter (SQLite) without touching Postgres Repo" do
-    prev_storage = Application.get_env(:pincer, :storage_adapter)
     prev_server = Application.get_env(:pincer, :sqlite_server)
-
-    db_pid = start_supervised!({SQLite, name: nil, db_path: ":memory:"})
-    Application.put_env(:pincer, :storage_adapter, SQLiteStorage)
+    prev_storage = Application.get_env(:pincer, :storage_adapter)
+    db_pid = start_supervised!({SQLite, name: nil, db_path: ":memory:", vec: false})
     Application.put_env(:pincer, :sqlite_server, db_pid)
+    Application.put_env(:pincer, :storage_adapter, SQLiteStorage)
 
     on_exit(fn ->
-      if prev_storage,
-        do: Application.put_env(:pincer, :storage_adapter, prev_storage),
-        else: Application.delete_env(:pincer, :storage_adapter)
-
-      if prev_server,
-        do: Application.put_env(:pincer, :sqlite_server, prev_server),
-        else: Application.delete_env(:pincer, :sqlite_server)
+      restore_env(:sqlite_server, prev_server)
+      restore_env(:storage_adapter, prev_storage)
     end)
 
+    {:ok, db: db_pid}
+  end
+
+  defp restore_env(key, nil), do: Application.delete_env(:pincer, key)
+  defp restore_env(key, value), do: Application.put_env(:pincer, key, value)
+
+  defp insert_node!(db, type, data) do
+    id = SQLite.uuid()
+    now = DateTime.utc_now() |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
+    :ok =
+      SQLite.execute(
+        db,
+        """
+        INSERT INTO nodes (id, type, data, access_count, inserted_at, updated_at)
+        VALUES (?1, ?2, ?3, 0, ?4, ?4)
+        """,
+        [id, type, Jason.encode!(data), now]
+      )
+
+    id
+  end
+
+  defp node_ids(db) do
+    {:ok, %{rows: rows}} = SQLite.query(db, "SELECT id FROM nodes")
+    rows |> List.flatten() |> MapSet.new()
+  end
+
+  test "purge/2 deletes matching document nodes under tmp/ and workspaces/ on SQLite adapter",
+       %{db: db} do
+    assert :ok = SQLiteStorage.index_document("tmp/scratch.md", "scratch", [])
+
+    assert :ok =
+             SQLiteStorage.index_document("workspaces/agent_1/notes.md", "workspace notes", [])
+
+    assert :ok = SQLiteStorage.index_document("tmpX/not_matching.md", "not matching", [])
+    assert :ok = SQLiteStorage.index_document("lib/pincer/app.ex", "app", [])
+
+    tmp_file_id = insert_node!(db, "file", %{"path" => "tmp/file_node.ex"})
+    no_path_id = insert_node!(db, "document", %{"title" => "untitled"})
+
+    assert {:ok, 2} = PurgeIndices.purge(SQLiteStorage)
+
+    remaining_ids = node_ids(db)
+    assert MapSet.member?(remaining_ids, tmp_file_id)
+    assert MapSet.member?(remaining_ids, no_path_id)
+
+    assert {:ok, paths} =
+             SQLite.query(db, "SELECT json_extract(data, '$.path') FROM nodes ORDER BY 1")
+
+    remaining_paths = paths.rows |> List.flatten() |> Enum.reject(&is_nil/1)
+
+    assert "tmpX/not_matching.md" in remaining_paths
+    assert "lib/pincer/app.ex" in remaining_paths
+    refute "tmp/scratch.md" in remaining_paths
+    refute "workspaces/agent_1/notes.md" in remaining_paths
+  end
+
+  test "purge/2 handles wildcard escapes and empty prefix list on SQLite adapter", %{db: db} do
+    assert :ok = SQLiteStorage.index_document("a_b%/file.md", "exact", [])
+    assert :ok = SQLiteStorage.index_document("axbanything/file.md", "wildcard", [])
+
+    assert {:ok, 0} = PurgeIndices.purge(SQLiteStorage, [])
+    assert {:ok, 1} = PurgeIndices.purge(SQLiteStorage, ["a_b%/"])
+
+    {:ok, %{rows: rows}} =
+      SQLite.query(db, "SELECT json_extract(data, '$.path') FROM nodes ORDER BY 1")
+
+    remaining = rows |> List.flatten() |> Enum.reject(&is_nil/1)
+    assert remaining == ["axbanything/file.md"]
+  end
+
+  test "delegates to the active SQLite storage adapter" do
     assert :ok = SQLiteStorage.index_document("tmp/purge_via_port.md", "ephemeral", [])
     assert :ok = SQLiteStorage.index_document("lib/keep_via_port.md", "permanent", [])
 

@@ -1,8 +1,6 @@
 defmodule Pincer.Core.Onboard.Defaults do
   @moduledoc false
 
-  alias Pincer.Infra.SQLite
-
   @default_sqlite_path "data/pincer.db"
 
   @spec defaults() :: map()
@@ -10,50 +8,50 @@ defmodule Pincer.Core.Onboard.Defaults do
 
   @spec defaults(keyword()) :: map()
   def defaults(opts) when is_list(opts) do
-    storage =
-      case SQLite.parse_storage_backend(Keyword.get(opts, :storage, :postgres)) do
-        {:ok, mode} -> mode
-        _ -> :postgres
-      end
+    sqlite_path =
+      opts
+      |> Keyword.get(:sqlite_path)
+      |> normalize_sqlite_path()
 
-    base = %{
+    %{
       "channels" => default_channels(),
       "llm" => default_llm(),
-      "mcp" => default_mcp()
+      "mcp" => default_mcp(),
+      "storage" => %{"adapter" => "sqlite", "path" => sqlite_path, "vec" => "auto"},
+      "sandbox" => %{"adapter" => "local"}
     }
-
-    case storage do
-      :sqlite ->
-        sqlite_path =
-          opts
-          |> Keyword.get(:sqlite_path)
-          |> normalize_sqlite_path()
-
-        base
-        |> Map.put("storage", %{"adapter" => "sqlite", "path" => sqlite_path})
-        |> Map.put("sandbox", %{"adapter" => "local"})
-
-      :postgres ->
-        Map.put(base, "database", default_database())
-    end
   end
 
   @doc "Returns `true` when the onboarding config targets embedded SQLite."
   @spec sqlite_storage_config?(map()) :: boolean()
   def sqlite_storage_config?(config) when is_map(config) do
-    SQLite.detect_storage_backend(config) == :sqlite
+    case get_in(config, ["storage", "adapter"]) do
+      nil -> true
+      adapter -> normalize_adapter(adapter) == "sqlite"
+    end
   end
 
   def sqlite_storage_config?(_), do: false
 
+  defp normalize_adapter(adapter) when is_atom(adapter) do
+    adapter |> Atom.to_string() |> normalize_adapter()
+  end
+
+  defp normalize_adapter(adapter) when is_binary(adapter) do
+    case adapter |> String.trim() |> String.downcase() do
+      "sqlite3" -> "sqlite"
+      other -> other
+    end
+  end
+
+  defp normalize_adapter(_), do: nil
+
   @doc "Extracts the configured SQLite database path with fallback to `#{@default_sqlite_path}`."
   @spec sqlite_path(map()) :: String.t()
   def sqlite_path(config) when is_map(config) do
-    candidate =
-      get_in(config, ["storage", "path"]) ||
-        get_in(config, ["database", "path"])
-
-    normalize_sqlite_path(candidate)
+    config
+    |> get_in(["storage", "path"])
+    |> normalize_sqlite_path()
   end
 
   def sqlite_path(_), do: @default_sqlite_path
@@ -66,18 +64,6 @@ defmodule Pincer.Core.Onboard.Defaults do
   end
 
   defp normalize_sqlite_path(_), do: @default_sqlite_path
-
-  defp default_database do
-    %{
-      "adapter" => "Ecto.Adapters.PostgreSQL",
-      "hostname" => "localhost",
-      "port" => 5432,
-      "username" => "postgres",
-      "password" => "postgres",
-      "database" => "pincer",
-      "pool_size" => 10
-    }
-  end
 
   defp default_channels do
     %{

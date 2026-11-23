@@ -1,6 +1,6 @@
 defmodule Pincer.Storage.MemoryHelpers do
   @moduledoc """
-  Pure helpers shared by the Postgres and SQLite storage adapters.
+  Pure helpers shared by the SQLite storage adapter.
 
   These functions never touch a database. They operate on the JSON `data`
   payload of a memory node (or a plain node map) and are used by both adapters

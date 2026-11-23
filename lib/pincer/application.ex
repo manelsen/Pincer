@@ -18,8 +18,8 @@ defmodule Pincer.Application do
       ├── Pincer.Finch
       │   HTTP client pool for API requests
       │
-      ├── Pincer.Infra.Repo
-      │   Database connection pool (Ecto)
+      ├── Pincer.Infra.SQLite
+      │   Embedded SQLite connection and schema owner
       │
       ├── Pincer.Core.Heartbeat
       │   Periodic health checks and maintenance
@@ -62,7 +62,7 @@ defmodule Pincer.Application do
   1. Load configuration from `Pincer.Infra.Config`
   2. Initialize PubSub for event broadcasting
   3. Start Finch HTTP client pool
-  4. Connect to database
+  4. Open the embedded SQLite database
   5. Initialize MCP connections
   6. Start session management
   7. Enable channel adapters
@@ -129,8 +129,6 @@ defmodule Pincer.Application do
   end
 
   defp do_start do
-    repo_config = Pincer.Infra.Config.get(:repo)
-
     Logger.info("Starting Bot...")
 
     Logger.info(
@@ -149,7 +147,7 @@ defmodule Pincer.Application do
       Pincer.Core.MemoryObservability,
       Pincer.Core.ConversationObservability,
       {Finch, name: Pincer.Finch},
-      storage_child(repo_config),
+      storage_child(),
       Pincer.Core.Heartbeat,
       {Registry, keys: :duplicate, name: Pincer.Dispatcher.Registry},
       {Task.Supervisor, name: Pincer.TaskSupervisor},
@@ -206,11 +204,7 @@ defmodule Pincer.Application do
     Supervisor.start_link(children, opts)
   end
 
-  defp storage_child(repo_config) do
-    if Pincer.Infra.SQLite.sqlite_mode?() do
-      {Pincer.Infra.SQLite, db_path: Pincer.Infra.SQLite.db_path()}
-    else
-      {Pincer.Infra.Repo, repo_config}
-    end
+  defp storage_child do
+    {Pincer.Infra.SQLite, db_path: Pincer.Infra.SQLite.db_path()}
   end
 end

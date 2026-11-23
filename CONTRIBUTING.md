@@ -4,22 +4,14 @@ Thank you for helping improve Pincer. Follow the workflow and quality standards 
 
 ## Development Setup
 
-You can develop with either embedded SQLite (zero external services) or PostgreSQL + pgvector:
-
-### Option A: Zero-Infra SQLite
-
-```bash
-git clone https://github.com/manelsen/Pincer.git && cd Pincer
-mix pincer.setup --storage sqlite --yes
-```
-
-### Option B: PostgreSQL + pgvector
+Pincer uses embedded SQLite only (zero external services). No PostgreSQL, Docker, or
+migration step is required to develop or test.
 
 ```bash
 git clone https://github.com/manelsen/Pincer.git && cd Pincer
-docker compose up -d postgres
 mix deps.get
-mix ecto.create && mix ecto.migrate
+./scripts/build_sqlite_vec.sh   # optional: native sqlite-vec; search falls back to cosine
+mix pincer.setup --yes          # initializes data/pincer.db
 ```
 
 ## Development Protocol (Mandatory)
@@ -35,12 +27,11 @@ mix ecto.create && mix ecto.migrate
 ```bash
 mix format --check-formatted
 MIX_ENV=dev mix compile --warnings-as-errors
-mix qa                    # fast full-suite gate
+mix qa                    # fast full-suite gate (SQLite, in-memory; no external DB)
 mix sprint.check          # full test run without max-failures cap
 
-# Postgres-free SQLite E2E smoke
-PINCER_STORAGE=sqlite PINCER_SQLITE_PATH=tmp/ci_smoke.db PINCER_DB_PORT=1 \
-  mix test test/pincer/e2e/zero_infra_sqlite_boot_e2e_test.exs
+# Optional sqlite-vec build for native vector search
+./scripts/build_sqlite_vec.sh
 
 # WhatsApp sidecar tests (requires Go 1.21+)
 PINCER_WHATSAPP=1 mix test \

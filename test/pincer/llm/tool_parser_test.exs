@@ -57,7 +57,7 @@ defmodule Pincer.LLM.ToolParserTest do
         "content" => """
         Running migrations.
         <tool_call>
-        <parameter name="command">mix ecto.migrate</parameter>
+        <parameter name="command">mix compile</parameter>
         </tool_call>
         """
       }
@@ -69,7 +69,7 @@ defmodule Pincer.LLM.ToolParserTest do
       assert call["function"]["name"] == "safe_shell"
 
       args = Jason.decode!(call["function"]["arguments"])
-      assert args["command"] == "mix ecto.migrate"
+      assert args["command"] == "mix compile"
     end
 
     test "merges native JSON tool_calls with hallucinated XML calls" do

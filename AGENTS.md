@@ -1,13 +1,13 @@
 # AGENTS.md - Pincer
 
 Pincer is an Elixir/OTP framework that runs persistent AI agents: supervised per-user
-sessions, an agentic tool-calling loop, MCP tool integration, PostgreSQL + pgvector (or
-embedded SQLite) memory, and many messaging channels. Hexagonal architecture with
+sessions, an agentic tool-calling loop, MCP tool integration, embedded SQLite (FTS5 plus
+optional sqlite-vec) memory, and many messaging channels. Hexagonal architecture with
 compile-time boundary enforcement.
 
 `CLAUDE.md` and `GEMINI.md` mirror parts of this file inconsistently (GEMINI.md still
-mentions SQLite-only storage and `Pincer.Tools.SafeShell`, which is stale); treat this
-file as authoritative. `CONTRIBUTING.md` holds the PR-facing checklist.
+mentions `Pincer.Tools.SafeShell`, which is stale); treat this file as authoritative.
+`CONTRIBUTING.md` holds the PR-facing checklist.
 
 ---
 
@@ -36,11 +36,9 @@ next turn) cannot tell what still needs doing.
 ## 2. Commands
 
 ```bash
-# Prereqs: PostgreSQL + pgvector for the default test path.
-docker compose up -d postgres
-
+# Prereqs: Elixir 1.20.5 / OTP 27. No database service is required.
 mix deps.get
-mix ecto.create && mix ecto.migrate
+./scripts/build_sqlite_vec.sh   # optional: native vector search (skipped → cosine fallback)
 
 mix qa                      # format --check-formatted + compile --warnings-as-errors + test (--max-failures 1)
 mix sprint.check            # same gate, but full test run (no --max-failures)
@@ -50,7 +48,7 @@ mix test test/pincer/core/executor_test.exs          # single file
 mix test test/foo_test.exs:42                        # single test
 mix format
 
-mix pincer.setup            # first-run: deps, DB, migrate, wizard, health check (--storage sqlite --yes for zero-infra)
+mix pincer.setup            # first-run: deps, SQLite init, wizard, health check (--yes, --sqlite-path)
 mix pincer.chat             # interactive CLI agent
 mix pincer.server [channels]
 mix pincer.agent new <id> | pair <id>
@@ -58,41 +56,19 @@ mix pincer.onboard | doctor [--strict] [--config path] | security_audit [--stric
 mix pincer.memory.report | memory.explain | full_sync | purge_indices | plugins
 ```
 
-**`mix test` drops and recreates the test database on every run.** `test/test_helper.exs`
-runs `ecto.drop`, `ecto.create`, `ecto.migrate`, then deletes `tmp/test_workspaces`.
-Never point `PINCER_DB_NAME` at the dev/prod database when testing.
+**`mix test` uses embedded SQLite only.** `config/test.exs` sets
+`PINCER_STORAGE=sqlite` and `PINCER_SQLITE_PATH=:memory:`; `test/test_helper.exs` clears
+`tmp/test_workspaces`. There is no test database to create, drop, or migrate and no
+external service to start. Tests run in parallel against in-memory SQLite; tests that
+need durable storage create their own temp file under `tmp/`.
 
-**The database you connect to must have a `postgres` role.** `Pincer.Core.StartupGuard`
-runs before the supervision tree; if credentials do not match, boot aborts with a
-`DBConnection` checkout error. When `docker compose` cannot bind 127.0.0.1:5432 because a
-host PostgreSQL already holds the port, the container starts but is unreachable and the app
-reports `role "postgres" does not exist`. Run against the reachable instance instead:
+**sqlite-vec is optional.** `./scripts/build_sqlite_vec.sh` (needs `git`, `make`, `cc`)
+writes `priv/sqlite_vec/vec0.so` and is version-pinned in the script. `PINCER_SQLITE_VEC=0`
+disables loading; semantic search then uses in-process cosine similarity. `Dockerfile`
+and CI run the build script.
 
-```bash
-PINCER_DB_USER=<user> PINCER_DB_PASSWORD=<pass> mix test --warnings-as-errors
-```
-
-Alternatively, publish the Compose database on another loopback port:
-`PINCER_DB_HOST_PORT=5433 docker compose up -d postgres`. The Pincer container still
-reaches it over the Compose network at `postgres:5432`.
-
-In `:test` the guard's DB/migration checks are skipped via
-`config :pincer, skip_startup_guard: true` (`config/test.exs`); `test_helper.exs` owns DB
-creation. Side effect: `mix ecto.create` is a no-op under `MIX_ENV=test` unless the
-`PINCER_DB_USER`/`PINCER_DB_PASSWORD` you pass actually match the server.
-
-**Postgres-free runs:** with `PINCER_STORAGE=sqlite` (aliases `sqlite3`;
-`PINCER_SQLITE_PATH` selects the file, default `data/pincer.db`), `test_helper.exs` skips
-all Ecto setup entirely and `:sqlite_smoke` tags get included. This is how CI runs the
-zero-infra job:
-
-```bash
-PINCER_STORAGE=sqlite PINCER_SQLITE_PATH=tmp/ci_smoke.db PINCER_DB_PORT=1 \
-  mix test --warnings-as-errors \
-    test/pincer/e2e/zero_infra_sqlite_boot_e2e_test.exs \
-    test/pincer/e2e/introspection_skills_e2e_test.exs \
-    test/pincer/e2e/ci_posture_fixture_test.exs
-```
+**`:sqlite_smoke` tests are part of the normal suite** (SQLite is the only backend).
+ExUnit excludes opt-in `:docker`, `:bwrap`, `:chaos`, and `:stress`.
 
 CI (`.github/workflows/ci.yml`) additionally gates on posture checks that need no
 database; run them after touching config, onboarding, or security code:
@@ -165,8 +141,8 @@ Three surfaces; only two carry real runtime values:
 
 | Surface | Contains |
 |---|---|
-| `config/config.exs` + `config/{dev,test,prod}.exs` | Compile-time defaults: Ecto repo, the `:llm_providers` map (adapter module, `env_key`, `default_model`), `:storage_adapter`, `:sandbox_adapter`, executor tunables, retry/circuit-breaker knobs, logger format. |
-| `config.yaml` (repo root) | **Runtime** config loaded by `Pincer.Infra.Config.load/0` at boot: `channels`, `database`, `storage`, `llm.provider` + per-provider `base_url`/`default_model`, `introspection`, `model_router`, `mcp.servers`, `gateway.bind`, `sandbox`, `tools.restrict_to_workspace`. This is how you enable/disable channels and switch providers. |
+| `config/config.exs` + `config/{dev,test,prod}.exs` | Compile-time defaults: the `:llm_providers` map (adapter module, `env_key`, `default_model`), `:storage_adapter`, `:sqlite_path`, `:sandbox_adapter`, executor tunables, retry/circuit-breaker knobs, logger format. |
+| `config.yaml` (repo root) | **Runtime** config loaded by `Pincer.Infra.Config.load/0` at boot: `channels`, `storage`, `llm.provider` + per-provider `base_url`/`default_model`, `introspection`, `model_router`, `mcp.servers`, `gateway.bind`, `sandbox`, `tools.restrict_to_workspace`. This is how you enable/disable channels and switch providers. |
 | `.env` | Secrets only (API keys, bot tokens), loaded by `dotenvy`; highest precedence. Copy `.env.example`. |
 
 Adding an LLM provider means touching **both** places: an `:llm_providers` entry in
@@ -176,19 +152,23 @@ named `Pincer.LLM.Providers.*` and live in `packages/pincer_*`, not under `lib/`
 
 Precedence rules that bite:
 
-- **Storage backend** = `PINCER_STORAGE` > `config.yaml` `storage.adapter` >
-  `database.adapter` > `:postgres` (`Pincer.Infra.Config.configure_storage_adapter/2`).
+- **Storage backend** = `PINCER_STORAGE` > `config.yaml` `storage.adapter` > `"sqlite"`
+  (`Pincer.Infra.Config` rejects `postgres`/`postgresql` with an `ArgumentError`).
+- **SQLite path** = `PINCER_SQLITE_PATH` > `storage.path` > `"data/pincer.db"`; tests set
+  `:memory:`.
+- **sqlite-vec** = `storage.vec` / `PINCER_SQLITE_VEC` (`auto` by default),
+  `storage.vec_path` / `PINCER_SQLITE_VEC_PATH`, and
+  `storage.vec_dimensions` / `PINCER_SQLITE_VEC_DIMENSIONS` (default 1024).
 - **Default LLM provider** = `config.yaml` `llm.provider` overrides
   `config :pincer, :default_llm_provider` (shipped config.yaml uses `groq`).
-- Database overrides: `PINCER_DB_HOST/PORT/USER/PASSWORD/NAME/POOL_SIZE/SSL`.
 - Health endpoint bind: `PINCER_HEALTH_IP` (or `:health_ip` app env) and the
   `:health_port` app env (default 127.0.0.1:4001; tests set `health_port: 0`).
 - Channel secrets are indirect: each channel entry names a `token_env` /
   `*_env` variable that points at the env var holding the secret (for example
   `token_env: "TELEGRAM_BOT_TOKEN"`), so tests can swap the variable name.
 
-`Pincer.Core.StartupGuard` compares `Ecto.Migrator` counts (migrations live in
-`priv/repo/migrations`, timestamped `.exs`) and refuses to boot with pending migrations.
+`Pincer.Core.StartupGuard` verifies SQLite storage is writable and, when vector search is
+enabled, that `sqlite-vec` loads; there are no migrations or remote connection checks.
 
 ---
 
@@ -201,7 +181,7 @@ Pincer.Channels  ->  Pincer.Adapters  ->  Pincer.Core  ->  Pincer.Ports  ->  Pin
 
 Declared in each layer's root module (`lib/pincer/core.ex`, `adapters.ex`, `ports.ex`,
 `channels.ex`, `infra.ex`, `llm.ex`, `utils.ex`) via `use Boundary, deps: [...], exports: [...]`.
-Verified exports: `Infra` exports `PubSub, Config, Repo, SQLite, CircuitBreakerSnapshot`;
+Verified exports: `Infra` exports `PubSub, Config, SQLite, CircuitBreakerSnapshot`;
 `Ports` exports `Messaging, Storage, LLM, MediaUnderstanding, ToolRegistry,
 CapabilityDiscovery, Onboarding, UserMenu, Tool, Cron, Hook, Sandbox`; `Channels` exports
 nothing (it consumes Core, not the reverse).
@@ -227,7 +207,7 @@ nothing (it consumes Core, not the reverse).
 
 1. `Pincer.Application` boots the supervision tree: `Cluster.Supervisor`, PromEx, PubSub,
    `Orchestration.Blackboard`, sub-agent DynamicSupervisor, observability, `Finch`,
-   storage child (Repo or SQLite), `Heartbeat`, MCP supervisor + `MCP.Manager`,
+   storage child (`Pincer.Infra.SQLite`), `Heartbeat`, MCP supervisor + `MCP.Manager`,
    Introspection Kernel, Session/Project Horde registries and supervisors,
    `CircuitBreaker`, `RateLimiter`, `HookDispatcher`, `Session.Supervisor`,
    `Cron.Scheduler`, `TimerServer`, `Channels.Supervisor`, and a `Bandit` health endpoint.
@@ -304,12 +284,12 @@ requires touching the package's `mix.exs`/`CHANGELOG.md` too.
 - Test config disables heavy subsystems: `workspaces_dir: "tmp/test_workspaces"`,
   `enable_graph_watcher: false`, `enable_heartbeat_watchers: false`, `health_port: 0`.
   Put new background watchers behind similar flags.
-- Ecto sandbox is enabled (`pool: Ecto.Adapters.SQL.Sandbox`), but nothing checks out
-  automatically. Tests touching Postgres do `Application.ensure_all_started(:pincer)`,
-  then `:ok = Ecto.Adapters.SQL.Sandbox.checkout(Pincer.Infra.Repo)` and clean tables
-  explicitly in `setup` (see `test/mix/tasks/pincer.memory.report_test.exs`).
-- ExUnit excludes `:docker`, `:bwrap`, and (unless in SQLite mode) `:sqlite_smoke`;
-  `:chaos` and `:stress` are load/performance suites. Run excluded or integration
+- Storage is the embedded SQLite adapter; there is no SQL sandbox and no checkout step.
+  Tests that need isolation either use the `:memory:` connection from `config/test.exs`
+  or start their own `Pincer.Infra.SQLite` on a temp file under `tmp/` and create the
+  fixtures they read. See `test/pincer/e2e/zero_infra_sqlite_boot_e2e_test.exs`.
+- ExUnit excludes `:docker`, `:bwrap`, `:chaos`, and `:stress`; `:sqlite_smoke` runs in
+  the normal suite (SQLite is the only backend). Run excluded or integration
   tests explicitly (`--only chaos`, `--include bwrap` for the real bubblewrap test).
 - `test/fixtures/` holds on-disk fixtures (`file_system_workspace/`, `telegram/`, and
   `ci_posture/config.yaml` used by the CI posture gates);
@@ -337,7 +317,8 @@ requires touching the package's `mix.exs`/`CHANGELOG.md` too.
   `model_router.enabled: false` in `config.yaml` (already the shipped default).
 - **Embeddings:** OpenRouter default `baai/bge-m3` with one retry to
   `baai/bge-large-en-v1.5` on the "No successful provider responses." error. Both are
-  1024-dim to keep the pgvector HNSW indexes valid (`20260410152102_add_hnsw_indexes`).
+  1024-dim, matching `storage.vec_dimensions` (default 1024); when `sqlite-vec` is not
+  loaded, search uses in-process cosine similarity so no index rebuild is needed.
 - **Port behaviour dispatch is indirect:** `Pincer.Ports.LLM` and friends expose wrapper
   functions that read `Application.get_env(:pincer, :llm_adapter | :storage_adapter |
   :sandbox_adapter)`. In tests, stub the adapter module or the Mox mock, not the port

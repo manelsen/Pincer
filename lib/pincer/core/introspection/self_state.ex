@@ -9,10 +9,8 @@ defmodule Pincer.Core.Introspection.SelfState do
 
   alias Pincer.Core.Introspection.Mood
   alias Pincer.Core.Introspection.Schema
-  alias Pincer.Infra.Repo
   alias Pincer.Infra.SQLite
 
-  import Ecto.Query, only: [from: 2]
   import Ecto.Changeset, only: [apply_changes: 1]
 
   @doc """
@@ -21,19 +19,7 @@ defmodule Pincer.Core.Introspection.SelfState do
   """
   @spec load_or_create(String.t()) :: {:ok, Schema.t()} | {:error, term()}
   def load_or_create(agent_id) do
-    if SQLite.sqlite_mode?() do
-      sqlite_load_or_create(agent_id)
-    else
-      case Repo.one(from(s in Schema, where: s.agent_id == ^agent_id)) do
-        %Schema{} = state ->
-          {:ok, state}
-
-        nil ->
-          %Schema{}
-          |> Schema.changeset(%{agent_id: agent_id})
-          |> Repo.insert()
-      end
-    end
+    sqlite_load_or_create(agent_id)
   end
 
   @doc """
@@ -44,19 +30,7 @@ defmodule Pincer.Core.Introspection.SelfState do
   """
   @spec update(String.t(), map()) :: {:ok, Schema.t()} | {:error, term()}
   def update(agent_id, attrs) do
-    if SQLite.sqlite_mode?() do
-      sqlite_update(agent_id, attrs)
-    else
-      case Repo.one(from(s in Schema, where: s.agent_id == ^agent_id)) do
-        nil ->
-          {:error, :not_found}
-
-        %Schema{} = state ->
-          state
-          |> Schema.changeset(Map.new(attrs))
-          |> Repo.update()
-      end
-    end
+    sqlite_update(agent_id, attrs)
   end
 
   @doc """

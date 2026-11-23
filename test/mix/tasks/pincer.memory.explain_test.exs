@@ -3,18 +3,17 @@ defmodule Mix.Tasks.Pincer.MemoryExplainTest do
   import ExUnit.CaptureIO
 
   alias Pincer.Core.AgentPaths
-  alias Pincer.Infra.Repo
-  alias Pincer.Storage.Adapters.Postgres
+  alias Pincer.Infra.SQLite
+  alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
 
   @task "pincer.memory.explain"
 
   setup do
     Application.ensure_all_started(:pincer)
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
 
-    {:ok, _} = Ecto.Adapters.SQL.query(Repo, "DELETE FROM edges", [])
-    {:ok, _} = Ecto.Adapters.SQL.query(Repo, "DELETE FROM nodes", [])
-    {:ok, _} = Ecto.Adapters.SQL.query(Repo, "DELETE FROM messages", [])
+    :ok = SQLite.execute("DELETE FROM edges")
+    :ok = SQLite.execute("DELETE FROM nodes")
+    :ok = SQLite.execute("DELETE FROM messages")
 
     tmp =
       Path.join(
@@ -47,14 +46,14 @@ defmodule Mix.Tasks.Pincer.MemoryExplainTest do
     workspace: workspace
   } do
     assert {:ok, _} =
-             Postgres.save_message(
+             SQLiteStorage.save_message(
                "session-a",
                "assistant",
                "Deploy timeout was fixed after webhook retries were limited."
              )
 
     assert :ok =
-             Postgres.index_memory(
+             SQLiteStorage.index_memory(
                "session://explain/snippet/1",
                "Deploy timeout runbook says to inspect webhook retries first.",
                "technical_fact",

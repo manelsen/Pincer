@@ -52,14 +52,11 @@ channels:
     adapter: "Pincer.Channels.DingTalk"
     client_id_env: "DINGTALK_CLIENT_ID"
     client_secret_env: "DINGTALK_CLIENT_SECRET"
-database:
-  adapter: "Ecto.Adapters.PostgreSQL"
-  database: "pincer"
-  hostname: "localhost"
-  password: "postgres"
-  pool_size: 10
-  port: 5432
-  username: "postgres"
+storage:
+  adapter: "sqlite"
+  path: "data/pincer.db"
+  vec: "auto"
+  vec_path: "priv/sqlite_vec/vec0.so"
 llm:
   groq:
     base_url: "https://api.groq.com/openai/v1/chat/completions"

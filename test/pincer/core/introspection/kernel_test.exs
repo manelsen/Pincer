@@ -65,13 +65,14 @@ defmodule Pincer.Core.Introspection.KernelTest do
 
   setup do
     # Clean introspection data
-    Pincer.Infra.Repo.delete_all(Pincer.Core.Introspection.Schema)
-    Pincer.Infra.Repo.delete_all(Pincer.Core.Introspection.LessonSchema)
+    :ok = Pincer.Infra.SQLite.execute("DELETE FROM self_states")
+    :ok = Pincer.Infra.SQLite.execute("DELETE FROM lessons")
 
     # Stop any lingering kernel for this agent
     case Registry.lookup(Kernel.Registry, @agent) do
-      [{pid, _}] ->
-        GenServer.stop(pid, :normal, 1000)
+      [{pid, _}] when is_pid(pid) ->
+        if Process.alive?(pid), do: GenServer.stop(pid, :normal, 1000)
+        :ok
 
       [] ->
         :ok

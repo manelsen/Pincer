@@ -156,7 +156,7 @@ defmodule Pincer.Core.Onboard do
   def preflight(config) when is_map(config), do: Preflight.preflight(config)
 
   @doc """
-  Attempts a raw TCP connection to the configured PostgreSQL host/port.
+  Checks the configured SQLite path and embedded engine.
   Returns :ok or {:warn, message} — never blocks onboard, just warns.
   """
   @spec check_db_connectivity(map()) :: :ok | {:warn, String.t()}

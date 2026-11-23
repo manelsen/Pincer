@@ -1,7 +1,7 @@
 defmodule Pincer.Adapters.Tools.ExternalKnowledge do
   @moduledoc """
   Tool to ingest and search external knowledge (APIs, Languages, Docs).
-  Connects to the Postgres + pgvector memory store.
+  Connects to the SQLite + sqlite-vec memory store.
   """
   @behaviour Pincer.Ports.Tool
   alias Pincer.Ports.Storage

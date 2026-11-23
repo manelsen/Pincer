@@ -75,8 +75,8 @@ defmodule Pincer.Core.Skills.ClosedLoopTest do
   end
 
   setup do
-    Pincer.Infra.Repo.delete_all(Pincer.Core.Introspection.Schema)
-    Pincer.Infra.Repo.delete_all(Pincer.Core.Introspection.LessonSchema)
+    :ok = Pincer.Infra.SQLite.execute("DELETE FROM self_states")
+    :ok = Pincer.Infra.SQLite.execute("DELETE FROM lessons")
 
     existing_kernels =
       DynamicSupervisor.which_children(Kernel.Supervisor)
@@ -146,7 +146,8 @@ defmodule Pincer.Core.Skills.ClosedLoopTest do
     # Now create a high-confidence lesson, promote it deterministically, and notify Session.Server
     {:ok, _lesson} =
       LessonStore.create(session_id, %{
-        content: "Check PostgreSQL connectivity and migrations before booting services.",
+        content:
+          "Check SQLite connectivity and run the embedded schema bootstrap before booting services.",
         confidence: 0.92,
         success_count: 3
       })

@@ -20,13 +20,11 @@ defmodule Pincer.Infra.Config do
 
   The `config.yaml` file should contain:
 
-      database:
-        adapter: "Ecto.Adapters.PostgreSQL"
-        hostname: "localhost"
-        port: 5432
-        username: "postgres"
-        password: "postgres"
-        database: "pincer"
+      storage:
+        adapter: "sqlite"
+        path: "data/pincer.db"
+        vec: "auto"
+        vec_path: "priv/sqlite_vec/vec0.so"
 
       llm:
         provider: "opencode_zen"
@@ -102,7 +100,6 @@ defmodule Pincer.Infra.Config do
     "channels" => :channels,
     "cluster" => :cluster,
     "cron" => :cron,
-    "database" => :database,
     "enable_browser" => :enable_browser,
     "enable_graph_watcher" => :enable_graph_watcher,
     "enable_heartbeat_watchers" => :enable_heartbeat_watchers,
@@ -139,35 +136,12 @@ defmodule Pincer.Infra.Config do
     "workspaces_dir" => :workspaces_dir
   }
 
-  @allowed_ecto_keys %{
+  @allowed_storage_keys %{
     "adapter" => :adapter,
-    "backoff_max" => :backoff_max,
-    "backoff_min" => :backoff_min,
-    "backoff_type" => :backoff_type,
-    "connect_timeout" => :connect_timeout,
-    "database" => :database,
-    "hostname" => :hostname,
-    "idle_interval" => :idle_interval,
-    "log" => :log,
-    "parameters" => :parameters,
-    "password" => :password,
     "path" => :path,
-    "pool" => :pool,
-    "pool_size" => :pool_size,
-    "port" => :port,
-    "prepare" => :prepare,
-    "queue_interval" => :queue_interval,
-    "queue_target" => :queue_target,
-    "show_sensitive_data_on_connection_error" => :show_sensitive_data_on_connection_error,
-    "socket" => :socket,
-    "socket_dir" => :socket_dir,
-    "ssl" => :ssl,
-    "ssl_opts" => :ssl_opts,
-    "stacktrace" => :stacktrace,
-    "timeout" => :timeout,
-    "types" => :types,
-    "url" => :url,
-    "username" => :username
+    "vec" => :vec,
+    "vec_dimensions" => :vec_dimensions,
+    "vec_path" => :vec_path
   }
 
   @doc """
@@ -276,7 +250,7 @@ defmodule Pincer.Infra.Config do
           Application.put_env(:pincer, :model_router, router_config)
         end
 
-        configure_database(config)
+        configure_storage(config)
 
         :ok
 
@@ -410,100 +384,86 @@ defmodule Pincer.Infra.Config do
     ArgumentError -> nil
   end
 
-  defp configure_database(config) do
-    db_config = config["database"]
-    storage_config = config["storage"]
+  defp configure_storage(config) do
+    storage_config =
+      case config["storage"] do
+        value when is_map(value) ->
+          value
+          |> allowlisted_entries(@allowed_storage_keys, "storage config")
+          |> Map.new()
 
-    if db_config do
-      current_repo_config = Application.get_env(:pincer, Pincer.Infra.Repo, [])
+        _ ->
+          %{}
+      end
 
-      ecto_config =
-        db_config
-        |> allowlisted_entries(@allowed_ecto_keys, "database config")
-        |> Keyword.merge(current_repo_config)
+    selected =
+      first_non_empty([
+        System.get_env("PINCER_STORAGE"),
+        storage_config[:adapter],
+        "sqlite"
+      ])
 
-      ecto_config =
-        case db_config["adapter"] do
-          "Ecto.Adapters.PostgreSQL" ->
-            ecto_config
-            |> Keyword.put(:adapter, Ecto.Adapters.Postgres)
-            |> Keyword.put(:types, Pincer.Infra.PostgrexTypes)
-            |> maybe_put_runtime_override(:hostname, "PINCER_DB_HOST")
-            |> maybe_put_runtime_override(:port, "PINCER_DB_PORT", &String.to_integer/1)
-            |> maybe_put_runtime_override(:username, "PINCER_DB_USER")
-            |> maybe_put_runtime_override(:password, "PINCER_DB_PASSWORD")
-            |> maybe_put_runtime_override(:database, "PINCER_DB_NAME")
-            |> maybe_put_runtime_override(
-              :pool_size,
-              "PINCER_DB_POOL_SIZE",
-              &String.to_integer/1
-            )
-            |> maybe_put_runtime_override(
-              :ssl,
-              "PINCER_DB_SSL",
-              &(&1 in ["1", "true", "TRUE"])
-            )
+    normalized = selected |> String.trim() |> String.downcase()
 
-          _ ->
-            ecto_config
-        end
-
-      Application.put_env(:pincer, :repo, ecto_config)
+    if normalized in ["postgres", "postgresql", "pincer.storage.adapters.postgres"] do
+      raise ArgumentError,
+            "PostgreSQL storage is no longer supported; set storage.adapter to \"sqlite\""
     end
 
-    configure_storage_adapter(storage_config, db_config)
-  end
+    unless normalized in ["sqlite", "sqlite3", "pincer.storage.adapters.sqlite"] do
+      raise ArgumentError,
+            "Unsupported storage adapter #{inspect(selected)}; only \"sqlite\" is supported"
+    end
 
-  defp configure_storage_adapter(storage_config, db_config) do
-    env_storage = System.get_env("PINCER_STORAGE")
+    Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
 
-    storage_adapter =
-      if is_map(storage_config), do: storage_config["adapter"], else: nil
+    sqlite_path =
+      first_non_empty([
+        System.get_env("PINCER_SQLITE_PATH"),
+        storage_config[:path],
+        "data/pincer.db"
+      ])
 
-    db_adapter = if is_map(db_config), do: db_config["adapter"], else: nil
-    selected = first_non_empty([env_storage, storage_adapter, db_adapter])
+    Application.put_env(:pincer, :sqlite_path, sqlite_path)
 
-    sqlite_names = [
-      "sqlite",
-      "sqlite3",
-      "ecto.adapters.sqlite3",
-      "pincer.storage.adapters.sqlite"
-    ]
+    Application.put_env(
+      :pincer,
+      :sqlite_vec,
+      normalize_vec_setting(storage_config[:vec] || System.get_env("PINCER_SQLITE_VEC"))
+    )
 
-    postgres_names = ["postgres", "postgresql", "pincer.storage.adapters.postgres"]
+    if vec_path = storage_config[:vec_path] || System.get_env("PINCER_SQLITE_VEC_PATH") do
+      Application.put_env(:pincer, :sqlite_vec_path, vec_path)
+    end
 
-    normalized =
-      if is_binary(selected), do: selected |> String.trim() |> String.downcase(), else: nil
-
-    cond do
-      normalized in sqlite_names ->
-        Application.put_env(
-          :pincer,
-          :storage_adapter,
-          Module.concat(["Pincer", "Storage", "Adapters", "SQLite"])
-        )
-
-        sqlite_path =
-          first_non_empty([
-            System.get_env("PINCER_SQLITE_PATH"),
-            is_map(storage_config) && storage_config["path"],
-            is_map(db_config) && (db_config["path"] || db_config["database"]),
-            "data/pincer.db"
-          ])
-
-        Application.put_env(:pincer, :sqlite_path, sqlite_path)
-
-      normalized in postgres_names ->
-        Application.put_env(
-          :pincer,
-          :storage_adapter,
-          Module.concat(["Pincer", "Storage", "Adapters", "Postgres"])
-        )
-
-      true ->
-        :ok
+    if dimensions =
+         storage_config[:vec_dimensions] || System.get_env("PINCER_SQLITE_VEC_DIMENSIONS") do
+      case Integer.parse(to_string(dimensions)) do
+        {value, ""} when value > 0 -> Application.put_env(:pincer, :sqlite_vec_dimensions, value)
+        _ -> Logger.warning("Ignoring invalid SQLite vector dimension: #{inspect(dimensions)}")
+      end
     end
   end
+
+  defp normalize_vec_setting(nil), do: :auto
+
+  defp normalize_vec_setting(value) when is_boolean(value), do: value
+
+  defp normalize_vec_setting(value) when is_binary(value) do
+    case value |> String.trim() |> String.downcase() do
+      "" -> :auto
+      "auto" -> :auto
+      "1" -> true
+      "true" -> true
+      "yes" -> true
+      "0" -> false
+      "false" -> false
+      "no" -> false
+      other -> other
+    end
+  end
+
+  defp normalize_vec_setting(value), do: value
 
   defp first_non_empty(candidates) do
     Enum.find(candidates, fn
@@ -569,19 +529,6 @@ defmodule Pincer.Infra.Config do
   @spec fetch!(atom()) :: term()
   def fetch!(key) do
     Application.fetch_env!(:pincer, key)
-  end
-
-  defp maybe_put_runtime_override(config, key, env_key, caster \\ & &1) do
-    case System.get_env(env_key) do
-      nil ->
-        config
-
-      "" ->
-        config
-
-      value ->
-        Keyword.put(config, key, caster.(value))
-    end
   end
 
   @doc """

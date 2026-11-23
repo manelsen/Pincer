@@ -15,7 +15,6 @@ defmodule Pincer.Core.Orchestration.SubAgentNestingE2ETest do
   alias Pincer.Core.Orchestration.SubAgentRegistry
   alias Pincer.Core.Orchestration.SubAgentSupervisor
   alias Pincer.Infra.PubSub
-  alias Pincer.Infra.Repo
   alias Pincer.Ports.Storage
 
   @provider "scripted"
@@ -179,9 +178,6 @@ defmodule Pincer.Core.Orchestration.SubAgentNestingE2ETest do
     Application.put_env(:pincer, :max_subagents_per_session, 8)
     Application.put_env(:pincer, :nesting_e2e_holder, self())
 
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
-    :ok = Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
-
     on_exit(fn ->
       terminate_children()
 
@@ -192,7 +188,6 @@ defmodule Pincer.Core.Orchestration.SubAgentNestingE2ETest do
       restore_env(:max_subagents_per_session, prev_session)
       Application.delete_env(:pincer, :nesting_e2e_holder)
       Blackboard.reset()
-      Ecto.Adapters.SQL.Sandbox.mode(Repo, :auto)
     end)
 
     :ok

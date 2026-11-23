@@ -14,21 +14,6 @@ jobs:
     name: Build and Test
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: pgvector/pgvector:pg15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: pincer
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     env:
       MIX_ENV: test
 
@@ -58,10 +43,8 @@ jobs:
           # telegex uses Plug.Router but keeps plug optional; build it first.
           mix deps.compile plug
 
-      - name: Create and migrate database
-        run: |
-          mix ecto.create
-          mix ecto.migrate
+      - name: Build sqlite-vec extension
+        run: ./scripts/build_sqlite_vec.sh
 
       - name: Compile with warnings as errors
         run: mix compile --warnings-as-errors
@@ -84,7 +67,6 @@ jobs:
       MIX_ENV: test
       PINCER_STORAGE: sqlite
       PINCER_SQLITE_PATH: tmp/ci_smoke.db
-      PINCER_DB_PORT: "1"
 
     steps:
       - name: Checkout code
@@ -113,6 +95,9 @@ jobs:
           # telegex uses Plug.Router but keeps plug optional; build it first.
           mix deps.compile plug
 
+      - name: Build sqlite-vec extension
+        run: ./scripts/build_sqlite_vec.sh
+
       - name: Compile with warnings as errors
         run: mix compile --warnings-as-errors
 
@@ -133,21 +118,6 @@ jobs:
   whatsapp:
     name: WhatsApp Channel Tests
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: pgvector/pgvector:pg15
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: pincer
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     env:
       MIX_ENV: test
@@ -184,10 +154,8 @@ jobs:
           # telegex uses Plug.Router but keeps plug optional; build it first.
           mix deps.compile plug
 
-      - name: Create and migrate database
-        run: |
-          mix ecto.create
-          mix ecto.migrate
+      - name: Build sqlite-vec extension
+        run: ./scripts/build_sqlite_vec.sh
 
       - name: Compile
         run: mix compile --warnings-as-errors
@@ -234,6 +202,9 @@ jobs:
           mix deps.get
           # telegex uses Plug.Router but keeps plug optional; build it first.
           mix deps.compile plug
+
+      - name: Build sqlite-vec extension
+        run: ./scripts/build_sqlite_vec.sh
 
       - name: Run Docker Sandbox E2E tests
         run: mix test --warnings-as-errors --only docker

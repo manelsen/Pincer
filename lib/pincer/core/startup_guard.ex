@@ -8,15 +8,14 @@ defmodule Pincer.Core.StartupGuard do
 
   1. `check_config/0` — validates `config.yaml` exists and is parseable.
   2. `check_sandbox/0` — probes the configured sandbox backend; bwrap failures are fatal.
-  3. `check_database/0` — verifies TCP reachability of the configured DB host/port.
-  4. `check_migrations/0` — ensures no pending Ecto migrations remain.
+  3. `check_sqlite/0` — verifies the SQLite database path is writable.
+  4. `check_migrations/0` — no-op for SQLite; always returns `:ok`.
 
-  The DB and migrations checks are skipped when
+  The SQLite and migrations checks are skipped when
   `Application.get_env(:pincer, :skip_startup_guard, false)` is `true`
   (used in test environments).
   """
 
-  require Logger
   alias Pincer.Infra.SQLite
   alias Pincer.Ports.Sandbox
 
@@ -78,59 +77,13 @@ defmodule Pincer.Core.StartupGuard do
   end
 
   @doc """
-  Attempts a raw TCP connection to the configured PostgreSQL host and port.
+  Checks for pending database migrations.
 
-  Reads host and port from `Application.get_env(:pincer, Pincer.Infra.Repo)`.
-  Times out after 2 seconds.
-  """
-  @spec check_database() :: check_result()
-  def check_database do
-    repo_config = Application.get_env(:pincer, Pincer.Infra.Repo, [])
-    host = Keyword.get(repo_config, :hostname, "localhost")
-    port = Keyword.get(repo_config, :port, 5432)
-
-    host_charlist = to_charlist(host)
-
-    case :gen_tcp.connect(host_charlist, port, [], 2_000) do
-      {:ok, socket} ->
-        :gen_tcp.close(socket)
-        :ok
-
-      {:error, _reason} ->
-        {:error, :db_unreachable,
-         "PostgreSQL inacessível em #{host}:#{port}. Execute: docker compose up -d postgres"}
-    end
-  end
-
-  @doc """
-  Checks for pending Ecto migrations.
-
-  Uses `Ecto.Migrator.with_repo/2` to list all migrations and counts those
-  with status `:down`.
+  SQLite has no Ecto migration tracking, so this always returns `:ok`.
   """
   @spec check_migrations() :: check_result()
   def check_migrations do
-    result =
-      Ecto.Migrator.with_repo(Pincer.Infra.Repo, fn repo ->
-        path = Ecto.Migrator.migrations_path(repo)
-        Ecto.Migrator.migrations(repo, [path])
-      end)
-
-    case result do
-      {:ok, migrations, _} ->
-        pending = Enum.count(migrations, fn {status, _version, _name} -> status == :down end)
-
-        if pending > 0 do
-          {:error, :migrations_pending,
-           "#{pending} migrações pendentes. Execute: mix ecto.migrate"}
-        else
-          :ok
-        end
-
-      {:error, reason} ->
-        Logger.warning("StartupGuard: could not check migrations: #{inspect(reason)}")
-        :ok
-    end
+    :ok
   end
 
   @doc """
@@ -166,19 +119,11 @@ defmodule Pincer.Core.StartupGuard do
   defp format_reason(reason), do: inspect(reason)
 
   defp maybe_check_database do
-    cond do
-      skip_guard?() -> :ok
-      SQLite.sqlite_mode?() -> check_sqlite()
-      true -> check_database()
-    end
+    if skip_guard?(), do: :ok, else: check_sqlite()
   end
 
   defp maybe_check_migrations do
-    cond do
-      skip_guard?() -> :ok
-      SQLite.sqlite_mode?() -> :ok
-      true -> check_migrations()
-    end
+    if skip_guard?(), do: :ok, else: check_migrations()
   end
 
   defp skip_guard? do

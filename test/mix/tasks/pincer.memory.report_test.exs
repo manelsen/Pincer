@@ -4,19 +4,18 @@ defmodule Mix.Tasks.Pincer.MemoryReportTest do
 
   alias Pincer.Core.MemoryObservability
   alias Pincer.Core.Telemetry
-  alias Pincer.Infra.Repo
-  alias Pincer.Storage.Adapters.Postgres
+  alias Pincer.Infra.SQLite
+  alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
 
   @task "pincer.memory.report"
 
   setup do
     Application.ensure_all_started(:pincer)
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
     :ok = MemoryObservability.reset()
 
-    {:ok, _} = Ecto.Adapters.SQL.query(Repo, "DELETE FROM edges", [])
-    {:ok, _} = Ecto.Adapters.SQL.query(Repo, "DELETE FROM nodes", [])
-    {:ok, _} = Ecto.Adapters.SQL.query(Repo, "DELETE FROM messages", [])
+    :ok = SQLite.execute("DELETE FROM edges")
+    :ok = SQLite.execute("DELETE FROM nodes")
+    :ok = SQLite.execute("DELETE FROM messages")
 
     on_exit(fn ->
       Mix.Task.reenable(@task)
@@ -27,7 +26,7 @@ defmodule Mix.Tasks.Pincer.MemoryReportTest do
 
   test "prints runtime and persistent memory summary" do
     assert :ok =
-             Postgres.index_memory(
+             SQLiteStorage.index_memory(
                "session://report/snippet/1",
                "Deploy timeout fixed by increasing webhook timeout.",
                "technical_fact",
@@ -38,7 +37,7 @@ defmodule Mix.Tasks.Pincer.MemoryReportTest do
              )
 
     assert :ok =
-             Postgres.index_memory(
+             SQLiteStorage.index_memory(
                "session://report/snippet/2",
                "User prefers concise postmortems.",
                "user_preference",

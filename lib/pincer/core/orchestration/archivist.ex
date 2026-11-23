@@ -6,8 +6,8 @@ defmodule Pincer.Core.Orchestration.Archivist do
   logs through three distinct memory systems:
 
   1. **Narrative Memory** (`MEMORY.md`) - Human-readable summaries of interactions
-  2. **Semantic Memory** (Postgres + pgvector) - Vector embeddings for similarity-based retrieval
-  3. **Relational Memory** (Postgres Graph Tables) - Structured relationships (bugs, fixes, files)
+  2. **Semantic Memory** (SQLite + sqlite-vec) - Vector embeddings for similarity-based retrieval
+  3. **Relational Memory** (SQLite Graph Tables) - Structured relationships (bugs, fixes, files)
 
   ## Memory Architecture
 
@@ -30,7 +30,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
                │                    │                   │
                ▼                    ▼                   ▼
       ┌──────────────┐    ┌──────────────┐    ┌──────────────┐
-      │  MEMORY.md   │    │  pgvector    │    │ Postgres DB  │
+      │  MEMORY.md   │    │ sqlite-vec   │    │  SQLite DB   │
       │  (Narrative) │    │  (Semantic)  │    │ (Relational) │
       └──────────────┘    └──────────────┘    └──────────────┘
 
@@ -84,8 +84,8 @@ defmodule Pincer.Core.Orchestration.Archivist do
 
   - `MEMORY.md` - Root of workspace, human-editable
   - `sessions/session_ID.md` - Individual session logs
-  - Postgres + pgvector - Vector embeddings for semantic search
-  - Postgres graph tables - Structured relationships for queries
+  - SQLite + sqlite-vec - Vector embeddings for semantic search
+  - SQLite graph tables - Structured relationships for queries
   """
 
   use GenServer
@@ -152,8 +152,8 @@ defmodule Pincer.Core.Orchestration.Archivist do
   On successful consolidation:
 
   - `MEMORY.md` is updated with new narrative content
-  - Knowledge snippets are stored in Postgres + pgvector
-  - Bug fix relationships are stored in Postgres graph tables
+  - Knowledge snippets are stored in SQLite + sqlite-vec
+  - Bug fix relationships are stored in SQLite graph tables
   """
   @spec start_consolidation(String.t(), list(), keyword()) :: {:ok, pid()}
   def start_consolidation(session_id, history, opts \\ []) do
@@ -182,8 +182,8 @@ defmodule Pincer.Core.Orchestration.Archivist do
 
   1. Read `sessions/session_{session_id}.md`
   2. Update `MEMORY.md` with summarized narrative
-  3. Extract and store semantic snippets in Postgres + pgvector
-  4. Extract and store bug fix relationships in Postgres graph tables
+  3. Extract and store semantic snippets in SQLite + sqlite-vec
+  4. Extract and store bug fix relationships in SQLite graph tables
 
   ## Returns
 
@@ -311,7 +311,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
         if length(snippets) > 0,
           do:
             Logger.info(
-              "[ARCHIVIST] 🧬 #{length(snippets)} snippets ingested into Postgres + pgvector."
+              "[ARCHIVIST] 🧬 #{length(snippets)} snippets ingested into SQLite + sqlite-vec."
             )
 
       _ ->

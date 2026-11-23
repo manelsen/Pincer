@@ -9,7 +9,6 @@ defmodule Pincer.Contracts.StorageAdapterContractTest do
   use ExUnit.Case, async: true
 
   @storage_adapters [
-    Pincer.Storage.Adapters.Postgres,
     Pincer.Storage.Adapters.SQLite
   ]
 

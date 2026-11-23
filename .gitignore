@@ -76,3 +76,12 @@ workspaces/*
 .idea/
 *.swp
 *~
+
+# Optional native vector index built by scripts/build_sqlite_vec.sh
+/priv/sqlite_vec/
+
+# Embedded SQLite runtime database
+/data/
+
+# sqlite-vec source/build cache
+/.cache/

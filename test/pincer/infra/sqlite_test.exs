@@ -136,26 +136,6 @@ defmodule Pincer.Infra.SQLiteTest do
     end
   end
 
-  describe "sqlite_mode?/0" do
-    test "reflects active storage_adapter application env" do
-      prev = Application.get_env(:pincer, :storage_adapter)
-
-      on_exit(fn ->
-        if prev do
-          Application.put_env(:pincer, :storage_adapter, prev)
-        else
-          Application.delete_env(:pincer, :storage_adapter)
-        end
-      end)
-
-      Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.Postgres)
-      refute SQLite.sqlite_mode?()
-
-      Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
-      assert SQLite.sqlite_mode?()
-    end
-  end
-
   describe "decode_json/2 and parse_datetime/1" do
     test "safely decodes valid JSON and returns fallback on invalid input" do
       assert SQLite.decode_json(~s({"a":1})) == %{"a" => 1}

@@ -61,9 +61,7 @@ defmodule Pincer.Core.ErrorClass do
   defp classify_normalized(:tool_loop), do: :tool_loop
   defp classify_normalized({:depth_exceeded, _}), do: :depth_exceeded
 
-  defp classify_normalized(%Postgrex.Error{postgres: %{code: :undefined_table}}), do: :db_schema
-
-  defp classify_normalized(%Postgrex.Error{} = error) do
+  defp classify_normalized(%Exqlite.Error{} = error) do
     if db_schema_message?(Exception.message(error)), do: :db_schema, else: :db
   end
 

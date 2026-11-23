@@ -19,3 +19,4 @@ memory
 .env
 *.log
 erl_crash.dump
+.cache

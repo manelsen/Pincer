@@ -46,10 +46,7 @@ defmodule Pincer.Channels.SmokeTest do
 
     Application.ensure_all_started(:pincer)
 
-    # Ensure DB is ready
-    Mix.Task.run("ecto.create", ["--quiet"])
-    Mix.Task.run("ecto.migrate", ["--quiet"])
-
+    # The application boots the embedded SQLite engine and its schema.
     # Setup Mock LLM
     original_llm = Application.get_env(:pincer, :llm_providers)
     original_default = Application.get_env(:pincer, :default_llm_provider)
