@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Changing the default model now edits only the `llm` section of `config.yaml` instead of regenerating the file and dropping unrelated sections; it also no longer re-reads `.env`.
 - LINE, Feishu, and DingTalk HTTP calls now set connect/receive timeouts.
 - Tool approval decisions are recorded in the audit log, and a configured role without `:approve_tools` cannot approve privileged tools.
+- Approval requests are delivered before the audit row is written, so a saturated database pool can no longer delay the prompt behind an audit insert.
+- In-memory state (provider and auth-profile cooldowns, pairing codes, project state, memory budgets, model cache) survives the exit of the process that first used it, and the Blackboard no longer reuses message ids after a restart.
+- Model lists are cached per provider configuration, so switching providers or reloading `config.yaml` no longer serves the previous list for up to an hour.
 
 ### Removed
 - Unused modules that were only referenced by their own tests (`ModelRouter`, `ProjectBoard`, `ContractEngine`, `Capabilities`, `Session.CommandQueue`, `ReleaseValidation`, `Storage.Port`, `Core.SubAgent`) and the incomplete Matrix channel tree, which pointed at a non-existent session module.
