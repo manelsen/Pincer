@@ -316,8 +316,6 @@ defmodule Pincer.Core.SubAgentProgress do
     Map.get(map, atom_key) || Map.get(map, Atom.to_string(atom_key))
   end
 
-  defp get_field(_, _), do: nil
-
   defp normalize_text(value) when is_binary(value) do
     value
     |> String.trim()

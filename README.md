@@ -57,7 +57,7 @@ mix pincer.doctor --strict      # same, but fail on warnings
 
 | Dependency | Minimum Version | Why |
 |---|---|---|
-| Elixir | 1.17+ | Compilation target |
+| Elixir | 1.20.5+ | Compilation target |
 | Erlang/OTP | 27+ | `boundary` compiler plugin |
 | SQLite3 (embedded via `exqlite`) | Built-in (FTS5) | Zero-infra message + graph/FTS5 storage (no external server) |
 | PostgreSQL | 18+ with pgvector *(optional)* | Scalable graph memory + native pgvector semantic search |

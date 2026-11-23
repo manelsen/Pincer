@@ -1,4 +1,4 @@
-FROM elixir:1.18-slim AS builder
+FROM elixir:1.20.5-otp-27-slim AS builder
 
 ENV MIX_ENV=prod \
     MIX_BUILD_PATH=/app/_build \
@@ -20,7 +20,9 @@ COPY packages ./packages
 RUN mix deps.get --only prod && \
     for pkg in packages/*/; do ln -sfn /app/deps "${pkg}deps"; done && \
     mix deps.compile pincer_ports pincer_shared --force && \
-    mix deps.compile --force
+    mix deps.compile typed_struct jason plug --force && \
+    mix deps.compile telegex --force && \
+    mix deps.compile
 
 COPY lib ./lib
 COPY priv ./priv
@@ -30,7 +32,7 @@ COPY LICENSE ./LICENSE
 
 RUN mix compile
 
-FROM elixir:1.18-slim AS runtime
+FROM elixir:1.20.5-otp-27-slim AS runtime
 
 ARG APP_UID=1000
 ARG APP_GID=1000

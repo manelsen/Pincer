@@ -504,7 +504,7 @@ defmodule Pincer.Storage.Adapters.SQLite do
         {:error, :not_found}
 
       node ->
-        next_data = Map.put(node.data || %{}, "forgotten_at", now_iso8601())
+        next_data = Map.put(node.data, "forgotten_at", now_iso8601())
 
         case update_node_data(server, node.id, next_data) do
           {:ok, _} -> :ok

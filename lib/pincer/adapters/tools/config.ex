@@ -3,7 +3,6 @@ defmodule Pincer.Adapters.Tools.Config do
   Tools for managing Pincer configuration in real time.
   """
   @behaviour Pincer.Ports.Tool
-  require Logger
 
   @impl true
   def spec do

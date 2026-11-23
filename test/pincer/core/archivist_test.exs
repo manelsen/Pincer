@@ -32,13 +32,8 @@ defmodule Pincer.Core.ArchivistTest do
 
     @impl true
     def stream_completion(messages, model, config, tools) do
-      case chat_completion(messages, model, config, tools) do
-        {:ok, response, _usage} ->
-          {:ok, Stream.iterate(response, fn _ -> nil end) |> Stream.take(0)}
-
-        error ->
-          error
-      end
+      {:ok, response, _usage} = chat_completion(messages, model, config, tools)
+      {:ok, Stream.iterate(response, fn _ -> nil end) |> Stream.take(0)}
     end
   end
 

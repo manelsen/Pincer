@@ -9,7 +9,7 @@ defmodule Pincer.MixProject do
     [
       app: :pincer,
       version: @version,
-      elixir: "~> 1.17",
+      elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       compilers: [:boundary] ++ Mix.compilers(),
       boundary: [

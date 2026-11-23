@@ -16,8 +16,6 @@ defmodule Pincer.Core.ConversationObservability do
 
   use GenServer
 
-  require Logger
-
   @handler_id "pincer-conversation-observability"
 
   @events [

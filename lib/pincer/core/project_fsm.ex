@@ -104,8 +104,6 @@ defmodule Pincer.Core.ProjectFSM do
     end
   end
 
-  defp enrich_state(_state, _phase, _attrs), do: {:error, :unsupported_phase}
-
   defp enrich_with_text(state, phase, field, value, error_tag) when is_binary(value) do
     case String.trim(value) do
       "" -> {:error, error_tag}

@@ -43,7 +43,7 @@ defmodule Pincer.Core.Orchestration.SubAgentRegistryTest do
     Application.put_env(:pincer, :max_subagents, :infinity)
     id4 = reserve!(reserved, "global-4", unique_session())
     id5 = reserve!(reserved, "global-5", unique_session())
-    assert is_binary(id4) and is_binary(id5)
+    assert id4 != id5
   end
 
   test "reserve enforces the per-session cap independently of the global cap", %{

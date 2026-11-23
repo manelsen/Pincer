@@ -114,8 +114,11 @@ PINCER_WHATSAPP=1 mix test --warnings-as-errors \
   test/pincer/channels/whatsapp_bridge_test.exs
 ```
 
-Toolchain: `mise.toml` pins Elixir 1.19.5 / OTP 27 (plus Go); `.tool-versions` and CI use
-Elixir 1.18 / OTP 27.2; `mix.exs` requires `~> 1.17` because `exqlite` 0.43 does.
+Toolchain: `mise.toml`, `.tool-versions`, the Dockerfile, and CI pin Elixir 1.20.5 /
+OTP 27.2 (plus Go); `mix.exs` requires `~> 1.20`. On a cold dependency build, compile
+`plug` before the project (`mix deps.compile plug`): `telegex` uses `Plug.Router` but
+declares `plug` as optional, so Mix can otherwise compile it too early. The Dockerfile
+and CI do this explicitly.
 
 **Every command sets `auto_background_after: 10`.** No exceptions, no categories, no
 "trivial" case, and no distinction between tools: the tool blocks for 60 seconds by

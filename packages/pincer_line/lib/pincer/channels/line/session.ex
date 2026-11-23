@@ -1,7 +1,8 @@
 defmodule Pincer.Channels.Line.Session do
-  @compile {:no_warn_undefined, [
-    Pincer.Infra.PubSub
-  ]}
+  @compile {:no_warn_undefined,
+            [
+              Pincer.Infra.PubSub
+            ]}
   @moduledoc """
   LINE channel session GenServer.
 
@@ -27,8 +28,6 @@ defmodule Pincer.Channels.Line.Session do
   """
 
   use Pincer.Ports.Channel
-  require Logger
-
   @chunk_size 500
 
   # Sentence-ending punctuation followed by whitespace or end-of-string

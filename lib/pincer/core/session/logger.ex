@@ -65,8 +65,6 @@ defmodule Pincer.Core.Session.Logger do
   Uses `File.write/3` with `:append` mode, which is atomic for reasonable
   message sizes. For high-volume scenarios, consider batching.
   """
-  require Logger
-
   alias Pincer.Core.AgentPaths
 
   @sessions_dir "sessions"

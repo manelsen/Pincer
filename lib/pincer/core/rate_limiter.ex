@@ -17,8 +17,6 @@ defmodule Pincer.Core.RateLimiter do
   """
   use GenServer
 
-  require Logger
-
   alias Pincer.Utils.ETSHelper
 
   @default_limits %{

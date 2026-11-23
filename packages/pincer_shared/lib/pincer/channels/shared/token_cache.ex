@@ -28,8 +28,6 @@ defmodule Pincer.Channels.Shared.TokenCache do
   """
 
   use GenServer
-  require Logger
-
   @safety_margin_seconds 60
 
   defstruct [:token, :expires_at, :fetch_fn, :last_error, waiters: []]

@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Require Elixir 1.20.5 / OTP 27 across `mix.exs`, mise/asdf, the Docker image, and CI. Remove compiler warnings surfaced by 1.20 (unused `require Logger` and unreachable/redundant clauses) so `warnings_as_errors` stays clean.
+
 ### Added
 - The local sandbox adapter can run commands over a Linux-only bubblewrap transport (`transport: "bwrap"` or `bwrap: true`): a minimal read-only root, workspace bind, network `none`/`host`, `prlimit`-based memory/CPU/PID/file limits, a capability probe cached per executable, and fail-closed startup via `StartupGuard.check_sandbox/0`.
 - The `pincer_webhook` channel now runs an HTTP listener (Bandit + Plug) under the channels supervisor, configurable with `bind` (loopback by default), `port`, `path`, `max_body_bytes`, and `rate_limit_per_minute`; deliveries are token-gated and validated before ingestion.

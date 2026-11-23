@@ -3,7 +3,7 @@ defmodule Pincer.Core.WorkspaceGuard do
   Domain-level security policy for paths and commands.
   Centralizes safety rules for the unified executor.
   """
-  require Logger
+
   alias Pincer.Core.Tooling.CommandProfile
 
   @outside_workspace_error "Access denied: Path outside workspace"

@@ -1,7 +1,8 @@
 defmodule Pincer.Channels.DingTalk.Session do
-  @compile {:no_warn_undefined, [
-    Pincer.Infra.PubSub
-  ]}
+  @compile {:no_warn_undefined,
+            [
+              Pincer.Infra.PubSub
+            ]}
   @moduledoc """
   DingTalk channel session GenServer.
 
@@ -34,8 +35,6 @@ defmodule Pincer.Channels.DingTalk.Session do
   """
 
   use Pincer.Ports.Channel
-  require Logger
-
   @impl Pincer.Ports.Channel
   def start_link(%{chat_id: chat_id} = args) do
     GenServer.start_link(__MODULE__, args, name: via_tuple(chat_id))

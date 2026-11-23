@@ -11,7 +11,6 @@ defmodule Pincer.Core.MemoryTypes do
   """
   @spec normalize(String.t() | atom() | nil) :: String.t()
   def normalize(type) when is_atom(type), do: type |> Atom.to_string() |> normalize()
-  def normalize(nil), do: "reference"
 
   def normalize(type) when is_binary(type) do
     if not String.valid?(type) do
@@ -35,7 +34,6 @@ defmodule Pincer.Core.MemoryTypes do
   """
   @spec valid?(String.t() | atom() | nil) :: boolean()
   def valid?(type) when is_atom(type), do: type |> Atom.to_string() |> valid?()
-  def valid?(nil), do: false
 
   def valid?(type) when is_binary(type) do
     String.valid?(type) and

@@ -1,7 +1,8 @@
 defmodule Pincer.Channels.Feishu.Session do
-  @compile {:no_warn_undefined, [
-    Pincer.Infra.PubSub
-  ]}
+  @compile {:no_warn_undefined,
+            [
+              Pincer.Infra.PubSub
+            ]}
   @moduledoc """
   Feishu channel session GenServer.
 
@@ -33,8 +34,6 @@ defmodule Pincer.Channels.Feishu.Session do
   """
 
   use Pincer.Ports.Channel
-  require Logger
-
   alias Pincer.Channels.Feishu.Cards
 
   @impl Pincer.Ports.Channel

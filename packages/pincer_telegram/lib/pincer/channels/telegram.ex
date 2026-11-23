@@ -1018,8 +1018,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     has_document?(message) or has_photo?(message) or has_audio?(message)
   end
 
-  defp has_supported_attachments?(_), do: false
-
   defp has_document?(message), do: is_map(map_value(message, :document))
 
   defp has_photo?(message) do

@@ -356,9 +356,6 @@ defmodule Pincer.Adapters.Connectors.MCP.Client do
       {from, updated_requests} ->
         GenServer.reply(from, {:ok, response})
         %{state | requests: updated_requests}
-
-      _ ->
-        state
     end
   end
 

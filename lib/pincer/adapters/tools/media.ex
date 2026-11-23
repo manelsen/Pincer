@@ -29,7 +29,6 @@ defmodule Pincer.Adapters.Tools.Media do
   """
   @behaviour Pincer.Ports.Tool
 
-  require Logger
   alias Pincer.Core.WorkspaceGuard
 
   @vision_prompt "Describe this image in detail. Include all text visible in the image."
