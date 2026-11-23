@@ -1,0 +1,29 @@
+# PR-Agent project instructions.
+# Configuration reference: https://docs.pr-agent.ai/usage-guide/configuration_options/
+#
+# AGENTS.md is the source of truth for this repository; this file is the short
+# list a reviewer must enforce. Model and trigger settings live in
+# .github/workflows/pr-agent.yml.
+
+[pr_reviewer]
+extra_instructions = """
+This repository is Pincer, an Elixir/OTP agent framework (see AGENTS.md). Enforce these or say why they do not apply:
+
+- Hexagonal boundaries: Channels -> Adapters -> Core -> Ports -> Infra (+ Utils). Core may depend only on Ports, Infra, Utils; Ports only on Infra. A new Core module used from Adapters or Channels must be added to the exports in lib/pincer/core.ex.
+- Warnings are errors (`warnings_as_errors`): unused variables, unused aliases and boundary violations fail the build.
+- TDD: every behaviour change in a .ex file needs a test that would catch the bug, not a test that pins wording, wiring or a tautology.
+- Security: filesystem and shell work must go through Pincer.Core.WorkspaceGuard and Pincer.Adapters.Tools.SafeShell. Flag any path that skips the guards (traversal, shell metacharacters, SSRF, dynamic atoms).
+- OTP: background work needs a supervision story; flag blocking calls inside callbacks, unbounded message queues, and named ETS tables created by a process that may die.
+- Tests mutate global application env only when unavoidable, and restore it; async tests must not swap process-global adapters.
+- Do not suggest changes that bypass the ports layer or reintroduce removed modules.
+"""
+
+[pr_code_suggestions]
+extra_instructions = """
+Prefer fixes that keep the boundary rules and the existing port/adapter structure. For a behaviour change with no test, call that out explicitly instead of only suggesting the implementation.
+"""
+
+[pr_description]
+extra_instructions = """
+Write in Portuguese (pt-BR). Cover the user-visible behaviour, the tests that were run, and any configuration or migration impact.
+"""
