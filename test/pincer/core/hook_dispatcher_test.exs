@@ -147,4 +147,39 @@ defmodule Pincer.Core.HookDispatcherTest do
       assert ctx[:second_hook_ran] == true
     end
   end
+
+  describe "crash resilience" do
+    test "registrations survive a crash of the dispatcher" do
+      :ok = HookDispatcher.register(OkHook)
+      original = Process.whereis(HookDispatcher)
+      assert is_pid(original)
+
+      Process.exit(original, :kill)
+      restarted = wait_for_restart(original)
+
+      # The restarted process reclaimed the protected table from the heir, so
+      # both dispatch and further registration keep working.
+      assert :ok = HookDispatcher.register(SecondOkHook)
+
+      {:ok, ctx} = HookDispatcher.dispatch(:test_event, %{})
+
+      assert ctx[:ok_hook_ran] == true
+      assert ctx[:second_hook_ran] == true
+      assert Process.whereis(HookDispatcher) == restarted
+    end
+  end
+
+  defp wait_for_restart(original, attempts \\ 100) do
+    case Process.whereis(HookDispatcher) do
+      pid when is_pid(pid) and pid != original ->
+        pid
+
+      _ when attempts == 0 ->
+        flunk("HookDispatcher did not restart after being killed")
+
+      _ ->
+        Process.sleep(10)
+        wait_for_restart(original, attempts - 1)
+    end
+  end
 end

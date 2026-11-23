@@ -6,6 +6,8 @@ defmodule Pincer.Core.Orchestration.Blackboard do
   use GenServer
   require Logger
 
+  alias Pincer.Utils.ETSHelper
+
   @table :pincer_blackboard
   @journal_file "memory/blackboard.journal"
   @ram_threshold_prune 0.95
@@ -125,20 +127,23 @@ defmodule Pincer.Core.Orchestration.Blackboard do
 
   @impl true
   def init(state) do
-    :ets.new(@table, [
-      :named_table,
-      :ordered_set,
-      :public,
-      read_concurrency: true,
-      write_concurrency: true
-    ])
+    _ =
+      ETSHelper.ensure_named_table(@table,
+        options: [
+          :named_table,
+          :ordered_set,
+          :public,
+          read_concurrency: true,
+          write_concurrency: true
+        ]
+      )
 
     journaler = spawn_link(fn -> journal_loop() end)
     Process.register(journaler, :blackboard_journaler)
 
     send(self(), :check_memory_health)
     Logger.info("📚 BLACKBOARD ARMED: Tiered Storage (RAM + Journal Recovery) active.")
-    {:ok, %{state | journal_pid: journaler}}
+    {:ok, %{state | next_id: next_message_id(), journal_pid: journaler}}
   end
 
   @impl true
@@ -306,6 +311,54 @@ defmodule Pincer.Core.Orchestration.Blackboard do
 
   defp message_id(%{id: id}) when is_integer(id), do: id
   defp message_id(_), do: 0
+
+  # A restarted server must not reuse ids: the hot cache (kept alive by the ETS
+  # heir) and the journal are keyed by id, so starting again at 1 would
+  # overwrite messages that are still readable.
+  defp next_message_id, do: max(last_ram_id(), last_journal_id()) + 1
+
+  defp last_ram_id do
+    case :ets.last(@table) do
+      :"$end_of_table" -> 0
+      id when is_integer(id) -> id
+      _ -> 0
+    end
+  end
+
+  # Journal records are `<<size::32, term::binary>>`; read only the last one so
+  # boot does not scan a journal that can hold millions of messages.
+  defp last_journal_id do
+    case File.stat(@journal_file) do
+      {:ok, %{size: size}} when size >= 4 -> last_record_id(size)
+      _ -> 0
+    end
+  end
+
+  defp last_record_id(size) do
+    case :file.open(@journal_file, [:read, :raw, :binary]) do
+      {:ok, file} ->
+        try do
+          read_record_id(file, size)
+        after
+          :file.close(file)
+        end
+
+      _ ->
+        0
+    end
+  end
+
+  defp read_record_id(file, size) do
+    with {:ok, <<len::32>>} when len > 0 and len <= size - 4 <-
+           :file.pread(file, size - 4, 4),
+         {:ok, binary} <- :file.pread(file, size - 4 - len, len) do
+      message_id(:erlang.binary_to_term(binary))
+    else
+      _ -> 0
+    end
+  rescue
+    _ -> 0
+  end
 
   # --- Internal Logic: Journaler & Pruning ---
 

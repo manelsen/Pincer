@@ -50,4 +50,34 @@ defmodule Pincer.Core.BlackboardTest do
 
     assert message.kind == nil
   end
+
+  test "a restart keeps the hot cache and does not reuse ids" do
+    first_id = Blackboard.post("system", "before restart", nil, scope: "restart-test")
+    assert is_integer(first_id)
+
+    original = Process.whereis(Blackboard)
+    Process.exit(original, :kill)
+    restarted = wait_for_blackboard_restart(original)
+
+    second_id = Blackboard.post("system", "after restart", nil, scope: "restart-test")
+    assert second_id > first_id
+
+    {messages, _} = Blackboard.fetch_new(0, scope: "restart-test")
+    assert Enum.map(messages, & &1.content) == ["before restart", "after restart"]
+    assert Process.whereis(Blackboard) == restarted
+  end
+
+  defp wait_for_blackboard_restart(original, attempts \\ 100) do
+    case Process.whereis(Blackboard) do
+      pid when is_pid(pid) and pid != original ->
+        pid
+
+      _ when attempts == 0 ->
+        flunk("Blackboard did not restart after being killed")
+
+      _ ->
+        Process.sleep(10)
+        wait_for_blackboard_restart(original, attempts - 1)
+    end
+  end
 end

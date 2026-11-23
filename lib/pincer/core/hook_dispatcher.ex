@@ -49,6 +49,9 @@ defmodule Pincer.Core.HookDispatcher do
   use GenServer
   require Logger
 
+  alias Pincer.Utils.ETSHelper
+  alias Pincer.Utils.ETSTableHeir
+
   @table :pincer_hook_registry
 
   # ---------------------------------------------------------------------------
@@ -148,16 +151,23 @@ defmodule Pincer.Core.HookDispatcher do
   @impl true
   @doc false
   def init(_opts) do
-    :ets.new(@table, [
-      :named_table,
-      :set,
-      :protected,
-      read_concurrency: true
-    ])
+    _ =
+      ETSHelper.ensure_named_table(@table,
+        options: [:named_table, :set, :protected, read_concurrency: true]
+      )
+
+    # After a crash the table survives with the heir, but `:protected` writes
+    # are owner-only, so a restarted dispatcher must take it back. Without the
+    # heir the registry would simply be empty and every hook would stop firing.
+    :ok = ETSTableHeir.ensure_owned(@table)
 
     Logger.info("HookDispatcher started.")
     {:ok, %{}}
   end
+
+  # The transfer of ownership from `:ets.give_away/3` lands here.
+  @impl true
+  def handle_info(_message, state), do: {:noreply, state}
 
   @impl true
   @doc false
