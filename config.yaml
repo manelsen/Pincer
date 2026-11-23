@@ -93,6 +93,9 @@ mcp:
   servers: {}
 gateway:
   bind: "127.0.0.1"
+# 4001 is occupied by the local Amélie container; keep Pincer's health listener
+# on 4002 so `mix pincer.server` can bind without stopping Amélie.
+health_port: 4002
 sandbox:
   adapter: "local"
   local:
