@@ -1,0 +1,54 @@
+name: PR Agent
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review, synchronize]
+  issue_comment:
+    types: [created]
+
+# A new push supersedes the review still running for the previous one.
+concurrency:
+  group: pr-agent-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pr_agent_job:
+    # Skip events raised by bots (including PR-Agent itself). Comment commands
+    # spend the OpenRouter key, so only PR comments from people with write
+    # access to the repo run them. Fork PRs get no secrets, so they are skipped
+    # rather than failing.
+    if: >-
+      ${{ github.event.sender.type != 'Bot' && (
+        (github.event_name == 'pull_request' &&
+          github.event.pull_request.head.repo.full_name == github.repository) || (
+          github.event.issue.pull_request &&
+          contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.comment.author_association)
+        )
+      ) }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: PR Agent action step
+        # v0.50.0, pinned by commit.
+        uses: the-pr-agent/pr-agent@e673a02076ce09a4726c3d0c3cc85780e59ca52b
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_KEY }}
+          config.model: "openrouter/deepseek/deepseek-v4.1-flash-1017"
+          config.fallback_models: '["openrouter/deepseek/deepseek-v4.1-flash"]'
+          # Not in PR-Agent's built-in token table; the model takes 1M. Both
+          # caps are needed: max_model_tokens clamps every model (default 32k).
+          config.custom_model_max_tokens: "128000"
+          config.max_model_tokens: "128000"
+          # The model reasons before answering; with the provider's default
+          # output cap it spent the whole budget thinking and returned nothing.
+          config.max_output_tokens: "32000"
+          config.reasoning_effort: "low"
+          config.additional_reasoning_effort_models: '["deepseek/deepseek-v4.1-flash-1017", "deepseek/deepseek-v4.1-flash"]'
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "false"
+          github_action_config.auto_improve: "true"
+          github_action_config.pr_actions: '["opened", "reopened", "ready_for_review", "synchronize"]'
