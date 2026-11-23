@@ -94,12 +94,12 @@ defmodule Pincer.MixProject do
       # HTTP clients
       {:req, "~> 0.7"},
       {:finch, "~> 0.25"},
-      {:tesla, "~> 1.9"},
+      {:tesla, "~> 1.16"},
       {:hackney, "~> 1.20"},
       {:multipart, "~> 0.4"},
 
       # HTTP server (health endpoint)
-      {:bandit, "~> 1.5"},
+      {:bandit, "~> 1.10"},
 
       # JSON
       {:jason, "~> 1.4"},
