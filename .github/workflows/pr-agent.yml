@@ -43,10 +43,12 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_KEY }}
           config.model: "openrouter/deepseek/deepseek-v4.1-flash-1017"
-          config.fallback_models: '["openrouter/deepseek/deepseek-v4.1-flash"]'
-          # Not in PR-Agent's built-in token table. Both models above, primary
-          # and fallback, take 1048576 (OpenRouter /api/v1/models,
-          # context_length), and 1000000 keeps a margin.
+          # Same dated model: the undated alias has no Mistral endpoint on
+          # OpenRouter, and Mistral is the provider this account routes to.
+          config.fallback_models: '["openrouter/deepseek/deepseek-v4.1-flash-1017"]'
+          # Not in PR-Agent's built-in token table. Mistral serves this model
+          # with a 1M context and 128k max output (docs.mistral.ai/models/
+          # deepseek-v4-flash-1017); 1000000 keeps a margin.
           # Both caps are needed: max_model_tokens clamps every model (default
           # 32k). The output cap below comes out of this window, so the window
           # must hold the prompt plus 128k.
@@ -54,9 +56,8 @@ jobs:
           config.max_model_tokens: "1000000"
           # The model reasons before answering; with the provider's default
           # output cap it spent the whole budget thinking and returned nothing.
-          # With effort at max, leave room: OpenRouter allows 393k for both
-          # models. It is taken from the window above: 1M - 128k leaves ~870k
-          # for the prompt.
+          # 128k is Mistral's max output for this model. It is taken from the
+          # window above: 1M - 128k leaves ~870k for the prompt.
           config.max_output_tokens: "128000"
           # Effort "max" (sent as xhigh) let the model think until the cap and
           # answer nothing (finish_reason: length), even on a 7k-token diff.
@@ -69,7 +70,7 @@ jobs:
           config.reasoning_effort: "max"
           # Full names, as in config.model. PR-Agent also matches the bare
           # name as a suffix, but the full form needs no knowing that.
-          config.additional_reasoning_effort_models: '["openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/deepseek/deepseek-v4.1-flash"]'
+          config.additional_reasoning_effort_models: '["openrouter/deepseek/deepseek-v4.1-flash-1017"]'
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "true"
