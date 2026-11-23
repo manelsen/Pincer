@@ -346,6 +346,100 @@ defmodule Pincer.Adapters.Tools.OrchestratorTest do
     wait_until(fn -> SubAgentRegistry.count_for(root) == 0 end)
   end
 
+  test "tree token budget rejects the next dispatch before starting a child", %{sup: sup, ws: ws} do
+    prev_global = Application.get_env(:pincer, :max_subagents)
+    prev_session = Application.get_env(:pincer, :max_subagents_per_session)
+    prev_tree_tokens = Application.get_env(:pincer, :max_subagent_tree_tokens)
+
+    Application.put_env(:pincer, :max_subagents, 100)
+    Application.put_env(:pincer, :max_subagents_per_session, :infinity)
+    Application.put_env(:pincer, :max_subagent_tree_tokens, 10)
+
+    on_exit(fn ->
+      restore_env(:max_subagents, prev_global)
+      restore_env(:max_subagents_per_session, prev_session)
+      restore_env(:max_subagent_tree_tokens, prev_tree_tokens)
+    end)
+
+    root = unique_session("tree_token")
+
+    assert {:ok, first} =
+             Orchestrator.execute(
+               %{"goal" => "First in tree"},
+               %{"session_id" => root, "workspace_path" => ws}
+             )
+
+    first_id = agent_id_from(first)
+    on_exit(fn -> SubAgentRegistry.release(first_id) end)
+
+    assert :ok = SubAgentRegistry.add_usage(root, 10)
+    before_children = child_pids(sup)
+
+    assert {:error, message} =
+             Orchestrator.execute(
+               %{"goal" => "Must not start"},
+               %{"session_id" => root, "workspace_path" => ws}
+             )
+
+    assert message =~ "tree token budget"
+    assert message =~ "cap 10 tokens"
+    assert MapSet.subset?(child_pids(sup), before_children)
+
+    wait_until(fn -> SubAgentRegistry.count_for(root) == 0 end)
+    assert SubAgentRegistry.tree_usage(root) == :error
+  end
+
+  test "tree deadline rejects the next dispatch before starting a child", %{sup: sup, ws: ws} do
+    prev_global = Application.get_env(:pincer, :max_subagents)
+    prev_session = Application.get_env(:pincer, :max_subagents_per_session)
+    prev_tree_tokens = Application.get_env(:pincer, :max_subagent_tree_tokens)
+    prev_tree_ms = Application.get_env(:pincer, :max_subagent_tree_ms)
+    original_now_fun = registry_now_fun()
+
+    Application.put_env(:pincer, :max_subagents, 100)
+    Application.put_env(:pincer, :max_subagents_per_session, :infinity)
+    Application.put_env(:pincer, :max_subagent_tree_tokens, :infinity)
+    Application.put_env(:pincer, :max_subagent_tree_ms, 1_000)
+
+    clock = start_supervised!({Agent, fn -> 0 end})
+    inject_clock!(fn -> Agent.get(clock, & &1) end)
+
+    on_exit(fn ->
+      restore_env(:max_subagents, prev_global)
+      restore_env(:max_subagents_per_session, prev_session)
+      restore_env(:max_subagent_tree_tokens, prev_tree_tokens)
+      restore_env(:max_subagent_tree_ms, prev_tree_ms)
+      restore_now_fun(original_now_fun)
+    end)
+
+    root = unique_session("tree_deadline")
+
+    assert {:ok, first} =
+             Orchestrator.execute(
+               %{"goal" => "First in tree"},
+               %{"session_id" => root, "workspace_path" => ws}
+             )
+
+    first_id = agent_id_from(first)
+    on_exit(fn -> SubAgentRegistry.release(first_id) end)
+
+    Agent.update(clock, fn _ -> 1_000 end)
+    before_children = child_pids(sup)
+
+    assert {:error, message} =
+             Orchestrator.execute(
+               %{"goal" => "Must not start"},
+               %{"session_id" => root, "workspace_path" => ws}
+             )
+
+    assert message =~ "tree deadline"
+    assert message =~ "cap 1000 ms"
+    assert MapSet.subset?(child_pids(sup), before_children)
+
+    wait_until(fn -> SubAgentRegistry.count_for(root) == 0 end)
+    assert SubAgentRegistry.tree_usage(root) == :error
+  end
+
   test "action status formats the durable run record", %{} do
     prev = Application.get_env(:pincer, :storage_adapter)
 
@@ -417,6 +511,31 @@ defmodule Pincer.Adapters.Tools.OrchestratorTest do
     test "reports an empty blackboard" do
       assert {:ok, "Blackboard is empty."} = BlackboardReader.execute(%{"limit" => 5})
     end
+  end
+
+  defp child_pids(sup) do
+    sup
+    |> DynamicSupervisor.which_children()
+    |> Enum.map(fn {_id, pid, _type, _modules} -> pid end)
+    |> MapSet.new()
+  end
+
+  defp inject_clock!(fun) do
+    :sys.replace_state(SubAgentRegistry, &Map.put(&1, :now_fun, fun))
+  end
+
+  defp registry_now_fun do
+    SubAgentRegistry
+    |> :sys.get_state()
+    |> Map.get(:now_fun, fn -> System.monotonic_time(:millisecond) end)
+  end
+
+  defp restore_now_fun(fun) do
+    if Process.whereis(SubAgentRegistry) do
+      :sys.replace_state(SubAgentRegistry, &Map.put(&1, :now_fun, fun))
+    end
+
+    :ok
   end
 
   defp post_messages(count) do

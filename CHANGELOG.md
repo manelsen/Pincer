@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sub-agent runs persist a running checkpoint every 10 tool uses, so `dispatch_agent`'s `status` action reports progress before termination.
 - `dispatch_agent` accepts per-run `provider`, `model`, and `thinking_level`, a `status` action that reads an agent's durable checkpoint run record, and enforces `:max_subagents` / `:max_subagents_per_session` caps before starting a child.
 - Sub-agents can dispatch nested sub-agents up to `:max_subagent_depth` (default 2); `dispatch_agent` is auto-approved inside a sub-agent, per-session caps are charged against the tree's root session, and depth/root are stored in checkpoint metadata.
+- Each sub-agent tree has a per-root token budget (`:max_subagent_tree_tokens`, default 200 000) and wall-clock deadline (`:max_subagent_tree_ms`, default 30 min), checked when a dispatch is admitted; running agents are not interrupted.
 - `session_search` native tool with `discover`, `search`, and `read` actions over persisted session transcripts and storage search.
 - Curated memory (`MEMORY.md`, `USER.md`) is bounded by `:curated_memory_limits` and enforced on both read and write through `Pincer.Core.CuratedMemory`.
 - Parallel tool fan-out is configurable with `:tool_max_concurrency`.

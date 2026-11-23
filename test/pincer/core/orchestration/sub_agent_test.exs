@@ -3,6 +3,7 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
 
   alias Pincer.Core.Orchestration.Blackboard
   alias Pincer.Core.Orchestration.SubAgent
+  alias Pincer.Core.Orchestration.SubAgentRegistry
   alias Pincer.Infra.PubSub
 
   defmodule ToolRegistryStub do
@@ -72,7 +73,7 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
            ], nil}
 
         :ok ->
-          {:ok, [%{"choices" => [%{"delta" => %{"content" => "Task complete"}}]}], nil}
+          {:ok, [%{"choices" => [%{"delta" => %{"content" => "Task complete"}}]}], usage()}
 
         :error ->
           {:error, :boom}
@@ -107,7 +108,7 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
            }, nil}
 
         :ok ->
-          {:ok, %{"role" => "assistant", "content" => "Task complete"}, nil}
+          {:ok, %{"role" => "assistant", "content" => "Task complete"}, usage()}
 
         :error ->
           {:error, :boom}
@@ -141,6 +142,10 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
       after
         10_000 -> :ok
       end
+    end
+
+    defp usage do
+      %{prompt_tokens: 7, completion_tokens: 5, total_tokens: 12}
     end
 
     defp notify_opts(opts) do
@@ -242,6 +247,51 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
              messages,
              &(&1.agent_id == sub_id and &1.content == "FINISHED: Task complete")
            )
+  end
+
+  test "reports successful run token usage to the registry for its root", %{tmp: tmp} do
+    LLMStub.put_mode(:ok)
+
+    prev_global = Application.get_env(:pincer, :max_subagents)
+    prev_session = Application.get_env(:pincer, :max_subagents_per_session)
+    prev_tree_tokens = Application.get_env(:pincer, :max_subagent_tree_tokens)
+
+    Application.put_env(:pincer, :max_subagents, :infinity)
+    Application.put_env(:pincer, :max_subagents_per_session, :infinity)
+    Application.put_env(:pincer, :max_subagent_tree_tokens, 1_000_000)
+
+    root = unique_id("root_usage")
+    slot_id = unique_id("slot_usage")
+    assert :ok = SubAgentRegistry.reserve(slot_id, root)
+
+    on_exit(fn ->
+      SubAgentRegistry.release(slot_id)
+      restore_env(:max_subagents, prev_global)
+      restore_env(:max_subagents_per_session, prev_session)
+      restore_env(:max_subagent_tree_tokens, prev_tree_tokens)
+    end)
+
+    id = unique_id("sub_usage")
+
+    {:ok, pid} =
+      SubAgent.start_link(
+        id: id,
+        goal: "Report token usage",
+        parent_session_id: root,
+        root_session_id: root,
+        workspace_path: Path.join(tmp, id),
+        llm_client: LLMStub,
+        tool_registry: ToolRegistryStub,
+        storage: StorageStub
+      )
+
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+
+    assert {:ok, %{tokens: 12}} = SubAgentRegistry.tree_usage(root)
+
+    SubAgentRegistry.release(slot_id)
+    assert SubAgentRegistry.tree_usage(root) == :error
   end
 
   test "posts FAILED to Blackboard and stops normally on executor error", %{tmp: tmp} do

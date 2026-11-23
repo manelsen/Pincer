@@ -36,6 +36,13 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   sub-agent; every other privileged tool still requires an operator and is
   denied. Nesting is bounded by the configured `:max_subagent_depth`.
 
+  On successful completion a Sub-Agent reports the run's total token usage to
+  `Pincer.Core.Orchestration.SubAgentRegistry`, keyed by its root session, so
+  the whole dispatch tree can be budgeted by its token and wall-clock caps.
+  Those tree budgets are enforced at spawn time; an exhausted budget rejects
+  new dispatches without interrupting running agents. Failed runs have no usage
+  and report nothing.
+
   ## Autonomous Execution Model
 
   SubAgents are designed for "fire and forget" delegation:
@@ -86,6 +93,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   alias Pincer.Core.LLM.RuntimeStatus
   alias Pincer.Core.Executor
   alias Pincer.Core.Orchestration.Blackboard
+  alias Pincer.Core.Orchestration.SubAgentRegistry
   alias Pincer.Core.Structs.Usage
 
   @checkpoint_statuses ~w(running paused completed finished failed interrupted)
@@ -311,6 +319,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
     })
 
     notify_parent(state.parent_session_id, "✅ Sub-Agent [#{state.id}] finished: #{response}")
+    report_tree_usage(state, usage)
     {:stop, :normal, %{state | worker_pid: nil, worker_ref: nil}}
   end
 
@@ -530,6 +539,31 @@ defmodule Pincer.Core.Orchestration.SubAgent do
     usage |> Usage.normalize() |> Usage.to_map()
   rescue
     _error -> nil
+  end
+
+  defp report_tree_usage(_state, nil), do: :ok
+
+  defp report_tree_usage(state, usage) do
+    if is_pid(Process.whereis(SubAgentRegistry)) do
+      tokens = Usage.normalize(usage).total_tokens
+      SubAgentRegistry.add_usage(state.root_session_id, tokens)
+    end
+
+    :ok
+  rescue
+    error ->
+      Logger.debug(
+        "[SubAgent #{state.id}] Failed to report token usage: #{Exception.message(error)}"
+      )
+
+      :ok
+  catch
+    :exit, reason ->
+      Logger.debug(
+        "[SubAgent #{state.id}] Sub-agent registry unavailable for token usage: #{inspect(reason)}"
+      )
+
+      :ok
   end
 
   defp truncate(value, max_chars) do

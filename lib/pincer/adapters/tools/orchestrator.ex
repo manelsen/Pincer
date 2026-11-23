@@ -12,6 +12,12 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   per-session cap is charged against the tree's root session, so root and nested
   agents share one budget.
 
+  The tree also has a token budget (`:max_subagent_tree_tokens`, default
+  `200_000`) and a wall-clock budget (`:max_subagent_tree_ms`, default
+  `1_800_000`), enforced at spawn time against the tree's root session. Running
+  agents are not killed when a budget is exhausted; only new dispatches are
+  rejected.
+
   ## Use Cases
 
   - **Parallel Processing**: Dispatch multiple agents to work on independent tasks
@@ -60,6 +66,8 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   alias Pincer.Core.Orchestration.Blackboard
 
   @default_max_subagent_depth 2
+  @default_max_subagent_tree_tokens 200_000
+  @default_max_subagent_tree_ms 1_800_000
 
   @type spec :: %{
           name: String.t(),
@@ -91,7 +99,7 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
     %{
       name: "dispatch_agent",
       description:
-        "Dispatches a new autonomous Sub-Agent to work on a goal asynchronously. Use this for monitoring, long tasks, parallel processing, or nested delegation: sub-agents may dispatch further sub-agents up to the configured :max_subagent_depth (default 2), and dispatch_agent is auto-approved inside a sub-agent while other privileged tools remain unavailable. Optionally pins the provider, model, and thinking level for that run. Use action \"status\" with an agent_id to read a dispatched agent's durable run record.",
+        "Dispatches a new autonomous Sub-Agent to work on a goal asynchronously. Use this for monitoring, long tasks, parallel processing, or nested delegation: sub-agents may dispatch further sub-agents up to the configured :max_subagent_depth (default 2), and dispatch_agent is auto-approved inside a sub-agent while other privileged tools remain unavailable. Each dispatch tree has token and wall-clock budgets enforced at spawn time; running agents are not killed mid-turn when a budget is exhausted. Optionally pins the provider, model, and thinking level for that run. Use action \"status\" with an agent_id to read a dispatched agent's durable run record.",
       parameters: %{
         type: "object",
         properties: %{
@@ -138,6 +146,11 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   fails fast because delegated agents have no operator. The child depth must not
   exceed the configured `:max_subagent_depth` (default `2`).
 
+  Each dispatch tree has a token budget (`:max_subagent_tree_tokens`) and a
+  wall-clock budget (`:max_subagent_tree_ms`) enforced at spawn time against the
+  tree's root session. Exhausting either rejects the dispatch with an error
+  naming the cap; running agents are not interrupted.
+
   ## Parameters
 
     * `goal` (required for `"start"`) - A clear, specific description of what
@@ -172,6 +185,9 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
     reserving
   - Per-session reservations are charged against `root_session_id`, so the whole
     tree shares one per-root cap
+  - Tree token (`:max_subagent_tree_tokens`) and wall-clock
+    (`:max_subagent_tree_ms`) budgets are enforced at reservation time; an
+    exhausted budget rejects new dispatches but does not kill running agents
   - Inside a sub-agent only `dispatch_agent` is auto-approved; all other
     privileged tools fail fast as denied because no operator is attached
   """
@@ -229,6 +245,12 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
 
         {:error, :session_limit} ->
           {:error, limit_message("session", :max_subagents_per_session, 8)}
+
+        {:error, :tree_token_budget} ->
+          {:error, tree_token_limit_message()}
+
+        {:error, :tree_deadline} ->
+          {:error, tree_deadline_message()}
       end
     end
   end
@@ -273,6 +295,25 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   defp limit_message(scope, key, default) do
     cap = Application.get_env(:pincer, key, default)
     "Sub-agent limit reached: #{scope} cap of #{cap} active sub-agents."
+  end
+
+  defp tree_token_limit_message do
+    cap = tree_cap(:max_subagent_tree_tokens, @default_max_subagent_tree_tokens)
+    "Sub-agent tree token budget exhausted (cap #{cap} tokens)."
+  end
+
+  defp tree_deadline_message do
+    cap = tree_cap(:max_subagent_tree_ms, @default_max_subagent_tree_ms)
+    "Sub-agent tree deadline exceeded (cap #{cap} ms)."
+  end
+
+  defp tree_cap(key, default) do
+    case Application.get_env(:pincer, key, default) do
+      :infinity -> :infinity
+      0 -> 0
+      value when is_integer(value) and value > 0 -> value
+      _ -> default
+    end
   end
 
   defp context_depth(context) do

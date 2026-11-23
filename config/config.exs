@@ -111,6 +111,8 @@ config :pincer, :tool_max_concurrency, 10
 config :pincer, :max_subagents, 32
 config :pincer, :max_subagents_per_session, 8
 config :pincer, :max_subagent_depth, 2
+config :pincer, :max_subagent_tree_tokens, 200_000
+config :pincer, :max_subagent_tree_ms, 1_800_000
 
 # Curated memory character budgets (MEMORY.md / USER.md)
 config :pincer, :curated_memory_limits, %{memory: 4_000, user: 2_500}
