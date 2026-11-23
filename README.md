@@ -69,13 +69,15 @@ mix pincer.doctor --strict      # same, but fail on warnings
 `sandbox.local.transport: "bwrap"` needs the `bwrap` binary and `prlimit`
 (util-linux), plus permission to create unprivileged user namespaces. On Ubuntu
 24.04+ where `kernel.apparmor_restrict_unprivileged_userns=1`, install and
-enforce the `bwrap-userns-restrict` AppArmor profile (usually
-`/etc/apparmor.d/bwrap-userns-restrict`) and verify with
-`bwrap --unshare-all ... /bin/true`. The boot probe fails closed if bwrap or
-prlimit is unavailable; `PINCER_SANDBOX_TRANSPORT=os` overrides the YAML
-transport. The Docker image ships `bubblewrap`, but the default container
-security profile blocks nested user namespaces, so `docker-compose.yml` pins
-the container to the OS transport. Use bwrap for bare-metal runs.
+enforce the `bwrap-userns-restrict` AppArmor profile shipped under
+`infrastructure/apparmor/`. The boot probe fails closed if bwrap or prlimit is
+unavailable; `PINCER_SANDBOX_TRANSPORT=os` overrides the YAML transport. The
+Docker image ships `bubblewrap`, but the default container security profile
+blocks nested user namespaces, so `docker-compose.yml` pins the container to the
+OS transport. Use bwrap for bare-metal runs.
+
+See [docs/operations/bubblewrap-sandbox.md](docs/operations/bubblewrap-sandbox.md)
+for the installation, verification, and troubleshooting steps.
 
 ## Configuration
 
