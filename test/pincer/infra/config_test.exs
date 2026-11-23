@@ -25,6 +25,7 @@ defmodule Pincer.Infra.ConfigTest do
 
     snapshot = Map.new(keys, fn k -> {k, Application.get_env(:pincer, k, :__unset__)} end)
     prev_sandbox_env = System.get_env("PINCER_SANDBOX_ADAPTER")
+    prev_sandbox_transport_env = System.get_env("PINCER_SANDBOX_TRANSPORT")
     prev_storage_env = System.get_env("PINCER_STORAGE")
     prev_sqlite_env = System.get_env("PINCER_SQLITE_PATH")
 
@@ -35,6 +36,7 @@ defmodule Pincer.Infra.ConfigTest do
       end)
 
       restore_sys_env("PINCER_SANDBOX_ADAPTER", prev_sandbox_env)
+      restore_sys_env("PINCER_SANDBOX_TRANSPORT", prev_sandbox_transport_env)
       restore_sys_env("PINCER_STORAGE", prev_storage_env)
       restore_sys_env("PINCER_SQLITE_PATH", prev_sqlite_env)
     end)
@@ -198,6 +200,37 @@ defmodule Pincer.Infra.ConfigTest do
       assert :ok = Config.load(config_file: yaml, load_dotenv: false)
 
       assert Application.get_env(:pincer, :sandbox_adapter) == Pincer.Adapters.Sandbox.SSH
+    end
+
+    test "PINCER_SANDBOX_TRANSPORT overrides the local transport" do
+      yaml =
+        write_yaml!("""
+        sandbox:
+          adapter: "local"
+          local:
+            transport: "bwrap"
+        """)
+
+      System.delete_env("PINCER_SANDBOX_ADAPTER")
+      System.put_env("PINCER_SANDBOX_TRANSPORT", "os")
+      assert :ok = Config.load(config_file: yaml, load_dotenv: false)
+
+      assert Config.get(:sandbox)["local"]["transport"] == "os"
+    end
+
+    test "an invalid PINCER_SANDBOX_TRANSPORT is ignored" do
+      yaml =
+        write_yaml!("""
+        sandbox:
+          adapter: "local"
+          local:
+            transport: "bwrap"
+        """)
+
+      System.put_env("PINCER_SANDBOX_TRANSPORT", "shell")
+      assert :ok = Config.load(config_file: yaml, load_dotenv: false)
+
+      assert Config.get(:sandbox)["local"]["transport"] == "bwrap"
     end
   end
 
