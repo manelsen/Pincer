@@ -26,9 +26,10 @@ jobs:
         )
       ) }}
     runs-on: ubuntu-latest
-    # A hung run would otherwise hold a runner for six hours. A call that
-    # thinks 96k tokens takes up to ~8 min; review and suggestions may each
-    # fall back to the second model.
+    # A hung run would otherwise hold a runner for six hours. Measured on
+    # supernova#55 with the settings below: review 39 s; suggestions 4 min 17 s
+    # on the primary (which ran out) plus 65 s on the fallback. Even four
+    # calls of that length fit well inside 45 min.
     timeout-minutes: 45
     permissions:
       contents: read
@@ -43,8 +44,9 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_KEY }}
           config.model: "openrouter/deepseek/deepseek-v4.1-flash-1017"
           config.fallback_models: '["openrouter/deepseek/deepseek-v4.1-flash"]'
-          # Not in PR-Agent's built-in token table; the model takes 1048576, and
-          # 1000000 keeps a margin.
+          # Not in PR-Agent's built-in token table. Both models above, primary
+          # and fallback, take 1048576 (OpenRouter /api/v1/models,
+          # context_length), and 1000000 keeps a margin.
           # Both caps are needed: max_model_tokens clamps every model (default
           # 32k). The output cap below comes out of this window, so the window
           # must hold the prompt plus 128k.
@@ -59,8 +61,11 @@ jobs:
           # Effort "max" (sent as xhigh) let the model think until the cap and
           # answer nothing (finish_reason: length), even on a 7k-token diff.
           # A thinking budget instead: deep, but 32k always left for the answer.
-          # It takes precedence over the effort below.
+          # It takes precedence over the effort below; the run log confirms it:
+          # "Using openrouter.reasoning_max_tokens over config.reasoning_effort".
           openrouter.reasoning_max_tokens: "96000"
+          # "max" is a valid value in v0.50.0 (ReasoningEffort enum: none,
+          # minimal, low, medium, high, xhigh, max), sent to OpenRouter as xhigh.
           config.reasoning_effort: "max"
           # Full names, as in config.model. PR-Agent also matches the bare
           # name as a suffix, but the full form needs no knowing that.
