@@ -95,6 +95,7 @@ defmodule Pincer.Infra.Config do
   """
 
   @config_file "config.yaml"
+  @sandbox_transports ~w(os tool_registry bwrap)
 
   @allowed_top_level_keys %{
     "agents" => :agents,
@@ -349,7 +350,7 @@ defmodule Pincer.Infra.Config do
   end
 
   defp configure_sandbox(config) do
-    sandbox_config = config["sandbox"]
+    sandbox_config = config["sandbox"] |> apply_sandbox_transport_override()
 
     if is_map(sandbox_config) do
       Application.put_env(:pincer, :sandbox, sandbox_config)
@@ -366,6 +367,30 @@ defmodule Pincer.Infra.Config do
       mod -> Application.put_env(:pincer, :sandbox_adapter, mod)
     end
   end
+
+  defp apply_sandbox_transport_override(config) when is_map(config) do
+    case System.get_env("PINCER_SANDBOX_TRANSPORT") do
+      value when is_binary(value) and value != "" ->
+        transport = String.trim(value)
+
+        if transport in @sandbox_transports do
+          local = if is_map(config["local"]), do: config["local"], else: %{}
+          Map.put(config, "local", Map.put(local, "transport", transport))
+        else
+          Logger.warning(
+            "Ignoring invalid PINCER_SANDBOX_TRANSPORT=#{inspect(transport)}; " <>
+              "expected one of #{Enum.join(@sandbox_transports, ", ")}"
+          )
+
+          config
+        end
+
+      _ ->
+        config
+    end
+  end
+
+  defp apply_sandbox_transport_override(_config), do: nil
 
   defp resolve_sandbox_module(spec) when is_binary(spec) do
     case String.downcase(String.trim(spec)) do

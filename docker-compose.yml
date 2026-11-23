@@ -36,6 +36,10 @@ services:
       PINCER_DB_USER: postgres
       PINCER_DB_PASSWORD: postgres
       PINCER_DB_NAME: pincer
+      # bwrap cannot create a nested user namespace under Docker's default
+      # AppArmor/seccomp profile. Use the OS transport in the container; the
+      # bwrap transport remains available for bare-metal runs.
+      PINCER_SANDBOX_TRANSPORT: os
     depends_on:
       postgres:
         condition: service_healthy
