@@ -11,9 +11,17 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
 
     File.mkdir_p!(root)
 
+    # `maybe_capture_api_key/3` calls System.put_env/2, which outlives the test
+    # process and would leak into the rest of the suite.
+    previous_key = System.get_env("OPENROUTER_API_KEY")
+
     on_exit(fn ->
       File.rm_rf!(root)
       Mix.Task.reenable(@task)
+
+      if previous_key,
+        do: System.put_env("OPENROUTER_API_KEY", previous_key),
+        else: System.delete_env("OPENROUTER_API_KEY")
     end)
 
     {:ok, root: root}
