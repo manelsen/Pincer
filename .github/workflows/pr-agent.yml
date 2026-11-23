@@ -26,9 +26,10 @@ jobs:
         )
       ) }}
     runs-on: ubuntu-latest
-    # A hung run would otherwise hold a runner for six hours. Thinking at max
-    # effort with a 128k output cap can take many minutes.
-    timeout-minutes: 30
+    # A hung run would otherwise hold a runner for six hours. A call that
+    # thinks 96k tokens takes up to ~8 min; review and suggestions may each
+    # fall back to the second model.
+    timeout-minutes: 45
     permissions:
       contents: read
       issues: write
@@ -42,7 +43,8 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_KEY }}
           config.model: "openrouter/deepseek/deepseek-v4.1-flash-1017"
           config.fallback_models: '["openrouter/deepseek/deepseek-v4.1-flash"]'
-          # Not in PR-Agent's built-in token table; the model takes 1M (1048576).
+          # Not in PR-Agent's built-in token table; the model takes 1048576, and
+          # 1000000 keeps a margin.
           # Both caps are needed: max_model_tokens clamps every model (default
           # 32k). The output cap below comes out of this window, so the window
           # must hold the prompt plus 128k.
@@ -54,6 +56,11 @@ jobs:
           # models. It is taken from the window above: 1M - 128k leaves ~870k
           # for the prompt.
           config.max_output_tokens: "128000"
+          # Effort "max" (sent as xhigh) let the model think until the cap and
+          # answer nothing (finish_reason: length), even on a 7k-token diff.
+          # A thinking budget instead: deep, but 32k always left for the answer.
+          # It takes precedence over the effort below.
+          openrouter.reasoning_max_tokens: "96000"
           config.reasoning_effort: "max"
           # Full names, as in config.model. PR-Agent also matches the bare
           # name as a suffix, but the full form needs no knowing that.
