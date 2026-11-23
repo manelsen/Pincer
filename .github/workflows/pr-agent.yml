@@ -42,14 +42,17 @@ jobs:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_KEY }}
           config.model: "openrouter/deepseek/deepseek-v4.1-flash-1017"
           config.fallback_models: '["openrouter/deepseek/deepseek-v4.1-flash"]'
-          # Not in PR-Agent's built-in token table; the model takes 1M. Both
-          # caps are needed: max_model_tokens clamps every model (default 32k).
-          config.custom_model_max_tokens: "128000"
-          config.max_model_tokens: "128000"
+          # Not in PR-Agent's built-in token table; the model takes 1M (1048576).
+          # Both caps are needed: max_model_tokens clamps every model (default
+          # 32k). The output cap below comes out of this window, so the window
+          # must hold the prompt plus 128k.
+          config.custom_model_max_tokens: "1000000"
+          config.max_model_tokens: "1000000"
           # The model reasons before answering; with the provider's default
           # output cap it spent the whole budget thinking and returned nothing.
           # With effort at max, leave room: OpenRouter allows 393k for both
-          # models, and PR-Agent keeps its own small buffer out of the prompt.
+          # models. It is taken from the window above: 1M - 128k leaves ~870k
+          # for the prompt.
           config.max_output_tokens: "128000"
           config.reasoning_effort: "max"
           # Full names, as in config.model. PR-Agent also matches the bare
