@@ -14,9 +14,9 @@ concurrency:
 jobs:
   pr_agent_job:
     # Skip events raised by bots (including PR-Agent itself). Comment commands
-    # spend the OpenRouter key, so only PR comments from people with write
-    # access to the repo run them. Fork PRs get no secrets, so they are skipped
-    # rather than failing.
+    # spend the OpenRouter key, so only PR comments from the owner, members and
+    # collaborators run them (in this personal repo, collaborators can push).
+    # Fork PRs get no secrets, so they are skipped rather than failing.
     if: >-
       ${{ github.event.sender.type != 'Bot' && (
         (github.event_name == 'pull_request' &&
@@ -26,6 +26,9 @@ jobs:
         )
       ) }}
     runs-on: ubuntu-latest
+    # A hung run would otherwise hold a runner for six hours. Thinking at max
+    # effort with a 128k output cap can take many minutes.
+    timeout-minutes: 30
     permissions:
       contents: read
       issues: write
@@ -45,9 +48,13 @@ jobs:
           config.max_model_tokens: "128000"
           # The model reasons before answering; with the provider's default
           # output cap it spent the whole budget thinking and returned nothing.
-          config.max_output_tokens: "32000"
-          config.reasoning_effort: "low"
-          config.additional_reasoning_effort_models: '["deepseek/deepseek-v4.1-flash-1017", "deepseek/deepseek-v4.1-flash"]'
+          # With effort at max, leave room: OpenRouter allows 393k for both
+          # models, and PR-Agent keeps its own small buffer out of the prompt.
+          config.max_output_tokens: "128000"
+          config.reasoning_effort: "max"
+          # Full names, as in config.model. PR-Agent also matches the bare
+          # name as a suffix, but the full form needs no knowing that.
+          config.additional_reasoning_effort_models: '["openrouter/deepseek/deepseek-v4.1-flash-1017", "openrouter/deepseek/deepseek-v4.1-flash"]'
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "true"
