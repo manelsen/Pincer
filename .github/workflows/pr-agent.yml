@@ -26,11 +26,9 @@ jobs:
         )
       ) }}
     runs-on: ubuntu-latest
-    # A hung run would otherwise hold a runner for six hours. Measured on
-    # supernova#55 with the settings below: review 39 s; suggestions 4 min 17 s
-    # on the primary (which ran out) plus 65 s on the fallback. Even four
-    # calls of that length fit well inside 45 min.
-    timeout-minutes: 45
+    # A hung run would otherwise hold a runner for six hours; a normal run
+    # takes a few minutes.
+    timeout-minutes: 20
     permissions:
       contents: read
       issues: write
@@ -54,23 +52,16 @@ jobs:
           # must hold the prompt plus 128k.
           config.custom_model_max_tokens: "1000000"
           config.max_model_tokens: "1000000"
-          # The model reasons before answering; with the provider's default
-          # output cap it spent the whole budget thinking and returned nothing.
           # 128k is Mistral's max output for this model. It is taken from the
           # window above: 1M - 128k leaves ~870k for the prompt.
           config.max_output_tokens: "128000"
-          # Effort "max" (sent as xhigh) let the model think until the cap and
-          # answer nothing (finish_reason: length), even on a 7k-token diff.
-          # A thinking budget instead: deep, but 32k always left for the answer.
-          # It takes precedence over the effort below; the run log confirms it:
-          # "Using openrouter.reasoning_max_tokens over config.reasoning_effort".
-          openrouter.reasoning_max_tokens: "96000"
-          # "max" is a valid value in v0.50.0 (ReasoningEffort enum: none,
-          # minimal, low, medium, high, xhigh, max), sent to OpenRouter as xhigh.
-          config.reasoning_effort: "max"
-          # Full names, as in config.model. PR-Agent also matches the bare
-          # name as a suffix, but the full form needs no knowing that.
-          config.additional_reasoning_effort_models: '["openrouter/deepseek/deepseek-v4.1-flash-1017"]'
+          # Reasoning is off. Through OpenRouter to Mistral (which serves this
+          # model), no setting kept it bounded: a token budget is ignored, and
+          # at effort max (sent as xhigh), high and low the model often thought
+          # until the 128k cap and answered nothing (finish_reason: length),
+          # from 4-9 min per call, on 7k and 49k-token diffs alike
+          # (supernova#53, #55, #56; donkey#122). Off, it answers every time.
+          openrouter.reasoning_effort: "none"
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "true"
