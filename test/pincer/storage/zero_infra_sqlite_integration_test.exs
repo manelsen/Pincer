@@ -105,7 +105,8 @@ defmodule Pincer.Storage.ZeroInfraSQLiteIntegrationTest do
     assert top_id == l1.id
 
     # 4. Cron.Storage
-    assert {:error, %Ecto.Changeset{valid?: false}} = CronStorage.create_job(%{name: "bad"})
+    assert {:error, %Pincer.Utils.Validation{valid?: false}} =
+             CronStorage.create_job(%{name: "bad"})
 
     assert {:ok, %Job{} = job} =
              CronStorage.create_job(%{

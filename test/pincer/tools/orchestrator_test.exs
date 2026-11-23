@@ -14,7 +14,7 @@ defmodule Pincer.Adapters.Tools.OrchestratorTest do
 
       {:ok,
        %Pincer.Storage.Checkpoint{
-         id: Ecto.UUID.generate(),
+         id: Pincer.Infra.UUID.generate(),
          session_id: session_id,
          status: "finished",
          step_count: 7,

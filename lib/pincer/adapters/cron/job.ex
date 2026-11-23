@@ -1,6 +1,6 @@
 defmodule Pincer.Adapters.Cron.Job do
   @moduledoc """
-  Ecto schema representing a scheduled cron job in Pincer.
+  Plain struct representing a scheduled cron job in Pincer.
 
   A Job encapsulates a prompt that should be sent to a specific session
   at recurring intervals defined by a cron expression. Jobs persist across
@@ -47,15 +47,24 @@ defmodule Pincer.Adapters.Cron.Job do
       }
 
       changeset = Pincer.Adapters.Cron.Job.changeset(%Pincer.Adapters.Cron.Job{}, attrs)
-      # => %Ecto.Changeset{valid?: true, ...}
+      # => %Pincer.Utils.Validation{valid?: true, ...}
 
       # Invalid cron expression
       invalid_attrs = %{cron_expression: "invalid"}
       changeset = Pincer.Adapters.Cron.Job.changeset(%Pincer.Adapters.Cron.Job{}, invalid_attrs)
-      # => %Ecto.Changeset{valid?: false, errors: [cron_expression: {"invalid cron format...", ...}]}
+      # => %Pincer.Utils.Validation{valid?: false, errors: [cron_expression: {"invalid cron format...", ...}]}
   """
-  use Ecto.Schema
-  import Ecto.Changeset
+  import Pincer.Utils.Validation
+
+  defstruct id: nil,
+            name: nil,
+            cron_expression: nil,
+            prompt: nil,
+            session_id: nil,
+            next_run_at: nil,
+            enabled: true,
+            inserted_at: nil,
+            updated_at: nil
 
   @type t :: %__MODULE__{
           id: binary() | nil,
@@ -68,19 +77,6 @@ defmodule Pincer.Adapters.Cron.Job do
           inserted_at: DateTime.t() | nil,
           updated_at: DateTime.t() | nil
         }
-
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @foreign_key_type :binary_id
-  schema "cron_jobs" do
-    field(:name, :string)
-    field(:cron_expression, :string)
-    field(:prompt, :string)
-    field(:session_id, :string)
-    field(:next_run_at, :utc_datetime_usec)
-    field(:enabled, :boolean, default: true)
-
-    timestamps(type: :utc_datetime_usec)
-  end
 
   @doc """
   Creates a changeset for validating and casting job attributes.
@@ -110,12 +106,12 @@ defmodule Pincer.Adapters.Cron.Job do
       ...>   prompt: "Good morning!",
       ...>   session_id: "test:123"
       ...> })
-      %Ecto.Changeset{valid?: true}
+      %Pincer.Utils.Validation{valid?: true}
 
       iex> Pincer.Adapters.Cron.Job.changeset(%Pincer.Adapters.Cron.Job{}, %{cron_expression: "bad"})
-      %Ecto.Changeset{valid?: false}
+      %Pincer.Utils.Validation{valid?: false}
   """
-  @spec changeset(t(), map()) :: Ecto.Changeset.t()
+  @spec changeset(t(), map()) :: Pincer.Utils.Validation.t()
   def changeset(job, attrs) do
     job
     |> cast(attrs, [:name, :cron_expression, :prompt, :session_id, :next_run_at, :enabled])

@@ -1,6 +1,6 @@
 defmodule Pincer.Core.Introspection.Schema do
   @moduledoc """
-  Ecto schema for agent introspective self-state.
+  Plain struct for agent introspective self-state.
 
   Persists the agent's internal awareness — current focus, concerns,
   open questions, and reflection summaries — so that introspection
@@ -15,10 +15,23 @@ defmodule Pincer.Core.Introspection.Schema do
   | `"reflecting"` | Introspection cycle in progress |
   """
 
-  use Ecto.Schema
-  import Ecto.Changeset
+  import Pincer.Utils.Validation
 
   @valid_wakefulness ~w(idle active reflecting)
+
+  defstruct id: nil,
+            agent_id: nil,
+            wakefulness: "idle",
+            focus: "",
+            concerns: [],
+            open_questions: [],
+            work_lanes: [],
+            last_reflection_summary: "",
+            mood_valence: 0.0,
+            mood_arousal: 0.0,
+            meta: %{},
+            inserted_at: nil,
+            updated_at: nil
 
   @type t :: %__MODULE__{
           id: binary() | nil,
@@ -36,26 +49,10 @@ defmodule Pincer.Core.Introspection.Schema do
           updated_at: DateTime.t() | nil
         }
 
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @timestamps_opts [type: :utc_datetime]
-  schema "self_states" do
-    field(:agent_id, :string)
-    field(:wakefulness, :string, default: "idle")
-    field(:focus, :string, default: "")
-    field(:concerns, {:array, :string}, default: [])
-    field(:open_questions, {:array, :string}, default: [])
-    field(:work_lanes, {:array, :map}, default: [])
-    field(:last_reflection_summary, :string, default: "")
-    field(:mood_valence, :float, default: 0.0)
-    field(:mood_arousal, :float, default: 0.0)
-    field(:meta, :map, default: %{})
-    timestamps()
-  end
-
   @doc """
   Creates a changeset for validating and casting self-state attributes.
   """
-  @spec changeset(t(), map()) :: Ecto.Changeset.t()
+  @spec changeset(t(), map()) :: Pincer.Utils.Validation.t()
   def changeset(self_state, attrs) do
     self_state
     |> cast(attrs, [
@@ -72,6 +69,5 @@ defmodule Pincer.Core.Introspection.Schema do
     ])
     |> validate_required([:agent_id])
     |> validate_inclusion(:wakefulness, @valid_wakefulness)
-    |> unique_constraint(:agent_id)
   end
 end

@@ -79,7 +79,7 @@ defmodule Pincer.Core.StartupGuard do
   @doc """
   Checks for pending database migrations.
 
-  SQLite has no Ecto migration tracking, so this always returns `:ok`.
+  SQLite applies its schema idempotently at boot, so this always returns `:ok`.
   """
   @spec check_migrations() :: check_result()
   def check_migrations do

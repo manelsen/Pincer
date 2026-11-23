@@ -334,7 +334,7 @@ defmodule Mix.Tasks.Pincer.OnboardTest do
          %{root: root} do
       File.write!(config_path(root), """
       database:
-        adapter: "Ecto.Adapters.PostgreSQL"
+        adapter: "postgres"
         hostname: "localhost"
         database: "pincer"
       custom_keep:

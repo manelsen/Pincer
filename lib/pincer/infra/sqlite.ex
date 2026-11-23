@@ -336,7 +336,7 @@ defmodule Pincer.Infra.SQLite do
 
   @doc "Generates a standard UUID v4 string."
   @spec uuid() :: String.t()
-  def uuid, do: Ecto.UUID.generate()
+  def uuid, do: Pincer.Infra.UUID.generate()
 
   @doc """
   Decodes a JSON string into an Elixir term, returning `default` on `nil` or invalid input.

@@ -53,12 +53,12 @@ defmodule Pincer.Core.Introspection.LessonSchemaTest do
           content: "lesson"
         })
 
-      assert Ecto.Changeset.get_field(cs, :confidence) == 0.5
-      assert Ecto.Changeset.get_field(cs, :source) == "reflection"
-      assert Ecto.Changeset.get_field(cs, :success_count) == 0
-      assert Ecto.Changeset.get_field(cs, :failure_count) == 0
-      assert Ecto.Changeset.get_field(cs, :contradiction_penalty) == 0.0
-      assert Ecto.Changeset.get_field(cs, :active) == true
+      assert Pincer.Utils.Validation.get_field(cs, :confidence) == 0.5
+      assert Pincer.Utils.Validation.get_field(cs, :source) == "reflection"
+      assert Pincer.Utils.Validation.get_field(cs, :success_count) == 0
+      assert Pincer.Utils.Validation.get_field(cs, :failure_count) == 0
+      assert Pincer.Utils.Validation.get_field(cs, :contradiction_penalty) == 0.0
+      assert Pincer.Utils.Validation.get_field(cs, :active) == true
     end
   end
 end

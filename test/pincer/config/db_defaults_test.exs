@@ -1,8 +1,8 @@
 defmodule Pincer.Infra.Config.DBDefaultsTest do
   use ExUnit.Case, async: true
 
-  test "does not configure any Ecto repo" do
-    assert Application.get_env(:pincer, :ecto_repos) == nil
+  test "does not configure a database repo" do
+    assert Application.get_env(:pincer, :repo) == nil
   end
 
   test "test config uses the embedded SQLite backend" do

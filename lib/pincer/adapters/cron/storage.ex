@@ -46,7 +46,7 @@ defmodule Pincer.Adapters.Cron.Storage do
       # Delete permanently
       {:ok, _} = Pincer.Adapters.Cron.Storage.delete_job(job_id)
   """
-  import Ecto.Changeset, only: [apply_changes: 1]
+  import Pincer.Utils.Validation, only: [apply_changes: 1]
   alias Pincer.Adapters.Cron.Job
   alias Pincer.Infra.SQLite
 
@@ -161,9 +161,9 @@ defmodule Pincer.Adapters.Cron.Storage do
       # => {:ok, %Job{id: "uuid-...", next_run_at: ~U[2024-01-22 09:00:00Z]}}
 
       {:error, changeset} = Pincer.Adapters.Cron.Storage.create_job(%{name: "Bad"})
-      # => {:error, %Ecto.Changeset{errors: [cron_expression: {"can't be blank", ...}, ...]}}
+      # => {:error, %Pincer.Utils.Validation{errors: [cron_expression: {"can't be blank", ...}, ...]}}
   """
-  @spec create_job(map()) :: {:ok, Job.t()} | {:error, Ecto.Changeset.t()}
+  @spec create_job(map()) :: {:ok, Job.t()} | {:error, Pincer.Utils.Validation.t()}
   def create_job(attrs) do
     changeset = Job.changeset(%Job{}, attrs)
 

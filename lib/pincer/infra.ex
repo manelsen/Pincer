@@ -4,6 +4,7 @@ defmodule Pincer.Infra do
     exports: [
       PubSub,
       Config,
-      SQLite
+      SQLite,
+      UUID
     ]
 end

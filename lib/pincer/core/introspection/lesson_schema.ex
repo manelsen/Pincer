@@ -1,6 +1,6 @@
 defmodule Pincer.Core.Introspection.LessonSchema do
   @moduledoc """
-  Ecto schema for agent lessons (Self-Improving System).
+  Plain struct for agent lessons (Self-Improving System).
 
   A lesson captures a reusable insight extracted from an execution
   episode or reflection cycle. Lessons carry a confidence score that
@@ -25,10 +25,25 @@ defmodule Pincer.Core.Introspection.LessonSchema do
   | `"manual"` | Operator-provided |
   """
 
-  use Ecto.Schema
-  import Ecto.Changeset
+  import Pincer.Utils.Validation
 
   @valid_sources ~w(reflection episode manual)
+
+  defstruct id: nil,
+            agent_id: nil,
+            content: nil,
+            source: "reflection",
+            confidence: 0.5,
+            extraction_confidence: 0.5,
+            success_count: 0,
+            failure_count: 0,
+            contradiction_penalty: 0.0,
+            active: true,
+            last_applied_at: nil,
+            last_outcome: nil,
+            meta: %{},
+            inserted_at: nil,
+            updated_at: nil
 
   @type t :: %__MODULE__{
           id: binary() | nil,
@@ -48,26 +63,8 @@ defmodule Pincer.Core.Introspection.LessonSchema do
           updated_at: DateTime.t() | nil
         }
 
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @timestamps_opts [type: :utc_datetime]
-  schema "lessons" do
-    field(:agent_id, :string)
-    field(:content, :string)
-    field(:source, :string, default: "reflection")
-    field(:confidence, :float, default: 0.5)
-    field(:extraction_confidence, :float, default: 0.5)
-    field(:success_count, :integer, default: 0)
-    field(:failure_count, :integer, default: 0)
-    field(:contradiction_penalty, :float, default: 0.0)
-    field(:active, :boolean, default: true)
-    field(:last_applied_at, :utc_datetime)
-    field(:last_outcome, :string)
-    field(:meta, :map, default: %{})
-    timestamps()
-  end
-
   @doc "Creates a changeset for validating and casting lesson attributes."
-  @spec changeset(t(), map()) :: Ecto.Changeset.t()
+  @spec changeset(t(), map()) :: Pincer.Utils.Validation.t()
   def changeset(lesson, attrs) do
     lesson
     |> cast(attrs, [

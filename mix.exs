@@ -104,8 +104,7 @@ defmodule Pincer.MixProject do
       # JSON
       {:jason, "~> 1.4"},
 
-      # Storage: embedded SQLite only; Ecto provides schemas/changesets, not a Repo.
-      {:ecto, "~> 3.13"},
+      # Storage: embedded SQLite only.
       {:exqlite, "~> 0.43"},
 
       # Channel plugins (monorepo path deps)

@@ -11,7 +11,7 @@ defmodule Pincer.Core.Introspection.SelfState do
   alias Pincer.Core.Introspection.Schema
   alias Pincer.Infra.SQLite
 
-  import Ecto.Changeset, only: [apply_changes: 1]
+  import Pincer.Utils.Validation, only: [apply_changes: 1]
 
   @doc """
   Loads the self-state for the given agent, creating a default row

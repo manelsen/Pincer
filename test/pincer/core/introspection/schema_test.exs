@@ -31,13 +31,13 @@ defmodule Pincer.Core.Introspection.SchemaTest do
     test "defaults are applied" do
       cs = Schema.changeset(%Schema{}, %{agent_id: "a"})
       assert cs.valid?
-      assert Ecto.Changeset.get_field(cs, :wakefulness) == "idle"
-      assert Ecto.Changeset.get_field(cs, :focus) == ""
-      assert Ecto.Changeset.get_field(cs, :concerns) == []
-      assert Ecto.Changeset.get_field(cs, :open_questions) == []
-      assert Ecto.Changeset.get_field(cs, :mood_valence) == 0.0
-      assert Ecto.Changeset.get_field(cs, :mood_arousal) == 0.0
-      assert Ecto.Changeset.get_field(cs, :meta) == %{}
+      assert Pincer.Utils.Validation.get_field(cs, :wakefulness) == "idle"
+      assert Pincer.Utils.Validation.get_field(cs, :focus) == ""
+      assert Pincer.Utils.Validation.get_field(cs, :concerns) == []
+      assert Pincer.Utils.Validation.get_field(cs, :open_questions) == []
+      assert Pincer.Utils.Validation.get_field(cs, :mood_valence) == 0.0
+      assert Pincer.Utils.Validation.get_field(cs, :mood_arousal) == 0.0
+      assert Pincer.Utils.Validation.get_field(cs, :meta) == %{}
     end
 
     test "all fields can be cast" do
@@ -56,8 +56,8 @@ defmodule Pincer.Core.Introspection.SchemaTest do
         })
 
       assert cs.valid?
-      assert Ecto.Changeset.get_field(cs, :focus) == "testing"
-      assert Ecto.Changeset.get_field(cs, :concerns) == ["c1", "c2"]
+      assert Pincer.Utils.Validation.get_field(cs, :focus) == "testing"
+      assert Pincer.Utils.Validation.get_field(cs, :concerns) == ["c1", "c2"]
     end
   end
 end

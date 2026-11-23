@@ -1,6 +1,6 @@
 defmodule Pincer.Storage.Checkpoint do
   @moduledoc """
-  Ecto schema for task checkpoints.
+  Plain struct for task checkpoints.
 
   A checkpoint captures the execution state of an agent session at a
   given point in time so that it can be resumed after a restart or
@@ -42,14 +42,24 @@ defmodule Pincer.Storage.Checkpoint do
       ...>     history_snapshot: :erlang.term_to_binary([])
       ...>   }
       ...> )
-      #Ecto.Changeset<valid: true, ...>
+      %Pincer.Utils.Validation{valid?: true, ...}
 
   """
 
-  use Ecto.Schema
-  import Ecto.Changeset
+  import Pincer.Utils.Validation
 
   @valid_statuses ~w(running paused failed finished interrupted completed)
+
+  defstruct id: nil,
+            session_id: nil,
+            task_id: nil,
+            project_id: nil,
+            status: "running",
+            history_snapshot: nil,
+            step_count: 0,
+            metadata: %{},
+            inserted_at: nil,
+            updated_at: nil
 
   @doc """
   Returns the canonical list of checkpoint statuses accepted by the schema.
@@ -73,19 +83,6 @@ defmodule Pincer.Storage.Checkpoint do
           updated_at: DateTime.t() | nil
         }
 
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @timestamps_opts [type: :utc_datetime]
-  schema "checkpoints" do
-    field(:session_id, :string)
-    field(:task_id, :string)
-    field(:project_id, :binary_id)
-    field(:status, :string, default: "running")
-    field(:history_snapshot, :binary)
-    field(:step_count, :integer, default: 0)
-    field(:metadata, :map, default: %{})
-    timestamps()
-  end
-
   @doc """
   Creates a changeset for validating and casting checkpoint attributes.
 
@@ -102,10 +99,10 @@ defmodule Pincer.Storage.Checkpoint do
       ...>   %Pincer.Storage.Checkpoint{},
       ...>   %{session_id: "s1", status: "invalid", history_snapshot: <<>>}
       ...> )
-      #Ecto.Changeset<valid: false, errors: [status: {"is invalid", ...}]>
+      %Pincer.Utils.Validation{valid?: false, errors: [status: {"is invalid", ...}]}
 
   """
-  @spec changeset(t(), map()) :: Ecto.Changeset.t()
+  @spec changeset(t(), map()) :: Pincer.Utils.Validation.t()
   def changeset(checkpoint, attrs) do
     checkpoint
     |> cast(attrs, [

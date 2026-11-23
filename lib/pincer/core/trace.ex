@@ -31,7 +31,7 @@ defmodule Pincer.Core.Trace do
   def new(session_id, turn_id, metadata \\ %{})
       when is_binary(session_id) and is_binary(turn_id) do
     %{
-      trace_id: Ecto.UUID.generate(),
+      trace_id: Pincer.Infra.UUID.generate(),
       session_id: session_id,
       turn_id: turn_id,
       steps: [],

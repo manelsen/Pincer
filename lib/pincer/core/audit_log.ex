@@ -4,24 +4,19 @@ defmodule Pincer.Core.AuditLog do
   Every tool approval, policy denial, auth failure, and RBAC decision
   is written here for compliance and post-incident analysis.
   """
-  use Ecto.Schema
-  import Ecto.Changeset
+  import Pincer.Utils.Validation
 
   alias Pincer.Infra.SQLite
 
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @timestamps_opts [type: :utc_datetime_usec]
-
-  schema "audit_log" do
-    field(:event_type, :string)
-    field(:actor, :string)
-    field(:target, :string)
-    field(:channel, :string)
-    field(:session_id, :string)
-    field(:outcome, :string)
-    field(:metadata, :map, default: %{})
-    field(:inserted_at, :utc_datetime_usec, autogenerate: {DateTime, :utc_now, []})
-  end
+  defstruct id: nil,
+            event_type: nil,
+            actor: nil,
+            target: nil,
+            channel: nil,
+            session_id: nil,
+            outcome: nil,
+            metadata: %{},
+            inserted_at: nil
 
   @required [:event_type, :outcome]
   @optional [:actor, :target, :channel, :session_id, :metadata]

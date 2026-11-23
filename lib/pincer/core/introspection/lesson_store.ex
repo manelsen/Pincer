@@ -25,7 +25,7 @@ defmodule Pincer.Core.Introspection.LessonStore do
   alias Pincer.Core.Introspection.LessonSchema
   alias Pincer.Infra.SQLite
 
-  import Ecto.Changeset, only: [apply_changes: 1]
+  import Pincer.Utils.Validation, only: [apply_changes: 1]
 
   @novelty_threshold 0.85
   @recency_half_life_days 30

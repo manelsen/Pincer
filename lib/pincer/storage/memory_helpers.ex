@@ -152,8 +152,8 @@ defmodule Pincer.Storage.MemoryHelpers do
   end
 
   @doc """
-  Renders a document search hit. Accepts any map with a `:data` payload, which
-  both an Ecto `%Node{}` struct and a plain SQLite row provide.
+  Renders a document search hit. Accepts any map with a `:data` payload, as
+  provided by a SQLite node row.
   """
   @spec document_result(%{data: map()}, map()) :: map()
   def document_result(%{data: data}, scoring) do

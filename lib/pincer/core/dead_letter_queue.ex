@@ -12,27 +12,22 @@ defmodule Pincer.Core.DeadLetterQueue do
   - `resolve/2` — mark an entry as resolved (manual or automated)
   - `retry_pending/2` — attempt to replay a failed operation
   """
-  use Ecto.Schema
-  import Ecto.Changeset
+  import Pincer.Utils.Validation
 
   require Logger
 
   alias Pincer.Infra.SQLite
 
-  @primary_key {:id, :binary_id, autogenerate: true}
-  @timestamps_opts [type: :utc_datetime_usec]
-
-  schema "dead_letter_queue" do
-    field(:operation_type, :string)
-    field(:payload, :map)
-    field(:error, :string)
-    field(:attempt_count, :integer, default: 1)
-    field(:last_attempted_at, :utc_datetime_usec)
-    field(:resolved_at, :utc_datetime_usec)
-    field(:resolution, :string)
-
-    timestamps()
-  end
+  defstruct id: nil,
+            operation_type: nil,
+            payload: nil,
+            error: nil,
+            attempt_count: 1,
+            last_attempted_at: nil,
+            resolved_at: nil,
+            resolution: nil,
+            inserted_at: nil,
+            updated_at: nil
 
   @required [:operation_type, :payload]
   @optional [:error, :attempt_count, :last_attempted_at, :resolved_at, :resolution]

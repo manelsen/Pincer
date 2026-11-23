@@ -12,6 +12,7 @@ defmodule Pincer.Utils do
       TokenCounter,
       Tokenizer,
       CodeSkeleton,
-      Text
+      Text,
+      Validation
     ]
 end
