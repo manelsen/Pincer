@@ -14,9 +14,9 @@ concurrency:
 jobs:
   pr_agent_job:
     # Skip events raised by bots (including PR-Agent itself). Comment commands
-    # spend the OpenRouter key, so only PR comments from people with write
-    # access to the repo run them. Fork PRs get no secrets, so they are skipped
-    # rather than failing.
+    # spend the OpenRouter key, so only PR comments from the owner, members and
+    # collaborators run them (in this personal repo, collaborators can push).
+    # Fork PRs get no secrets, so they are skipped rather than failing.
     if: >-
       ${{ github.event.sender.type != 'Bot' && (
         (github.event_name == 'pull_request' &&
@@ -26,6 +26,9 @@ jobs:
         )
       ) }}
     runs-on: ubuntu-latest
+    # A hung run would otherwise hold a runner for six hours; a normal run
+    # takes a few minutes.
+    timeout-minutes: 20
     permissions:
       contents: read
       issues: write
@@ -38,16 +41,27 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_KEY }}
           config.model: "openrouter/deepseek/deepseek-v4.1-flash-1017"
-          config.fallback_models: '["openrouter/deepseek/deepseek-v4.1-flash"]'
-          # Not in PR-Agent's built-in token table; the model takes 1M. Both
-          # caps are needed: max_model_tokens clamps every model (default 32k).
-          config.custom_model_max_tokens: "128000"
-          config.max_model_tokens: "128000"
-          # The model reasons before answering; with the provider's default
-          # output cap it spent the whole budget thinking and returned nothing.
-          config.max_output_tokens: "32000"
-          config.reasoning_effort: "low"
-          config.additional_reasoning_effort_models: '["deepseek/deepseek-v4.1-flash-1017", "deepseek/deepseek-v4.1-flash"]'
+          # Same dated model: the undated alias has no Mistral endpoint on
+          # OpenRouter, and Mistral is the provider this account routes to.
+          config.fallback_models: '["openrouter/deepseek/deepseek-v4.1-flash-1017"]'
+          # Not in PR-Agent's built-in token table. Mistral serves this model
+          # with a 1M context and 128k max output (docs.mistral.ai/models/
+          # deepseek-v4-flash-1017); 1000000 keeps a margin.
+          # Both caps are needed: max_model_tokens clamps every model (default
+          # 32k). The output cap below comes out of this window, so the window
+          # must hold the prompt plus 128k.
+          config.custom_model_max_tokens: "1000000"
+          config.max_model_tokens: "1000000"
+          # 128k is Mistral's max output for this model. It is taken from the
+          # window above: 1M - 128k leaves ~870k for the prompt.
+          config.max_output_tokens: "128000"
+          # Reasoning is off. Through OpenRouter to Mistral (which serves this
+          # model), no setting kept it bounded: a token budget is ignored, and
+          # at effort max (sent as xhigh), high and low the model often thought
+          # until the 128k cap and answered nothing (finish_reason: length),
+          # from 4-9 min per call, on 7k and 49k-token diffs alike
+          # (supernova#53, #55, #56; donkey#122). Off, it answers every time.
+          openrouter.reasoning_effort: "none"
           github_action_config.auto_review: "true"
           github_action_config.auto_describe: "false"
           github_action_config.auto_improve: "true"
