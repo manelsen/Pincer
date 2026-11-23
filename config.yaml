@@ -21,6 +21,7 @@ channels:
     max_body_bytes: 1048576
     path: "/webhook/message"
     port: 4000
+    rate_limit_per_minute: 60
     session_mode: "per_sender"
     token_env: "PINCER_WEBHOOK_TOKEN"
   line:

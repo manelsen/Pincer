@@ -4,6 +4,7 @@ defmodule Pincer.Channels.WebhookPlugTest do
   import Plug.Conn
 
   alias Pincer.Channels.Webhook.Plug
+  alias Pincer.Channels.Webhook.RateLimiter
 
   @path "/webhook/message"
   @token "top-secret-token"
@@ -215,5 +216,106 @@ defmodule Pincer.Channels.WebhookPlugTest do
       assert conn.status == expected_status
       assert %{"error" => _} = decode(conn)
     end
+  end
+
+  test "returns 429 with retry-after once the limiter rejects a request" do
+    limiter = start_supervised!({RateLimiter, name: nil, limit: 1})
+
+    accepted =
+      json_request(body(@payload), [{"x-pincer-token", @token}])
+      |> Plug.call(opts(rate_limiter: limiter))
+
+    assert accepted.status == 202
+
+    rejected =
+      json_request(body(@payload), [{"x-pincer-token", @token}])
+      |> Plug.call(opts(rate_limiter: limiter))
+
+    assert rejected.status == 429
+    assert %{"error" => "rate_limited"} = decode(rejected)
+
+    assert [retry_after] = get_resp_header(rejected, "retry-after")
+    assert {seconds, ""} = Integer.parse(retry_after)
+    assert seconds >= 1
+  end
+
+  test "enforces the rate limit before authentication" do
+    limiter = start_supervised!({RateLimiter, name: nil, limit: 2})
+
+    unauthorized = fn ->
+      json_request(body(@payload))
+      |> Plug.call(opts(rate_limiter: limiter))
+    end
+
+    assert unauthorized.().status == 401
+    assert unauthorized.().status == 401
+    assert unauthorized.().status == 429
+  end
+
+  test "limits each client IP independently" do
+    limiter = start_supervised!({RateLimiter, name: nil, limit: 1})
+
+    first =
+      json_request(body(@payload), [{"x-pincer-token", @token}])
+      |> Plug.call(opts(rate_limiter: limiter))
+
+    assert first.status == 202
+
+    same_ip =
+      json_request(body(@payload), [{"x-pincer-token", @token}])
+      |> Plug.call(opts(rate_limiter: limiter))
+
+    assert same_ip.status == 429
+
+    other_ip =
+      json_request(body(@payload), [{"x-pincer-token", @token}])
+      |> Map.put(:remote_ip, {10, 0, 0, 2})
+      |> Plug.call(opts(rate_limiter: limiter))
+
+    assert other_ip.status == 202
+  end
+
+  test "resets the window using the limiter clock" do
+    {:ok, clock} = Agent.start_link(fn -> 0 end)
+
+    limiter =
+      start_supervised!(
+        {RateLimiter, name: nil, limit: 1, now_fun: fn -> Agent.get(clock, & &1) end}
+      )
+
+    request = fn ->
+      json_request(body(@payload), [{"x-pincer-token", @token}])
+      |> Plug.call(opts(rate_limiter: limiter))
+    end
+
+    assert request.().status == 202
+    assert request.().status == 429
+
+    Agent.update(clock, fn _now -> 60_000 end)
+
+    assert request.().status == 202
+  end
+
+  test "bypasses limiting when no limiter is configured" do
+    for _ <- 1..5 do
+      conn =
+        json_request(body(@payload), [{"x-pincer-token", @token}])
+        |> Plug.call(opts(rate_limiter: nil))
+
+      assert conn.status == 202
+    end
+  end
+
+  test "fails closed with 503 when the limiter process is unavailable" do
+    limiter = spawn(fn -> :ok end)
+    ref = Process.monitor(limiter)
+    assert_receive {:DOWN, ^ref, :process, ^limiter, _reason}
+
+    conn =
+      json_request(body(@payload), [{"x-pincer-token", @token}])
+      |> Plug.call(opts(rate_limiter: limiter))
+
+    assert conn.status == 503
+    assert %{"error" => "rate_limiter_unavailable"} = decode(conn)
   end
 end

@@ -13,8 +13,15 @@ defmodule Pincer.Channels.Webhook.Plug do
     * `:path` - POST path, defaults to `"/webhook/message"` (`"/webhook"` is
       always accepted as an alias)
     * `:max_body_bytes` - hard body size cap, defaults to `1_048_576`
+    * `:rate_limiter` - optional `Pincer.Channels.Webhook.RateLimiter` server
+      (pid or registered name) checked before authentication; `nil` disables
+      limiting
     * `:ingest_fun` - arity-2 function receiving `(payload, opts)`, defaults to
       `&Pincer.Channels.Webhook.ingest/2`
+
+  The rate limiter runs before authentication so unauthenticated work is
+  bounded. A rejected request returns `429` with a `retry-after` header; a
+  configured limiter that is unavailable fails closed with `503`.
 
   The plug never logs tokens or payload bodies.
   """
@@ -22,6 +29,8 @@ defmodule Pincer.Channels.Webhook.Plug do
   @behaviour Plug
 
   import Plug.Conn
+
+  alias Pincer.Channels.Webhook.RateLimiter
 
   @default_path "/webhook/message"
   @alias_path "/webhook"
@@ -43,6 +52,16 @@ defmodule Pincer.Channels.Webhook.Plug do
       conn.method != "POST" ->
         send_error(conn, 405, "method_not_allowed")
 
+      true ->
+        case enforce_rate_limit(conn, opts.rate_limiter) do
+          {:ok, conn} -> authorize_and_dispatch(conn, opts)
+          {:error, conn} -> conn
+        end
+    end
+  end
+
+  defp authorize_and_dispatch(conn, opts) do
+    cond do
       not authorized?(conn, opts.token) ->
         send_error(conn, 401, "unauthorized")
 
@@ -52,6 +71,27 @@ defmodule Pincer.Channels.Webhook.Plug do
       true ->
         read_and_dispatch(conn, opts)
     end
+  end
+
+  defp enforce_rate_limit(conn, nil), do: {:ok, conn}
+
+  defp enforce_rate_limit(conn, rate_limiter) do
+    case RateLimiter.check(rate_limiter, conn.remote_ip) do
+      :ok ->
+        {:ok, conn}
+
+      {:error, retry_after_seconds} ->
+        {:error, send_rate_limited(conn, retry_after_seconds)}
+    end
+  catch
+    :exit, _reason ->
+      {:error, send_error(conn, 503, "rate_limiter_unavailable")}
+  end
+
+  defp send_rate_limited(conn, retry_after_seconds) do
+    conn
+    |> put_resp_header("retry-after", Integer.to_string(max(retry_after_seconds, 1)))
+    |> send_error(429, "rate_limited")
   end
 
   defp read_and_dispatch(conn, opts) do
@@ -196,6 +236,7 @@ defmodule Pincer.Channels.Webhook.Plug do
       path: normalize_path(read_opt(opts, :path, @default_path)),
       max_body_bytes:
         normalize_max_body_bytes(read_opt(opts, :max_body_bytes, @default_max_body_bytes)),
+      rate_limiter: read_opt(opts, :rate_limiter, nil),
       ingest_fun: read_opt(opts, :ingest_fun, &Pincer.Channels.Webhook.ingest/2)
     }
   end

@@ -8,7 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- The `pincer_webhook` channel now runs an HTTP listener (Bandit + Plug) under the channels supervisor, configurable with `bind` (loopback by default), `port`, `path`, and `max_body_bytes`; deliveries are token-gated and validated before ingestion.
+- The `pincer_webhook` channel now runs an HTTP listener (Bandit + Plug) under the channels supervisor, configurable with `bind` (loopback by default), `port`, `path`, `max_body_bytes`, and `rate_limit_per_minute`; deliveries are token-gated and validated before ingestion.
+- Webhook ingress is rate limited per client IP (60 requests/minute by default, `0` disables) with `429` + `Retry-After`; an unavailable limiter fails closed with `503`.
+- The security audit warns when an enabled webhook binds to all interfaces (`0.0.0.0`, `::`).
+- `read_blackboard` honors `limit` (default 10, capped at 100) and returns only the most recent messages.
+- Sub-agent runs persist a running checkpoint every 10 tool uses, so `dispatch_agent`'s `status` action reports progress before termination.
 - `dispatch_agent` accepts per-run `provider`, `model`, and `thinking_level`, a `status` action that reads an agent's durable checkpoint run record, and enforces `:max_subagents` / `:max_subagents_per_session` caps before starting a child.
 - `session_search` native tool with `discover`, `search`, and `read` actions over persisted session transcripts and storage search.
 - Curated memory (`MEMORY.md`, `USER.md`) is bounded by `:curated_memory_limits` and enforced on both read and write through `Pincer.Core.CuratedMemory`.

@@ -350,6 +350,10 @@ defmodule Pincer.Adapters.Tools.BlackboardReader do
 
   @type execute_result :: {:ok, String.t()} | {:error, String.t()}
 
+  @default_limit 10
+  @max_limit 100
+  @invalid_limit_error "read_blackboard limit must be a positive integer (max 100)"
+
   @doc """
   Returns the tool specification for LLM function calling.
 
@@ -357,7 +361,7 @@ defmodule Pincer.Adapters.Tools.BlackboardReader do
 
       %{
         name: "read_blackboard",
-        description: "Reads recent messages from the Sub-Agent Blackboard.",
+        description: "Reads the most recent messages from the Sub-Agent Blackboard (default 10, max 100).",
         parameters: %{
           type: "object",
           properties: %{
@@ -370,14 +374,17 @@ defmodule Pincer.Adapters.Tools.BlackboardReader do
   def spec do
     %{
       name: "read_blackboard",
-      description: "Reads recent messages from the Sub-Agent Blackboard.",
+      description:
+        "Reads the most recent messages from the Sub-Agent Blackboard (default 10, max 100).",
       parameters: %{
         type: "object",
         properties: %{
           limit: %{
             type: "integer",
-            description: "Number of recent messages to read (default 10)",
-            default: 10
+            description: "Number of recent messages to read (default 10, max 100)",
+            default: @default_limit,
+            minimum: 1,
+            maximum: @max_limit
           }
         }
       }
@@ -387,18 +394,21 @@ defmodule Pincer.Adapters.Tools.BlackboardReader do
   @doc """
   Reads and returns messages from the Sub-Agent Blackboard.
 
-  Fetches all messages posted by Sub-Agents and returns them in a
-  human-readable format with agent IDs and timestamps.
+  Fetches messages posted by Sub-Agents and returns the most recent ones in
+  chronological order, in a human-readable format with agent IDs and
+  timestamps.
 
   ## Parameters
 
-    * `limit` (optional) - Maximum number of messages to return. Defaults to 10.
-      Currently not enforced as all messages are fetched.
+    * `limit` (optional) - Maximum number of most recent messages to return.
+      Defaults to 10 and is capped at 100. Any other value must be a positive
+      integer; non-integers and values below 1 return an error.
 
   ## Returns
 
-    * `{:ok, messages}` - Formatted string with all messages, one per line
+    * `{:ok, messages}` - Formatted string with up to `limit` messages, one per line
     * `{:ok, "Blackboard is empty."}` - When no messages exist
+    * `{:error, reason}` - When `limit` is invalid
 
   ## Examples
 
@@ -410,23 +420,34 @@ defmodule Pincer.Adapters.Tools.BlackboardReader do
 
   ## Note
 
-  In the current implementation, the `limit` parameter is accepted but all
-  messages are returned. Future versions will respect this parameter and
-  support cursor-based pagination for efficient message retrieval.
+  The journal is still read in full to find the most recent messages; only the
+  final `limit` messages are returned.
   """
   @spec execute(map()) :: execute_result()
-  def execute(_args) do
-    {msgs, _last_id} = Blackboard.fetch_new(0)
+  def execute(args) do
+    with {:ok, limit} <- parse_limit(args) do
+      {msgs, _last_id} = Blackboard.fetch_new(0)
 
-    if Enum.empty?(msgs) do
-      {:ok, "Blackboard is empty."}
-    else
-      output =
-        msgs
-        |> Enum.map(fn msg -> "[#{msg.agent_id} @ #{msg.timestamp}]: #{msg.content}" end)
-        |> Enum.join("\n")
+      if Enum.empty?(msgs) do
+        {:ok, "Blackboard is empty."}
+      else
+        output =
+          msgs
+          |> Enum.take(-limit)
+          |> Enum.map(fn msg -> "[#{msg.agent_id} @ #{msg.timestamp}]: #{msg.content}" end)
+          |> Enum.join("\n")
 
-      {:ok, output}
+        {:ok, output}
+      end
+    end
+  end
+
+  defp parse_limit(args) do
+    case Map.fetch(args, "limit") do
+      :error -> {:ok, @default_limit}
+      {:ok, limit} when is_integer(limit) and limit > @max_limit -> {:ok, @max_limit}
+      {:ok, limit} when is_integer(limit) and limit > 0 -> {:ok, limit}
+      {:ok, _invalid} -> {:error, @invalid_limit_error}
     end
   end
 end

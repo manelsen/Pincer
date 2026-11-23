@@ -6,6 +6,7 @@ defmodule Pincer.Core.SecurityAudit do
   - channel auth/token exposure
   - DM policy hardening
   - gateway bind risk
+  - webhook public bind risk
   """
 
   alias Pincer.Core.LLM.SkillsSidecarPolicy
@@ -67,6 +68,7 @@ defmodule Pincer.Core.SecurityAudit do
         channel_auth_checks(config, env_fetcher) ++
         dm_policy_checks(config) ++
         gateway_bind_checks(config) ++
+        webhook_bind_checks(config) ++
         dangerous_flag_checks(config) ++
         workspace_restriction_checks(config) ++
         sidecar_isolation_checks(config)
@@ -244,6 +246,46 @@ defmodule Pincer.Core.SecurityAudit do
       []
     end
   end
+
+  defp webhook_bind_checks(config) do
+    case Enum.find(channels(config), fn {name, _cfg} -> name == "webhook" end) do
+      nil ->
+        []
+
+      {_name, cfg} ->
+        bind = MapHelpers.read_field(cfg, :bind)
+
+        cond do
+          not enabled?(cfg) ->
+            [
+              ok_check(
+                :webhook_public_bind,
+                "Webhook channel is disabled",
+                %{bind: bind, status: :disabled}
+              )
+            ]
+
+          risky_bind?(bind) ->
+            [
+              warn_check(
+                :webhook_public_bind,
+                "Webhook bind #{bind} exposes the HTTP ingress to all interfaces",
+                %{bind: bind}
+              )
+            ]
+
+          true ->
+            [ok_check(:webhook_public_bind, "Webhook bind is restricted", %{bind: bind})]
+        end
+    end
+  end
+
+  defp risky_bind?(bind) when is_binary(bind) do
+    normalized = bind |> String.trim() |> String.downcase()
+    MapSet.member?(@risky_binds, normalized)
+  end
+
+  defp risky_bind?(_bind), do: false
 
   defp dangerous_flag_checks(config) do
     direct_flags =

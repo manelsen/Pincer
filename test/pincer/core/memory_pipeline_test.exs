@@ -64,8 +64,8 @@ defmodule Pincer.Core.MemoryPipelineTest do
       end)
 
     ref = Process.monitor(pid)
-    assert_receive :stored
-    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
+    assert_receive :stored, 1_000
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
 
     assert {:ok, second} = MemoryPipeline.run(%{input | content: "B"}, opts)
     assert second.store.status == :skipped_budget

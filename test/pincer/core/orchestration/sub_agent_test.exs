@@ -43,6 +43,7 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
         :ok -> {:ok, [%{"choices" => [%{"delta" => %{"content" => "Task complete"}}]}], nil}
         :error -> {:error, :boom}
         :crash -> raise "kaboom"
+        :hold -> hold_stream()
       end
     end
 
@@ -54,6 +55,30 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
         :ok -> {:ok, %{"role" => "assistant", "content" => "Task complete"}, nil}
         :error -> {:error, :boom}
         :crash -> raise "kaboom"
+        :hold -> hold_chat()
+      end
+    end
+
+    defp hold_stream do
+      hold()
+
+      {:ok, [%{"choices" => [%{"delta" => %{"content" => "Task complete"}}]}], nil}
+    end
+
+    defp hold_chat do
+      hold()
+
+      {:ok, %{"role" => "assistant", "content" => "Task complete"}, nil}
+    end
+
+    defp hold do
+      pid = Application.fetch_env!(:pincer, :sub_agent_test_hold_pid)
+      send(pid, {:llm_holding, self()})
+
+      receive do
+        :release_llm -> :ok
+      after
+        10_000 -> :ok
       end
     end
 
@@ -295,6 +320,105 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
     assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
   end
 
+  test "writes a running checkpoint after every tenth tool use", %{tmp: tmp} do
+    test_pid = self()
+    id = unique_id("sub_checkpoint_periodic")
+    parent_session = "parent_periodic_#{System.unique_integer([:positive])}"
+
+    checkpoint_fn = fn agent_id, checkpoint ->
+      send(test_pid, {:checkpoint, agent_id, checkpoint})
+      {:ok, checkpoint}
+    end
+
+    {pid, ref} = start_held_subagent(tmp, id, parent_session, checkpoint_fn)
+
+    assert_receive {:checkpoint, ^id, initial}, 1_000
+    assert initial.status == "running"
+    assert initial.step_count == 0
+
+    send_tool_uses(pid, 1..9)
+    refute_receive {:checkpoint, ^id, _}, 100
+
+    send_tool_uses(pid, 10..10)
+
+    assert_receive {:checkpoint, ^id, tenth}, 1_000
+    assert tenth.status == "running"
+    assert tenth.step_count == 10
+    assert tenth.history_snapshot == :erlang.term_to_binary([])
+    assert tenth.metadata.kind == "subagent"
+    assert tenth.metadata.parent_session_id == parent_session
+    assert is_binary(tenth.metadata.boot_id)
+    assert is_binary(tenth.metadata.started_at)
+
+    send_tool_uses(pid, 11..19)
+    refute_receive {:checkpoint, ^id, _}, 100
+
+    send_tool_uses(pid, 20..20)
+
+    assert_receive {:checkpoint, ^id, twentieth}, 1_000
+    assert twentieth.status == "running"
+    assert twentieth.step_count == 20
+
+    GenServer.stop(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
+  end
+
+  test "does not write a checkpoint for the first nine tool uses", %{tmp: tmp} do
+    test_pid = self()
+    id = unique_id("sub_checkpoint_silent")
+    parent_session = "parent_silent_#{System.unique_integer([:positive])}"
+
+    checkpoint_fn = fn agent_id, checkpoint ->
+      send(test_pid, {:checkpoint, agent_id, checkpoint})
+      {:ok, checkpoint}
+    end
+
+    {pid, ref} = start_held_subagent(tmp, id, parent_session, checkpoint_fn)
+
+    assert_receive {:checkpoint, ^id, %{status: "running", step_count: 0}}, 1_000
+
+    send_tool_uses(pid, 1..9)
+    refute_receive {:checkpoint, ^id, _}, 200
+
+    GenServer.stop(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 1_000
+  end
+
+  test "writes the finished checkpoint with the final step count after tool uses", %{
+    tmp: tmp
+  } do
+    test_pid = self()
+    id = unique_id("sub_checkpoint_terminal")
+    parent_session = "parent_terminal_#{System.unique_integer([:positive])}"
+
+    checkpoint_fn = fn agent_id, checkpoint ->
+      send(test_pid, {:checkpoint, agent_id, checkpoint})
+      {:ok, checkpoint}
+    end
+
+    {pid, ref} = start_held_subagent(tmp, id, parent_session, checkpoint_fn)
+
+    assert_receive {:checkpoint, ^id, %{status: "running", step_count: 0}}, 1_000
+    assert_receive {:llm_holding, worker}, 2_000
+
+    send_tool_uses(pid, 1..9)
+    refute_receive {:checkpoint, ^id, _}, 100
+    send_tool_uses(pid, 10..10)
+
+    assert_receive {:checkpoint, ^id, periodic}, 1_000
+    assert periodic.status == "running"
+    assert periodic.step_count == 10
+
+    send(worker, :release_llm)
+
+    assert_receive {:checkpoint, ^id, finished}, 2_000
+    assert finished.status == "finished"
+    assert finished.step_count == 10
+    assert finished.metadata.result == "Task complete"
+
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+  end
+
   test "writes a failed checkpoint when the executor fails", %{tmp: tmp} do
     LLMStub.put_mode(:error)
     test_pid = self()
@@ -356,6 +480,41 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
 
     assert_received {:save_checkpoint, ^session_id, persisted}
     assert persisted.status == "interrupted"
+  end
+
+  defp start_held_subagent(tmp, id, parent_session, checkpoint_fn) do
+    LLMStub.put_mode(:hold)
+    Application.put_env(:pincer, :sub_agent_test_hold_pid, self())
+
+    {:ok, pid} =
+      SubAgent.start_link(
+        id: id,
+        goal: "Periodic checkpoint goal",
+        parent_session_id: parent_session,
+        workspace_path: Path.join(tmp, id),
+        llm_client: LLMStub,
+        tool_registry: ToolRegistryStub,
+        storage: StorageStub,
+        checkpoint_fn: checkpoint_fn
+      )
+
+    on_exit(fn ->
+      Application.delete_env(:pincer, :sub_agent_test_hold_pid)
+
+      if Process.alive?(pid) do
+        try do
+          GenServer.stop(pid, :normal, 1_000)
+        catch
+          :exit, _ -> :ok
+        end
+      end
+    end)
+
+    {pid, Process.monitor(pid)}
+  end
+
+  defp send_tool_uses(pid, range) do
+    Enum.each(range, fn step -> send(pid, {:sme_tool_use, "tool #{step}"}) end)
   end
 
   defp unique_id(prefix), do: "#{prefix}_#{System.unique_integer([:positive])}"

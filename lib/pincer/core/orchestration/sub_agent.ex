@@ -84,6 +84,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   alias Pincer.Core.Structs.Usage
 
   @checkpoint_statuses ~w(running paused completed finished failed interrupted)
+  @checkpoint_interval 10
   @checkpoint_result_max_chars 4_000
   @checkpoint_error_max_chars 4_000
   @empty_history_snapshot :erlang.term_to_binary([])
@@ -310,6 +311,16 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   @impl GenServer
   def handle_info({:sme_tool_use, tools}, state) do
     state = %{state | step_count: state.step_count + 1}
+
+    if rem(state.step_count, @checkpoint_interval) == 0 do
+      save_checkpoint(state, %{
+        status: "running",
+        history_snapshot: @empty_history_snapshot,
+        step_count: state.step_count,
+        metadata: checkpoint_metadata(state)
+      })
+    end
+
     Blackboard.post(state.id, "Using tool: #{tools}", nil, scope: state.scope)
 
     notify_parent_progress(state.parent_session_id, %{

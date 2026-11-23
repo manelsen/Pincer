@@ -2,7 +2,9 @@ defmodule Pincer.Adapters.Tools.OrchestratorTest do
   use ExUnit.Case, async: false
   import Mox
 
+  alias Pincer.Adapters.Tools.BlackboardReader
   alias Pincer.Adapters.Tools.Orchestrator
+  alias Pincer.Core.Orchestration.Blackboard
   alias Pincer.Core.Orchestration.SubAgent
   alias Pincer.Core.Orchestration.SubAgentRegistry
 
@@ -245,6 +247,71 @@ defmodule Pincer.Adapters.Tools.OrchestratorTest do
 
     assert_received {:load, "agent_status_1", opts}
     assert Enum.sort(opts[:status]) == ~w(completed failed finished interrupted paused running)
+  end
+
+  describe "read_blackboard" do
+    setup do
+      Blackboard.reset()
+      on_exit(fn -> Blackboard.reset() end)
+      :ok
+    end
+
+    test "returns only the most recent messages in chronological order when limited" do
+      post_messages(12)
+
+      assert {:ok, output} = BlackboardReader.execute(%{"limit" => 5})
+
+      assert message_contents(output) == Enum.map(8..12, &"message #{&1}")
+    end
+
+    test "defaults to the last 10 messages when limit is missing" do
+      post_messages(12)
+
+      assert {:ok, output} = BlackboardReader.execute(%{})
+
+      assert message_contents(output) == Enum.map(3..12, &"message #{&1}")
+    end
+
+    test "clamps limits above 100" do
+      post_messages(105)
+
+      assert {:ok, output} = BlackboardReader.execute(%{"limit" => 1000})
+
+      contents = message_contents(output)
+      assert length(contents) == 100
+      assert List.first(contents) == "message 6"
+      assert List.last(contents) == "message 105"
+    end
+
+    test "rejects a limit that is not a positive integer" do
+      error = "read_blackboard limit must be a positive integer (max 100)"
+
+      assert {:error, ^error} = BlackboardReader.execute(%{"limit" => 0})
+      assert {:error, ^error} = BlackboardReader.execute(%{"limit" => "5"})
+    end
+
+    test "reports an empty blackboard" do
+      assert {:ok, "Blackboard is empty."} = BlackboardReader.execute(%{"limit" => 5})
+    end
+  end
+
+  defp post_messages(count) do
+    for i <- 1..count do
+      Blackboard.post("agent_read", "message #{i}", nil, scope: :global)
+    end
+
+    Blackboard.wait_for_journal()
+  end
+
+  defp message_contents(output) do
+    output
+    |> String.split("\n")
+    |> Enum.map(fn line ->
+      case Regex.run(~r/\]: (.*)$/, line) do
+        [_, content] -> content
+        _ -> line
+      end
+    end)
   end
 
   defp unique_session(prefix), do: "#{prefix}_#{System.unique_integer([:positive])}"

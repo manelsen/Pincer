@@ -110,6 +110,87 @@ defmodule Pincer.Core.SecurityAuditTest do
              end)
     end
 
+    test "warns when an enabled webhook channel binds all interfaces" do
+      for bind <- ["0.0.0.0", "::", "[::]"] do
+        tmp = tmp_dir!()
+
+        write_config!(
+          tmp,
+          """
+          channels:
+            webhook:
+              enabled: true
+              adapter: "Pincer.Channels.Webhook"
+              token_env: "PINCER_WEBHOOK_TOKEN"
+              bind: "#{bind}"
+          """
+        )
+
+        report =
+          SecurityAudit.run(
+            root: tmp,
+            env_fetcher: fn
+              "PINCER_WEBHOOK_TOKEN" -> "ok-token"
+              _ -> nil
+            end
+          )
+
+        assert Enum.any?(report.checks, fn check ->
+                 check.id == :webhook_public_bind and check.severity == :warn
+               end)
+      end
+    end
+
+    test "reports ok when an enabled webhook channel binds loopback" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        channels:
+          webhook:
+            enabled: true
+            adapter: "Pincer.Channels.Webhook"
+            token_env: "PINCER_WEBHOOK_TOKEN"
+            bind: "127.0.0.1"
+        """
+      )
+
+      report =
+        SecurityAudit.run(
+          root: tmp,
+          env_fetcher: fn
+            "PINCER_WEBHOOK_TOKEN" -> "ok-token"
+            _ -> nil
+          end
+        )
+
+      assert Enum.any?(report.checks, fn check ->
+               check.id == :webhook_public_bind and check.severity == :ok
+             end)
+    end
+
+    test "does not warn when a disabled webhook channel binds all interfaces" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        channels:
+          webhook:
+            enabled: false
+            adapter: "Pincer.Channels.Webhook"
+            bind: "0.0.0.0"
+        """
+      )
+
+      report = SecurityAudit.run(root: tmp, env_fetcher: fn _ -> nil end)
+
+      refute Enum.any?(report.checks, fn check ->
+               check.id == :webhook_public_bind and check.severity == :warn
+             end)
+    end
+
     test "evaluates whatsapp dm policy without forcing token_env" do
       tmp = tmp_dir!()
 

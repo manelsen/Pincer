@@ -15,6 +15,8 @@ defmodule Pincer.Channels.Webhook.Listener do
     * `:path` - POST path, defaults to `"/webhook/message"` (`"/webhook"` is
       accepted as an alias)
     * `:max_body_bytes` - maximum request body size, defaults to `1_048_576`
+    * `:rate_limit_per_minute` - maximum requests per client IP per 60-second
+      window, defaults to `60`; `0` disables limiting
     * `:token_env` - name of the environment variable holding the token
   """
 
@@ -26,6 +28,7 @@ defmodule Pincer.Channels.Webhook.Listener do
   @default_bind "127.0.0.1"
   @default_path "/webhook/message"
   @default_max_body_bytes 1_048_576
+  @default_rate_limit_per_minute 60
 
   @doc """
   Starts the webhook HTTP listener.
@@ -46,22 +49,33 @@ defmodule Pincer.Channels.Webhook.Listener do
 
   @impl Supervisor
   def init(config) do
+    {rate_limiter, limiter_children} = rate_limiter(config)
+
     plug_opts = [
       token: config.token,
       path: config.path,
-      max_body_bytes: config.max_body_bytes
+      max_body_bytes: config.max_body_bytes,
+      rate_limiter: rate_limiter
     ]
 
-    children = [
-      {Bandit,
-       plug: {Pincer.Channels.Webhook.Plug, plug_opts},
-       scheme: :http,
-       ip: config.ip,
-       port: config.port}
-    ]
+    children =
+      limiter_children ++
+        [
+          {Bandit,
+           plug: {Pincer.Channels.Webhook.Plug, plug_opts},
+           scheme: :http,
+           ip: config.ip,
+           port: config.port}
+        ]
 
     Supervisor.init(children, strategy: :one_for_one)
   end
+
+  defp rate_limiter(%{rate_limit_per_minute: limit}) when limit > 0 do
+    {Pincer.Channels.Webhook.RateLimiter, [{Pincer.Channels.Webhook.RateLimiter, limit: limit}]}
+  end
+
+  defp rate_limiter(_config), do: {nil, []}
 
   defp build_config(config, token) do
     %{
@@ -70,6 +84,10 @@ defmodule Pincer.Channels.Webhook.Listener do
       path: normalize_path(read_config(config, "path", @default_path)),
       max_body_bytes:
         parse_max_body_bytes(read_config(config, "max_body_bytes", @default_max_body_bytes)),
+      rate_limit_per_minute:
+        parse_rate_limit_per_minute(
+          read_config(config, "rate_limit_per_minute", @default_rate_limit_per_minute)
+        ),
       token: token
     }
   end
@@ -100,6 +118,17 @@ defmodule Pincer.Channels.Webhook.Listener do
   defp parse_max_body_bytes(value) do
     raise ArgumentError,
           "invalid webhook max_body_bytes #{inspect(value)}; expected a positive integer"
+  end
+
+  defp parse_rate_limit_per_minute(value) when is_integer(value) and value >= 0, do: value
+
+  defp parse_rate_limit_per_minute(value) do
+    Logger.warning(
+      "[WEBHOOK] invalid webhook rate_limit_per_minute #{inspect(value)}; " <>
+        "using default #{@default_rate_limit_per_minute}"
+    )
+
+    @default_rate_limit_per_minute
   end
 
   defp normalize_path(path) when is_binary(path) and path != "", do: path

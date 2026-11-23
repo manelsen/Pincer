@@ -97,6 +97,108 @@ defmodule Pincer.Channels.WebhookListenerTest do
     assert Listener.start_link(config) == :ignore
   end
 
+  test "starts the rate limiter before Bandit and limits signed requests", %{
+    channel_config: channel_config
+  } do
+    start_channel!(channel_config)
+    port = free_port()
+
+    listener =
+      start_listener!(%{
+        "token_env" => @token_env,
+        "port" => port,
+        "bind" => "127.0.0.1",
+        "path" => @path,
+        "rate_limit_per_minute" => 2
+      })
+
+    children = Supervisor.which_children(listener)
+
+    assert Enum.any?(children, fn {id, _pid, _type, _modules} ->
+             id == Pincer.Channels.Webhook.RateLimiter
+           end)
+
+    assert Enum.any?(children, fn {id, _pid, _type, _modules} -> match?({Bandit, _}, id) end)
+    assert is_pid(Process.whereis(Pincer.Channels.Webhook.RateLimiter))
+
+    responses =
+      for index <- 1..3 do
+        Req.post!(url(port),
+          json: %{"text" => "message #{index}"},
+          headers: [{"x-pincer-token", @token}]
+        )
+      end
+
+    assert Enum.map(Enum.take(responses, 2), & &1.status) == [202, 202]
+
+    rejected = Enum.at(responses, 2)
+    assert rejected.status == 429
+    assert %{"error" => "rate_limited"} = rejected.body
+
+    assert [retry_after] = Req.Response.get_header(rejected, "retry-after")
+    assert {seconds, ""} = Integer.parse(retry_after)
+    assert seconds >= 1
+  end
+
+  test "does not start a limiter when rate_limit_per_minute is 0", %{
+    channel_config: channel_config
+  } do
+    start_channel!(channel_config)
+    port = free_port()
+
+    start_listener!(%{
+      "token_env" => @token_env,
+      "port" => port,
+      "bind" => "127.0.0.1",
+      "path" => @path,
+      "rate_limit_per_minute" => 0
+    })
+
+    assert Process.whereis(Pincer.Channels.Webhook.RateLimiter) == nil
+
+    for index <- 1..3 do
+      response =
+        Req.post!(url(port),
+          json: %{"text" => "unlimited #{index}"},
+          headers: [{"x-pincer-token", @token}]
+        )
+
+      assert response.status == 202
+    end
+  end
+
+  test "falls back to the default limit and logs once for invalid rate_limit_per_minute", %{
+    channel_config: channel_config
+  } do
+    import ExUnit.CaptureLog
+
+    start_channel!(channel_config)
+    port = free_port()
+
+    log =
+      capture_log(fn ->
+        start_listener!(%{
+          "token_env" => @token_env,
+          "port" => port,
+          "bind" => "127.0.0.1",
+          "path" => @path,
+          "rate_limit_per_minute" => "not-a-number"
+        })
+      end)
+
+    assert log =~ "rate_limit_per_minute"
+    assert length(String.split(log, "rate_limit_per_minute")) == 2
+    assert is_pid(Process.whereis(Pincer.Channels.Webhook.RateLimiter))
+
+    response =
+      Req.post!(url(port),
+        json: %{"text" => "still accepted"},
+        headers: [{"x-pincer-token", @token}]
+      )
+
+    assert response.status == 202
+  end
+
   defp url(port), do: "http://127.0.0.1:#{port}#{@path}"
 
   defp free_port do
