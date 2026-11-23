@@ -3,7 +3,10 @@ services:
     container_name: pincer-postgres
     image: pgvector/pgvector:0.8.2-pg18-trixie
     ports:
-      - "127.0.0.1:5432:5432"
+      # Host-side port for tools/tests. Override with PINCER_DB_HOST_PORT when
+      # a local PostgreSQL already owns 5432; the Pincer container always
+      # reaches this service on the Compose network at postgres:5432.
+      - "127.0.0.1:${PINCER_DB_HOST_PORT:-5432}:5432"
     environment:
       TZ: America/Sao_Paulo
       POSTGRES_USER: postgres

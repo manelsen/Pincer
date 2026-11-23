@@ -72,6 +72,10 @@ reports `role "postgres" does not exist`. Run against the reachable instance ins
 PINCER_DB_USER=<user> PINCER_DB_PASSWORD=<pass> mix test --warnings-as-errors
 ```
 
+Alternatively, publish the Compose database on another loopback port:
+`PINCER_DB_HOST_PORT=5433 docker compose up -d postgres`. The Pincer container still
+reaches it over the Compose network at `postgres:5432`.
+
 In `:test` the guard's DB/migration checks are skipped via
 `config :pincer, skip_startup_guard: true` (`config/test.exs`); `test_helper.exs` owns DB
 creation. Side effect: `mix ecto.create` is a no-op under `MIX_ENV=test` unless the
