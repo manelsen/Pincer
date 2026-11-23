@@ -3,6 +3,7 @@ defmodule Pincer.Utils do
   use Boundary,
     exports: [
       ETSHelper,
+      ETSTableHeir,
       MapHelpers,
       Time,
       Value,

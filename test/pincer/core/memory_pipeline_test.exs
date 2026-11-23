@@ -44,11 +44,32 @@ defmodule Pincer.Core.MemoryPipelineTest do
     assert result.compact.status in [:noop, :compacted]
   end
 
-  test "counter table is owned by the supervised pipeline, not by a caller" do
-    # Budget counters live in a public named ETS table. If the first caller
-    # creates it, the table dies with that process and every budget silently
-    # resets - which is how the budget test below used to flake under load.
-    assert :ets.info(MemoryPipeline, :owner) == Process.whereis(MemoryPipeline)
+  test "budget counters survive the process that recorded them" do
+    session_id = "s-survive-#{System.unique_integer([:positive])}"
+    project_id = "p-survive-#{System.unique_integer([:positive])}"
+    input = %{session_id: session_id, project_id: project_id, content: "A", query: "memory"}
+
+    opts = [
+      storage: StorageStub,
+      embedding_fun: fn _ -> {:ok, [0.1]} end,
+      budget: %{session: 1, project: 1}
+    ]
+
+    parent = self()
+
+    pid =
+      spawn(fn ->
+        {:ok, %{store: %{status: :stored}}} = MemoryPipeline.run(input, opts)
+        send(parent, :stored)
+      end)
+
+    ref = Process.monitor(pid)
+    assert_receive :stored
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
+
+    assert {:ok, second} = MemoryPipeline.run(%{input | content: "B"}, opts)
+    assert second.store.status == :skipped_budget
+    assert second.store.reason == :session_budget_exceeded
   end
 
   test "enforces session/project memory budget" do

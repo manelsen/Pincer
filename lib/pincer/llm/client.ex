@@ -41,6 +41,7 @@ defmodule Pincer.LLM.Client do
   alias Pincer.LLM.CooldownRouting
   alias Pincer.LLM.RetrySettings
   alias Pincer.LLM.StreamFallback
+  alias Pincer.Utils.ETSHelper
 
   @type message :: Pincer.LLM.Provider.message()
   @type tool :: Pincer.LLM.Provider.tool()
@@ -171,7 +172,7 @@ defmodule Pincer.LLM.Client do
   """
   @spec list_models(String.t()) :: [String.t()]
   def list_models(provider_id) do
-    cache_key = {:models, provider_id}
+    cache_key = {:models, provider_id, models_config_fingerprint(provider_id)}
 
     case get_cached_models(cache_key) do
       {:ok, models} ->
@@ -182,6 +183,13 @@ defmodule Pincer.LLM.Client do
         put_cached_models(cache_key, models)
         models
     end
+  end
+
+  # The cached model list belongs to one provider configuration, not just to a
+  # provider id. Without the fingerprint, a config reload (or a test that swaps
+  # `:llm_providers`) kept serving the previous list for the whole TTL.
+  defp models_config_fingerprint(provider_id) do
+    :erlang.phash2({provider_config(provider_id), model_selection_registry()})
   end
 
   defp fetch_models_from_provider("mock"),
@@ -244,13 +252,10 @@ defmodule Pincer.LLM.Client do
   end
 
   defp ensure_cache_table do
-    if :ets.whereis(@cache_table) == :undefined do
-      try do
-        :ets.new(@cache_table, [:named_table, :public, :set, {:read_concurrency, true}])
-      rescue
-        _ -> :ok
-      end
-    end
+    _ =
+      ETSHelper.ensure_named_table(@cache_table,
+        options: [:named_table, :public, :set, read_concurrency: true]
+      )
   end
 
   @doc """

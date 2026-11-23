@@ -236,6 +236,22 @@ defmodule Pincer.LLM.ClientTest do
 
       assert Client.list_models("z_ai") == ["glm-4.5"]
     end
+
+    test "list_models/1 does not serve a list cached under a different configuration" do
+      Application.delete_env(:pincer, :llm)
+
+      Application.put_env(:pincer, :llm_providers, %{
+        "z_ai" => %{adapter: MockAdapter, default_model: "glm-4.7", models: ["glm-4.7"]}
+      })
+
+      assert Client.list_models("z_ai") == ["glm-4.7"]
+
+      Application.put_env(:pincer, :llm_providers, %{
+        "z_ai" => %{adapter: MockAdapter, default_model: "glm-4.5", models: ["glm-4.5"]}
+      })
+
+      assert Client.list_models("z_ai") == ["glm-4.5"]
+    end
   end
 
   describe "streaming hardening" do

@@ -202,7 +202,7 @@ nothing (it consumes Core, not the reverse).
 - `Core` may depend only on `Ports`, `Infra`, `Utils`.
 - `Ports` may depend only on `Infra`.
 - `Adapters` may depend on `Core`, `Ports`, `Infra`, `Utils`.
-- `LLM` is a peer layer: `deps: [Pincer.Core, Pincer.Infra, Pincer.Ports]`.
+- `LLM` is a peer layer: `deps: [Pincer.Core, Pincer.Infra, Pincer.Ports, Pincer.Utils]`.
 - **In `exports` lists use relative aliases** (`Session.Server`), not owner-prefixed names.
   `test/pincer/boundary_exports_test.exs` enforces this for `core.ex`, `core/ux.ex`,
   `infra.ex`, `ports.ex` and also asserts **no `lib/pincer/core/**` file references

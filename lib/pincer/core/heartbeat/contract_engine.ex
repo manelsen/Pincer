@@ -11,6 +11,8 @@ defmodule Pincer.Core.Heartbeat.ContractEngine do
 
   @table :contract_engine
 
+  alias Pincer.Utils.ETSHelper
+
   @type promise :: %{
           id: String.t(),
           description: String.t(),
@@ -22,10 +24,7 @@ defmodule Pincer.Core.Heartbeat.ContractEngine do
   @doc "Ensure the ETS table exists. Call once at startup or let it lazily create."
   @spec init() :: :ok
   def init do
-    if :ets.whereis(@table) == :undefined do
-      :ets.new(@table, [:named_table, :set, :public])
-    end
-
+    _ = ETSHelper.ensure_named_table(@table, options: [:named_table, :set, :public])
     :ok
   end
 
