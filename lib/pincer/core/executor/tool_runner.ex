@@ -54,7 +54,7 @@ defmodule Pincer.Core.Executor.ToolRunner do
 
     Pincer.Core.TaskSupervisor
     |> Task.Supervisor.async_stream_nolink(calls, &execute_one(&1, ctx),
-      max_concurrency: 10,
+      max_concurrency: tool_max_concurrency(),
       timeout: stream_timeout,
       on_timeout: :kill_task
     )
@@ -233,6 +233,30 @@ defmodule Pincer.Core.Executor.ToolRunner do
   end
 
   defp request_approval(call_id, approval_data, runtime_ctx, ctx, steps) do
+    if Keyword.get(ctx.opts, :subagent?, false) do
+      handle_subagent_approval(approval_data, ctx, steps)
+    else
+      do_request_approval(call_id, approval_data, runtime_ctx, ctx, steps)
+    end
+  end
+
+  defp handle_subagent_approval(approval_data, ctx, steps) do
+    command = Map.get(approval_data, :command) || Map.get(approval_data, "command") || ""
+    tool_name = Map.get(approval_data, :tool) || Map.get(approval_data, "tool") || "safe_shell"
+    tool_class = Map.get(approval_data, :class) || Map.get(approval_data, "class") || :privileged
+
+    Logger.warning(
+      "[EXECUTOR] Denied approval for #{tool_name}: delegated sub-agent has no operator"
+    )
+
+    steps = audit_step(ctx, steps, tool_name, tool_class, :denied)
+    record_audit(ctx, tool_name, :denied, command)
+
+    {"Error: approval required for #{tool_name} but delegated sub-agents have no operator attached",
+     steps, :ok}
+  end
+
+  defp do_request_approval(call_id, approval_data, runtime_ctx, ctx, steps) do
     command = Map.get(approval_data, :command) || Map.get(approval_data, "command") || ""
     tool_name = Map.get(approval_data, :tool) || Map.get(approval_data, "tool") || "safe_shell"
 
@@ -357,6 +381,13 @@ defmodule Pincer.Core.Executor.ToolRunner do
 
   defp approval_timeout(%Ctx{opts: opts}),
     do: Keyword.get(opts, :approval_timeout_ms, @approval_timeout_ms)
+
+  defp tool_max_concurrency do
+    case Application.get_env(:pincer, :tool_max_concurrency, 10) do
+      value when is_integer(value) and value > 0 -> value
+      _ -> 10
+    end
+  end
 
   defp send_session(%Ctx{session_pid: pid}, msg) when is_pid(pid) do
     send(pid, msg)

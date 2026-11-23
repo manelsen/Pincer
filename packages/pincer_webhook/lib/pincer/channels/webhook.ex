@@ -1,7 +1,8 @@
 defmodule Pincer.Channels.Webhook do
-  @compile {:no_warn_undefined, [
-    Pincer.Infra.PubSub
-  ]}
+  @compile {:no_warn_undefined,
+            [
+              Pincer.Infra.PubSub
+            ]}
 
   @moduledoc """
   Universal receive-only webhook channel.
@@ -36,7 +37,7 @@ defmodule Pincer.Channels.Webhook do
   @spec start_link(map()) :: GenServer.on_start() | :ignore
   @impl Pincer.Ports.Channel
   def start_link(config) do
-    case resolve_token(config) do
+    case configured_token(config) do
       {:ok, token} ->
         GenServer.start_link(__MODULE__, {config, token}, name: __MODULE__)
 
@@ -49,6 +50,20 @@ defmodule Pincer.Channels.Webhook do
         :ignore
     end
   end
+
+  @doc """
+  Resolves the webhook authentication token from the configured `token_env`.
+
+  Returns `{:ok, token}` when the environment variable is set and non-empty,
+  `{:error, :missing_token_env}` when `token_env` is not configured, and
+  `{:error, {:missing_token_env, env_var}}` when the variable is unset or
+  empty. A non-string `token_env` disables authentication and returns
+  `{:ok, nil}`.
+  """
+  @spec configured_token(map()) ::
+          {:ok, String.t() | nil}
+          | {:error, :missing_token_env | {:missing_token_env, String.t()}}
+  def configured_token(config) when is_map(config), do: resolve_token(config)
 
   @doc """
   Ingests one webhook payload into the channel runtime.

@@ -70,6 +70,7 @@ defmodule Pincer.Core do
       SubAgentProgress,
       Orchestration.Blackboard,
       Orchestration.SubAgent,
+      Orchestration.SubAgentRegistry,
       Orchestration.Scheduler,
       Graph.Sync,
       Graph.Watcher,

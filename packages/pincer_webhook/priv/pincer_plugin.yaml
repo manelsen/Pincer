@@ -18,3 +18,15 @@ config_schema:
   default_source:
     type: string
     description: "Source label attached to incoming messages"
+  port:
+    type: integer
+    description: "HTTP listen port (default 4000; 0 selects an ephemeral port)"
+  bind:
+    type: string
+    description: "Bind address (default 127.0.0.1; never 0.0.0.0 by default)"
+  path:
+    type: string
+    description: "POST path for deliveries (default /webhook/message; /webhook is an alias)"
+  max_body_bytes:
+    type: integer
+    description: "Maximum accepted request body size in bytes (default 1048576)"

@@ -343,7 +343,11 @@ requires touching the package's `mix.exs`/`CHANGELOG.md` too.
   `workflow_dispatch` CI using `alpine:3.20`.
 - **Executor limits are compile-time config**, set in `config/config.exs`:
   `:max_recursion_depth`, `:tool_result_max_chars`, `:max_inline_bytes`,
-  `:approval_timeout_ms`, `:fs_*`, `:llm_retry`, `:circuit_breaker_*`.
+  `:approval_timeout_ms`, `:fs_*`, `:llm_retry`, `:circuit_breaker_*`,
+  `:tool_max_concurrency`, `:max_subagents`, `:max_subagents_per_session`,
+  `:curated_memory_limits`. Sub-agent runs persist their status to
+  `checkpoints` (statuses `running`/`finished`/`failed`/`interrupted`) and
+  `dispatch_agent` exposes them through its `status` action.
 - `Nx`/`Bumblebee` are optional: `Pincer.AI.Embeddings` guards with
   `Code.ensure_loaded?/1` and degrades silently when absent.
 - Several modules and docs still carry Portuguese `@moduledoc` text; match local style

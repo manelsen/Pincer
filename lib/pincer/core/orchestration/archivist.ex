@@ -91,6 +91,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
   use GenServer
   require Logger
   alias Pincer.Core.AgentPaths
+  alias Pincer.Core.CuratedMemory
   alias Pincer.Core.Memory
   alias Pincer.Core.MemoryTypes
   alias Pincer.Ports.LLM
@@ -196,18 +197,20 @@ defmodule Pincer.Core.Orchestration.Archivist do
     filename = AgentPaths.session_log_path(workspace_path, session_id)
     memory_path = AgentPaths.memory_path(workspace_path)
     history_path = AgentPaths.history_path(workspace_path)
-    user_path = AgentPaths.user_path(workspace_path)
 
     if File.exists?(filename) do
       content = File.read!(filename)
 
       current_memory =
-        if File.exists?(memory_path), do: File.read!(memory_path), else: "(Empty)"
+        case CuratedMemory.read(workspace_path, :memory) do
+          "" -> "(Empty)"
+          memory -> memory
+        end
 
-      current_user = if File.exists?(user_path), do: File.read!(user_path), else: ""
+      current_user = CuratedMemory.read(workspace_path, :user)
 
-      update_narrative_memory(content, current_memory, memory_path)
-      update_user_memory(content, current_user, user_path)
+      update_narrative_memory(content, current_memory, workspace_path)
+      update_user_memory(content, current_user, workspace_path)
 
       case Memory.record_session(content,
              session_id: session_id,
@@ -228,7 +231,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
     end
   end
 
-  defp update_narrative_memory(content, current_memory, memory_path) do
+  defp update_narrative_memory(content, current_memory, workspace_path) do
     archive_instruction = """
     You are the ARCHIVIST. Read the session and update MEMORY.md with new facts.
     IGNORE trivial conversations. Keep it concise.
@@ -245,8 +248,14 @@ defmodule Pincer.Core.Orchestration.Archivist do
     case LLM.chat_completion([%{"role" => "system", "content" => archive_instruction}]) do
       {:ok, %{"content" => new_memory}, _usage} ->
         clean_memory = sanitize_markdown(new_memory)
-        File.write(memory_path, clean_memory)
-        Logger.info("[ARCHIVIST] ✅ MEMORY.md updated!")
+
+        case CuratedMemory.write(workspace_path, :memory, clean_memory) do
+          {:ok, _bytes} ->
+            Logger.info("[ARCHIVIST] ✅ MEMORY.md updated!")
+
+          {:error, reason} ->
+            Logger.warning("[ARCHIVIST] MEMORY.md write failed: #{inspect(reason)}")
+        end
 
       _ ->
         :ok
@@ -334,7 +343,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
     end
   end
 
-  defp update_user_memory(content, current_user, user_path) do
+  defp update_user_memory(content, current_user, workspace_path) do
     instruction = """
     You extract durable user preferences and constraints.
     Read the session below and extract durable user preferences.
@@ -359,7 +368,13 @@ defmodule Pincer.Core.Orchestration.Archivist do
           |> String.trim()
 
         if merged != "" do
-          File.write!(user_path, merged <> "\n")
+          case CuratedMemory.write(workspace_path, :user, merged <> "\n") do
+            {:ok, _bytes} ->
+              :ok
+
+            {:error, reason} ->
+              Logger.warning("[ARCHIVIST] USER.md write failed: #{inspect(reason)}")
+          end
         end
 
       _ ->

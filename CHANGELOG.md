@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- The `pincer_webhook` channel now runs an HTTP listener (Bandit + Plug) under the channels supervisor, configurable with `bind` (loopback by default), `port`, `path`, and `max_body_bytes`; deliveries are token-gated and validated before ingestion.
+- `dispatch_agent` accepts per-run `provider`, `model`, and `thinking_level`, a `status` action that reads an agent's durable checkpoint run record, and enforces `:max_subagents` / `:max_subagents_per_session` caps before starting a child.
+- `session_search` native tool with `discover`, `search`, and `read` actions over persisted session transcripts and storage search.
+- Curated memory (`MEMORY.md`, `USER.md`) is bounded by `:curated_memory_limits` and enforced on both read and write through `Pincer.Core.CuratedMemory`.
+- Parallel tool fan-out is configurable with `:tool_max_concurrency`.
 - Pluggable `Pincer.Ports.Sandbox` port with `Local`, `Docker` (`--cap-drop ALL`, `no-new-privileges`, `--network none`, `--user uid:gid`), and `SSH` adapters.
 - Zero-infra embedded SQLite3 + FTS5 + WAL storage backend (`Pincer.Storage.Adapters.SQLite`), onboarding (`mix pincer.setup --storage sqlite`), and `Pincer.Core.Doctor` storage diagnostics.
 - Closed-loop `Introspection.Kernel` → `Skills.Generator` / `Skills.Guard` → `Session.Server` skill promotion and prompt injection.
@@ -16,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Open-source governance files (`SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `CODE_OF_CONDUCT.md`).
 
 ### Fixed
+- Delegated sub-agents fail fast when a privileged tool needs approval instead of broadcasting to an unattended topic and waiting for the 600-second timeout.
 - Approved `safe_shell` commands are re-validated against the static checks before execution, so approving a tool no longer bypasses the path and metacharacter guards.
 - The local sandbox `:os` transport, SSH remote workspaces, and `browser` navigation now enforce the same guards (command allowlist, remote path validation, SSRF blocklist) as the rest of the tool surface.
 - Changing the default model now edits only the `llm` section of `config.yaml` instead of regenerating the file and dropping unrelated sections; it also no longer re-reads `.env`.

@@ -152,7 +152,14 @@ defmodule Pincer.Channels.Factory do
               do: module.extra_child_specs(),
               else: []
 
-          [{module, cfg} | extra]
+          specs =
+            if module == Pincer.Channels.Webhook do
+              [{module, cfg}, {Pincer.Channels.Webhook.Listener, cfg}]
+            else
+              [{module, cfg}]
+            end
+
+          specs ++ extra
       end
     end)
   end

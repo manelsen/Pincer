@@ -1117,18 +1117,34 @@ defmodule Pincer.Storage.Adapters.Postgres do
   end
 
   @impl true
-  def load_checkpoint(session_id, _opts \\ []) do
-    result =
-      from(c in Checkpoint,
-        where: c.session_id == ^session_id and c.status in ["running", "paused"],
-        order_by: [desc: c.inserted_at],
-        limit: 1
-      )
-      |> Repo.one()
+  def load_checkpoint(session_id, opts \\ []) do
+    with {:ok, statuses} <- checkpoint_statuses(opts) do
+      result =
+        from(c in Checkpoint,
+          where: c.session_id == ^session_id and c.status in ^statuses,
+          order_by: [desc: c.inserted_at],
+          limit: 1
+        )
+        |> Repo.one()
 
-    case result do
-      nil -> {:error, :not_found}
-      checkpoint -> {:ok, checkpoint}
+      case result do
+        nil -> {:error, :not_found}
+        checkpoint -> {:ok, checkpoint}
+      end
+    end
+  end
+
+  defp checkpoint_statuses(opts) do
+    statuses =
+      (opts[:status] || ["running", "paused"])
+      |> List.wrap()
+      |> Enum.map(&to_string/1)
+      |> Enum.uniq()
+
+    if statuses != [] and Enum.all?(statuses, &(&1 in Checkpoint.valid_statuses())) do
+      {:ok, statuses}
+    else
+      {:error, :invalid_status}
     end
   end
 

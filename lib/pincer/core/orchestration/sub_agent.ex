@@ -81,6 +81,12 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   alias Pincer.Core.LLM.RuntimeStatus
   alias Pincer.Core.Executor
   alias Pincer.Core.Orchestration.Blackboard
+  alias Pincer.Core.Structs.Usage
+
+  @checkpoint_statuses ~w(running paused completed finished failed interrupted)
+  @checkpoint_result_max_chars 4_000
+  @checkpoint_error_max_chars 4_000
+  @empty_history_snapshot :erlang.term_to_binary([])
 
   @type option ::
           {:goal, String.t()}
@@ -92,6 +98,8 @@ defmodule Pincer.Core.Orchestration.SubAgent do
           | {:llm_client, module()}
           | {:tool_registry, module()}
           | {:storage, module()}
+          | {:model_override, map()}
+          | {:checkpoint_fn, (String.t(), map() -> term())}
 
   @type state :: %{
           id: String.t(),
@@ -99,6 +107,10 @@ defmodule Pincer.Core.Orchestration.SubAgent do
           parent_session_id: String.t() | nil,
           scope: String.t(),
           workspace_path: String.t(),
+          model_override: map() | nil,
+          checkpoint_fn: (String.t(), map() -> term()),
+          started_at: String.t(),
+          step_count: non_neg_integer(),
           worker_pid: pid() | nil,
           worker_ref: reference() | nil
         }
@@ -140,6 +152,37 @@ defmodule Pincer.Core.Orchestration.SubAgent do
     DynamicSupervisor.start_child(supervisor, {__MODULE__, opts})
   end
 
+  @doc """
+  Returns durable run information for a Sub-Agent by reading its latest
+  checkpoint across all run statuses.
+
+  A `"running"` checkpoint written by a different VM boot is stale; it is
+  persisted as `"interrupted"` before being returned.
+
+  Returns `{:ok, %{id:, status:, step_count:, metadata:, inserted_at:, updated_at:}}`
+  or `{:error, :not_found}`.
+  """
+  @spec run_info(String.t()) :: {:ok, map()} | {:error, term()}
+  def run_info(id) when is_binary(id) and id != "" do
+    case Pincer.Ports.Storage.load_checkpoint(id, status: @checkpoint_statuses) do
+      {:ok, checkpoint} ->
+        info = to_run_info(checkpoint)
+
+        if info.status == "running" and boot_id_of(info.metadata) != boot_id() do
+          {:ok, mark_interrupted(id, info)}
+        else
+          {:ok, info}
+        end
+
+      {:error, :not_found} ->
+        {:error, :not_found}
+
+      {:error, reason} ->
+        Logger.warning("[SubAgent #{id}] Failed to load run info: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
   @doc false
   @impl true
   def init(opts) do
@@ -149,6 +192,12 @@ defmodule Pincer.Core.Orchestration.SubAgent do
     parent_workspace_path = Keyword.get(opts, :parent_workspace_path)
     scope = Keyword.get(opts, :scope, parent_session_id || id)
     workspace_path = Keyword.get(opts, :workspace_path, AgentPaths.workspace_root(id))
+    model_override = Keyword.get(opts, :model_override)
+
+    checkpoint_fn =
+      Keyword.get(opts, :checkpoint_fn, &Pincer.Ports.Storage.save_checkpoint/2)
+
+    started_at = DateTime.utc_now() |> DateTime.to_iso8601()
 
     AgentPaths.ensure_workspace!(
       workspace_path,
@@ -157,6 +206,27 @@ defmodule Pincer.Core.Orchestration.SubAgent do
     )
 
     Logger.info("[SubAgent #{id}] Starting with goal: #{goal}")
+
+    state = %{
+      id: id,
+      goal: goal,
+      parent_session_id: parent_session_id,
+      scope: scope,
+      workspace_path: workspace_path,
+      model_override: model_override,
+      checkpoint_fn: checkpoint_fn,
+      started_at: started_at,
+      step_count: 0,
+      worker_pid: nil,
+      worker_ref: nil
+    }
+
+    save_checkpoint(state, %{
+      status: "running",
+      history_snapshot: @empty_history_snapshot,
+      step_count: 0,
+      metadata: checkpoint_metadata(state)
+    })
 
     # Post initial status
     Blackboard.post(id, "Started with goal: #{goal}", nil, scope: scope)
@@ -173,10 +243,11 @@ defmodule Pincer.Core.Orchestration.SubAgent do
     ]
 
     executor_opts =
-      [workspace_path: workspace_path, notify?: false]
+      [workspace_path: workspace_path, notify?: false, subagent?: true]
       |> maybe_put_opt(:llm_client, Keyword.get(opts, :llm_client))
       |> maybe_put_opt(:tool_registry, Keyword.get(opts, :tool_registry))
       |> maybe_put_opt(:storage, Keyword.get(opts, :storage))
+      |> maybe_put_opt(:model_override, model_override)
 
     parent = self()
 
@@ -185,26 +256,29 @@ defmodule Pincer.Core.Orchestration.SubAgent do
         Executor.run(parent, id, history, executor_opts)
       end)
 
-    {:ok,
-     %{
-       id: id,
-       goal: goal,
-       parent_session_id: parent_session_id,
-       scope: scope,
-       workspace_path: workspace_path,
-       worker_pid: task.pid,
-       worker_ref: task.ref
-     }}
+    {:ok, %{state | worker_pid: task.pid, worker_ref: task.ref}}
   end
 
   # --- Handling Executor Messages ---
 
   @doc false
   @impl GenServer
-  def handle_info({ref, {:ok, _history, response, _usage}}, %{worker_ref: ref} = state)
+  def handle_info({ref, {:ok, _history, response, usage}}, %{worker_ref: ref} = state)
       when is_reference(ref) do
     Process.demonitor(ref, [:flush])
     Logger.info("[SubAgent #{state.id}] Finished. Posting result.")
+
+    save_checkpoint(state, %{
+      status: "finished",
+      history_snapshot: @empty_history_snapshot,
+      step_count: state.step_count,
+      metadata:
+        state
+        |> checkpoint_metadata()
+        |> Map.put(:result, truncate(response, @checkpoint_result_max_chars))
+        |> Map.put(:usage, usage_map(usage))
+    })
+
     Blackboard.post(state.id, "FINISHED: #{response}", nil, scope: state.scope)
 
     notify_parent_progress(state.parent_session_id, %{
@@ -235,6 +309,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   @doc false
   @impl GenServer
   def handle_info({:sme_tool_use, tools}, state) do
+    state = %{state | step_count: state.step_count + 1}
     Blackboard.post(state.id, "Using tool: #{tools}", nil, scope: state.scope)
 
     notify_parent_progress(state.parent_session_id, %{
@@ -288,6 +363,17 @@ defmodule Pincer.Core.Orchestration.SubAgent do
 
   defp handle_worker_failure(reason, state) do
     Logger.error("[SubAgent #{state.id}] Failed: #{inspect(reason)}")
+
+    save_checkpoint(state, %{
+      status: "failed",
+      history_snapshot: @empty_history_snapshot,
+      step_count: state.step_count,
+      metadata:
+        state
+        |> checkpoint_metadata()
+        |> Map.put(:error, truncate(inspect(reason), @checkpoint_error_max_chars))
+    })
+
     Blackboard.post(state.id, "FAILED: #{inspect(reason)}", nil, scope: state.scope)
 
     notify_parent_progress(state.parent_session_id, %{
@@ -298,6 +384,127 @@ defmodule Pincer.Core.Orchestration.SubAgent do
 
     notify_parent(state.parent_session_id, "❌ Sub-Agent [#{state.id}] failed: #{inspect(reason)}")
     {:stop, :normal, %{state | worker_pid: nil, worker_ref: nil}}
+  end
+
+  defp checkpoint_metadata(state) do
+    %{
+      kind: "subagent",
+      boot_id: boot_id(),
+      parent_session_id: state.parent_session_id,
+      goal: state.goal,
+      provider: override_field(state.model_override, :provider),
+      model: override_field(state.model_override, :model),
+      started_at: state.started_at
+    }
+  end
+
+  defp save_checkpoint(state, checkpoint) do
+    case state.checkpoint_fn.(state.id, checkpoint) do
+      {:ok, _saved} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "[SubAgent #{state.id}] Failed to save #{checkpoint.status} checkpoint: #{inspect(reason)}"
+        )
+
+      other ->
+        Logger.warning("[SubAgent #{state.id}] Unexpected checkpoint result: #{inspect(other)}")
+    end
+  rescue
+    error ->
+      Logger.warning(
+        "[SubAgent #{state.id}] Checkpoint callback raised: #{Exception.message(error)}"
+      )
+
+      :ok
+  end
+
+  defp to_run_info(checkpoint) do
+    %{
+      id: checkpoint_field(checkpoint, :session_id),
+      status: checkpoint_field(checkpoint, :status),
+      step_count: checkpoint_field(checkpoint, :step_count) || 0,
+      metadata: checkpoint_field(checkpoint, :metadata) || %{},
+      inserted_at: checkpoint_field(checkpoint, :inserted_at),
+      updated_at: checkpoint_field(checkpoint, :updated_at)
+    }
+  end
+
+  defp mark_interrupted(id, info) do
+    checkpoint = %{
+      status: "interrupted",
+      history_snapshot: @empty_history_snapshot,
+      step_count: info.step_count,
+      metadata: info.metadata
+    }
+
+    case Pincer.Ports.Storage.save_checkpoint(id, checkpoint) do
+      {:ok, _saved} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "[SubAgent #{id}] Failed to persist interrupted status: #{inspect(reason)}"
+        )
+    end
+
+    %{info | status: "interrupted"}
+  end
+
+  defp checkpoint_field(%{} = checkpoint, key) do
+    Map.get(checkpoint, key) || Map.get(checkpoint, to_string(key))
+  end
+
+  defp boot_id_of(metadata) when is_map(metadata) do
+    Map.get(metadata, :boot_id) || Map.get(metadata, "boot_id")
+  end
+
+  defp boot_id_of(_metadata), do: nil
+
+  defp boot_id do
+    key = {__MODULE__, :boot_id}
+
+    case :persistent_term.get(key, nil) do
+      nil ->
+        value =
+          case :erlang.system_info(:start_time) do
+            {_, _, _} = tuple -> tuple |> Tuple.to_list() |> Enum.join("-")
+            other -> to_string(other)
+          end
+
+        :persistent_term.put(key, value)
+        value
+
+      value ->
+        value
+    end
+  end
+
+  defp override_field(nil, _key), do: nil
+
+  defp override_field(override, key) when is_map(override) do
+    Map.get(override, key) || Map.get(override, to_string(key))
+  end
+
+  defp override_field(_override, _key), do: nil
+
+  defp usage_map(nil), do: nil
+
+  defp usage_map(usage) do
+    usage |> Usage.normalize() |> Usage.to_map()
+  rescue
+    _error -> nil
+  end
+
+  defp truncate(value, max_chars) do
+    text = to_string(value)
+
+    if String.length(text) > max_chars do
+      String.slice(text, 0, max_chars) <> "...[truncated]"
+    else
+      text
+    end
   end
 
   defp maybe_put_opt(opts, _key, nil), do: opts

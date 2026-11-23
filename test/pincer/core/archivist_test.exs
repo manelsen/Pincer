@@ -217,6 +217,7 @@ defmodule Pincer.Core.ArchivistTest do
     original_storage = Application.get_env(:pincer, :storage_adapter)
     original_providers = Application.get_env(:pincer, :llm_providers)
     original_default = Application.get_env(:pincer, :default_llm_provider)
+    original_curated = Application.get_env(:pincer, :curated_memory_limits)
 
     Application.put_env(:pincer, :storage_adapter, StorageStub)
     Application.put_env(:pincer, :archivist_test_agent, agent)
@@ -248,6 +249,12 @@ defmodule Pincer.Core.ArchivistTest do
         Application.put_env(:pincer, :default_llm_provider, original_default)
       else
         Application.delete_env(:pincer, :default_llm_provider)
+      end
+
+      if original_curated do
+        Application.put_env(:pincer, :curated_memory_limits, original_curated)
+      else
+        Application.delete_env(:pincer, :curated_memory_limits)
       end
 
       Application.delete_env(:pincer, :archivist_test_agent)
@@ -297,5 +304,35 @@ defmodule Pincer.Core.ArchivistTest do
                file: "lib/pincer/deploy.ex"
              }
            ]
+  end
+
+  test "curated memory caps bound MEMORY.md and USER.md writes at line boundaries", %{
+    workspace: workspace,
+    session_id: session_id
+  } do
+    Application.put_env(:pincer, :curated_memory_limits, %{memory: 30, user: 70})
+
+    File.write!(AgentPaths.user_path(workspace), "# User\n")
+
+    :ok = Archivist.consolidate(session_id, [], workspace_path: workspace)
+
+    memory = File.read!(AgentPaths.memory_path(workspace))
+    user = File.read!(AgentPaths.user_path(workspace))
+
+    assert byte_size(memory) <= 30
+    assert memory =~ "# Long-term Memory"
+    refute memory =~ "Deployment timeout fix recorded"
+
+    assert byte_size(user) <= 70
+    assert user =~ "## Learned User Memory"
+    assert user =~ "Prefers concise summaries."
+    refute user =~ "Uses Telegram as the main channel."
+
+    user_lines = String.split(user, "\n", trim: true)
+
+    assert Enum.all?(
+             user_lines,
+             &(String.starts_with?(&1, "- ") or &1 in ["# User", "## Learned User Memory"])
+           )
   end
 end

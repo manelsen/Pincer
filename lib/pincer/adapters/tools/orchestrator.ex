@@ -47,6 +47,7 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
 
   @behaviour Pincer.Ports.Tool
   alias Pincer.Core.Orchestration.SubAgent
+  alias Pincer.Core.Orchestration.SubAgentRegistry
   alias Pincer.Core.Orchestration.Blackboard
 
   @type spec :: %{
@@ -79,22 +80,43 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
     %{
       name: "dispatch_agent",
       description:
-        "Dispatches a new autonomous Sub-Agent to work on a goal asynchronously. Use this for monitoring, long tasks, or parallel processing.",
+        "Dispatches a new autonomous Sub-Agent to work on a goal asynchronously. Use this for monitoring, long tasks, or parallel processing. Optionally pins the provider, model, and thinking level for that run. Use action \"status\" with an agent_id to read a dispatched agent's durable run record.",
       parameters: %{
         type: "object",
         properties: %{
           goal: %{
             type: "string",
             description: "The specific goal for the sub-agent. Be descriptive."
+          },
+          provider: %{
+            type: "string",
+            description: "Optional LLM provider for this run (requires model)."
+          },
+          model: %{
+            type: "string",
+            description: "Optional model identifier for this run (requires provider)."
+          },
+          thinking_level: %{
+            type: "string",
+            description: "Optional thinking level forwarded to the LLM provider."
+          },
+          action: %{
+            type: "string",
+            enum: ["start", "status"],
+            description: "start (default) dispatches a new agent; status reads a run record."
+          },
+          agent_id: %{
+            type: "string",
+            description: "Agent id to inspect when action is \"status\"."
           }
         },
-        required: ["goal"]
+        required: []
       }
     }
   end
 
   @doc """
-  Dispatches a new Sub-Agent with the given goal.
+  Dispatches a new Sub-Agent with the given goal, or reports a run's status.
 
   Creates and starts a new Sub-Agent process that will work autonomously on
   the specified goal. The agent will report progress and results to the
@@ -102,13 +124,19 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
 
   ## Parameters
 
-    * `goal` (required) - A clear, specific description of what the sub-agent
-      should accomplish. More descriptive goals lead to better results.
+    * `goal` (required for `"start"`) - A clear, specific description of what
+      the sub-agent should accomplish.
+    * `provider`, `model` (optional) - Pin the LLM provider/model for this run.
+      Both must be present to take effect.
+    * `thinking_level` (optional) - Forwarded to the LLM provider.
+    * `action` (optional) - `"start"` (default) or `"status"`.
+    * `agent_id` (required for `"status"`) - The agent whose run record to read.
 
   ## Returns
 
-    * `{:ok, message}` - Success message including the generated agent ID
-    * `{:error, reason}` - Failure message with details
+    * `{:ok, message}` - Success message including the generated agent ID, or
+      the formatted run record for `"status"`.
+    * `{:error, reason}` - Failure message with details.
 
   ## Examples
 
@@ -122,33 +150,132 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
 
   - Agent IDs are 16-character hex strings prefixed with "agent_"
   - Sub-Agents run as supervised `:temporary` children under `SubAgentSupervisor`
+  - Reservations are admitted by `SubAgentRegistry` before any child starts
   """
   @spec execute(map(), map()) :: execute_result()
   def execute(args, context \\ %{})
 
-  def execute(%{"goal" => goal} = args, context) when is_binary(goal) do
+  def execute(%{"action" => "status"} = args, _context) do
+    case Map.get(args, "agent_id") do
+      id when is_binary(id) and id != "" ->
+        case SubAgent.run_info(id) do
+          {:ok, info} ->
+            {:ok, format_run_info(info)}
+
+          {:error, :not_found} ->
+            {:error, "No run record found for agent #{id}."}
+
+          {:error, reason} ->
+            {:error, "Failed to read run record for agent #{id}: #{inspect(reason)}"}
+        end
+
+      _ ->
+        {:error, "dispatch_agent action 'status' requires an 'agent_id' parameter."}
+    end
+  end
+
+  def execute(%{"goal" => goal} = args, context) when is_binary(goal) and goal != "" do
     parent_session_id = Map.get(context, "session_id") || Map.get(args, "session_id")
     parent_workspace_path = Map.get(context, "workspace_path") || Map.get(args, "workspace_path")
     id = "agent_" <> (:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower))
 
-    opts = [
-      goal: goal,
-      id: id,
-      parent_session_id: parent_session_id,
-      parent_workspace_path: parent_workspace_path
-    ]
+    opts =
+      [
+        goal: goal,
+        id: id,
+        parent_session_id: parent_session_id,
+        parent_workspace_path: parent_workspace_path
+      ] ++ model_override_opts(args)
 
-    case SubAgent.start_supervised(opts, sub_agent_supervisor()) do
-      {:ok, _pid} ->
-        {:ok, "Sub-Agent detached successfully. ID: #{id}. Monitor the Blackboard for updates."}
+    case SubAgentRegistry.reserve(id, parent_session_id) do
+      :ok ->
+        start_child(opts, id)
 
-      {:error, reason} ->
-        {:error, "Failed to dispatch agent: #{inspect(reason)}"}
+      {:error, :global_limit} ->
+        {:error, limit_message("global", :max_subagents, 32)}
+
+      {:error, :session_limit} ->
+        {:error, limit_message("session", :max_subagents_per_session, 8)}
     end
   end
 
   def execute(args, _context) do
     {:error, "dispatch_agent requires a 'goal' parameter. Got keys: #{inspect(Map.keys(args))}"}
+  end
+
+  defp start_child(opts, id) do
+    case SubAgent.start_supervised(opts, sub_agent_supervisor()) do
+      {:ok, pid} ->
+        :ok = SubAgentRegistry.track(id, pid)
+        {:ok, "Sub-Agent detached successfully. ID: #{id}. Monitor the Blackboard for updates."}
+
+      {:error, reason} ->
+        SubAgentRegistry.release(id)
+        {:error, "Failed to dispatch agent: #{inspect(reason)}"}
+    end
+  end
+
+  defp model_override_opts(args) do
+    provider = Map.get(args, "provider")
+    model = Map.get(args, "model")
+    thinking_level = Map.get(args, "thinking_level")
+
+    if is_binary(provider) and provider != "" and is_binary(model) and model != "" do
+      override = %{provider: provider, model: model}
+
+      override =
+        if is_binary(thinking_level) and thinking_level != "" do
+          Map.put(override, :thinking_level, thinking_level)
+        else
+          override
+        end
+
+      [model_override: override]
+    else
+      []
+    end
+  end
+
+  defp limit_message(scope, key, default) do
+    cap = Application.get_env(:pincer, key, default)
+    "Sub-agent limit reached: #{scope} cap of #{cap} active sub-agents."
+  end
+
+  defp format_run_info(info) do
+    metadata = Map.get(info, :metadata) || %{}
+
+    [
+      "Sub-agent #{Map.get(info, :id)}",
+      "Status: #{Map.get(info, :status)}",
+      "Step count: #{Map.get(info, :step_count, 0)}",
+      metadata_line(metadata, :goal, "Goal"),
+      metadata_line(metadata, :result, "Result"),
+      timestamp_line(info)
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp metadata_line(metadata, key, label) do
+    case metadata_value(metadata, key) do
+      nil -> nil
+      "" -> nil
+      value -> "#{label}: #{value}"
+    end
+  end
+
+  defp metadata_value(metadata, key) when is_map(metadata) do
+    Map.get(metadata, key) || Map.get(metadata, to_string(key))
+  end
+
+  defp metadata_value(_metadata, _key), do: nil
+
+  defp timestamp_line(info) do
+    case Map.get(info, :updated_at) do
+      nil -> nil
+      %DateTime{} = value -> "Updated: #{DateTime.to_iso8601(value)}"
+      value -> "Updated: #{value}"
+    end
   end
 
   defp sub_agent_supervisor do

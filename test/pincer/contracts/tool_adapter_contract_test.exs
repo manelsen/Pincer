@@ -24,6 +24,7 @@ defmodule Pincer.Contracts.ToolAdapterContractTest do
     Pincer.Adapters.Tools.Orchestrator,
     Pincer.Adapters.Tools.SafeShell,
     Pincer.Adapters.Tools.Scheduler,
+    Pincer.Adapters.Tools.SessionSearch,
     Pincer.Adapters.Tools.Timer,
     Pincer.Adapters.Tools.Web,
     Pincer.Adapters.Tools.Workflow

@@ -4,17 +4,40 @@ defmodule Pincer.Adapters.Tools.OrchestratorTest do
 
   alias Pincer.Adapters.Tools.Orchestrator
   alias Pincer.Core.Orchestration.SubAgent
+  alias Pincer.Core.Orchestration.SubAgentRegistry
+
+  defmodule RunInfoStorageStub do
+    def load_checkpoint(session_id, opts) do
+      send(Application.fetch_env!(:pincer, :orchestrator_run_info_pid), {:load, session_id, opts})
+
+      {:ok,
+       %Pincer.Storage.Checkpoint{
+         id: Ecto.UUID.generate(),
+         session_id: session_id,
+         status: "finished",
+         step_count: 7,
+         metadata: %{"kind" => "subagent", "goal" => "Audit", "result" => "all clear"},
+         inserted_at: ~U[2026-01-01 00:00:00Z],
+         updated_at: ~U[2026-01-01 00:01:00Z]
+       }}
+    end
+
+    def save_checkpoint(session_id, checkpoint) do
+      send(Application.fetch_env!(:pincer, :orchestrator_run_info_pid), {:save, session_id})
+      {:ok, checkpoint}
+    end
+  end
 
   setup :set_mox_global
 
   setup do
     Pincer.LLM.ClientMock
     |> stub(:chat_completion, fn _msgs, _model, _config, _tools ->
-      Process.sleep(60)
+      Process.sleep(300)
       {:ok, %{"content" => "SubAgent finished"}}
     end)
     |> stub(:stream_completion, fn _msgs, _model, _config, _tools ->
-      Process.sleep(60)
+      Process.sleep(300)
       {:ok, [%{"choices" => [%{"delta" => %{"content" => "SubAgent finished"}}]}]}
     end)
 
@@ -74,4 +97,193 @@ defmodule Pincer.Adapters.Tools.OrchestratorTest do
     assert {:error, msg} = Orchestrator.execute(%{}, %{})
     assert msg =~ "goal"
   end
+
+  test "spec advertises per-run model overrides, action, and agent_id" do
+    spec = Orchestrator.spec()
+    props = spec.parameters.properties
+
+    assert spec.parameters.required == []
+    assert props[:goal].type == "string"
+    assert props[:provider].type == "string"
+    assert props[:model].type == "string"
+    assert props[:thinking_level].type == "string"
+    assert props[:action].type == "string"
+    assert props[:agent_id].type == "string"
+  end
+
+  test "execute/2 forwards a complete model override into the SubAgent state", %{ws: ws} do
+    assert {:ok, msg} =
+             Orchestrator.execute(
+               %{
+                 "goal" => "Use a specific model",
+                 "provider" => "openai",
+                 "model" => "gpt-5",
+                 "thinking_level" => "high"
+               },
+               %{"session_id" => "parent_model", "workspace_path" => ws}
+             )
+
+    id = agent_id_from(msg)
+
+    assert {:ok, pid} = await_agent(SubAgentRegistry, id)
+
+    assert :sys.get_state(pid).model_override == %{
+             provider: "openai",
+             model: "gpt-5",
+             thinking_level: "high"
+           }
+  end
+
+  test "execute/2 ignores an incomplete model override", %{ws: ws} do
+    assert {:ok, msg} =
+             Orchestrator.execute(
+               %{"goal" => "No model here", "provider" => "openai"},
+               %{"session_id" => "parent_partial_model", "workspace_path" => ws}
+             )
+
+    id = agent_id_from(msg)
+
+    assert {:ok, pid} = await_agent(SubAgentRegistry, id)
+    assert :sys.get_state(pid).model_override == nil
+  end
+
+  test "global limit rejects before starting a child", %{sup: sup, ws: ws} do
+    prev = Application.get_env(:pincer, :max_subagents)
+    Application.put_env(:pincer, :max_subagents, 0)
+
+    on_exit(fn ->
+      case prev do
+        nil -> Application.delete_env(:pincer, :max_subagents)
+        value -> Application.put_env(:pincer, :max_subagents, value)
+      end
+    end)
+
+    before_children = DynamicSupervisor.which_children(sup)
+
+    assert {:error, msg} =
+             Orchestrator.execute(
+               %{"goal" => "Must not start"},
+               %{"session_id" => unique_session("global"), "workspace_path" => ws}
+             )
+
+    assert msg =~ "Sub-agent limit reached"
+    assert DynamicSupervisor.which_children(sup) == before_children
+  end
+
+  test "per-session limit rejects before starting a child and releases after exit", %{
+    sup: sup,
+    ws: ws
+  } do
+    prev_global = Application.get_env(:pincer, :max_subagents)
+    prev_session = Application.get_env(:pincer, :max_subagents_per_session)
+
+    Application.put_env(:pincer, :max_subagents, 100)
+    Application.put_env(:pincer, :max_subagents_per_session, 1)
+
+    on_exit(fn ->
+      restore_env(:max_subagents, prev_global)
+      restore_env(:max_subagents_per_session, prev_session)
+    end)
+
+    session = unique_session("session_limit")
+
+    assert {:ok, first} =
+             Orchestrator.execute(
+               %{"goal" => "First"},
+               %{"session_id" => session, "workspace_path" => ws}
+             )
+
+    first_id = agent_id_from(first)
+    before_children = length(DynamicSupervisor.which_children(sup))
+
+    assert {:error, msg} =
+             Orchestrator.execute(
+               %{"goal" => "Second"},
+               %{"session_id" => session, "workspace_path" => ws}
+             )
+
+    assert msg =~ "Sub-agent limit reached"
+    assert length(DynamicSupervisor.which_children(sup)) == before_children
+
+    assert {:ok, _pid} = await_agent(SubAgentRegistry, first_id)
+
+    wait_until(fn -> SubAgentRegistry.count_for(session) == 0 end)
+
+    assert {:ok, third} =
+             Orchestrator.execute(
+               %{"goal" => "Third after release"},
+               %{"session_id" => session, "workspace_path" => ws}
+             )
+
+    assert agent_id_from(third) =~ ~r/^agent_/
+
+    wait_until(fn -> SubAgentRegistry.count_for(session) == 0 end)
+  end
+
+  test "action status formats the durable run record", %{} do
+    prev = Application.get_env(:pincer, :storage_adapter)
+
+    Application.put_env(:pincer, :storage_adapter, RunInfoStorageStub)
+    Application.put_env(:pincer, :orchestrator_run_info_pid, self())
+
+    on_exit(fn ->
+      restore_env(:storage_adapter, prev)
+
+      case Application.get_env(:pincer, :orchestrator_run_info_pid) do
+        nil -> :ok
+        _ -> Application.delete_env(:pincer, :orchestrator_run_info_pid)
+      end
+    end)
+
+    assert {:ok, report} =
+             Orchestrator.execute(%{"action" => "status", "agent_id" => "agent_status_1"}, %{})
+
+    assert report =~ "agent_status_1"
+    assert report =~ "finished"
+    assert report =~ "7"
+    assert report =~ "all clear"
+
+    assert_received {:load, "agent_status_1", opts}
+    assert Enum.sort(opts[:status]) == ~w(completed failed finished interrupted paused running)
+  end
+
+  defp unique_session(prefix), do: "#{prefix}_#{System.unique_integer([:positive])}"
+
+  defp agent_id_from(message) do
+    case Regex.run(~r/ID: (agent_[a-f0-9]+)/, message) do
+      [_, id] -> id
+      _ -> flunk("no agent id in #{inspect(message)}")
+    end
+  end
+
+  defp await_agent(registry, id, attempts \\ 100) do
+    case registry.lookup(id) do
+      {:ok, pid} ->
+        {:ok, pid}
+
+      :error when attempts > 0 ->
+        Process.sleep(5)
+        await_agent(registry, id, attempts - 1)
+
+      :error ->
+        {:error, :not_found}
+    end
+  end
+
+  defp wait_until(fun, attempts \\ 200) do
+    cond do
+      fun.() ->
+        :ok
+
+      attempts == 0 ->
+        flunk("condition not met in time")
+
+      true ->
+        Process.sleep(5)
+        wait_until(fun, attempts - 1)
+    end
+  end
+
+  defp restore_env(key, nil), do: Application.delete_env(:pincer, key)
+  defp restore_env(key, value), do: Application.put_env(:pincer, key, value)
 end

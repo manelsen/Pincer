@@ -207,4 +207,67 @@ defmodule Pincer.Core.PromptAssemblyTest do
       assert prompt =~ "## CAPABILITIES & TOOLS:"
     end
   end
+
+  describe "curated memory bounds" do
+    test "prepare bounds an oversized MEMORY.md before injecting it" do
+      workspace =
+        Path.join(System.tmp_dir!(), "pincer_pa_mem_cap_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(AgentPaths.pincer_dir(workspace))
+      on_exit(fn -> File.rm_rf!(workspace) end)
+
+      lines = for index <- 1..120, do: "HEAD_MEMORY_LINE_#{index} #{String.duplicate("m", 40)}"
+
+      File.write!(
+        AgentPaths.memory_path(workspace),
+        Enum.join(lines, "\n") <> "\nTAIL_MEMORY_SECRET"
+      )
+
+      history = [
+        %{"role" => "system", "content" => "System base"},
+        %{"role" => "user", "content" => "Oi"}
+      ]
+
+      [system_msg | _] =
+        PromptAssembly.prepare(history, %{provider: "stub_provider", model: "x"},
+          current_time: "2026-03-14 00:00:00Z",
+          workspace_path: workspace,
+          storage: StorageStub,
+          memory_recall: RecallStub,
+          llm_client: LLMStub,
+          context_strategy: nil
+        )
+
+      content = system_msg["content"]
+
+      assert content =~ "HEAD_MEMORY_LINE_1 "
+      refute content =~ "HEAD_MEMORY_LINE_120 "
+      refute content =~ "TAIL_MEMORY_SECRET"
+      assert content =~ "[truncated]"
+    end
+
+    test "build_system_prompt bounds an oversized USER.md before injecting it" do
+      workspace =
+        Path.join(System.tmp_dir!(), "pincer_pa_user_cap_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(AgentPaths.pincer_dir(workspace))
+      on_exit(fn -> File.rm_rf!(workspace) end)
+
+      lines = for index <- 1..120, do: "HEAD_USER_LINE_#{index} #{String.duplicate("u", 40)}"
+      File.write!(AgentPaths.user_path(workspace), Enum.join(lines, "\n") <> "\nTAIL_USER_SECRET")
+
+      prompt =
+        PromptAssembly.build_system_prompt(
+          workspace_path: workspace,
+          root_agent_id: "agent-with-lessons",
+          self_state: nil,
+          lesson_store: LessonStoreStub
+        )
+
+      assert prompt =~ "HEAD_USER_LINE_1 "
+      refute prompt =~ "HEAD_USER_LINE_120 "
+      refute prompt =~ "TAIL_USER_SECRET"
+      assert prompt =~ "[truncated]"
+    end
+  end
 end

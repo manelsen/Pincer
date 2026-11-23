@@ -90,6 +90,18 @@ defmodule Pincer.Core.Introspection.KernelTest do
     start_supervised!({Kernel, Keyword.merge(defaults, opts)})
   end
 
+  defp eventually(fun, attempts \\ 200)
+  defp eventually(_fun, 0), do: false
+
+  defp eventually(fun, attempts) do
+    if fun.() do
+      true
+    else
+      Process.sleep(5)
+      eventually(fun, attempts - 1)
+    end
+  end
+
   describe "lifecycle" do
     test "starts and registers via Registry" do
       pid = start_kernel()
@@ -262,7 +274,8 @@ defmodule Pincer.Core.Introspection.KernelTest do
 
       trace = %{"steps" => [%{"kind" => "tool"}, %{"kind" => "error"}, %{"kind" => "tool"}]}
       Kernel.report_trace(@agent, trace)
-      Process.sleep(200)
+      assert eventually(fn -> :sys.get_state(pid).last_reflection_at != nil end)
+      assert eventually(fn -> :sys.get_state(pid).pending_reflection? == false end)
 
       state = :sys.get_state(pid)
       # Should have recorded the attempt but not crashed

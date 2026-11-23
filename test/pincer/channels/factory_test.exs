@@ -195,4 +195,56 @@ defmodule Pincer.Channels.Factory.Test do
       assert [{MockTelegramChannel, _}] = specs
     end
   end
+
+  describe "create_channel_specs/2 — webhook listener integration" do
+    setup :clean_whitelist
+
+    defp webhook_config(extra) do
+      Map.merge(
+        %{
+          "enabled" => true,
+          "adapter" => "Pincer.Channels.Webhook",
+          "token_env" => "PINCER_WEBHOOK_FACTORY_TEST_TOKEN"
+        },
+        extra
+      )
+    end
+
+    test "enabled webhook yields the channel followed by the listener with the same config" do
+      cfg = webhook_config(%{})
+
+      specs = Factory.create_channel_specs(%{"webhook" => cfg})
+
+      assert [
+               {Pincer.Channels.Webhook, ^cfg},
+               {Pincer.Channels.Webhook.Listener, ^cfg}
+             ] = specs
+    end
+
+    test "disabled webhook yields neither the channel nor the listener" do
+      cfg = webhook_config(%{"enabled" => false})
+
+      assert Factory.create_channel_specs(%{"webhook" => cfg}) == []
+    end
+
+    test "whitelist-excluded webhook yields neither the channel nor the listener" do
+      Application.put_env(:pincer, :enabled_channels, ["telegram"])
+      cfg = webhook_config(%{})
+
+      on_exit(fn -> Application.delete_env(:pincer, :enabled_channels) end)
+
+      assert Factory.create_channel_specs(%{"webhook" => cfg}) == []
+    end
+
+    test "missing token_env still yields both specs so the listener can fail closed" do
+      cfg =
+        webhook_config(%{})
+        |> Map.delete("token_env")
+
+      assert [
+               {Pincer.Channels.Webhook, ^cfg},
+               {Pincer.Channels.Webhook.Listener, ^cfg}
+             ] = Factory.create_channel_specs(%{"webhook" => cfg})
+    end
+  end
 end

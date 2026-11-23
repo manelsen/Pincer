@@ -8,6 +8,7 @@ defmodule Pincer.Core.PromptAssembly do
 
   require Logger
   alias Pincer.Core.AgentPaths
+  alias Pincer.Core.CuratedMemory
   alias Pincer.Core.MemoryRecall
   alias Pincer.Core.Session.Pruner
 
@@ -44,7 +45,7 @@ defmodule Pincer.Core.PromptAssembly do
 
     identity = AgentPaths.read_file(AgentPaths.identity_path(workspace))
     soul = AgentPaths.read_file(AgentPaths.soul_path(workspace))
-    user = AgentPaths.read_file(AgentPaths.user_path(workspace))
+    user = CuratedMemory.read(workspace, :user)
     style = AgentPaths.read_file(AgentPaths.style_path(workspace))
     history = AgentPaths.read_file(AgentPaths.history_path(workspace))
 
@@ -154,7 +155,7 @@ defmodule Pincer.Core.PromptAssembly do
           if memory != "" do
             memory
           else
-            AgentPaths.read_file(AgentPaths.memory_path(workspace_path))
+            CuratedMemory.read(workspace_path, :memory)
           end
 
         safe_memory = MemoryRecall.sanitize_for_prompt(runtime_memory)

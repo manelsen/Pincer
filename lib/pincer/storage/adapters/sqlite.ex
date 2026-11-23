@@ -684,52 +684,71 @@ defmodule Pincer.Storage.Adapters.SQLite do
   end
 
   @impl true
-  @spec load_checkpoint(String.t(), keyword()) :: {:ok, Checkpoint.t()} | {:error, :not_found}
-  def load_checkpoint(session_id, _opts \\ []) do
-    case SQLite.query(
-           SQLite.default_server(),
-           """
-           SELECT id, session_id, task_id, project_id, status, history_snapshot, step_count, metadata, inserted_at, updated_at
-           FROM checkpoints
-           WHERE session_id = ?1 AND status IN ('running', 'paused')
-           ORDER BY inserted_at DESC, rowid DESC
-           LIMIT 1
-           """,
-           [to_string(session_id)]
-         ) do
-      {:ok,
-       %{
-         rows: [
-           [
-             id,
-             sid,
-             task_id,
-             project_id,
-             status,
-             snapshot,
-             step_count,
-             meta_json,
-             inserted_at,
-             updated_at
-           ]
-         ]
-       }} ->
-        {:ok,
-         %Checkpoint{
-           id: id,
-           session_id: sid,
-           task_id: task_id,
-           project_id: project_id,
-           status: status,
-           history_snapshot: snapshot,
-           step_count: step_count,
-           metadata: decode_json(meta_json),
-           inserted_at: parse_timestamp(inserted_at),
-           updated_at: parse_timestamp(updated_at)
-         }}
+  @spec load_checkpoint(String.t(), keyword()) :: {:ok, Checkpoint.t()} | {:error, term()}
+  def load_checkpoint(session_id, opts \\ []) do
+    with {:ok, statuses} <- checkpoint_statuses(opts) do
+      placeholders =
+        statuses
+        |> Enum.with_index(2)
+        |> Enum.map_join(", ", fn {_status, index} -> "?#{index}" end)
 
-      _ ->
-        {:error, :not_found}
+      query = """
+      SELECT id, session_id, task_id, project_id, status, history_snapshot, step_count, metadata, inserted_at, updated_at
+      FROM checkpoints
+      WHERE session_id = ?1 AND status IN (#{placeholders})
+      ORDER BY inserted_at DESC, rowid DESC
+      LIMIT 1
+      """
+
+      case SQLite.query(SQLite.default_server(), query, [to_string(session_id) | statuses]) do
+        {:ok,
+         %{
+           rows: [
+             [
+               id,
+               sid,
+               task_id,
+               project_id,
+               status,
+               snapshot,
+               step_count,
+               meta_json,
+               inserted_at,
+               updated_at
+             ]
+           ]
+         }} ->
+          {:ok,
+           %Checkpoint{
+             id: id,
+             session_id: sid,
+             task_id: task_id,
+             project_id: project_id,
+             status: status,
+             history_snapshot: snapshot,
+             step_count: step_count,
+             metadata: decode_json(meta_json),
+             inserted_at: parse_timestamp(inserted_at),
+             updated_at: parse_timestamp(updated_at)
+           }}
+
+        _ ->
+          {:error, :not_found}
+      end
+    end
+  end
+
+  defp checkpoint_statuses(opts) do
+    statuses =
+      (opts[:status] || ["running", "paused"])
+      |> List.wrap()
+      |> Enum.map(&to_string/1)
+      |> Enum.uniq()
+
+    if statuses != [] and Enum.all?(statuses, &(&1 in Checkpoint.valid_statuses())) do
+      {:ok, statuses}
+    else
+      {:error, :invalid_status}
     end
   end
 

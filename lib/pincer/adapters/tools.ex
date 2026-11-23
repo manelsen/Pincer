@@ -13,6 +13,7 @@ defmodule Pincer.Adapters.Tools do
       TimerServer,
       Browser,
       Media,
-      Workflow
+      Workflow,
+      SessionSearch
     ]
 end

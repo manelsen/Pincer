@@ -31,6 +31,7 @@ defmodule Pincer.Adapters.NativeToolRegistry do
     Pincer.Adapters.Tools.ExternalKnowledge,
     Pincer.Adapters.Tools.Browser,
     Pincer.Adapters.Tools.Media,
+    Pincer.Adapters.Tools.SessionSearch,
     Pincer.Adapters.Tools.Workflow
   ]
 

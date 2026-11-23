@@ -12,7 +12,9 @@ defmodule Pincer.Storage.Checkpoint do
   |--------|---------|
   | `"running"` | Active — the session is currently executing |
   | `"paused"` | Suspended — can be resumed |
+  | `"finished"` | Finished successfully (used by Sub-Agents) |
   | `"failed"` | Terminated with an error |
+  | `"interrupted"` | Running in a previous VM boot and now stale |
   | `"completed"` | Finished successfully |
 
   ## Schema
@@ -47,7 +49,16 @@ defmodule Pincer.Storage.Checkpoint do
   use Ecto.Schema
   import Ecto.Changeset
 
-  @valid_statuses ~w(running paused failed completed)
+  @valid_statuses ~w(running paused failed finished interrupted completed)
+
+  @doc """
+  Returns the canonical list of checkpoint statuses accepted by the schema.
+
+  Storage adapters use this single list when validating `load_checkpoint/2`
+  status filters, so the accepted vocabulary cannot drift.
+  """
+  @spec valid_statuses() :: [String.t()]
+  def valid_statuses, do: @valid_statuses
 
   @type t :: %__MODULE__{
           id: binary() | nil,
@@ -81,7 +92,8 @@ defmodule Pincer.Storage.Checkpoint do
   ## Required Fields
 
     - `session_id` - The owning session
-    - `status` - One of `"running"`, `"paused"`, `"failed"`, `"completed"`
+    - `status` - One of `"running"`, `"paused"`, `"failed"`, `"finished"`,
+      `"interrupted"`, `"completed"`
     - `history_snapshot` - Binary blob of the serialised history
 
   ## Examples

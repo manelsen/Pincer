@@ -14,9 +14,13 @@ channels:
     token_env: "TELEGRAM_BOT_TOKEN"
   webhook:
     adapter: "Pincer.Channels.Webhook"
+    bind: "127.0.0.1"
     default_session_id: "webhook_main"
     default_source: "external"
     enabled: false
+    max_body_bytes: 1048576
+    path: "/webhook/message"
+    port: 4000
     session_mode: "per_sender"
     token_env: "PINCER_WEBHOOK_TOKEN"
   line:

@@ -8,7 +8,7 @@ defmodule Pincer.Core.MemoryRecall do
   """
 
   require Logger
-  alias Pincer.Core.AgentPaths
+  alias Pincer.Core.CuratedMemory
   alias Pincer.Core.Telemetry
 
   @default_limit 5
@@ -525,9 +525,7 @@ defmodule Pincer.Core.MemoryRecall do
   end
 
   defp read_learned_user_memory(workspace_path) do
-    user_path = AgentPaths.user_path(workspace_path)
-
-    case AgentPaths.read_file(user_path) do
+    case CuratedMemory.read(workspace_path, :user) do
       "" ->
         ""
 

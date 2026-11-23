@@ -1,6 +1,7 @@
 defmodule Pincer.LLM.FailoverDispatchTest do
   use ExUnit.Case, async: true
 
+  alias Pincer.Core.LLM.CooldownStore
   alias Pincer.Core.LLM.FailoverPolicy
   alias Pincer.LLM.FailoverDispatch
 
@@ -10,6 +11,12 @@ defmodule Pincer.LLM.FailoverDispatchTest do
   }
 
   @transient {:http_error, 503, "upstream unavailable"}
+
+  setup do
+    CooldownStore.clear_provider("primary")
+    on_exit(fn -> CooldownStore.clear_provider("primary") end)
+    :ok
+  end
 
   defp no_retry do
     fn _provider, _model, _state -> flunk("failover retry must not run") end

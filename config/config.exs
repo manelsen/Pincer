@@ -90,8 +90,6 @@ config :pincer, Pincer.Infra.Repo,
   types: Pincer.Infra.PostgrexTypes,
   log: false
 
-config :pincer, :webhook_token, System.get_env("PINCER_WEBHOOK_TOKEN", "")
-
 config :pincer, :log_mcp, false
 
 config :nostrum,
@@ -107,6 +105,14 @@ config :pincer, :approval_timeout_ms, 600_000
 config :pincer, :max_recursion_depth, 100
 config :pincer, :tool_result_max_chars, 32_000
 config :pincer, :max_inline_bytes, 6_291_456
+config :pincer, :tool_max_concurrency, 10
+
+# Delegated sub-agents
+config :pincer, :max_subagents, 32
+config :pincer, :max_subagents_per_session, 8
+
+# Curated memory character budgets (MEMORY.md / USER.md)
+config :pincer, :curated_memory_limits, %{memory: 4_000, user: 2_500}
 
 # File system tool
 config :pincer, :fs_max_file_size, 52_428_800

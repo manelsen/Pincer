@@ -145,6 +145,7 @@ defmodule Pincer.Application do
       Pincer.Core.Orchestration.Blackboard,
       {DynamicSupervisor,
        strategy: :one_for_one, name: Pincer.Core.Orchestration.SubAgentSupervisor},
+      Pincer.Core.Orchestration.SubAgentRegistry,
       Pincer.Core.MemoryObservability,
       Pincer.Core.ConversationObservability,
       {Finch, name: Pincer.Finch},

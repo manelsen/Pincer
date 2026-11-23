@@ -46,6 +46,20 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
     def execute_tool("huge_tool", _args, _ctx) do
       {:ok, String.duplicate("x", 40_000)}
     end
+
+    def execute_tool("concurrency_tool", _args, _ctx) do
+      agent = Application.fetch_env!(:pincer, :tool_runner_test_concurrency_agent)
+
+      peak =
+        Agent.get_and_update(agent, fn state ->
+          current = state.current + 1
+          {max(state.peak, current), %{state | current: current, peak: max(state.peak, current)}}
+        end)
+
+      Process.sleep(40)
+      Agent.update(agent, fn state -> %{state | current: state.current - 1} end)
+      {:ok, "conc:#{peak}"}
+    end
   end
 
   defmodule StorageSpy do
@@ -268,6 +282,77 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
 
     {[denied_msg], _ctx} = Task.await(task2, 2_000)
     assert denied_msg["content"] =~ "Approval denied for approval_tool"
+  end
+
+  test "honors tool_max_concurrency for parallel batches" do
+    prev = Application.get_env(:pincer, :tool_max_concurrency)
+    Application.put_env(:pincer, :tool_max_concurrency, 2)
+
+    {:ok, agent} = Agent.start_link(fn -> %{current: 0, peak: 0} end)
+    Application.put_env(:pincer, :tool_runner_test_concurrency_agent, agent)
+
+    on_exit(fn ->
+      case prev do
+        nil -> Application.delete_env(:pincer, :tool_max_concurrency)
+        value -> Application.put_env(:pincer, :tool_max_concurrency, value)
+      end
+
+      Application.delete_env(:pincer, :tool_runner_test_concurrency_agent)
+
+      if Process.alive?(agent), do: Agent.stop(agent)
+    end)
+
+    ctx =
+      Ctx.new(self(), "runner_concurrency",
+        workspace_path: tmp_dir!(),
+        tool_registry: RegistryStub,
+        storage: StorageSpy
+      )
+
+    calls =
+      for i <- 1..6 do
+        %{
+          "id" => "c#{i}",
+          "function" => %{"name" => "concurrency_tool", "arguments" => "{}"}
+        }
+      end
+
+    {results, _ctx} = ToolRunner.execute_batch(calls, ctx)
+
+    assert length(results) == 6
+    assert Enum.all?(results, &String.starts_with?(&1["content"], "conc:"))
+
+    state = Agent.get(agent, & &1)
+    assert state.peak <= 2
+    assert state.peak == 2
+  end
+
+  test "subagent privileged tool fails fast without broadcasting an approval request" do
+    session_id = "runner_subagent_#{System.unique_integer([:positive])}"
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+    on_exit(fn -> Pincer.Infra.PubSub.unsubscribe("session:#{session_id}") end)
+
+    ctx =
+      Ctx.new(self(), session_id,
+        workspace_path: tmp_dir!(),
+        tool_registry: RegistryStub,
+        storage: StorageSpy,
+        subagent?: true,
+        approval_timeout_ms: 50
+      )
+
+    call = %{"id" => "c_sub", "function" => %{"name" => "approval_tool", "arguments" => "{}"}}
+
+    {micros, {[msg], _ctx}} = :timer.tc(fn -> ToolRunner.execute_batch([call], ctx) end)
+
+    assert msg["content"] =~
+             "approval required for approval_tool but delegated sub-agents have no operator attached"
+
+    refute_received {:approval_required, _id, _prompt}
+    assert micros < 500_000
+
+    events = Pincer.Core.AuditLog.by_actor(session_id)
+    assert Enum.any?(events, &(&1.event_type == "tool_approval" and &1.outcome == "denied"))
   end
 
   defp tmp_dir! do

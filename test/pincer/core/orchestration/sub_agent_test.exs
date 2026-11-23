@@ -36,7 +36,9 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
     end
 
     @impl true
-    def stream_completion(_messages, _opts) do
+    def stream_completion(_messages, opts) do
+      notify_opts(opts)
+
       case mode() do
         :ok -> {:ok, [%{"choices" => [%{"delta" => %{"content" => "Task complete"}}]}], nil}
         :error -> {:error, :boom}
@@ -45,11 +47,20 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
     end
 
     @impl true
-    def chat_completion(_messages, _opts) do
+    def chat_completion(_messages, opts) do
+      notify_opts(opts)
+
       case mode() do
         :ok -> {:ok, %{"role" => "assistant", "content" => "Task complete"}, nil}
         :error -> {:error, :boom}
         :crash -> raise "kaboom"
+      end
+    end
+
+    defp notify_opts(opts) do
+      case Application.get_env(:pincer, :sub_agent_test_llm_opts_pid) do
+        pid when is_pid(pid) -> send(pid, {:llm_opts, opts})
+        _ -> :ok
       end
     end
 
@@ -61,6 +72,35 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
     def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
     @impl true
     def provider_config(_provider_id), do: nil
+  end
+
+  defmodule RunInfoStorageStub do
+    def load_checkpoint(session_id, opts) do
+      pid = Application.fetch_env!(:pincer, :run_info_test_pid)
+      send(pid, {:load_checkpoint, session_id, opts})
+
+      {:ok,
+       %Pincer.Storage.Checkpoint{
+         id: Ecto.UUID.generate(),
+         session_id: session_id,
+         status: "running",
+         step_count: 2,
+         metadata: %{"boot_id" => "a-foreign-boot", "goal" => "Stale run"},
+         inserted_at: ~U[2026-01-01 00:00:00Z],
+         updated_at: ~U[2026-01-01 00:00:05Z]
+       }}
+    end
+
+    def save_checkpoint(session_id, checkpoint) do
+      pid = Application.fetch_env!(:pincer, :run_info_test_pid)
+      send(pid, {:save_checkpoint, session_id, checkpoint})
+      {:ok, checkpoint}
+    end
+  end
+
+  defmodule EmptyStorageStub do
+    def load_checkpoint(_session_id, _opts), do: {:error, :not_found}
+    def save_checkpoint(_session_id, checkpoint), do: {:ok, checkpoint}
   end
 
   setup do
@@ -180,4 +220,146 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
              &(&1.agent_id == sub_id and String.starts_with?(&1.content, "FAILED:"))
            )
   end
+
+  test "passes model_override into the injected LLM client options", %{tmp: tmp} do
+    LLMStub.put_mode(:ok)
+    Application.put_env(:pincer, :sub_agent_test_llm_opts_pid, self())
+
+    on_exit(fn -> Application.delete_env(:pincer, :sub_agent_test_llm_opts_pid) end)
+
+    id = unique_id("sub_model")
+    workspace = Path.join(tmp, id)
+
+    {:ok, pid} =
+      SubAgent.start_link(
+        id: id,
+        goal: "Use the requested model",
+        workspace_path: workspace,
+        llm_client: LLMStub,
+        tool_registry: ToolRegistryStub,
+        storage: StorageStub,
+        model_override: %{provider: "openai", model: "gpt-5", thinking_level: "high"}
+      )
+
+    ref = Process.monitor(pid)
+    assert_receive {:llm_opts, opts}, 2_000
+    assert opts[:provider] == "openai"
+    assert opts[:model] == "gpt-5"
+    assert opts[:thinking_level] == "high"
+
+    assert_receive {:DOWN, ^ref, :process, ^pid, _}, 2_000
+  end
+
+  test "writes a running checkpoint on start and a finished checkpoint on success", %{
+    tmp: tmp
+  } do
+    LLMStub.put_mode(:ok)
+    test_pid = self()
+    id = unique_id("sub_checkpoint_ok")
+    parent_session = "parent_chk_#{System.unique_integer([:positive])}"
+
+    checkpoint_fn = fn agent_id, checkpoint ->
+      send(test_pid, {:checkpoint, agent_id, checkpoint})
+      {:ok, checkpoint}
+    end
+
+    {:ok, pid} =
+      SubAgent.start_link(
+        id: id,
+        goal: "Checkpointed goal",
+        parent_session_id: parent_session,
+        workspace_path: Path.join(tmp, id),
+        llm_client: LLMStub,
+        tool_registry: ToolRegistryStub,
+        storage: StorageStub,
+        checkpoint_fn: checkpoint_fn,
+        model_override: %{provider: "openai", model: "gpt-5", thinking_level: "high"}
+      )
+
+    ref = Process.monitor(pid)
+    assert_receive {:checkpoint, ^id, running}, 1_000
+    assert running.status == "running"
+    assert running.step_count == 0
+    assert running.metadata.kind == "subagent"
+    assert running.metadata.parent_session_id == parent_session
+    assert running.metadata.goal == "Checkpointed goal"
+    assert running.metadata.provider == "openai"
+    assert running.metadata.model == "gpt-5"
+    assert is_binary(running.metadata.boot_id)
+    assert is_binary(running.metadata.started_at)
+
+    assert_receive {:checkpoint, ^id, finished}, 2_000
+    assert finished.status == "finished"
+    assert finished.metadata.result == "Task complete"
+
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+  end
+
+  test "writes a failed checkpoint when the executor fails", %{tmp: tmp} do
+    LLMStub.put_mode(:error)
+    test_pid = self()
+    id = unique_id("sub_checkpoint_fail")
+
+    checkpoint_fn = fn agent_id, checkpoint ->
+      send(test_pid, {:checkpoint, agent_id, checkpoint})
+      {:ok, checkpoint}
+    end
+
+    {:ok, pid} =
+      SubAgent.start_link(
+        id: id,
+        goal: "Fail with checkpoints",
+        workspace_path: Path.join(tmp, id),
+        llm_client: LLMStub,
+        tool_registry: ToolRegistryStub,
+        storage: StorageStub,
+        checkpoint_fn: checkpoint_fn
+      )
+
+    ref = Process.monitor(pid)
+    assert_receive {:checkpoint, ^id, %{status: "running"}}, 1_000
+    assert_receive {:checkpoint, ^id, failed}, 2_000
+    assert failed.status == "failed"
+    assert failed.metadata.error =~ "boom"
+
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+  end
+
+  test "run_info returns :not_found when no checkpoint exists" do
+    prev = Application.get_env(:pincer, :storage_adapter)
+    Application.put_env(:pincer, :storage_adapter, EmptyStorageStub)
+
+    on_exit(fn -> restore_env(:storage_adapter, prev) end)
+
+    assert {:error, :not_found} =
+             SubAgent.run_info("missing-#{System.unique_integer([:positive])}")
+  end
+
+  test "run_info marks a running checkpoint from a foreign VM as interrupted and persists it" do
+    prev = Application.get_env(:pincer, :storage_adapter)
+    Application.put_env(:pincer, :storage_adapter, RunInfoStorageStub)
+    Application.put_env(:pincer, :run_info_test_pid, self())
+
+    on_exit(fn ->
+      restore_env(:storage_adapter, prev)
+      Application.delete_env(:pincer, :run_info_test_pid)
+    end)
+
+    session_id = "stale_#{System.unique_integer([:positive])}"
+
+    assert {:ok, info} = SubAgent.run_info(session_id)
+    assert info.status == "interrupted"
+    assert info.metadata["boot_id"] == "a-foreign-boot"
+
+    assert_received {:load_checkpoint, ^session_id, opts}
+    assert Enum.sort(opts[:status]) == ~w(completed failed finished interrupted paused running)
+
+    assert_received {:save_checkpoint, ^session_id, persisted}
+    assert persisted.status == "interrupted"
+  end
+
+  defp unique_id(prefix), do: "#{prefix}_#{System.unique_integer([:positive])}"
+
+  defp restore_env(key, nil), do: Application.delete_env(:pincer, key)
+  defp restore_env(key, value), do: Application.put_env(:pincer, key, value)
 end

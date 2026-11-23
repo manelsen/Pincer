@@ -1,6 +1,7 @@
 defmodule Pincer.LLM.CooldownRoutingTest do
   use ExUnit.Case, async: false
 
+  alias Pincer.Core.LLM.CooldownStore
   alias Pincer.LLM.CooldownRouting
 
   @registry %{
@@ -9,10 +10,14 @@ defmodule Pincer.LLM.CooldownRoutingTest do
   }
 
   setup do
+    CooldownStore.clear_provider("primary")
+
     previous = Application.get_env(:pincer, :llm_providers)
     Application.put_env(:pincer, :llm_providers, @registry)
 
     on_exit(fn ->
+      CooldownStore.clear_provider("primary")
+
       if previous do
         Application.put_env(:pincer, :llm_providers, previous)
       else
