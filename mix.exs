@@ -105,8 +105,8 @@ defmodule Pincer.MixProject do
       {:jason, "~> 1.4"},
 
       # Database
-      {:ecto_sql, "~> 3.11"},
-      {:postgrex, "~> 0.19"},
+      {:ecto_sql, "~> 3.13"},
+      {:postgrex, "~> 0.22"},
       {:pgvector, "~> 0.4"},
       {:exqlite, "~> 0.43"},
 
