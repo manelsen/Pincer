@@ -10,7 +10,8 @@ defmodule Pincer.Core.Orchestration.SubAgentRegistry do
 
   Caps are read from application configuration at reservation time, so tests
   and operators can change them without restarting the registry. A cap of
-  `:infinity` means uncapped.
+  `:infinity` means uncapped. Nested dispatches pass the tree's root session id
+  as `parent_session_id`, so the per-session cap is shared by the whole tree.
   """
 
   use GenServer

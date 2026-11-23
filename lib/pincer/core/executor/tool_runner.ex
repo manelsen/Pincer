@@ -3,6 +3,10 @@ defmodule Pincer.Core.Executor.ToolRunner do
   Executes sequential or parallel tool-call batches for `Pincer.Core.Executor`,
   handling approval handshakes, output truncation, consecutive-error tracking,
   workspace markdown notices, and trace accumulation via an explicit `%Ctx{}`.
+
+  Delegated sub-agents have no operator attached: `dispatch_agent` is
+  auto-approved so they can nest, while every other privileged tool that needs
+  approval fails fast and is audited as denied.
   """
 
   require Logger
@@ -120,8 +124,12 @@ defmodule Pincer.Core.Executor.ToolRunner do
     runtime_ctx = %{
       "session_id" => ctx.session_id,
       "workspace_path" => ctx.workspace_path,
+      "subagent_depth" => ctx.opts[:subagent_depth],
+      "root_session_id" => ctx.opts[:root_session_id],
       session_id: ctx.session_id,
-      workspace_path: ctx.workspace_path
+      workspace_path: ctx.workspace_path,
+      subagent_depth: ctx.opts[:subagent_depth],
+      root_session_id: ctx.opts[:root_session_id]
     }
 
     {result, steps, outcome} =
@@ -234,26 +242,54 @@ defmodule Pincer.Core.Executor.ToolRunner do
 
   defp request_approval(call_id, approval_data, runtime_ctx, ctx, steps) do
     if Keyword.get(ctx.opts, :subagent?, false) do
-      handle_subagent_approval(approval_data, ctx, steps)
+      handle_subagent_approval(approval_data, runtime_ctx, ctx, steps)
     else
       do_request_approval(call_id, approval_data, runtime_ctx, ctx, steps)
     end
   end
 
-  defp handle_subagent_approval(approval_data, ctx, steps) do
+  defp handle_subagent_approval(approval_data, runtime_ctx, ctx, steps) do
     command = Map.get(approval_data, :command) || Map.get(approval_data, "command") || ""
     tool_name = Map.get(approval_data, :tool) || Map.get(approval_data, "tool") || "safe_shell"
     tool_class = Map.get(approval_data, :class) || Map.get(approval_data, "class") || :privileged
 
-    Logger.warning(
-      "[EXECUTOR] Denied approval for #{tool_name}: delegated sub-agent has no operator"
-    )
+    if tool_name == "dispatch_agent" do
+      tool_args = Map.get(approval_data, :args) || Map.get(approval_data, "args") || %{}
 
-    steps = audit_step(ctx, steps, tool_name, tool_class, :denied)
-    record_audit(ctx, tool_name, :denied, command)
+      Logger.info("[EXECUTOR] Auto-approved #{tool_name} for delegated sub-agent")
 
-    {"Error: approval required for #{tool_name} but delegated sub-agents have no operator attached",
-     steps, :ok}
+      execute_approved(tool_name, tool_args, tool_class, runtime_ctx, ctx, steps, command)
+    else
+      Logger.warning(
+        "[EXECUTOR] Denied approval for #{tool_name}: delegated sub-agent has no operator"
+      )
+
+      steps = audit_step(ctx, steps, tool_name, tool_class, :denied)
+      record_audit(ctx, tool_name, :denied, command)
+
+      {"Error: approval required for #{tool_name} but delegated sub-agents have no operator attached",
+       steps, :ok}
+    end
+  end
+
+  defp execute_approved(tool_name, tool_args, tool_class, runtime_ctx, ctx, steps, command) do
+    steps = audit_step(ctx, steps, tool_name, tool_class, :approved)
+    record_audit(ctx, tool_name, :approved, command)
+
+    result =
+      case ToolRuntime.execute(
+             tool_name,
+             tool_args,
+             runtime_ctx,
+             ctx.deps.tool_registry,
+             approval_granted: true,
+             class: tool_class
+           ) do
+        {:ok, res, _meta} -> res
+        {:error, reason, _meta} -> "Error: #{inspect(reason)}"
+      end
+
+    {result, steps, :ok}
   end
 
   defp do_request_approval(call_id, approval_data, runtime_ctx, ctx, steps) do
@@ -278,23 +314,7 @@ defmodule Pincer.Core.Executor.ToolRunner do
     receive do
       {:tool_approval_result, ^call_id, :approved} ->
         Logger.info("[EXECUTOR] Command approved: #{command}")
-        steps = audit_step(ctx, steps, tool_name, tool_class, :approved)
-        record_audit(ctx, tool_name, :approved, command)
-
-        result =
-          case ToolRuntime.execute(
-                 tool_name,
-                 tool_args,
-                 runtime_ctx,
-                 ctx.deps.tool_registry,
-                 approval_granted: true,
-                 class: tool_class
-               ) do
-            {:ok, res, _meta} -> res
-            {:error, reason, _meta} -> "Error: #{inspect(reason)}"
-          end
-
-        {result, steps, :ok}
+        execute_approved(tool_name, tool_args, tool_class, runtime_ctx, ctx, steps, command)
 
       {:tool_approval_result, ^call_id, :rejected} ->
         Logger.info("[EXECUTOR] Command rejected: #{command}")

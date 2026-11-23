@@ -43,6 +43,30 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
         }}}
     end
 
+    def execute_tool("dispatch_agent", _args, context) do
+      if context["approval_granted"] do
+        case Application.get_env(:pincer, :tool_runner_test_dispatch_pid) do
+          pid when is_pid(pid) -> send(pid, {:dispatch_context, context})
+          _ -> :ok
+        end
+
+        {:ok, "dispatched"}
+      else
+        {:error,
+         {:approval_required,
+          %{tool: "dispatch_agent", args: %{"goal" => "nested"}, class: :privileged}}}
+      end
+    end
+
+    def execute_tool("ctx_tool", _args, context) do
+      case Application.get_env(:pincer, :tool_runner_test_ctx_pid) do
+        pid when is_pid(pid) -> send(pid, {:tool_context, context})
+        _ -> :ok
+      end
+
+      {:ok, "ctx"}
+    end
+
     def execute_tool("huge_tool", _args, _ctx) do
       {:ok, String.duplicate("x", 40_000)}
     end
@@ -325,6 +349,75 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
     state = Agent.get(agent, & &1)
     assert state.peak <= 2
     assert state.peak == 2
+  end
+
+  test "runtime context carries subagent depth and root session id" do
+    Application.put_env(:pincer, :tool_runner_test_ctx_pid, self())
+    on_exit(fn -> Application.delete_env(:pincer, :tool_runner_test_ctx_pid) end)
+
+    ctx =
+      Ctx.new(self(), "runner_nesting_ctx",
+        workspace_path: tmp_dir!(),
+        tool_registry: RegistryStub,
+        storage: StorageSpy,
+        subagent?: true,
+        subagent_depth: 2,
+        root_session_id: "root_runner"
+      )
+
+    call = %{"id" => "c_ctx", "function" => %{"name" => "ctx_tool", "arguments" => "{}"}}
+
+    {[msg], _ctx} = ToolRunner.execute_batch([call], ctx)
+    assert msg["content"] == "ctx"
+
+    assert_receive {:tool_context, context}, 1_000
+    assert context["subagent_depth"] == 2
+    assert context["root_session_id"] == "root_runner"
+    assert context[:subagent_depth] == 2
+    assert context[:root_session_id] == "root_runner"
+  end
+
+  test "subagent auto-approves dispatch_agent without broadcasting an approval request" do
+    session_id = "runner_dispatch_#{System.unique_integer([:positive])}"
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+    on_exit(fn -> Pincer.Infra.PubSub.unsubscribe("session:#{session_id}") end)
+
+    Application.put_env(:pincer, :tool_runner_test_dispatch_pid, self())
+    on_exit(fn -> Application.delete_env(:pincer, :tool_runner_test_dispatch_pid) end)
+
+    ctx =
+      Ctx.new(self(), session_id,
+        workspace_path: tmp_dir!(),
+        tool_registry: RegistryStub,
+        storage: StorageSpy,
+        subagent?: true,
+        subagent_depth: 1,
+        root_session_id: "root_runner_dispatch",
+        approval_timeout_ms: 50
+      )
+
+    call = %{
+      "id" => "c_dispatch",
+      "function" => %{"name" => "dispatch_agent", "arguments" => ~s({"goal":"nested"})}
+    }
+
+    {[msg], _ctx} = ToolRunner.execute_batch([call], ctx)
+
+    assert msg["content"] == "dispatched"
+    refute_received {:approval_required, _id, _prompt}
+
+    assert_receive {:dispatch_context, context}, 1_000
+    assert context["approval_granted"] == true
+    assert context["subagent_depth"] == 1
+    assert context["root_session_id"] == "root_runner_dispatch"
+
+    events = Pincer.Core.AuditLog.by_actor(session_id)
+
+    assert Enum.any?(
+             events,
+             &(&1.event_type == "tool_approval" and &1.outcome == "approved" and
+                 &1.target == "dispatch_agent")
+           )
   end
 
   test "subagent privileged tool fails fast without broadcasting an approval request" do

@@ -31,6 +31,11 @@ defmodule Pincer.Core.Orchestration.SubAgent do
                         │  Blackboard   │
                         └───────────────┘
 
+  SubAgents may themselves dispatch nested SubAgents through the
+  `dispatch_agent` tool. That single privileged tool is auto-approved inside a
+  sub-agent; every other privileged tool still requires an operator and is
+  denied. Nesting is bounded by the configured `:max_subagent_depth`.
+
   ## Autonomous Execution Model
 
   SubAgents are designed for "fire and forget" delegation:
@@ -93,6 +98,8 @@ defmodule Pincer.Core.Orchestration.SubAgent do
           {:goal, String.t()}
           | {:id, String.t()}
           | {:parent_session_id, String.t()}
+          | {:root_session_id, String.t() | nil}
+          | {:subagent_depth, non_neg_integer()}
           | {:parent_workspace_path, String.t()}
           | {:scope, String.t()}
           | {:workspace_path, String.t()}
@@ -106,6 +113,8 @@ defmodule Pincer.Core.Orchestration.SubAgent do
           id: String.t(),
           goal: String.t(),
           parent_session_id: String.t() | nil,
+          root_session_id: String.t() | nil,
+          subagent_depth: non_neg_integer(),
           scope: String.t(),
           workspace_path: String.t(),
           model_override: map() | nil,
@@ -123,6 +132,9 @@ defmodule Pincer.Core.Orchestration.SubAgent do
 
     * `:goal` (required) - The task description for the SubAgent to accomplish
     * `:id` (optional) - Unique identifier for this SubAgent. Auto-generated if not provided
+    * `:subagent_depth` (optional) - Nesting depth of this agent (defaults to `1`)
+    * `:root_session_id` (optional) - Root session whose per-session cap this run
+      is charged against (defaults to `:parent_session_id`)
 
   ## Returns
 
@@ -189,6 +201,8 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   def init(opts) do
     goal = Keyword.fetch!(opts, :goal)
     parent_session_id = Keyword.get(opts, :parent_session_id)
+    root_session_id = Keyword.get(opts, :root_session_id, parent_session_id)
+    subagent_depth = Keyword.get(opts, :subagent_depth, 1)
     id = Keyword.get(opts, :id, "sub_agent_" <> (:crypto.strong_rand_bytes(8) |> Base.encode16()))
     parent_workspace_path = Keyword.get(opts, :parent_workspace_path)
     scope = Keyword.get(opts, :scope, parent_session_id || id)
@@ -212,6 +226,8 @@ defmodule Pincer.Core.Orchestration.SubAgent do
       id: id,
       goal: goal,
       parent_session_id: parent_session_id,
+      root_session_id: root_session_id,
+      subagent_depth: subagent_depth,
       scope: scope,
       workspace_path: workspace_path,
       model_override: model_override,
@@ -244,7 +260,13 @@ defmodule Pincer.Core.Orchestration.SubAgent do
     ]
 
     executor_opts =
-      [workspace_path: workspace_path, notify?: false, subagent?: true]
+      [
+        workspace_path: workspace_path,
+        notify?: false,
+        subagent?: true,
+        subagent_depth: subagent_depth,
+        root_session_id: root_session_id
+      ]
       |> maybe_put_opt(:llm_client, Keyword.get(opts, :llm_client))
       |> maybe_put_opt(:tool_registry, Keyword.get(opts, :tool_registry))
       |> maybe_put_opt(:storage, Keyword.get(opts, :storage))
@@ -402,6 +424,8 @@ defmodule Pincer.Core.Orchestration.SubAgent do
       kind: "subagent",
       boot_id: boot_id(),
       parent_session_id: state.parent_session_id,
+      root_session_id: state.root_session_id,
+      subagent_depth: state.subagent_depth,
       goal: state.goal,
       provider: override_field(state.model_override, :provider),
       model: override_field(state.model_override, :model),

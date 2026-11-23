@@ -10,6 +10,15 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
     @impl true
     def list_tools, do: []
     @impl true
+    def execute_tool("ctx_tool", _args, context) do
+      case Application.get_env(:pincer, :sub_agent_test_tool_ctx_pid) do
+        pid when is_pid(pid) -> send(pid, {:tool_ctx, context})
+        _ -> :ok
+      end
+
+      {:ok, "ctx captured"}
+    end
+
     def execute_tool(_name, _args, _context), do: {:error, :not_implemented}
   end
 
@@ -40,10 +49,39 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
       notify_opts(opts)
 
       case mode() do
-        :ok -> {:ok, [%{"choices" => [%{"delta" => %{"content" => "Task complete"}}]}], nil}
-        :error -> {:error, :boom}
-        :crash -> raise "kaboom"
-        :hold -> hold_stream()
+        :tool_once ->
+          put_mode(:ok)
+
+          {:ok,
+           [
+             %{
+               "choices" => [
+                 %{
+                   "delta" => %{
+                     "tool_calls" => [
+                       %{
+                         "index" => 0,
+                         "id" => "call_ctx",
+                         "function" => %{"name" => "ctx_tool", "arguments" => "{}"}
+                       }
+                     ]
+                   }
+                 }
+               ]
+             }
+           ], nil}
+
+        :ok ->
+          {:ok, [%{"choices" => [%{"delta" => %{"content" => "Task complete"}}]}], nil}
+
+        :error ->
+          {:error, :boom}
+
+        :crash ->
+          raise "kaboom"
+
+        :hold ->
+          hold_stream()
       end
     end
 
@@ -52,10 +90,33 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
       notify_opts(opts)
 
       case mode() do
-        :ok -> {:ok, %{"role" => "assistant", "content" => "Task complete"}, nil}
-        :error -> {:error, :boom}
-        :crash -> raise "kaboom"
-        :hold -> hold_chat()
+        :tool_once ->
+          put_mode(:ok)
+
+          {:ok,
+           %{
+             "role" => "assistant",
+             "content" => nil,
+             "tool_calls" => [
+               %{
+                 "id" => "call_ctx",
+                 "type" => "function",
+                 "function" => %{"name" => "ctx_tool", "arguments" => "{}"}
+               }
+             ]
+           }, nil}
+
+        :ok ->
+          {:ok, %{"role" => "assistant", "content" => "Task complete"}, nil}
+
+        :error ->
+          {:error, :boom}
+
+        :crash ->
+          raise "kaboom"
+
+        :hold ->
+          hold_chat()
       end
     end
 
@@ -273,6 +334,119 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
     assert opts[:thinking_level] == "high"
 
     assert_receive {:DOWN, ^ref, :process, ^pid, _}, 2_000
+  end
+
+  test "stores subagent depth and root session id in state and checkpoint metadata", %{
+    tmp: tmp
+  } do
+    LLMStub.put_mode(:hold)
+    Application.put_env(:pincer, :sub_agent_test_hold_pid, self())
+    on_exit(fn -> Application.delete_env(:pincer, :sub_agent_test_hold_pid) end)
+
+    test_pid = self()
+    id = unique_id("sub_depth_state")
+    parent_session = "parent_depth_#{System.unique_integer([:positive])}"
+    root_session = "root_depth_#{System.unique_integer([:positive])}"
+
+    checkpoint_fn = fn agent_id, checkpoint ->
+      send(test_pid, {:checkpoint, agent_id, checkpoint})
+      {:ok, checkpoint}
+    end
+
+    {:ok, pid} =
+      SubAgent.start_link(
+        id: id,
+        goal: "Report nesting metadata",
+        parent_session_id: parent_session,
+        root_session_id: root_session,
+        subagent_depth: 1,
+        workspace_path: Path.join(tmp, id),
+        llm_client: LLMStub,
+        tool_registry: ToolRegistryStub,
+        storage: StorageStub,
+        checkpoint_fn: checkpoint_fn
+      )
+
+    state = :sys.get_state(pid)
+    assert state.subagent_depth == 1
+    assert state.root_session_id == root_session
+
+    assert_receive {:checkpoint, ^id, running}, 1_000
+    assert running.metadata.subagent_depth == 1
+    assert running.metadata.root_session_id == root_session
+
+    assert_receive {:llm_holding, worker}, 2_000
+    send(worker, :release_llm)
+
+    ref = Process.monitor(pid)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _}, 2_000
+  end
+
+  test "passes subagent depth and root session id into the executor tool context", %{tmp: tmp} do
+    LLMStub.put_mode(:tool_once)
+    Application.put_env(:pincer, :sub_agent_test_tool_ctx_pid, self())
+    on_exit(fn -> Application.delete_env(:pincer, :sub_agent_test_tool_ctx_pid) end)
+
+    id = unique_id("sub_depth_executor")
+    root_session = "root_executor_#{System.unique_integer([:positive])}"
+
+    {:ok, pid} =
+      SubAgent.start_link(
+        id: id,
+        goal: "Invoke the context tool",
+        parent_session_id: "parent_executor",
+        root_session_id: root_session,
+        subagent_depth: 2,
+        workspace_path: Path.join(tmp, id),
+        llm_client: LLMStub,
+        tool_registry: ToolRegistryStub,
+        storage: StorageStub
+      )
+
+    ref = Process.monitor(pid)
+
+    assert_receive {:tool_ctx, context}, 2_000
+    assert context["subagent_depth"] == 2
+    assert context["root_session_id"] == root_session
+    assert context[:subagent_depth] == 2
+    assert context[:root_session_id] == root_session
+
+    assert_receive {:DOWN, ^ref, :process, ^pid, :normal}, 2_000
+  end
+
+  test "defaults subagent depth to 1 and root session id to the parent session", %{tmp: tmp} do
+    LLMStub.put_mode(:tool_once)
+    Application.put_env(:pincer, :sub_agent_test_tool_ctx_pid, self())
+    on_exit(fn -> Application.delete_env(:pincer, :sub_agent_test_tool_ctx_pid) end)
+
+    test_pid = self()
+    id = unique_id("sub_depth_default")
+    parent_session = "parent_default_#{System.unique_integer([:positive])}"
+
+    checkpoint_fn = fn agent_id, checkpoint ->
+      send(test_pid, {:checkpoint, agent_id, checkpoint})
+      {:ok, checkpoint}
+    end
+
+    {:ok, _pid} =
+      SubAgent.start_link(
+        id: id,
+        goal: "Use default nesting metadata",
+        parent_session_id: parent_session,
+        workspace_path: Path.join(tmp, id),
+        llm_client: LLMStub,
+        tool_registry: ToolRegistryStub,
+        storage: StorageStub,
+        checkpoint_fn: checkpoint_fn
+      )
+
+    assert_receive {:checkpoint, ^id, running}, 1_000
+    assert running.metadata.subagent_depth == 1
+    assert running.metadata.root_session_id == parent_session
+
+    assert_receive {:tool_ctx, context}, 2_000
+    assert context["subagent_depth"] == 1
+    assert context["root_session_id"] == parent_session
   end
 
   test "writes a running checkpoint on start and a finished checkpoint on success", %{

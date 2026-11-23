@@ -222,6 +222,130 @@ defmodule Pincer.Adapters.Tools.OrchestratorTest do
     wait_until(fn -> SubAgentRegistry.count_for(session) == 0 end)
   end
 
+  test "root dispatch records depth 1 and the root session id", %{ws: ws} do
+    root = unique_session("root_dispatch")
+
+    assert {:ok, msg} =
+             Orchestrator.execute(
+               %{"goal" => "Root dispatch"},
+               %{"session_id" => root, "workspace_path" => ws}
+             )
+
+    id = agent_id_from(msg)
+    assert {:ok, pid} = await_agent(SubAgentRegistry, id)
+
+    state = :sys.get_state(pid)
+    assert state.subagent_depth == 1
+    assert state.root_session_id == root
+    assert state.parent_session_id == root
+
+    wait_until(fn -> SubAgentRegistry.count_for(root) == 0 end)
+  end
+
+  test "a depth-1 context may dispatch depth 2", %{ws: ws} do
+    root = unique_session("root_nested")
+    depth_one_session = unique_session("agent_depth_one")
+
+    assert {:ok, msg} =
+             Orchestrator.execute(
+               %{"goal" => "Nested dispatch"},
+               %{
+                 "session_id" => depth_one_session,
+                 "subagent_depth" => 1,
+                 "root_session_id" => root,
+                 "workspace_path" => ws
+               }
+             )
+
+    id = agent_id_from(msg)
+    assert {:ok, pid} = await_agent(SubAgentRegistry, id)
+
+    state = :sys.get_state(pid)
+    assert state.subagent_depth == 2
+    assert state.root_session_id == root
+    assert state.parent_session_id == depth_one_session
+    assert SubAgentRegistry.count_for(root) == 1
+
+    wait_until(fn -> SubAgentRegistry.count_for(root) == 0 end)
+  end
+
+  test "rejects a dispatch at the depth cap before reserving or starting a child", %{
+    sup: sup,
+    ws: ws
+  } do
+    prev = Application.get_env(:pincer, :max_subagent_depth)
+    Application.put_env(:pincer, :max_subagent_depth, 2)
+
+    on_exit(fn -> restore_env(:max_subagent_depth, prev) end)
+
+    root = unique_session("root_depth_cap")
+    before_children = length(DynamicSupervisor.which_children(sup))
+
+    assert {:error, msg} =
+             Orchestrator.execute(
+               %{"goal" => "Too deep"},
+               %{
+                 "session_id" => unique_session("agent_at_cap"),
+                 "subagent_depth" => 2,
+                 "root_session_id" => root,
+                 "workspace_path" => ws
+               }
+             )
+
+    assert msg =~ "depth limit"
+    assert msg =~ "depth 2"
+    assert msg =~ "cap 2"
+    assert length(DynamicSupervisor.which_children(sup)) == before_children
+    assert SubAgentRegistry.count_for(root) == 0
+  end
+
+  test "charges the per-session cap against the root session id across the tree", %{
+    sup: sup,
+    ws: ws
+  } do
+    prev_global = Application.get_env(:pincer, :max_subagents)
+    prev_session = Application.get_env(:pincer, :max_subagents_per_session)
+    prev_depth = Application.get_env(:pincer, :max_subagent_depth)
+
+    Application.put_env(:pincer, :max_subagents, 100)
+    Application.put_env(:pincer, :max_subagents_per_session, 1)
+    Application.put_env(:pincer, :max_subagent_depth, 2)
+
+    on_exit(fn ->
+      restore_env(:max_subagents, prev_global)
+      restore_env(:max_subagents_per_session, prev_session)
+      restore_env(:max_subagent_depth, prev_depth)
+    end)
+
+    root = unique_session("root_shared_cap")
+
+    assert {:ok, _msg} =
+             Orchestrator.execute(
+               %{"goal" => "Root child"},
+               %{"session_id" => root, "workspace_path" => ws}
+             )
+
+    assert SubAgentRegistry.count_for(root) == 1
+    before_children = length(DynamicSupervisor.which_children(sup))
+
+    assert {:error, msg} =
+             Orchestrator.execute(
+               %{"goal" => "Nested child"},
+               %{
+                 "session_id" => unique_session("agent_tree_child"),
+                 "subagent_depth" => 1,
+                 "root_session_id" => root,
+                 "workspace_path" => ws
+               }
+             )
+
+    assert msg =~ "session cap of 1"
+    assert length(DynamicSupervisor.which_children(sup)) == before_children
+    assert SubAgentRegistry.count_for(root) == 1
+
+    wait_until(fn -> SubAgentRegistry.count_for(root) == 0 end)
+  end
+
   test "action status formats the durable run record", %{} do
     prev = Application.get_env(:pincer, :storage_adapter)
 

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `read_blackboard` honors `limit` (default 10, capped at 100) and returns only the most recent messages.
 - Sub-agent runs persist a running checkpoint every 10 tool uses, so `dispatch_agent`'s `status` action reports progress before termination.
 - `dispatch_agent` accepts per-run `provider`, `model`, and `thinking_level`, a `status` action that reads an agent's durable checkpoint run record, and enforces `:max_subagents` / `:max_subagents_per_session` caps before starting a child.
+- Sub-agents can dispatch nested sub-agents up to `:max_subagent_depth` (default 2); `dispatch_agent` is auto-approved inside a sub-agent, per-session caps are charged against the tree's root session, and depth/root are stored in checkpoint metadata.
 - `session_search` native tool with `discover`, `search`, and `read` actions over persisted session transcripts and storage search.
 - Curated memory (`MEMORY.md`, `USER.md`) is bounded by `:curated_memory_limits` and enforced on both read and write through `Pincer.Core.CuratedMemory`.
 - Parallel tool fan-out is configurable with `:tool_max_concurrency`.
@@ -25,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Open-source governance files (`SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `CODE_OF_CONDUCT.md`).
 
 ### Fixed
-- Delegated sub-agents fail fast when a privileged tool needs approval instead of broadcasting to an unattended topic and waiting for the 600-second timeout.
+- Delegated sub-agents fail fast when a privileged tool other than `dispatch_agent` needs approval instead of broadcasting to an unattended topic and waiting for the 600-second timeout.
 - Approved `safe_shell` commands are re-validated against the static checks before execution, so approving a tool no longer bypasses the path and metacharacter guards.
 - The local sandbox `:os` transport, SSH remote workspaces, and `browser` navigation now enforce the same guards (command allowlist, remote path validation, SSRF blocklist) as the rest of the tool surface.
 - Changing the default model now edits only the `llm` section of `config.yaml` instead of regenerating the file and dropping unrelated sections; it also no longer re-reads `.env`.

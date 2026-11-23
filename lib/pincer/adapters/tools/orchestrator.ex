@@ -6,6 +6,12 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   independent Sub-Agents that operate autonomously. Each Sub-Agent has its own
   execution context and reports progress to the shared Blackboard.
 
+  Sub-Agents may dispatch nested Sub-Agents. The whole tree is bounded by the
+  configured `:max_subagent_depth` (default `2`): a dispatch whose child depth
+  would exceed the cap is rejected before any reservation or child start. The
+  per-session cap is charged against the tree's root session, so root and nested
+  agents share one budget.
+
   ## Use Cases
 
   - **Parallel Processing**: Dispatch multiple agents to work on independent tasks
@@ -34,9 +40,12 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
 
   ## Security Considerations
 
-  Sub-Agents inherit the same permissions as the parent session. Be cautious when
-  dispatching agents with access to sensitive resources. Agent IDs are randomly
-  generated using cryptographically strong random bytes.
+  Sub-Agents inherit the parent workspace and read-only tool access. Inside a
+  sub-agent, `dispatch_agent` is auto-approved so nesting works without an
+  operator, while every other privileged tool that needs approval remains
+  unavailable and fails fast as denied. Be cautious when dispatching agents with
+  access to sensitive resources. Agent IDs are randomly generated using
+  cryptographically strong random bytes.
 
   ## See Also
 
@@ -49,6 +58,8 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   alias Pincer.Core.Orchestration.SubAgent
   alias Pincer.Core.Orchestration.SubAgentRegistry
   alias Pincer.Core.Orchestration.Blackboard
+
+  @default_max_subagent_depth 2
 
   @type spec :: %{
           name: String.t(),
@@ -80,7 +91,7 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
     %{
       name: "dispatch_agent",
       description:
-        "Dispatches a new autonomous Sub-Agent to work on a goal asynchronously. Use this for monitoring, long tasks, or parallel processing. Optionally pins the provider, model, and thinking level for that run. Use action \"status\" with an agent_id to read a dispatched agent's durable run record.",
+        "Dispatches a new autonomous Sub-Agent to work on a goal asynchronously. Use this for monitoring, long tasks, parallel processing, or nested delegation: sub-agents may dispatch further sub-agents up to the configured :max_subagent_depth (default 2), and dispatch_agent is auto-approved inside a sub-agent while other privileged tools remain unavailable. Optionally pins the provider, model, and thinking level for that run. Use action \"status\" with an agent_id to read a dispatched agent's durable run record.",
       parameters: %{
         type: "object",
         properties: %{
@@ -122,6 +133,11 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   the specified goal. The agent will report progress and results to the
   Blackboard, which can be monitored using `Pincer.Adapters.Tools.BlackboardReader`.
 
+  A sub-agent may call this tool again to dispatch a nested agent. Nested
+  dispatch is auto-approved inside sub-agents; every other privileged tool still
+  fails fast because delegated agents have no operator. The child depth must not
+  exceed the configured `:max_subagent_depth` (default `2`).
+
   ## Parameters
 
     * `goal` (required for `"start"`) - A clear, specific description of what
@@ -151,6 +167,13 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   - Agent IDs are 16-character hex strings prefixed with "agent_"
   - Sub-Agents run as supervised `:temporary` children under `SubAgentSupervisor`
   - Reservations are admitted by `SubAgentRegistry` before any child starts
+  - The caller's `subagent_depth` (default `0` for a root session) is incremented
+    per dispatch; a child depth above `:max_subagent_depth` is rejected before
+    reserving
+  - Per-session reservations are charged against `root_session_id`, so the whole
+    tree shares one per-root cap
+  - Inside a sub-agent only `dispatch_agent` is auto-approved; all other
+    privileged tools fail fast as denied because no operator is attached
   """
   @spec execute(map(), map()) :: execute_result()
   def execute(args, context \\ %{})
@@ -177,25 +200,36 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   def execute(%{"goal" => goal} = args, context) when is_binary(goal) and goal != "" do
     parent_session_id = Map.get(context, "session_id") || Map.get(args, "session_id")
     parent_workspace_path = Map.get(context, "workspace_path") || Map.get(args, "workspace_path")
+
+    current_depth = context_depth(context)
+    child_depth = current_depth + 1
+    depth_cap = max_subagent_depth()
+    root_session_id = context_value(context, :root_session_id) || parent_session_id
     id = "agent_" <> (:crypto.strong_rand_bytes(8) |> Base.encode16(case: :lower))
 
-    opts =
-      [
-        goal: goal,
-        id: id,
-        parent_session_id: parent_session_id,
-        parent_workspace_path: parent_workspace_path
-      ] ++ model_override_opts(args)
+    if child_depth > depth_cap do
+      {:error, depth_limit_message(current_depth, child_depth, depth_cap)}
+    else
+      opts =
+        [
+          goal: goal,
+          id: id,
+          parent_session_id: parent_session_id,
+          root_session_id: root_session_id,
+          subagent_depth: child_depth,
+          parent_workspace_path: parent_workspace_path
+        ] ++ model_override_opts(args)
 
-    case SubAgentRegistry.reserve(id, parent_session_id) do
-      :ok ->
-        start_child(opts, id)
+      case SubAgentRegistry.reserve(id, root_session_id) do
+        :ok ->
+          start_child(opts, id)
 
-      {:error, :global_limit} ->
-        {:error, limit_message("global", :max_subagents, 32)}
+        {:error, :global_limit} ->
+          {:error, limit_message("global", :max_subagents, 32)}
 
-      {:error, :session_limit} ->
-        {:error, limit_message("session", :max_subagents_per_session, 8)}
+        {:error, :session_limit} ->
+          {:error, limit_message("session", :max_subagents_per_session, 8)}
+      end
     end
   end
 
@@ -239,6 +273,31 @@ defmodule Pincer.Adapters.Tools.Orchestrator do
   defp limit_message(scope, key, default) do
     cap = Application.get_env(:pincer, key, default)
     "Sub-agent limit reached: #{scope} cap of #{cap} active sub-agents."
+  end
+
+  defp context_depth(context) do
+    case context_value(context, :subagent_depth) do
+      depth when is_integer(depth) and depth >= 0 -> depth
+      _ -> 0
+    end
+  end
+
+  defp context_value(context, key) when is_map(context) do
+    Map.get(context, key) || Map.get(context, Atom.to_string(key))
+  end
+
+  defp context_value(_context, _key), do: nil
+
+  defp max_subagent_depth do
+    case Application.get_env(:pincer, :max_subagent_depth, @default_max_subagent_depth) do
+      value when is_integer(value) and value >= 0 -> value
+      _ -> @default_max_subagent_depth
+    end
+  end
+
+  defp depth_limit_message(current_depth, depth, cap) do
+    "Sub-agent depth limit reached: depth #{current_depth} at cap #{cap} " <>
+      "(cannot dispatch depth #{depth})."
   end
 
   defp format_run_info(info) do
@@ -292,8 +351,9 @@ defmodule Pincer.Adapters.Tools.BlackboardReader do
   Tool for reading messages from the Sub-Agent Blackboard.
 
   The Blackboard is a shared message bus where Sub-Agents post their progress,
-  findings, and results. This tool allows the main session to monitor and
-  retrieve messages from all dispatched agents.
+  findings, and results. Nested Sub-Agents post under their own agent IDs, so a
+  whole dispatch tree shares this single Blackboard. This tool lets the main
+  session monitor and retrieve messages from all dispatched agents.
 
   ## Purpose
 
