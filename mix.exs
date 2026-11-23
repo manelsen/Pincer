@@ -96,7 +96,7 @@ defmodule Pincer.MixProject do
       {:finch, "~> 0.25"},
       {:tesla, "~> 1.16"},
       {:hackney, "~> 1.20"},
-      {:multipart, "~> 0.4"},
+      {:multipart, "~> 0.6"},
 
       # HTTP server (health endpoint)
       {:bandit, "~> 1.10"},
@@ -145,33 +145,33 @@ defmodule Pincer.MixProject do
       {:earmark, "~> 1.4"},
 
       # Config
-      {:dotenvy, "~> 1.0"},
-      {:yaml_elixir, "~> 2.11"},
+      {:dotenvy, "~> 1.2"},
+      {:yaml_elixir, "~> 2.12"},
 
       # Scheduling
-      {:crontab, "~> 1.1"},
+      {:crontab, "~> 1.2"},
 
       # Boundary Enforcement
       {:boundary, "~> 0.12", runtime: false},
 
       # Observability
-      {:prom_ex, "~> 1.11"},
+      {:prom_ex, "~> 1.12"},
       {:opentelemetry, "~> 1.5"},
       {:opentelemetry_api, "~> 1.4"},
-      {:opentelemetry_exporter, "~> 1.8"},
+      {:opentelemetry_exporter, "~> 1.11"},
       {:opentelemetry_phoenix, "~> 2.0"},
-      {:telemetry_metrics, "~> 1.0"},
+      {:telemetry_metrics, "~> 1.2"},
       {:telemetry_poller, "~> 1.1"},
 
       # Dev & Hot Reload
       # Distributed clustering
-      {:libcluster, "~> 3.3"},
+      {:libcluster, "~> 3.6"},
       {:horde, "~> 0.8"},
       {:mox, "~> 1.0", only: :test},
-      {:stream_data, "~> 1.1", only: [:test, :dev]},
-      {:benchee, "~> 1.3", only: :bench},
+      {:stream_data, "~> 1.4", only: [:test, :dev]},
+      {:benchee, "~> 1.5", only: :bench},
       {:file_system, "~> 1.0"},
-      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+      {:ex_doc, "~> 0.40", only: :dev, runtime: false}
     ]
   end
 
