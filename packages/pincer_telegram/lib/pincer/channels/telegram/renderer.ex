@@ -56,7 +56,12 @@ defmodule Pincer.Channels.Telegram.Renderer do
 
   # Code Blocks (<pre>)
   defp render_node({"pre", _attrs, [{"code", [{"class", class}], [code], _m1}], _m2}) do
-    lang = class |> String.replace("language-", "") |> escape_html()
+    lang =
+      class
+      |> String.replace_prefix("language-", "")
+      |> String.replace(~r/[^A-Za-z0-9_+-]/, "")
+      |> escape_html()
+
     "<pre><code class=\"language-#{lang}\">" <> escape_html(code) <> "</code></pre>\n"
   end
 

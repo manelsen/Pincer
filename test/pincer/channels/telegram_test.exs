@@ -22,11 +22,25 @@ defmodule Pincer.Channels.TelegramTest do
                "<b>bold</b> and <a href=\"https://example.com\">link</a>"
     end
 
+    test "escapes link attributes end to end" do
+      assert Telegram.markdown_to_html("[link](https://example.com/?a=1&b=2)") ==
+               "<a href=\"https://example.com/?a=1&amp;b=2\">link</a>"
+    end
+
     test "escapes AST link attributes" do
       ast = [{"a", [{"href", "https://example.com/?q=\"quoted\""}], ["link"], %{}}]
 
       assert Pincer.Channels.Telegram.Renderer.render(ast) ==
                "<a href=\"https://example.com/?q=&quot;quoted&quot;\">link</a>"
+    end
+
+    test "sanitizes code block language attributes" do
+      ast = [
+        {"pre", [], [{"code", [{"class", "language-\"><script>"}], ["code"], %{}}], %{}}
+      ]
+
+      assert Pincer.Channels.Telegram.Renderer.render(ast) ==
+               "<pre><code class=\"language-script\">code</code></pre>"
     end
   end
 
