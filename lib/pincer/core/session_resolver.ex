@@ -11,7 +11,7 @@ defmodule Pincer.Core.SessionResolver do
   alias Pincer.Core.Policy
   alias Pincer.Utils.MapHelpers
 
-  @type channel :: :telegram | :discord | :whatsapp
+  @type channel :: :telegram | :discord | :whatsapp | :feishu | :line | :dingtalk
 
   @doc """
   Resolves channel context and config into a `%Session.Context{}`.
@@ -94,6 +94,103 @@ defmodule Pincer.Core.SessionResolver do
 
     Context.new(
       channel: :whatsapp,
+      session_id: session_id,
+      principal_ref: principal_ref,
+      conversation_ref: conversation_ref,
+      root_agent_id: root_agent_id,
+      root_agent_source: root_agent_source
+    )
+  end
+
+  def resolve(:feishu, context, channel_config) do
+    open_id =
+      MapHelpers.read_field(context, :open_id) ||
+        MapHelpers.read_field(context, :sender_id) ||
+        MapHelpers.read_field(context, :chat_id)
+
+    chat_id = MapHelpers.read_field(context, :chat_id) || open_id
+    chat_type = normalize_chat_type(MapHelpers.read_field(context, :chat_type))
+
+    session_id =
+      Policy.route(:session_scope, %{channel: :feishu, context: context, config: channel_config})
+
+    dm? = chat_type in ["p2p", "private", "dm"]
+    conversation_ref = conversation_ref(:feishu, if(dm?, do: :dm, else: :chat), chat_id)
+
+    {principal_ref, root_agent_id, root_agent_source} =
+      if dm? do
+        principal_ref = Bindings.principal_ref(:feishu, :user, open_id)
+        resolve_root_agent(principal_ref, open_id, session_id, channel_config)
+      else
+        {nil, session_id, :session_scope}
+      end
+
+    Context.new(
+      channel: :feishu,
+      session_id: session_id,
+      principal_ref: principal_ref,
+      conversation_ref: conversation_ref,
+      root_agent_id: root_agent_id,
+      root_agent_source: root_agent_source
+    )
+  end
+
+  def resolve(:line, context, channel_config) do
+    user_id =
+      MapHelpers.read_field(context, :user_id) || MapHelpers.read_field(context, :sender_id)
+
+    source_type = normalize_chat_type(MapHelpers.read_field(context, :source_type))
+    chat_id = MapHelpers.read_field(context, :chat_id) || user_id
+
+    session_id =
+      Policy.route(:session_scope, %{channel: :line, context: context, config: channel_config})
+
+    dm? = source_type in ["", "user", "private", "dm"]
+    conversation_ref = conversation_ref(:line, if(dm?, do: :dm, else: :group), chat_id)
+
+    {principal_ref, root_agent_id, root_agent_source} =
+      if dm? do
+        principal_ref = Bindings.principal_ref(:line, :user, user_id)
+        resolve_root_agent(principal_ref, user_id, session_id, channel_config)
+      else
+        {nil, session_id, :session_scope}
+      end
+
+    Context.new(
+      channel: :line,
+      session_id: session_id,
+      principal_ref: principal_ref,
+      conversation_ref: conversation_ref,
+      root_agent_id: root_agent_id,
+      root_agent_source: root_agent_source
+    )
+  end
+
+  def resolve(:dingtalk, context, channel_config) do
+    staff_id = MapHelpers.read_field(context, :staff_id)
+    conversation_id = MapHelpers.read_field(context, :conversation_id)
+
+    session_id =
+      Policy.route(:session_scope, %{
+        channel: :dingtalk,
+        context: context,
+        config: channel_config
+      })
+
+    group? = String.starts_with?(to_string(conversation_id), "cid")
+    chat_id = if group?, do: conversation_id, else: staff_id || conversation_id
+    conversation_ref = conversation_ref(:dingtalk, if(group?, do: :group, else: :dm), chat_id)
+
+    {principal_ref, root_agent_id, root_agent_source} =
+      if group? do
+        {nil, session_id, :session_scope}
+      else
+        principal_ref = Bindings.principal_ref(:dingtalk, :user, staff_id)
+        resolve_root_agent(principal_ref, staff_id, session_id, channel_config)
+      end
+
+    Context.new(
+      channel: :dingtalk,
       session_id: session_id,
       principal_ref: principal_ref,
       conversation_ref: conversation_ref,

@@ -59,11 +59,15 @@ defmodule Pincer.Channels.Feishu do
   @spec start_link(config :: map()) :: Supervisor.on_start()
   @impl Pincer.Ports.Channel
   def start_link(config) do
-    app_id = System.get_env("FEISHU_APP_ID")
-    app_secret = System.get_env("FEISHU_APP_SECRET")
+    Application.put_env(:pincer, :feishu_channel_config, config)
+
+    app_id_env = Map.get(config, "app_id_env", "FEISHU_APP_ID")
+    app_secret_env = Map.get(config, "app_secret_env", "FEISHU_APP_SECRET")
+    app_id = System.get_env(app_id_env)
+    app_secret = System.get_env(app_secret_env)
 
     if is_nil(app_id) or is_nil(app_secret) do
-      Logger.warning("FEISHU_APP_ID or FEISHU_APP_SECRET not set. Channel ignored.")
+      Logger.warning("#{app_id_env} or #{app_secret_env} not set. Channel ignored.")
       :ignore
     else
       Supervisor.start_link(__MODULE__, config, name: __MODULE__)
@@ -71,10 +75,24 @@ defmodule Pincer.Channels.Feishu do
   end
 
   @impl Supervisor
-  def init(_config) do
+  def init(config) do
     Logger.info("Starting Feishu Channel...")
-    children = [{API, []}]
+
+    children =
+      [
+        {API, []},
+        {Pincer.Channels.Feishu.SessionSupervisor, []}
+      ] ++ webhook_children(config)
+
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp webhook_children(config) do
+    if get_in(config, ["webhook", "enabled"]) == true do
+      [{Pincer.Channels.Feishu.Listener, config}]
+    else
+      []
+    end
   end
 
   @doc """
@@ -127,7 +145,7 @@ defmodule Pincer.Channels.Feishu do
             "message_id" => message_id,
             "message_type" => msg_type,
             "content" => content_json
-          }
+          } = message
         }
       }) do
     content =
@@ -141,7 +159,8 @@ defmodule Pincer.Channels.Feishu do
       chat_id: chat_id,
       message_id: message_id,
       content: content,
-      msg_type: msg_type
+      msg_type: msg_type,
+      chat_type: message["chat_type"]
     }
   rescue
     _ -> :error
@@ -171,5 +190,57 @@ defmodule Pincer.Channels.Feishu do
   @spec format_session_id(open_id :: String.t()) :: String.t()
   def format_session_id(open_id) do
     "feishu_#{open_id}"
+  end
+
+  @doc """
+  Routes a parsed Feishu message event into a Pincer session.
+  """
+  @spec handle_event(map()) :: :ok | {:error, term()}
+  def handle_event(%{open_id: open_id, chat_id: chat_id, content: text} = event) do
+    if is_binary(text) and String.trim(text) != "" do
+      config = Application.get_env(:pincer, :feishu_channel_config, %{})
+
+      context =
+        Pincer.Ports.Session.resolve(
+          :feishu,
+          %{
+            open_id: open_id,
+            chat_id: chat_id,
+            chat_type: Map.get(event, :chat_type)
+          },
+          config
+        )
+
+      ensure_session_started(context)
+      Pincer.Channels.Feishu.Session.ensure_started(chat_id, context.session_id)
+
+      incoming =
+        Pincer.Core.Structs.IncomingMessage.new(context.session_id, text)
+
+      case Pincer.Ports.Session.process_input(context.session_id, incoming) do
+        {:ok, _status} -> :ok
+        {:error, reason} -> {:error, reason}
+        _other -> :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  def handle_event(_event), do: {:error, :invalid_event}
+
+  defp ensure_session_started(context) do
+    case Registry.lookup(Pincer.Ports.Session.registry(), context.session_id) do
+      [] ->
+        start_opts =
+          context
+          |> Pincer.Core.Session.Context.to_start_opts()
+          |> Keyword.delete(:session_id)
+
+        Pincer.Ports.Session.start_session(context.session_id, start_opts)
+
+      [_] ->
+        :ok
+    end
   end
 end

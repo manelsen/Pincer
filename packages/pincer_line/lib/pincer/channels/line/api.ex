@@ -138,7 +138,10 @@ defmodule Pincer.Channels.Line.API do
   end
 
   defp fetch_token do
-    System.get_env("LINE_CHANNEL_ACCESS_TOKEN") ||
-      raise "LINE_CHANNEL_ACCESS_TOKEN environment variable is not set"
+    config = Application.get_env(:pincer, :line_channel_config, %{})
+    token_env = Map.get(config, "token_env", "LINE_CHANNEL_ACCESS_TOKEN")
+
+    System.get_env(token_env) ||
+      raise "#{token_env} environment variable is not set"
   end
 end

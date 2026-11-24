@@ -18,11 +18,22 @@ defmodule Pincer.Channels.Shared.WebhookVerifier do
   """
   @spec verify_feishu(String.t(), String.t(), String.t(), String.t()) :: verify_result()
   def verify_feishu(timestamp, nonce, body, signature) do
+    verify_feishu(timestamp, nonce, body, signature, "")
+  end
+
+  @doc """
+  Verifies a Feishu webhook signature with the app's encrypt key.
+
+  Feishu signs `timestamp <> nonce <> encrypt_key <> body`.
+  """
+  @spec verify_feishu(String.t(), String.t(), String.t(), String.t(), String.t()) ::
+          verify_result()
+  def verify_feishu(timestamp, nonce, body, signature, encrypt_key) do
     expected =
-      :crypto.hash(:sha256, timestamp <> nonce <> body)
+      :crypto.hash(:sha256, timestamp <> nonce <> encrypt_key <> body)
       |> Base.encode16(case: :lower)
 
-    if expected == signature,
+    if secure_compare(expected, signature),
       do: :ok,
       else: {:error, :invalid_signature}
   end
@@ -41,7 +52,7 @@ defmodule Pincer.Channels.Shared.WebhookVerifier do
       :crypto.mac(:hmac, :sha256, channel_secret, body)
       |> Base.encode64()
 
-    if expected == signature,
+    if secure_compare(expected, signature),
       do: :ok,
       else: {:error, :invalid_signature}
   end
@@ -62,8 +73,14 @@ defmodule Pincer.Channels.Shared.WebhookVerifier do
       :crypto.mac(:hmac, :sha256, secret, string_to_sign)
       |> Base.encode64()
 
-    if expected == signature,
+    if secure_compare(expected, signature),
       do: :ok,
       else: {:error, :invalid_signature}
   end
+
+  defp secure_compare(left, right) when is_binary(left) and is_binary(right) do
+    byte_size(left) == byte_size(right) and :crypto.hash_equals(left, right)
+  end
+
+  defp secure_compare(_left, _right), do: false
 end

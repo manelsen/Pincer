@@ -35,6 +35,13 @@ channels:
     base_url: "https://open.feishu.cn"  # or https://open.larksuite.com for Lark
     app_id_env: "FEISHU_APP_ID"
     app_secret_env: "FEISHU_APP_SECRET"
+    webhook:
+      enabled: false
+      bind: "127.0.0.1"
+      port: 4010
+      path: "/webhooks/feishu"
+      encrypt_key_env: "FEISHU_ENCRYPT_KEY"
+      verification_token_env: "FEISHU_VERIFICATION_TOKEN"
 
   whatsapp:
     enabled: false

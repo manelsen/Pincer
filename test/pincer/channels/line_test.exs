@@ -104,6 +104,46 @@ defmodule Pincer.Channels.LineTest do
     end
   end
 
+  describe "configured env names" do
+    test "uses token_env from channel config" do
+      original_config = Application.get_env(:pincer, :line_channel_config)
+      env_name = "PINCER_TEST_LINE_TOKEN_#{System.unique_integer([:positive])}"
+      System.put_env(env_name, "test-token")
+
+      on_exit(fn ->
+        System.delete_env(env_name)
+
+        if original_config,
+          do: Application.put_env(:pincer, :line_channel_config, original_config),
+          else: Application.delete_env(:pincer, :line_channel_config)
+      end)
+
+      assert {:ok, pid} = Line.start_link(%{"token_env" => env_name})
+      assert Process.alive?(pid)
+      Supervisor.stop(pid)
+    end
+
+    test "uses secret_env from channel config for webhook signatures" do
+      original_config = Application.get_env(:pincer, :line_channel_config)
+      secret_env = "PINCER_TEST_LINE_SECRET_#{System.unique_integer([:positive])}"
+      secret = "custom-line-secret"
+      body = ~s({"events":[]})
+      signature = :crypto.mac(:hmac, :sha256, secret, body) |> Base.encode64()
+      System.put_env(secret_env, secret)
+      Application.put_env(:pincer, :line_channel_config, %{"secret_env" => secret_env})
+
+      on_exit(fn ->
+        System.delete_env(secret_env)
+
+        if original_config,
+          do: Application.put_env(:pincer, :line_channel_config, original_config),
+          else: Application.delete_env(:pincer, :line_channel_config)
+      end)
+
+      assert Line.handle_webhook(body, signature) == {:ok, []}
+    end
+  end
+
   describe "handles_session?/1" do
     test "matches line_ prefixed session IDs" do
       assert Line.handles_session?("line_U1234567890") == true

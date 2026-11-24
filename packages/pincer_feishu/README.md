@@ -24,7 +24,23 @@ channels:
     enabled: true
     app_id_env: FEISHU_APP_ID
     app_secret_env: FEISHU_APP_SECRET
+    webhook:
+      enabled: true
+      bind: 127.0.0.1
+      port: 4010
+      path: /webhooks/feishu
+      encrypt_key_env: FEISHU_ENCRYPT_KEY
+      verification_token_env: FEISHU_VERIFICATION_TOKEN
 ```
+
+Set `FEISHU_ENCRYPT_KEY` to the Encrypt Key from the Feishu app's
+Event Subscription settings. The listener is disabled unless the key is
+present, so an unauthenticated endpoint is never exposed.
+
+Expose the path through your reverse proxy with HTTPS and point the Feishu
+event subscription URL at it. Pincer answers `url_verification` challenges,
+verifies signatures, decrypts encrypted payloads, and routes
+`im.message.receive_v1` events to per-chat sessions.
 
 ## License
 

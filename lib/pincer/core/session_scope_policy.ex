@@ -11,7 +11,7 @@ defmodule Pincer.Core.SessionScopePolicy do
 
   alias Pincer.Utils.MapHelpers
 
-  @type channel :: :telegram | :discord | :whatsapp
+  @type channel :: :telegram | :discord | :whatsapp | :feishu | :line | :dingtalk
   @type dm_scope :: :main | :per_peer
 
   @doc """
@@ -66,6 +66,56 @@ defmodule Pincer.Core.SessionScopePolicy do
       case dm_scope(channel_config) do
         :main -> "whatsapp_main"
         :per_peer -> scoped_id("whatsapp", chat_id)
+      end
+    end
+  end
+
+  def resolve(:feishu, context, channel_config)
+      when is_map(context) and is_map(channel_config) do
+    chat_id = stringify(MapHelpers.read_field(context, :chat_id))
+    chat_type = normalize_chat_type(MapHelpers.read_field(context, :chat_type))
+
+    if chat_type in ["p2p", "private", "dm"] do
+      case dm_scope(channel_config) do
+        :main -> "feishu_main"
+        :per_peer -> scoped_id("feishu", chat_id)
+      end
+    else
+      scoped_id("feishu", chat_id)
+    end
+  end
+
+  def resolve(:line, context, channel_config)
+      when is_map(context) and is_map(channel_config) do
+    source_type = normalize_chat_type(MapHelpers.read_field(context, :source_type))
+
+    chat_id =
+      stringify(
+        MapHelpers.read_field(context, :chat_id) ||
+          MapHelpers.read_field(context, :user_id)
+      )
+
+    if source_type == "user" do
+      case dm_scope(channel_config) do
+        :main -> "line_main"
+        :per_peer -> scoped_id("line", chat_id)
+      end
+    else
+      scoped_id("line", chat_id)
+    end
+  end
+
+  def resolve(:dingtalk, context, channel_config)
+      when is_map(context) and is_map(channel_config) do
+    staff_id = stringify(MapHelpers.read_field(context, :staff_id))
+    conversation_id = stringify(MapHelpers.read_field(context, :conversation_id))
+
+    if String.starts_with?(conversation_id, "cid") do
+      scoped_id("dingtalk", conversation_id)
+    else
+      case dm_scope(channel_config) do
+        :main -> "dingtalk_main"
+        :per_peer -> scoped_id("dingtalk", staff_id)
       end
     end
   end

@@ -38,8 +38,11 @@ defmodule Pincer.Channels.DingTalk.API do
     TokenCache.start_link(
       name: name,
       fetch_fn: fn ->
-        client_id = System.get_env("DINGTALK_CLIENT_ID") || ""
-        client_secret = System.get_env("DINGTALK_CLIENT_SECRET") || ""
+        config = Application.get_env(:pincer, :dingtalk_channel_config, %{})
+        client_id_env = Map.get(config, "client_id_env", "DINGTALK_CLIENT_ID")
+        client_secret_env = Map.get(config, "client_secret_env", "DINGTALK_CLIENT_SECRET")
+        client_id = System.get_env(client_id_env) || ""
+        client_secret = System.get_env(client_secret_env) || ""
 
         case Req.post(@token_url,
                json: %{
@@ -234,7 +237,10 @@ defmodule Pincer.Channels.DingTalk.API do
   """
   @spec fetch_token() :: String.t()
   def fetch_token do
-    System.get_env("DINGTALK_ACCESS_TOKEN") ||
-      raise "DINGTALK_ACCESS_TOKEN environment variable is not set"
+    config = Application.get_env(:pincer, :dingtalk_channel_config, %{})
+    token_env = Map.get(config, "access_token_env", "DINGTALK_ACCESS_TOKEN")
+
+    System.get_env(token_env) ||
+      raise "#{token_env} environment variable is not set"
   end
 end

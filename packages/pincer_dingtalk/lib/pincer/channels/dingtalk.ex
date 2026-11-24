@@ -55,11 +55,14 @@ defmodule Pincer.Channels.DingTalk do
   @spec start_link(config :: map()) :: Supervisor.on_start()
   @impl Pincer.Ports.Channel
   def start_link(config) do
-    client_id = System.get_env("DINGTALK_CLIENT_ID")
-    client_secret = System.get_env("DINGTALK_CLIENT_SECRET")
+    Application.put_env(:pincer, :dingtalk_channel_config, config)
+    client_id_env = Map.get(config, "client_id_env", "DINGTALK_CLIENT_ID")
+    client_secret_env = Map.get(config, "client_secret_env", "DINGTALK_CLIENT_SECRET")
+    client_id = System.get_env(client_id_env)
+    client_secret = System.get_env(client_secret_env)
 
     if is_nil(client_id) or is_nil(client_secret) do
-      Logger.warning("DINGTALK_CLIENT_ID or DINGTALK_CLIENT_SECRET not set. Channel ignored.")
+      Logger.warning("#{client_id_env} or #{client_secret_env} not set. Channel ignored.")
       :ignore
     else
       Supervisor.start_link(__MODULE__, config, name: __MODULE__)

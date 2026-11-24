@@ -13,3 +13,11 @@ config_schema:
     type: string
     required: true
     description: "Env var with the Feishu app secret (FEISHU_APP_SECRET)"
+  base_url:
+    type: string
+    required: false
+    description: "Feishu or Lark API base URL"
+  webhook:
+    type: object
+    required: false
+    description: "Inbound webhook settings: enabled, bind, port, path, encrypt_key_env, verification_token_env"

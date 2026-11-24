@@ -27,7 +27,10 @@ defmodule Pincer.Channels.Feishu.API do
   """
   @spec base_url() :: String.t()
   def base_url do
-    Application.get_env(:pincer, :feishu_base_url, "https://open.feishu.cn")
+    config = Application.get_env(:pincer, :feishu_channel_config, %{})
+
+    Map.get(config, "base_url") ||
+      Application.get_env(:pincer, :feishu_base_url, "https://open.feishu.cn")
   end
 
   @doc """
@@ -229,8 +232,12 @@ defmodule Pincer.Channels.Feishu.API do
   end
 
   defp fetch_tenant_token do
-    app_id = System.get_env("FEISHU_APP_ID") || raise "FEISHU_APP_ID is not set"
-    app_secret = System.get_env("FEISHU_APP_SECRET") || raise "FEISHU_APP_SECRET is not set"
+    config = Application.get_env(:pincer, :feishu_channel_config, %{})
+    app_id_env = Map.get(config, "app_id_env", "FEISHU_APP_ID")
+    app_secret_env = Map.get(config, "app_secret_env", "FEISHU_APP_SECRET")
+
+    app_id = System.get_env(app_id_env) || raise "#{app_id_env} is not set"
+    app_secret = System.get_env(app_secret_env) || raise "#{app_secret_env} is not set"
 
     url = "#{base_url()}/auth/v3/tenant_access_token/internal"
 

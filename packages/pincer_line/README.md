@@ -22,8 +22,8 @@ Add to your `config.yaml`:
 channels:
   line:
     enabled: true
-    channel_access_token_env: LINE_CHANNEL_ACCESS_TOKEN
-    channel_secret_env: LINE_CHANNEL_SECRET
+    token_env: LINE_CHANNEL_ACCESS_TOKEN
+    secret_env: LINE_CHANNEL_SECRET
 ```
 
 ## License

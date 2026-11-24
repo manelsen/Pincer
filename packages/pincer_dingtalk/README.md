@@ -22,8 +22,8 @@ Add to your `config.yaml`:
 channels:
   dingtalk:
     enabled: true
-    app_key_env: DINGTALK_APP_KEY
-    app_secret_env: DINGTALK_APP_SECRET
+    client_id_env: DINGTALK_CLIENT_ID
+    client_secret_env: DINGTALK_CLIENT_SECRET
 ```
 
 ## License

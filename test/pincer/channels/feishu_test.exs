@@ -11,6 +11,7 @@ defmodule Pincer.Channels.FeishuTest do
         "chat_id" => "oc_test_chat",
         "message_id" => "om_test_msg",
         "message_type" => "text",
+        "chat_type" => "p2p",
         "content" => Jason.encode!(%{"text" => "Hello from Feishu"})
       }
     }
@@ -25,7 +26,8 @@ defmodule Pincer.Channels.FeishuTest do
                chat_id: "oc_test_chat",
                message_id: "om_test_msg",
                content: "Hello from Feishu",
-               msg_type: "text"
+               msg_type: "text",
+               chat_type: "p2p"
              }
     end
 

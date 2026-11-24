@@ -63,10 +63,12 @@ defmodule Pincer.Channels.Line do
   @spec start_link(config :: map()) :: Supervisor.on_start()
   @impl Pincer.Ports.Channel
   def start_link(config) do
-    token = System.get_env("LINE_CHANNEL_ACCESS_TOKEN")
+    Application.put_env(:pincer, :line_channel_config, config)
+    token_env = Map.get(config, "token_env", "LINE_CHANNEL_ACCESS_TOKEN")
+    token = System.get_env(token_env)
 
     if is_nil(token) or token == "" do
-      Logger.warning("LINE_CHANNEL_ACCESS_TOKEN not set. Channel ignored.")
+      Logger.warning("#{token_env} not set. Channel ignored.")
       :ignore
     else
       Supervisor.start_link(__MODULE__, config, name: __MODULE__)
@@ -139,7 +141,9 @@ defmodule Pincer.Channels.Line do
   @spec handle_webhook(body :: String.t(), signature :: String.t()) ::
           {:ok, [map()]} | {:error, term()}
   def handle_webhook(body, signature) do
-    secret = System.get_env("LINE_CHANNEL_SECRET") || ""
+    config = Application.get_env(:pincer, :line_channel_config, %{})
+    secret_env = Map.get(config, "secret_env", "LINE_CHANNEL_SECRET")
+    secret = System.get_env(secret_env) || ""
 
     case Pincer.Channels.Shared.WebhookVerifier.verify_line(body, secret, signature) do
       :ok ->
@@ -159,7 +163,13 @@ defmodule Pincer.Channels.Line do
   `replyToken` from each event.
   """
   @spec parse_webhook_events(payload :: map()) :: [
-          %{user_id: String.t(), text: String.t(), reply_token: String.t()}
+          %{
+            user_id: String.t(),
+            source_type: String.t() | nil,
+            chat_id: String.t(),
+            text: String.t(),
+            reply_token: String.t()
+          }
         ]
   def parse_webhook_events(%{"events" => events}) when is_list(events) do
     events
@@ -186,10 +196,20 @@ defmodule Pincer.Channels.Line do
   defp text_message_event?(_), do: false
 
   defp extract_event(%{
-         "source" => %{"userId" => user_id},
+         "source" => source,
          "message" => %{"text" => text},
          "replyToken" => reply_token
        }) do
-    %{user_id: user_id, text: text, reply_token: reply_token}
+    user_id = source["userId"]
+    source_type = source["type"]
+    chat_id = source["groupId"] || source["roomId"] || user_id
+
+    %{
+      user_id: user_id,
+      source_type: source_type,
+      chat_id: chat_id,
+      text: text,
+      reply_token: reply_token
+    }
   end
 end

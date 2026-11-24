@@ -78,4 +78,53 @@ defmodule Pincer.Core.SessionResolverTest do
     assert context.root_agent_id == "whatsapp_551199000111"
     assert context.root_agent_source == :session_scope
   end
+
+  test "feishu DM resolves the bound root agent from open_id" do
+    principal_ref = Bindings.principal_ref(:feishu, :user, "ou_user")
+    assert :ok = Bindings.bind(principal_ref, "feishu_agent")
+
+    context =
+      SessionResolver.resolve(
+        :feishu,
+        %{open_id: "ou_user", chat_id: "oc_dm", chat_type: "p2p"},
+        %{}
+      )
+
+    assert context.session_id == "feishu_oc_dm"
+    assert context.principal_ref == "feishu:user:ou_user"
+    assert context.conversation_ref == "feishu:dm:oc_dm"
+    assert context.root_agent_id == "feishu_agent"
+    assert context.root_agent_source == :binding
+  end
+
+  test "line group keeps the group as the conversation and skips principal binding" do
+    context =
+      SessionResolver.resolve(
+        :line,
+        %{user_id: "U123", chat_id: "C456", source_type: "group"},
+        %{}
+      )
+
+    assert context.session_id == "line_C456"
+    assert context.principal_ref == nil
+    assert context.conversation_ref == "line:group:C456"
+    assert context.root_agent_id == "line_C456"
+  end
+
+  test "dingtalk direct message uses the staff member as the bound principal" do
+    principal_ref = Bindings.principal_ref(:dingtalk, :user, "staff1")
+    assert :ok = Bindings.bind(principal_ref, "dingtalk_agent")
+
+    context =
+      SessionResolver.resolve(
+        :dingtalk,
+        %{staff_id: "staff1", conversation_id: "dm-conv"},
+        %{}
+      )
+
+    assert context.session_id == "dingtalk_staff1"
+    assert context.principal_ref == "dingtalk:user:staff1"
+    assert context.conversation_ref == "dingtalk:dm:staff1"
+    assert context.root_agent_id == "dingtalk_agent"
+  end
 end

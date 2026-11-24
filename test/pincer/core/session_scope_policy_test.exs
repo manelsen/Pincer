@@ -156,5 +156,45 @@ defmodule Pincer.Core.SessionScopePolicyTest do
       assert SessionScopePolicy.resolve(:whatsapp, context, config) ==
                "whatsapp_120363025073717274@g.us"
     end
+
+    test "feishu direct messages honor dm_session_scope" do
+      context = %{chat_id: "oc_dm", chat_type: "p2p"}
+
+      assert SessionScopePolicy.resolve(:feishu, context, %{"dm_session_scope" => "main"}) ==
+               "feishu_main"
+
+      assert SessionScopePolicy.resolve(:feishu, context, %{}) == "feishu_oc_dm"
+    end
+
+    test "feishu groups stay chat-scoped" do
+      context = %{chat_id: "oc_group", chat_type: "group"}
+
+      assert SessionScopePolicy.resolve(:feishu, context, %{"dm_session_scope" => "main"}) ==
+               "feishu_oc_group"
+    end
+
+    test "line users honor dm_session_scope and groups use their source id" do
+      dm = %{user_id: "U123", source_type: "user"}
+      group = %{user_id: "U123", chat_id: "C456", source_type: "group"}
+
+      assert SessionScopePolicy.resolve(:line, dm, %{"dm_session_scope" => "main"}) == "line_main"
+      assert SessionScopePolicy.resolve(:line, dm, %{}) == "line_U123"
+
+      assert SessionScopePolicy.resolve(:line, group, %{"dm_session_scope" => "main"}) ==
+               "line_C456"
+    end
+
+    test "dingtalk direct messages honor dm_session_scope and groups use conversation id" do
+      dm = %{staff_id: "user123", conversation_id: "dm123"}
+      group = %{staff_id: "user123", conversation_id: "cid_group"}
+
+      assert SessionScopePolicy.resolve(:dingtalk, dm, %{"dm_session_scope" => "main"}) ==
+               "dingtalk_main"
+
+      assert SessionScopePolicy.resolve(:dingtalk, dm, %{}) == "dingtalk_user123"
+
+      assert SessionScopePolicy.resolve(:dingtalk, group, %{"dm_session_scope" => "main"}) ==
+               "dingtalk_cid_group"
+    end
   end
 end
