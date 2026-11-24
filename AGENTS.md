@@ -5,9 +5,8 @@ sessions, an agentic tool-calling loop, MCP tool integration, embedded SQLite (F
 optional sqlite-vec) memory, and many messaging channels. Hexagonal architecture with
 compile-time boundary enforcement.
 
-`CLAUDE.md` and `GEMINI.md` mirror parts of this file inconsistently (GEMINI.md still
-mentions `Pincer.Tools.SafeShell`, which is stale); treat this file as authoritative.
-`CONTRIBUTING.md` holds the PR-facing checklist.
+Treat this file as the authoritative agent and contributor guide; `CONTRIBUTING.md`
+holds the PR-facing checklist.
 
 ---
 
