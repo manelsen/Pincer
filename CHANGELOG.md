@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Manual debug scripts moved from `test/` to `scripts/manual/` so they no longer run as part of `mix test`.
 
 ### Security
+- Updated `earmark` to 1.4.50 and `db_connection` to 2.10.3, and removed the unused `tesla`/`hackney` clients, dropping the vulnerable `idna` transitive dependency. `mix deps.get` now resolves with no Hex vulnerability warnings.
 - Centralized outbound URL validation in `Pincer.Utils.NetworkGuard`: rejects URL credentials, unsupported schemes, loopback/private/link-local/metadata/reserved IPv4 and IPv6 ranges, resolves all A/AAAA records, and pins `web_fetch` and attachment downloads to the validated address while preserving TLS SNI and the `Host` header. Redirects are revalidated and repinned; browser requests are checked by the Playwright sidecar.
 - Capped `web_fetch` and attachment bodies with a streaming Req sink that halts downloads above the limit, and added connect timeouts; removed the invalid `max_body_length` Req option that raised at runtime.
 - Removed unvalidated MCP `shell_server.py` and Node `mcp_sidecar` PoC; blocked MCP `run_command` execution in `Pincer.Adapters.NativeToolRegistry`.

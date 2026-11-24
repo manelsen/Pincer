@@ -94,8 +94,6 @@ defmodule Pincer.MixProject do
       # HTTP clients
       {:req, "~> 0.7"},
       {:finch, "~> 0.25"},
-      {:tesla, "~> 1.16"},
-      {:hackney, "~> 1.20"},
       {:multipart, "~> 0.6"},
 
       # HTTP server (health endpoint)
