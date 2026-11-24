@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optional `sqlite-vec` semantic search, loaded from `priv/sqlite_vec/vec0.so` (built by `./scripts/build_sqlite_vec.sh`, version pinned in the script). Configure with `storage.vec` / `storage.vec_path` / `storage.vec_dimensions` or `PINCER_SQLITE_VEC*`; when the extension is absent or disabled, search falls back to in-process cosine similarity.
 - The local sandbox adapter can run commands over a Linux-only bubblewrap transport (`transport: "bwrap"` or `bwrap: true`): a minimal read-only root, workspace bind, network `none`/`host`, `prlimit`-based memory/CPU/PID/file limits, a capability probe cached per executable, and fail-closed startup via `StartupGuard.check_sandbox/0`.
 - The `pincer_webhook` channel now runs an HTTP listener (Bandit + Plug) under the channels supervisor, configurable with `bind` (loopback by default), `port`, `path`, `max_body_bytes`, and `rate_limit_per_minute`; deliveries are token-gated and validated before ingestion.
+- The Feishu/Lark channel now has an inbound webhook listener (Bandit + Plug): fail-closed signature verification with the encrypt key, encrypted payload decryption, URL-verification challenges, per-chat session startup, and inbound message routing. Configure under `channels.feishu.webhook`.
 - Webhook ingress is rate limited per client IP (60 requests/minute by default, `0` disables) with `429` + `Retry-After`; an unavailable limiter fails closed with `503`.
 - The security audit warns when an enabled webhook binds to all interfaces (`0.0.0.0`, `::`).
 - `read_blackboard` honors `limit` (default 10, capped at 100) and returns only the most recent messages.
@@ -39,6 +40,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The local sandbox `:os` transport, SSH remote workspaces, and `browser` navigation now enforce the same guards (command allowlist, remote path validation, SSRF blocklist) as the rest of the tool surface.
 - Changing the default model now edits only the `llm` section of `config.yaml` instead of regenerating the file and dropping unrelated sections; it also no longer re-reads `.env`.
 - LINE, Feishu, and DingTalk HTTP calls now set connect/receive timeouts.
+- Feishu, LINE, and DingTalk now honor the env var names configured in `config.yaml` (`app_id_env`, `token_env`, `secret_env`, `client_id_env`, `client_secret_env`) instead of hard-coded variable names.
+- Feishu, LINE, and DingTalk sessions are resolved by the core session resolver, including DM binding and group-scoped session IDs.
 - Tool approval decisions are recorded in the audit log, and a configured role without `:approve_tools` cannot approve privileged tools.
 - Approval requests are delivered before the audit row is written, so a saturated database pool can no longer delay the prompt behind an audit insert.
 - In-memory state (provider and auth-profile cooldowns, pairing codes, project state, memory budgets, model cache) survives the exit of the process that first used it, and the Blackboard no longer reuses message ids after a restart.
