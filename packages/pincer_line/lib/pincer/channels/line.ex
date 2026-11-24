@@ -76,10 +76,21 @@ defmodule Pincer.Channels.Line do
   end
 
   @impl Supervisor
-  def init(_config) do
+  def init(config) do
     Logger.info("Starting LINE Channel...")
-    children = []
+
+    children =
+      [{Pincer.Channels.Line.SessionSupervisor, []}] ++ webhook_children(config)
+
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp webhook_children(config) do
+    if get_in(config, ["webhook", "enabled"]) == true do
+      [{Pincer.Channels.Line.Listener, config}]
+    else
+      []
+    end
   end
 
   @doc """
@@ -145,14 +156,12 @@ defmodule Pincer.Channels.Line do
     secret_env = Map.get(config, "secret_env", "LINE_CHANNEL_SECRET")
     secret = System.get_env(secret_env) || ""
 
-    case Pincer.Channels.Shared.WebhookVerifier.verify_line(body, secret, signature) do
-      :ok ->
-        payload = Jason.decode!(body)
-        events = parse_webhook_events(payload)
-        {:ok, events}
-
-      {:error, reason} ->
-        {:error, reason}
+    with :ok <- Pincer.Channels.Shared.WebhookVerifier.verify_line(body, secret, signature),
+         {:ok, payload} <- Jason.decode(body) do
+      {:ok, parse_webhook_events(payload)}
+    else
+      {:error, %Jason.DecodeError{}} -> {:error, :invalid_payload}
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -185,6 +194,54 @@ defmodule Pincer.Channels.Line do
   @spec session_id(user_id :: String.t()) :: String.t()
   def session_id(user_id) do
     "line_#{user_id}"
+  end
+
+  @doc """
+  Routes a parsed LINE event into a Pincer session.
+  """
+  @spec handle_event(map()) :: :ok | {:error, term()}
+  def handle_event(%{text: text} = event) when is_binary(text) and text != "" do
+    config = Application.get_env(:pincer, :line_channel_config, %{})
+
+    context =
+      Pincer.Ports.Session.resolve(
+        :line,
+        %{
+          user_id: Map.get(event, :user_id),
+          chat_id: Map.get(event, :chat_id),
+          source_type: Map.get(event, :source_type)
+        },
+        config
+      )
+
+    ensure_session_started(context)
+    chat_id = Map.get(event, :chat_id) || Map.get(event, :user_id)
+    Pincer.Channels.Line.Session.ensure_started(chat_id, context.session_id)
+
+    incoming = Pincer.Core.Structs.IncomingMessage.new(context.session_id, text)
+
+    case Pincer.Ports.Session.process_input(context.session_id, incoming) do
+      {:ok, _status} -> :ok
+      {:error, reason} -> {:error, reason}
+      _other -> :ok
+    end
+  end
+
+  def handle_event(_event), do: :ok
+
+  defp ensure_session_started(context) do
+    case Registry.lookup(Pincer.Ports.Session.registry(), context.session_id) do
+      [] ->
+        start_opts =
+          context
+          |> Pincer.Core.Session.Context.to_start_opts()
+          |> Keyword.delete(:session_id)
+
+        Pincer.Ports.Session.start_session(context.session_id, start_opts)
+
+      [_] ->
+        :ok
+    end
   end
 
   defp text_message_event?(%{

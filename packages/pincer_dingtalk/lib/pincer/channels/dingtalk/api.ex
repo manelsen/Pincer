@@ -240,6 +240,19 @@ defmodule Pincer.Channels.DingTalk.API do
     config = Application.get_env(:pincer, :dingtalk_channel_config, %{})
     token_env = Map.get(config, "access_token_env", "DINGTALK_ACCESS_TOKEN")
 
+    case Process.whereis(__MODULE__) do
+      nil ->
+        env_token(token_env)
+
+      _pid ->
+        case TokenCache.get_token(__MODULE__) do
+          {:ok, token} -> token
+          {:error, _reason} -> env_token(token_env)
+        end
+    end
+  end
+
+  defp env_token(token_env) do
     System.get_env(token_env) ||
       raise "#{token_env} environment variable is not set"
   end

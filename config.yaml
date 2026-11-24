@@ -29,6 +29,11 @@ channels:
     adapter: "Pincer.Channels.Line"
     token_env: "LINE_CHANNEL_ACCESS_TOKEN"
     secret_env: "LINE_CHANNEL_SECRET"
+    webhook:
+      enabled: false
+      bind: "127.0.0.1"
+      port: 4011
+      path: "/webhooks/line"
   feishu:
     enabled: false
     adapter: "Pincer.Channels.Feishu"
@@ -59,6 +64,12 @@ channels:
     adapter: "Pincer.Channels.DingTalk"
     client_id_env: "DINGTALK_CLIENT_ID"
     client_secret_env: "DINGTALK_CLIENT_SECRET"
+    webhook:
+      enabled: false
+      bind: "127.0.0.1"
+      port: 4012
+      path: "/webhooks/dingtalk"
+      signing_secret_env: "DINGTALK_SIGNING_SECRET"
 storage:
   adapter: "sqlite"
   path: "data/pincer.db"

@@ -13,3 +13,7 @@ config_schema:
     type: string
     required: true
     description: "Env var with the DingTalk client secret (DINGTALK_CLIENT_SECRET)"
+  webhook:
+    type: object
+    required: false
+    description: "Inbound webhook settings: enabled, bind, port, path, signing_secret_env"

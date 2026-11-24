@@ -13,3 +13,7 @@ config_schema:
     type: string
     required: false
     description: "Env var with the LINE channel secret for webhook signature verification"
+  webhook:
+    type: object
+    required: false
+    description: "Inbound webhook settings: enabled, bind, port, path"

@@ -70,14 +70,24 @@ defmodule Pincer.Channels.DingTalk do
   end
 
   @impl Supervisor
-  def init(_config) do
+  def init(config) do
     Logger.info("Starting DingTalk Channel...")
 
-    children = [
-      {Pincer.Channels.DingTalk.API, name: Pincer.Channels.DingTalk.API}
-    ]
+    children =
+      [
+        {Pincer.Channels.DingTalk.API, name: Pincer.Channels.DingTalk.API},
+        {Pincer.Channels.DingTalk.SessionSupervisor, []}
+      ] ++ webhook_children(config)
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp webhook_children(config) do
+    if get_in(config, ["webhook", "enabled"]) == true do
+      [{Pincer.Channels.DingTalk.Listener, config}]
+    else
+      []
+    end
   end
 
   @doc """
@@ -191,6 +201,58 @@ defmodule Pincer.Channels.DingTalk do
     "dingtalk_#{staff_id}"
   end
 
+  @doc """
+  Routes a parsed DingTalk robot event into a Pincer session.
+  """
+  @spec handle_event(map()) :: :ok | {:error, term()}
+  def handle_event(%{text: text} = event) when is_binary(text) and text != "" do
+    config = Application.get_env(:pincer, :dingtalk_channel_config, %{})
+
+    context =
+      Pincer.Ports.Session.resolve(
+        :dingtalk,
+        %{
+          staff_id: Map.get(event, :staff_id),
+          conversation_id: Map.get(event, :conversation_id)
+        },
+        config
+      )
+
+    ensure_session_started(context)
+
+    chat_id =
+      if group_id?(Map.get(event, :conversation_id)),
+        do: Map.get(event, :conversation_id),
+        else: Map.get(event, :staff_id)
+
+    Pincer.Channels.DingTalk.Session.ensure_started(chat_id, context.session_id)
+
+    incoming = Pincer.Core.Structs.IncomingMessage.new(context.session_id, text)
+
+    case Pincer.Ports.Session.process_input(context.session_id, incoming) do
+      {:ok, _status} -> :ok
+      {:error, reason} -> {:error, reason}
+      _other -> :ok
+    end
+  end
+
+  def handle_event(_event), do: :ok
+
+  defp ensure_session_started(context) do
+    case Registry.lookup(Pincer.Ports.Session.registry(), context.session_id) do
+      [] ->
+        start_opts =
+          context
+          |> Pincer.Core.Session.Context.to_start_opts()
+          |> Keyword.delete(:session_id)
+
+        Pincer.Ports.Session.start_session(context.session_id, start_opts)
+
+      [_] ->
+        :ok
+    end
+  end
+
   # Group conversation IDs start with "cid" in DingTalk.
-  defp group_id?(id), do: String.starts_with?(id, "cid")
+  defp group_id?(id), do: String.starts_with?(to_string(id), "cid")
 end

@@ -40,6 +40,18 @@ defmodule Pincer.Channels.DingTalk.Session do
     GenServer.start_link(__MODULE__, args, name: via_tuple(chat_id))
   end
 
+  @spec ensure_started(String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
+  def ensure_started(chat_id, session_id) do
+    case Registry.lookup(Pincer.Ports.Session.registry(), worker_key(chat_id)) do
+      [{pid, _}] ->
+        GenServer.cast(pid, {:bind_session, session_id})
+        {:ok, pid}
+
+      [] ->
+        Pincer.Channels.DingTalk.SessionSupervisor.start_session(chat_id, session_id)
+    end
+  end
+
   @impl true
   def init(%{chat_id: chat_id} = args) do
     session_id = Map.get(args, :session_id, "dingtalk_#{chat_id}")
@@ -64,6 +76,17 @@ defmodule Pincer.Channels.DingTalk.Session do
   @impl Pincer.Ports.Channel
   def send_message(chat_id, text) do
     dingtalk_channel().send_message(chat_id, text)
+  end
+
+  @impl true
+  def handle_cast({:bind_session, session_id}, state) when is_binary(session_id) do
+    if session_id == state.session_id do
+      {:noreply, state}
+    else
+      unsubscribe_session(state.session_id)
+      subscribe_session(session_id)
+      {:noreply, %{state | session_id: session_id}}
+    end
   end
 
   # --- Session PubSub callbacks ---
@@ -121,11 +144,17 @@ defmodule Pincer.Channels.DingTalk.Session do
   end
 
   defp via_tuple(chat_id) do
-    {:via, Registry, {Pincer.Ports.Session.registry(), "dingtalk_session_worker_#{chat_id}"}}
+    {:via, Registry, {Pincer.Ports.Session.registry(), worker_key(chat_id)}}
   end
+
+  defp worker_key(chat_id), do: "dingtalk_session_worker_#{chat_id}"
 
   defp subscribe_session(session_id) do
     Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+  end
+
+  defp unsubscribe_session(session_id) do
+    Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
   end
 
   defp initial_state(chat_id, session_id) do

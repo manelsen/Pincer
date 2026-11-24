@@ -11,7 +11,9 @@ defmodule PincerLine.MixProject do
         {:pincer_ports, "~> 0.1"},
         {:pincer_shared, "~> 0.1"},
         {:jason, "~> 1.4"},
-        {:req, "~> 0.5"}
+        {:req, "~> 0.5"},
+        {:plug, "~> 1.16"},
+        {:bandit, "~> 1.5"}
       ],
       description: "LINE Messaging API channel adapter for the Pincer AI agent framework",
       package: [
