@@ -16,6 +16,20 @@ defmodule Pincer.Channels.TelegramTest do
     :ok
   end
 
+  describe "markdown_to_html/1" do
+    test "parses structural Markdown through EarmarkParser" do
+      assert Telegram.markdown_to_html("**bold** and [link](https://example.com)") ==
+               "<b>bold</b> and <a href=\"https://example.com\">link</a>"
+    end
+
+    test "escapes AST link attributes" do
+      ast = [{"a", [{"href", "https://example.com/?q=\"quoted\""}], ["link"], %{}}]
+
+      assert Pincer.Channels.Telegram.Renderer.render(ast) ==
+               "<a href=\"https://example.com/?q=&quot;quoted&quot;\">link</a>"
+    end
+  end
+
   describe "send_message/3" do
     test "removes <thinking> without skip_reasoning_strip" do
       chat_id = 100

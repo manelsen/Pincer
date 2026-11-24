@@ -1,11 +1,11 @@
 defmodule Pincer.Channels.Telegram.Renderer do
   @moduledoc """
   Professional AST-based renderer for Telegram HTML.
-  Converts Earmark AST into Telegram-safe HTML tags.
+  Converts EarmarkParser AST into Telegram-safe HTML tags.
   """
 
   @doc """
-  Renders Earmark AST into Telegram HTML.
+  Renders EarmarkParser AST into Telegram HTML.
   """
   def render(ast) when is_list(ast) do
     ast
@@ -56,7 +56,7 @@ defmodule Pincer.Channels.Telegram.Renderer do
 
   # Code Blocks (<pre>)
   defp render_node({"pre", _attrs, [{"code", [{"class", class}], [code], _m1}], _m2}) do
-    lang = class |> String.replace("language-", "")
+    lang = class |> String.replace("language-", "") |> escape_html()
     "<pre><code class=\"language-#{lang}\">" <> escape_html(code) <> "</code></pre>\n"
   end
 
@@ -81,7 +81,7 @@ defmodule Pincer.Channels.Telegram.Renderer do
   # Links
   defp render_node({"a", attrs, children, _m8}) do
     case List.keyfind(attrs, "href", 0) do
-      {_, href} -> "<a href=\"#{href}\">" <> render(children) <> "</a>"
+      {_, href} -> "<a href=\"#{escape_html(href)}\">" <> render(children) <> "</a>"
       nil -> render(children)
     end
   end
