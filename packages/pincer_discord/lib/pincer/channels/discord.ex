@@ -1201,11 +1201,22 @@ defmodule Pincer.Channels.Discord do
         "(Error: File too large — #{attachment.size} bytes exceeds the #{@max_attachment_size}-byte limit)"
       else
         case Req.get(attachment.url,
-               max_body_length: @max_attachment_size,
+               decode_body: false,
                receive_timeout: 30_000,
-               connect_timeout: 10_000
+               connect_options: [timeout: 10_000],
+               into: fn {:data, chunk}, {request, response} ->
+                 body = (response.body || "") <> chunk
+                 response = %{response | body: body}
+
+                 if byte_size(body) > @max_attachment_size do
+                   {:halt, {request, response}}
+                 else
+                   {:cont, {request, response}}
+                 end
+               end
              ) do
-          {:ok, %{status: 200, body: content, headers: headers}} ->
+          {:ok, %{status: 200, body: content, headers: headers}}
+          when is_binary(content) and byte_size(content) <= @max_attachment_size ->
             content_type =
               case Req.Response.get_header(
                      %Req.Response{headers: headers, status: 200, body: content},
@@ -1222,6 +1233,10 @@ defmodule Pincer.Channels.Discord do
               Logger.warning("[DISCORD] Rejected attachment with content-type: #{content_type}")
               "(Error: Unsupported content type '#{content_type}')"
             end
+
+          {:ok, %{status: 200}} ->
+            Logger.warning("[DISCORD] Attachment too large: #{attachment.filename}")
+            "(Error: File too large — download exceeded the limit)"
 
           {:ok, %{status: status}} ->
             Logger.error("[DISCORD] Failed to download #{attachment.filename}: HTTP #{status}")

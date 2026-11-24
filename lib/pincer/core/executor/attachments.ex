@@ -3,7 +3,7 @@ defmodule Pincer.Core.Executor.Attachments do
   Lazy attachment resolution and download helpers for executor prompt history.
   """
 
-  alias Pincer.Utils.MapHelpers
+  alias Pincer.Utils.{BoundedBody, MapHelpers, NetworkGuard}
 
   @max_inline_bytes Application.compile_env(:pincer, :max_inline_bytes, 6_291_456)
   @max_text_preview_chars 32_768
@@ -24,15 +24,30 @@ defmodule Pincer.Core.Executor.Attachments do
 
   @doc """
   Fetches a remote attachment over HTTP and returns Base64-encoded contents.
+
+  `:http_client` can be supplied for tests; defaults to `Req.get/2`.
   """
-  @spec default_fetch(String.t()) :: {:ok, String.t()} | {:error, term()}
-  def default_fetch(url) do
+  @spec default_fetch(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
+  def default_fetch(url, opts \\ []) do
+    http_client = Keyword.get(opts, :http_client, &Req.get/2)
+
     with {:ok, resolved_url} <- resolve_url(url, nil),
+         {:ok, target} <- NetworkGuard.safe_target(resolved_url),
          {:ok, response} <-
-           Req.get(resolved_url, receive_timeout: 60_000, max_body_length: @max_inline_bytes) do
+           http_client.(target.pinned_url,
+             headers: [{"Host", target.host_header}],
+             decode_body: false,
+             receive_timeout: 60_000,
+             connect_options: Keyword.put(target.connect_options, :timeout, 10_000),
+             into: BoundedBody.callback(@max_inline_bytes)
+           ) do
       case response do
-        %{status: 200, body: body} when is_binary(body) ->
+        %{status: 200, body: body}
+        when is_binary(body) and byte_size(body) <= @max_inline_bytes ->
           {:ok, Base.encode64(body)}
+
+        %{status: 200, body: body} when is_binary(body) ->
+          {:error, :attachment_too_large}
 
         %{status: status} ->
           {:error, "HTTP #{status}"}
