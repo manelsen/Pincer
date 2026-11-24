@@ -182,7 +182,7 @@ defmodule Pincer.Adapters.Tools.Web do
            redirect: false,
            decode_body: false,
            receive_timeout: 30_000,
-           connect_options: [hostname: target.host, timeout: @connect_timeout],
+           connect_options: Keyword.put(target.connect_options, :timeout, @connect_timeout),
            into: BoundedBody.callback(@max_body_bytes)
          ) do
       {:ok, %{status: status} = resp} when status in [301, 302, 307, 308] ->

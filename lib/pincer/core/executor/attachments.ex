@@ -38,7 +38,7 @@ defmodule Pincer.Core.Executor.Attachments do
              headers: [{"Host", target.host_header}],
              decode_body: false,
              receive_timeout: 60_000,
-             connect_options: [hostname: target.host, timeout: 10_000],
+             connect_options: Keyword.put(target.connect_options, :timeout, 10_000),
              into: BoundedBody.callback(@max_inline_bytes)
            ) do
       case response do

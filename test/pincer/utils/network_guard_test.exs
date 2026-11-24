@@ -96,6 +96,16 @@ defmodule Pincer.Utils.NetworkGuardTest do
     assert target.pinned_url == "https://[2606:4700:4700::1111]/dns"
   end
 
+  test "pins IPv6-only hostnames with brackets and keeps the host header" do
+    Application.put_env(:pincer, :network_guard_resolver, fn "v6.example" ->
+      {:ok, [{0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0x1111}]}
+    end)
+
+    assert {:ok, target} = NetworkGuard.safe_target("https://v6.example/dns")
+    assert target.pinned_url == "https://[2606:4700:4700::1111]/dns"
+    assert target.host_header == "v6.example"
+  end
+
   test "classifies IPv4-mapped IPv6 addresses by the embedded IPv4" do
     assert NetworkGuard.public_address?({0, 0, 0, 0, 0, 0xFFFF, 0x0808, 0x0808})
     refute NetworkGuard.public_address?({0, 0, 0, 0, 0, 0xFFFF, 0x0A00, 0x0001})
