@@ -106,6 +106,7 @@ defmodule Pincer.Adapters.Tools.WebTest do
     assert_received {:http_get, pinned_url, opts}
     assert pinned_url == "https://93.184.216.34/"
     assert opts[:connect_options][:hostname] == "www.legacy.example"
+    assert {"Host", "www.legacy.example"} in opts[:headers]
     refute_received {:http_get, "http://" <> _, _}
   end
 

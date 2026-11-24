@@ -178,7 +178,7 @@ defmodule Pincer.Adapters.Tools.Web do
     # and the Host header. This prevents a second DNS lookup from rebinding to
     # an internal address between validation and connection.
     case http_client.get(target.pinned_url,
-           headers: [{"User-Agent", @user_agent}],
+           headers: [{"User-Agent", @user_agent}, {"Host", target.host_header}],
            redirect: false,
            decode_body: false,
            receive_timeout: 30_000,

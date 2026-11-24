@@ -22,6 +22,7 @@ defmodule Pincer.Core.Executor.AttachmentsTest do
       assert Base.decode64!(encoded) == "attachment-body"
       assert_received {:fetch, "https://93.184.216.34/file.txt", opts}
       assert opts[:connect_options][:hostname] == "93.184.216.34"
+      assert {"Host", "93.184.216.34"} in opts[:headers]
       assert opts[:decode_body] == false
       assert is_function(opts[:into], 2)
     end

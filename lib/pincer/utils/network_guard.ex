@@ -26,6 +26,7 @@ defmodule Pincer.Utils.NetworkGuard do
           pinned_url: String.t(),
           scheme: String.t(),
           host: String.t(),
+          host_header: String.t(),
           port: :inet.port_number(),
           address: address(),
           connect_options: keyword()
@@ -54,13 +55,16 @@ defmodule Pincer.Utils.NetworkGuard do
          :ok <- reject_private_addresses(addresses),
          {:ok, address} <- preferred_address(addresses),
          {:ok, pinned_url} <- pin_url(uri, scheme, address) do
+      port = uri.port || default_port(scheme)
+
       {:ok,
        %{
          url: url,
          pinned_url: pinned_url,
          scheme: scheme,
          host: host,
-         port: uri.port || default_port(scheme),
+         host_header: host_header(host, port, scheme),
+         port: port,
          address: address,
          connect_options: [hostname: host]
        }}
@@ -188,6 +192,10 @@ defmodule Pincer.Utils.NetworkGuard do
 
   defp default_port("http"), do: 80
   defp default_port("https"), do: 443
+
+  defp host_header(host, port, scheme) do
+    if port == default_port(scheme), do: host, else: "#{host}:#{port}"
+  end
 
   defp pin_url(uri, scheme, address) do
     host = address |> :inet.ntoa() |> to_string()

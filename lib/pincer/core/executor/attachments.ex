@@ -35,6 +35,7 @@ defmodule Pincer.Core.Executor.Attachments do
          {:ok, target} <- NetworkGuard.safe_target(resolved_url),
          {:ok, response} <-
            http_client.(target.pinned_url,
+             headers: [{"Host", target.host_header}],
              decode_body: false,
              receive_timeout: 60_000,
              connect_options: [hostname: target.host, timeout: 10_000],

@@ -56,7 +56,18 @@ defmodule Pincer.Utils.NetworkGuardTest do
     assert target.address == {93, 184, 216, 34}
     assert target.pinned_url == "https://93.184.216.34/path?q=1"
     assert target.connect_options[:hostname] == "example.com"
+    assert target.host_header == "example.com"
     assert target.port == 443
+  end
+
+  test "includes a non-default port in the Host header" do
+    Application.put_env(:pincer, :network_guard_resolver, fn "example.com" ->
+      {:ok, [{93, 184, 216, 34}]}
+    end)
+
+    assert {:ok, target} = NetworkGuard.safe_target("https://example.com:8443/path")
+    assert target.pinned_url == "https://93.184.216.34:8443/path"
+    assert target.host_header == "example.com:8443"
   end
 
   test "preserves the fragment in the pinned URL" do
@@ -83,6 +94,11 @@ defmodule Pincer.Utils.NetworkGuardTest do
     assert {:ok, target} = NetworkGuard.safe_target("https://[2606:4700:4700::1111]/dns")
     assert target.host == "2606:4700:4700::1111"
     assert target.pinned_url == "https://[2606:4700:4700::1111]/dns"
+  end
+
+  test "classifies IPv4-mapped IPv6 addresses by the embedded IPv4" do
+    assert NetworkGuard.public_address?({0, 0, 0, 0, 0, 0xFFFF, 0x0808, 0x0808})
+    refute NetworkGuard.public_address?({0, 0, 0, 0, 0, 0xFFFF, 0x0A00, 0x0001})
   end
 
   test "public_address? accepts global unicast and rejects special ranges" do
