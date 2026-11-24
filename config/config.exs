@@ -57,7 +57,7 @@ config :pincer, :llm_providers, %{
   "groq" => %{
     adapter: Pincer.LLM.Providers.Groq,
     env_key: "GROQ_API_KEY",
-    default_model: "llama-3.3-70b-versatile"
+    default_model: "openai/gpt-oss-120b"
   },
   "groq_whisper" => %{
     adapter: Pincer.LLM.Providers.GroqWhisper,

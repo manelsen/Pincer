@@ -15,7 +15,7 @@ defmodule Pincer.Infra.ConfigSetModelTest do
   llm:
     groq:
       base_url: "https://api.groq.com/openai/v1/chat/completions"
-      default_model: "llama-3.3-70b-versatile"
+      default_model: "openai/gpt-oss-120b"
     provider: "groq"
   tools:
     restrict_to_workspace: true
@@ -67,7 +67,7 @@ defmodule Pincer.Infra.ConfigSetModelTest do
       {:ok, parsed} = YamlElixir.read_from_file(@config_path)
       assert parsed["llm"]["provider"] == "brand"
       assert parsed["llm"]["brand"]["default_model"] == "brand-model"
-      assert parsed["llm"]["groq"]["default_model"] == "llama-3.3-70b-versatile"
+      assert parsed["llm"]["groq"]["default_model"] == "openai/gpt-oss-120b"
     end
 
     test "keeps the file valid YAML after repeated updates" do

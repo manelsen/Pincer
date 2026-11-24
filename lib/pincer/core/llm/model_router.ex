@@ -18,8 +18,8 @@ defmodule Pincer.Core.LLM.ModelRouter do
       model_router:
         enabled: true
         tiers:
-          local:    { provider: "groq",       model: "llama-3.3-70b-versatile" }
-          fast:     { provider: "groq",       model: "llama-3.3-70b-versatile" }
+          local:    { provider: "groq",       model: "openai/gpt-oss-20b" }
+          fast:     { provider: "groq",       model: "openai/gpt-oss-20b" }
           balanced: { provider: "z_ai",       model: "glm-4.7" }
           powerful: { provider: "z_ai_coding", model: "glm-4.7" }
   """

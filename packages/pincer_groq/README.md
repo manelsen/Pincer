@@ -23,7 +23,7 @@ llm:
   provider: groq
   groq:
     api_key: $GROQ_API_KEY
-    model: llama-3.3-70b-versatile
+    model: openai/gpt-oss-120b
 ```
 
 ## License
