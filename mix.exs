@@ -137,7 +137,7 @@ defmodule Pincer.MixProject do
       # Messaging
       {:nostrum, "~> 0.10", runtime: false},
       {:slack_elixir, "~> 1.2"},
-      {:earmark, "~> 1.4"},
+      {:earmark_parser, "~> 1.4"},
 
       # Config
       {:dotenvy, "~> 1.2"},

@@ -3,7 +3,7 @@ defmodule Pincer.Channels.Telegram do
   # runtime but not at pincer_telegram compile time.
   @compile {:no_warn_undefined,
             [
-              Earmark,
+              EarmarkParser,
               Pincer.Core.Structs.IncomingMessage,
               Pincer.Infra.PubSub,
               Pincer.Ports.LLM,
@@ -383,7 +383,7 @@ defmodule Pincer.Channels.Telegram do
   Converts standard Markdown and/or safe HTML into Telegram-compatible HTML.
   Uses a Hybrid Fencing strategy:
   1. Protects literal HTML blocks (<pre>, <code>) and tags (<b>, <i>, etc.)
-  2. Uses Earmark to parse structural Markdown from the remaining text
+  2. Uses EarmarkParser to parse structural Markdown from the remaining text
   3. Renders the AST via Pincer.Channels.Telegram.Renderer
   4. Unfences the protected HTML for a 100% faithful hybrid output.
   """
@@ -434,7 +434,7 @@ defmodule Pincer.Channels.Telegram do
 
     # 3. Main Parsing & Rendering (Professional AST approach)
     rendered =
-      case Earmark.as_ast(fenced) do
+      case EarmarkParser.as_ast(fenced) do
         {:ok, ast, _warnings} ->
           Pincer.Channels.Telegram.Renderer.render(ast)
 
