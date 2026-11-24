@@ -2,7 +2,7 @@ import Config
 
 config :telegex,
   token: System.get_env("TELEGRAM_BOT_TOKEN"),
-  caller_adapter: {Finch, [name: Pincer.Finch]}
+  caller_adapter: Finch
 
 config :pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite
 config :pincer, :sqlite_path, System.get_env("PINCER_SQLITE_PATH", "data/pincer.db")
