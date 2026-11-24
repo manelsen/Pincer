@@ -10,27 +10,36 @@ defmodule Pincer.Adapters.Tools.WebTest do
     def unregister, do: :persistent_term.erase(@pt_key)
     defp notify(msg), do: if(pid = :persistent_term.get(@pt_key, nil), do: send(pid, msg))
 
-    def get("https://www.legacy.example", _opts) do
-      notify({:http_get, "https://www.legacy.example"})
+    def get(url, opts) do
+      notify({:http_get, url, opts})
 
-      {:error,
-       %Req.TransportError{
-         reason:
-           {:tls_alert,
-            {:handshake_failure,
-             ~c"TLS client alert {bad_cert,{hostname_check_failed,{requested,\"www.legacy.example\"}}}"}}
-       }}
-    end
+      case URI.parse(url).path do
+        "/redirect" ->
+          {:ok,
+           %Req.Response{
+             status: 302,
+             headers: %{"location" => ["http://169.254.169.254/latest/meta-data"]},
+             body: ""
+           }}
 
-    def get("http://www.legacy.example", _opts) do
-      notify({:http_get, "http://www.legacy.example"})
-
-      {:ok,
-       %Req.Response{
-         status: 200,
-         headers: %{"content-type" => ["text/html"]},
-         body: "<html><body><h1>Downgraded</h1></body></html>"
-       }}
+        _ ->
+          if String.starts_with?(url, "https://") do
+            {:error,
+             %Req.TransportError{
+               reason:
+                 {:tls_alert,
+                  {:handshake_failure,
+                   ~c"TLS client alert {bad_cert,{hostname_check_failed,{requested,\"www.legacy.example\"}}}"}}
+             }}
+          else
+            {:ok,
+             %Req.Response{
+               status: 200,
+               headers: %{"content-type" => ["text/html"]},
+               body: "<html><body><h1>Downgraded</h1></body></html>"
+             }}
+          end
+      end
     end
   end
 
@@ -62,6 +71,36 @@ defmodule Pincer.Adapters.Tools.WebTest do
   end
 
   test "web_fetch refuses to downgrade https to http on TLS hostname mismatch" do
+    register_stub()
+    stub_public_dns()
+
+    assert {:error, msg} =
+             Web.execute(%{"tool_name" => "web_fetch", "url" => "https://www.legacy.example"})
+
+    assert msg =~ "TLS certificate does not match"
+
+    assert_received {:http_get, pinned_url, opts}
+    assert pinned_url == "https://93.184.216.34/"
+    assert opts[:connect_options][:hostname] == "www.legacy.example"
+    refute_received {:http_get, "http://" <> _, _}
+  end
+
+  test "web_fetch rejects redirects to internal addresses before following them" do
+    register_stub()
+    stub_public_dns()
+
+    assert {:error, msg} =
+             Web.execute(%{
+               "tool_name" => "web_fetch",
+               "url" => "https://www.legacy.example/redirect"
+             })
+
+    assert msg =~ "Redirect to unsafe URL blocked"
+    assert_received {:http_get, "https://93.184.216.34/redirect", _opts}
+    refute_received {:http_get, "http://169.254.169.254" <> _, _}
+  end
+
+  defp register_stub do
     HTTPClientStub.register(self())
     previous_client = Application.get_env(:pincer, :web_http_client)
     Application.put_env(:pincer, :web_http_client, HTTPClientStub)
@@ -74,12 +113,20 @@ defmodule Pincer.Adapters.Tools.WebTest do
         client -> Application.put_env(:pincer, :web_http_client, client)
       end
     end)
+  end
 
-    assert {:error, msg} =
-             Web.execute(%{"tool_name" => "web_fetch", "url" => "https://www.legacy.example"})
+  defp stub_public_dns do
+    previous = Application.get_env(:pincer, :network_guard_resolver)
 
-    assert msg =~ "TLS certificate does not match"
-    assert_received {:http_get, "https://www.legacy.example"}
-    refute_received {:http_get, "http://www.legacy.example"}
+    Application.put_env(:pincer, :network_guard_resolver, fn "www.legacy.example" ->
+      {:ok, [{93, 184, 216, 34}]}
+    end)
+
+    on_exit(fn ->
+      case previous do
+        nil -> Application.delete_env(:pincer, :network_guard_resolver)
+        resolver -> Application.put_env(:pincer, :network_guard_resolver, resolver)
+      end
+    end)
   end
 end

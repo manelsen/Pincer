@@ -5,6 +5,7 @@ defmodule Pincer.Utils do
       ETSHelper,
       ETSTableHeir,
       MapHelpers,
+      NetworkGuard,
       Time,
       Value,
       LoggerFormatter,

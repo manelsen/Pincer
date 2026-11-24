@@ -28,6 +28,147 @@ const { chromium } = require("playwright");
 const readline = require("readline");
 const path = require("path");
 const fs = require("fs");
+const dns = require("dns").promises;
+const net = require("net");
+
+const BLOCKED_HOSTS = new Set([
+  "localhost",
+  "localhost.localdomain",
+  "ip6-localhost",
+  "ip6-loopback",
+  "metadata",
+  "metadata.google.internal",
+  "instance-data",
+]);
+const BLOCKED_SUFFIXES = [".localhost", ".local", ".internal", ".home.arpa"];
+
+function ipv4Parts(address) {
+  const parts = address.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+    return null;
+  }
+  return parts;
+}
+
+function inIpv4Range(parts, base, prefix) {
+  const ip = ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+  const baseIp = ((base[0] << 24) | (base[1] << 16) | (base[2] << 8) | base[3]) >>> 0;
+  const mask = prefix === 0 ? 0 : (~0 << (32 - prefix)) >>> 0;
+  return (ip & mask) === (baseIp & mask);
+}
+
+function isPrivateIpv4(address) {
+  const p = ipv4Parts(address);
+  if (!p) return true;
+  return [
+    [[0, 0, 0, 0], 8],
+    [[10, 0, 0, 0], 8],
+    [[100, 64, 0, 0], 10],
+    [[127, 0, 0, 0], 8],
+    [[169, 254, 0, 0], 16],
+    [[172, 16, 0, 0], 12],
+    [[192, 0, 0, 0], 24],
+    [[192, 0, 2, 0], 24],
+    [[192, 88, 99, 0], 24],
+    [[192, 168, 0, 0], 16],
+    [[198, 18, 0, 0], 15],
+    [[198, 51, 100, 0], 24],
+    [[203, 0, 113, 0], 24],
+    [[224, 0, 0, 0], 4],
+    [[240, 0, 0, 0], 4],
+  ].some(([base, prefix]) => inIpv4Range(p, base, prefix));
+}
+
+function isPrivateIpv6(address) {
+  const normalized = address.toLowerCase().split("%")[0];
+  if (normalized === "::" || normalized === "::1") return true;
+
+  const mapped = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return isPrivateIpv4(mapped[1]);
+
+  const compatible = normalized.match(/^::(\d+\.\d+\.\d+\.\d+)$/);
+  if (compatible) return isPrivateIpv4(compatible[1]);
+
+  const first = parseInt(normalized.split(":")[0] || "0", 16);
+  if (first >= 0xfc00 && first <= 0xfdff) return true;
+  if (first >= 0xfe80 && first <= 0xfebf) return true;
+  if (first >= 0xff00) return true;
+  if (normalized.startsWith("2001:db8:")) return true;
+  if (normalized.startsWith("2001:2:")) return true;
+  if (normalized.startsWith("64:ff9b:")) return true;
+  return false;
+}
+
+function isPrivateAddress(address) {
+  if (net.isIPv4(address)) return isPrivateIpv4(address);
+  if (net.isIPv6(address)) return isPrivateIpv6(address);
+  return true;
+}
+
+async function assertPublicUrl(rawUrl) {
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    throw new Error(`Invalid URL: ${rawUrl}`);
+  }
+
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error(`Blocked URL scheme: ${url.protocol}`);
+  }
+  if (url.username || url.password) {
+    throw new Error("URL credentials are not allowed");
+  }
+
+  const host = url.hostname
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "")
+    .toLowerCase();
+
+  if (!host) throw new Error("Invalid URL host");
+  if (BLOCKED_HOSTS.has(host)) throw new Error(`Blocked internal host: ${host}`);
+  if (BLOCKED_SUFFIXES.some((suffix) => host.endsWith(suffix))) {
+    throw new Error(`Blocked internal host: ${host}`);
+  }
+
+  if (net.isIP(host)) {
+    if (isPrivateAddress(host)) throw new Error(`Blocked internal address: ${host}`);
+    return;
+  }
+
+  let addresses;
+  try {
+    addresses = await dns.lookup(host, { all: true, verbatim: true });
+  } catch {
+    throw new Error(`Could not resolve host: ${host}`);
+  }
+
+  if (!addresses.length) throw new Error(`Could not resolve host: ${host}`);
+  for (const { address } of addresses) {
+    if (isPrivateAddress(address)) {
+      throw new Error(`Blocked internal address for ${host}: ${address}`);
+    }
+  }
+}
+
+async function installNetworkGuard(page) {
+  if (page.__pincerNetworkGuard) return;
+  page.__pincerNetworkGuard = true;
+
+  await page.route("**/*", async (route) => {
+    const url = route.request().url();
+    if (!/^https?:/i.test(url)) {
+      return route.continue();
+    }
+
+    try {
+      await assertPublicUrl(url);
+      return route.continue();
+    } catch {
+      return route.abort("blockedbyclient").catch(() => {});
+    }
+  });
+}
 
 let browser = null;
 /** @type {Map<string, import("playwright").Page>} */
@@ -46,6 +187,7 @@ async function getPage(session) {
   }
   const b = await getBrowser();
   const page = await b.newPage();
+  await installNetworkGuard(page);
   pages.set(session, page);
   return page;
 }
@@ -75,6 +217,7 @@ async function handle(req) {
 
     switch (cmd) {
       case "navigate": {
+        await assertPublicUrl(req.url);
         await page.goto(req.url, { waitUntil: "domcontentloaded" });
         const title = await page.title();
         const url = page.url();

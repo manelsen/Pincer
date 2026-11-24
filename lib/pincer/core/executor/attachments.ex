@@ -4,6 +4,7 @@ defmodule Pincer.Core.Executor.Attachments do
   """
 
   alias Pincer.Utils.MapHelpers
+  alias Pincer.Utils.NetworkGuard
 
   @max_inline_bytes Application.compile_env(:pincer, :max_inline_bytes, 6_291_456)
   @max_text_preview_chars 32_768
@@ -28,11 +29,19 @@ defmodule Pincer.Core.Executor.Attachments do
   @spec default_fetch(String.t()) :: {:ok, String.t()} | {:error, term()}
   def default_fetch(url) do
     with {:ok, resolved_url} <- resolve_url(url, nil),
+         {:ok, target} <- NetworkGuard.safe_target(resolved_url),
          {:ok, response} <-
-           Req.get(resolved_url, receive_timeout: 60_000, max_body_length: @max_inline_bytes) do
+           Req.get(target.pinned_url,
+             receive_timeout: 60_000,
+             connect_options: [hostname: target.host, timeout: 10_000]
+           ) do
       case response do
-        %{status: 200, body: body} when is_binary(body) ->
+        %{status: 200, body: body}
+        when is_binary(body) and byte_size(body) <= @max_inline_bytes ->
           {:ok, Base.encode64(body)}
+
+        %{status: 200, body: body} when is_binary(body) ->
+          {:error, :attachment_too_large}
 
         %{status: status} ->
           {:error, "HTTP #{status}"}

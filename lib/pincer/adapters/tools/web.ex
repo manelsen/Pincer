@@ -9,12 +9,14 @@ defmodule Pincer.Adapters.Tools.Web do
   ## Security Features (SSRF Protection)
 
   The `fetch` action includes strict Server-Side Request Forgery (SSRF) protection:
-  - **Scheme Validation**: Only `http` and `https` are allowed.
-  - **Host Blocking**:
-    - Localhost (`127.0.0.1`, `localhost`, `0.0.0.0`, `::1`) is blocked.
-    - Private IP ranges (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) are blocked.
-    - Cloud metadata services (`169.254.169.254`) are blocked.
-  - **Redirect Validation**: Redirects are followed manually to validate the target URL.
+  - **Scheme and credential validation**: only `http`/`https`, no URL userinfo.
+  - **Address classification**: loopback, private, link-local, metadata, multicast,
+    documentation, benchmark, and reserved IPv4/IPv6 ranges are blocked.
+  - **DNS pinning**: the hostname is resolved once, every address is validated,
+    and the request connects to the validated IP while keeping the original
+    hostname for TLS SNI and the `Host` header.
+  - **Redirect validation**: every redirect target is revalidated and repinned.
+  - **Response cap**: HTML bodies above `:web_fetch_max_bytes` are rejected.
 
   ## Features
 
@@ -37,22 +39,14 @@ defmodule Pincer.Adapters.Tools.Web do
   @behaviour Pincer.Ports.Tool
   alias Pincer.Adapters.Tools.WebFetchError
   alias Pincer.Adapters.Tools.WebVisibility
+  alias Pincer.Utils.NetworkGuard
   require Logger
-  import Bitwise
 
   @user_agent "Pincer/0.1.0 (Mozilla/5.0 compliant)"
   @max_content_length 30_000
+  @max_body_bytes Application.compile_env(:pincer, :web_fetch_max_bytes, 2_000_000)
+  @connect_timeout 10_000
   @max_redirects 3
-
-  @blocked_hosts [
-    "localhost",
-    "127.0.0.1",
-    "0.0.0.0",
-    "::1",
-    "169.254.169.254",
-    "metadata.google.internal"
-  ]
-  @allowed_schemes ["http", "https"]
 
   @impl true
   def spec do
@@ -120,8 +114,8 @@ defmodule Pincer.Adapters.Tools.Web do
   defp execute_search(_args), do: {:error, "Missing required parameter: query"}
 
   defp execute_fetch(%{"url" => url}) do
-    case validate_url(url) do
-      {:ok, validated_url} -> do_fetch(validated_url, @max_redirects, http_client: http_client())
+    case NetworkGuard.safe_target(url) do
+      {:ok, target} -> do_fetch(target, @max_redirects, http_client: http_client())
       {:error, reason} -> {:error, reason}
     end
   end
@@ -129,136 +123,10 @@ defmodule Pincer.Adapters.Tools.Web do
   defp execute_fetch(_args), do: {:error, "Missing required parameter: url"}
 
   @doc """
-  Validates a URL against the outbound-fetch policy (allowed schemes and SSRF
-  blocklist). Shared by every tool that reaches the network so no caller can
-  skip the check.
+  Validates a URL against the shared outbound network policy.
   """
   @spec validate_url(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def validate_url(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{scheme: scheme, host: host} when not is_nil(scheme) and not is_nil(host) ->
-        normalized_scheme = String.downcase(String.trim(scheme))
-        normalized_host = normalize_host(host)
-
-        cond do
-          normalized_scheme not in @allowed_schemes ->
-            {:error, "URL scheme '#{scheme}' not allowed"}
-
-          is_nil(normalized_host) ->
-            {:error, "Invalid URL format"}
-
-          blocked_host?(normalized_host) ->
-            {:error, "Access to internal hosts is not allowed"}
-
-          true ->
-            {:ok, url}
-        end
-
-      _ ->
-        {:error, "Invalid URL format"}
-    end
-  end
-
-  defp blocked_host?(host) do
-    host in @blocked_hosts or
-      match_private_ip?(host) or
-      resolves_to_private_ip?(host)
-  end
-
-  defp normalize_host(host) when is_binary(host) do
-    host
-    |> String.trim()
-    |> String.trim_leading("[")
-    |> String.trim_trailing("]")
-    |> String.trim_trailing(".")
-    |> String.downcase()
-    |> case do
-      "" -> nil
-      normalized -> normalized
-    end
-  end
-
-  defp normalize_host(_), do: nil
-
-  defp match_private_ip?(ip) when is_binary(ip) do
-    ip
-    |> strip_ipv6_zone()
-    |> String.to_charlist()
-    |> :inet.parse_address()
-    |> case do
-      {:ok, addr} -> private_address?(addr)
-      _ -> false
-    end
-  end
-
-  defp match_private_ip?(_), do: false
-
-  defp private_address?({_, _, _, _} = ipv4), do: private_ipv4?(ipv4)
-  defp private_address?({_, _, _, _, _, _, _, _} = ipv6), do: private_ipv6?(ipv6)
-  defp private_address?(_), do: false
-
-  defp private_ipv4?(addr) do
-    in_range?(addr, {0, 0, 0, 0}, 8) or
-      in_range?(addr, {10, 0, 0, 0}, 8) or
-      in_range?(addr, {100, 64, 0, 0}, 10) or
-      in_range?(addr, {127, 0, 0, 0}, 8) or
-      in_range?(addr, {169, 254, 0, 0}, 16) or
-      in_range?(addr, {172, 16, 0, 0}, 12) or
-      in_range?(addr, {192, 168, 0, 0}, 16)
-  end
-
-  defp private_ipv6?({0, 0, 0, 0, 0, 65_535, high, low}) do
-    # IPv4-mapped IPv6 address (::ffff:a.b.c.d)
-    ipv4 = {high >>> 8, high &&& 255, low >>> 8, low &&& 255}
-    private_ipv4?(ipv4)
-  end
-
-  defp private_ipv6?({segment1, _, _, _, _, _, _, _} = ipv6) do
-    ipv6 == {0, 0, 0, 0, 0, 0, 0, 1} or
-      ipv6 == {0, 0, 0, 0, 0, 0, 0, 0} or
-      (segment1 >= 0xFC00 and segment1 <= 0xFDFF) or
-      (segment1 >= 0xFE80 and segment1 <= 0xFEBF)
-  end
-
-  defp resolves_to_private_ip?(host) do
-    if match_private_ip?(host) do
-      true
-    else
-      host
-      |> resolve_host_addresses(:inet)
-      |> Kernel.++(resolve_host_addresses(host, :inet6))
-      |> Enum.any?(&private_address?/1)
-    end
-  end
-
-  defp resolve_host_addresses(host, family) do
-    case :inet.getaddrs(String.to_charlist(host), family) do
-      {:ok, addresses} -> addresses
-      _ -> []
-    end
-  end
-
-  defp strip_ipv6_zone(host) do
-    case String.split(host, "%", parts: 2) do
-      [address, _zone] -> address
-      [address] -> address
-    end
-  end
-
-  defp in_range?({a, b, c, d}, base, prefix) do
-    {base_a, base_b, base_c, base_d} = base
-
-    # Calculate mask
-    mask = bnot((1 <<< (32 - prefix)) - 1)
-
-    # Pack IP into integer
-    ip_int = a <<< 24 ||| b <<< 16 ||| c <<< 8 ||| d
-    base_int = base_a <<< 24 ||| base_b <<< 16 ||| base_c <<< 8 ||| base_d
-
-    (ip_int &&& mask) == (base_int &&& mask)
-  end
-
-  defp in_range?(_addr, _base, _prefix), do: false
+  def validate_url(url) when is_binary(url), do: NetworkGuard.validate_url(url)
 
   defp do_search(query, count) do
     api_key = System.get_env("BRAVE_API_KEY")
@@ -273,7 +141,9 @@ defmodule Pincer.Adapters.Tools.Web do
              headers: [
                {"Accept", "application/json"},
                {"X-Subscription-Token", api_key}
-             ]
+             ],
+             receive_timeout: 15_000,
+             connect_options: [timeout: @connect_timeout]
            ) do
         {:ok, %{status: 200, body: body}} ->
           results = get_in(body, ["web", "results"]) || []
@@ -300,15 +170,18 @@ defmodule Pincer.Adapters.Tools.Web do
     end
   end
 
-  defp do_fetch(url, redirects_remaining, opts) do
-    Logger.info("[WEB] Fetching URL: #{url}")
+  defp do_fetch(target, redirects_remaining, opts) do
+    Logger.info("[WEB] Fetching URL: #{target.url}")
     http_client = Keyword.fetch!(opts, :http_client)
 
-    # Use redirect: false to manually handle redirects for validation
-    case http_client.get(url,
+    # Connect to the validated IP, but keep the original hostname for TLS SNI
+    # and the Host header. This prevents a second DNS lookup from rebinding to
+    # an internal address between validation and connection.
+    case http_client.get(target.pinned_url,
            headers: [{"User-Agent", @user_agent}],
            redirect: false,
-           receive_timeout: 30_000
+           receive_timeout: 30_000,
+           connect_options: [hostname: target.host, timeout: @connect_timeout]
          ) do
       {:ok, %{status: status} = resp} when status in [301, 302, 307, 308] ->
         location = List.first(Req.Response.get_header(resp, "location"))
@@ -321,24 +194,30 @@ defmodule Pincer.Adapters.Tools.Web do
             {:error, "Redirect with no location header"}
 
           true ->
-            # Handle relative redirects
-            target = URI.merge(URI.parse(url), URI.parse(location)) |> URI.to_string()
+            target =
+              URI.merge(URI.parse(target.url), URI.parse(location))
+              |> URI.to_string()
 
-            case validate_url(target) do
+            case NetworkGuard.safe_target(target) do
               {:ok, valid_target} -> do_fetch(valid_target, redirects_remaining - 1, opts)
               {:error, reason} -> {:error, "Redirect to unsafe URL blocked: #{reason}"}
             end
         end
 
-      {:ok, %Req.Response{status: 200, body: html} = resp} ->
+      {:ok, %Req.Response{status: 200, body: html} = resp} when is_binary(html) ->
         content_type = List.first(Req.Response.get_header(resp, "content-type")) || ""
 
-        if String.contains?(content_type, "application/json") do
-          {:ok, html}
-        else
-          text = extract_text(html)
-          final_text = truncate_text(text)
-          {:ok, final_text}
+        cond do
+          byte_size(html) > @max_body_bytes ->
+            {:error, "Response body exceeds #{@max_body_bytes} bytes"}
+
+          String.contains?(content_type, "application/json") ->
+            {:ok, html}
+
+          true ->
+            text = extract_text(html)
+            final_text = truncate_text(text)
+            {:ok, final_text}
         end
 
       {:ok, %{status: status}} ->
