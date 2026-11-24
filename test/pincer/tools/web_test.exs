@@ -22,6 +22,12 @@ defmodule Pincer.Adapters.Tools.WebTest do
              body: ""
            }}
 
+        "/large" ->
+          stream_body(opts[:into], [
+            "<html><body>" <> String.duplicate("a", 2_000_000) <> "</body></html>",
+            "tail"
+          ])
+
         _ ->
           if String.starts_with?(url, "https://") do
             {:error,
@@ -40,6 +46,24 @@ defmodule Pincer.Adapters.Tools.WebTest do
              }}
           end
       end
+    end
+
+    defp stream_body(into, chunks) do
+      {_request, response} =
+        Enum.reduce_while(
+          chunks,
+          {nil, %Req.Response{status: 200, headers: %{"content-type" => ["text/html"]}}},
+          fn chunk, {request, response} ->
+            notify({:stream_chunk, byte_size(chunk)})
+
+            case into.({:data, chunk}, {request, response}) do
+              {:cont, acc} -> {:cont, acc}
+              {:halt, acc} -> {:halt, acc}
+            end
+          end
+        )
+
+      {:ok, response}
     end
   end
 
@@ -83,6 +107,22 @@ defmodule Pincer.Adapters.Tools.WebTest do
     assert pinned_url == "https://93.184.216.34/"
     assert opts[:connect_options][:hostname] == "www.legacy.example"
     refute_received {:http_get, "http://" <> _, _}
+  end
+
+  test "web_fetch halts the download once the body cap is exceeded" do
+    register_stub()
+    stub_public_dns()
+
+    assert {:error, msg} =
+             Web.execute(%{
+               "tool_name" => "web_fetch",
+               "url" => "https://www.legacy.example/large"
+             })
+
+    assert msg =~ "exceeds"
+    assert_received {:stream_chunk, size}
+    assert size > 2_000_000
+    refute_received {:stream_chunk, _}
   end
 
   test "web_fetch rejects redirects to internal addresses before following them" do

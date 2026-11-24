@@ -59,6 +59,17 @@ defmodule Pincer.Utils.NetworkGuardTest do
     assert target.port == 443
   end
 
+  test "preserves the fragment in the pinned URL" do
+    Application.put_env(:pincer, :network_guard_resolver, fn "example.com" ->
+      {:ok, [{93, 184, 216, 34}]}
+    end)
+
+    assert {:ok, target} =
+             NetworkGuard.safe_target("https://example.com/docs?q=1#section-2")
+
+    assert target.pinned_url == "https://93.184.216.34/docs?q=1#section-2"
+  end
+
   test "rejects a hostname when any resolved address is private" do
     Application.put_env(:pincer, :network_guard_resolver, fn "mixed.example" ->
       {:ok, [{93, 184, 216, 34}, {10, 0, 0, 7}]}
@@ -80,6 +91,7 @@ defmodule Pincer.Utils.NetworkGuardTest do
     refute NetworkGuard.public_address?({100, 64, 0, 1})
     refute NetworkGuard.public_address?({127, 0, 0, 1})
     refute NetworkGuard.public_address?({169, 254, 169, 254})
+    refute NetworkGuard.public_address?({0, 0, 0, 0, 0, 0, 0x0808, 0x0808})
     refute NetworkGuard.public_address?({0xFC00, 0, 0, 0, 0, 0, 0, 1})
     refute NetworkGuard.public_address?({0xFE80, 0, 0, 0, 0, 0, 0, 1})
   end

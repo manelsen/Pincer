@@ -39,7 +39,7 @@ defmodule Pincer.Adapters.Tools.Web do
   @behaviour Pincer.Ports.Tool
   alias Pincer.Adapters.Tools.WebFetchError
   alias Pincer.Adapters.Tools.WebVisibility
-  alias Pincer.Utils.NetworkGuard
+  alias Pincer.Utils.{BoundedBody, NetworkGuard}
   require Logger
 
   @user_agent "Pincer/0.1.0 (Mozilla/5.0 compliant)"
@@ -180,8 +180,10 @@ defmodule Pincer.Adapters.Tools.Web do
     case http_client.get(target.pinned_url,
            headers: [{"User-Agent", @user_agent}],
            redirect: false,
+           decode_body: false,
            receive_timeout: 30_000,
-           connect_options: [hostname: target.host, timeout: @connect_timeout]
+           connect_options: [hostname: target.host, timeout: @connect_timeout],
+           into: BoundedBody.callback(@max_body_bytes)
          ) do
       {:ok, %{status: status} = resp} when status in [301, 302, 307, 308] ->
         location = List.first(Req.Response.get_header(resp, "location"))

@@ -198,7 +198,8 @@ defmodule Pincer.Utils.NetworkGuard do
 
     path = if uri.path in [nil, ""], do: "/", else: uri.path
     query = if uri.query, do: "?" <> uri.query, else: ""
-    {:ok, "#{scheme}://#{authority}#{port}#{path}#{query}"}
+    fragment = if uri.fragment, do: "#" <> uri.fragment, else: ""
+    {:ok, "#{scheme}://#{authority}#{port}#{path}#{query}#{fragment}"}
   end
 
   defp parse_ip(host) do
@@ -245,8 +246,7 @@ defmodule Pincer.Utils.NetworkGuard do
   defp private_ipv6?({0, 0, 0, 0, 0, 0xFFFF, high, low}),
     do: private_ipv4?({high >>> 8, high &&& 255, low >>> 8, low &&& 255})
 
-  defp private_ipv6?({0, 0, 0, 0, 0, 0, high, low}),
-    do: private_ipv4?({high >>> 8, high &&& 255, low >>> 8, low &&& 255})
+  defp private_ipv6?({0, 0, 0, 0, 0, 0, _, _}), do: true
 
   defp private_ipv6?({0x0064, 0xFF9B, 0, 0, 0, 0, _, _}), do: true
   defp private_ipv6?({0x0100, 0, 0, 0, 0, 0, 0, 0}), do: true

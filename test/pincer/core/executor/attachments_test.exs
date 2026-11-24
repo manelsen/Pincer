@@ -3,6 +3,64 @@ defmodule Pincer.Core.Executor.AttachmentsTest do
 
   alias Pincer.Core.Executor.Attachments
 
+  @max_inline_bytes Application.compile_env(:pincer, :max_inline_bytes, 6_291_456)
+
+  describe "default_fetch/2" do
+    test "downloads a pinned public URL and base64 encodes the body" do
+      parent = self()
+
+      http_client = fn url, opts ->
+        send(parent, {:fetch, url, opts})
+        {:ok, %Req.Response{status: 200, body: "attachment-body"}}
+      end
+
+      assert {:ok, encoded} =
+               Attachments.default_fetch("https://93.184.216.34/file.txt",
+                 http_client: http_client
+               )
+
+      assert Base.decode64!(encoded) == "attachment-body"
+      assert_received {:fetch, "https://93.184.216.34/file.txt", opts}
+      assert opts[:connect_options][:hostname] == "93.184.216.34"
+      assert opts[:decode_body] == false
+      assert is_function(opts[:into], 2)
+    end
+
+    test "rejects internal URLs before downloading" do
+      http_client = fn _url, _opts -> flunk("must not fetch internal URL") end
+
+      assert {:error, reason} =
+               Attachments.default_fetch("http://127.0.0.1/secret", http_client: http_client)
+
+      assert reason =~ "internal hosts"
+    end
+
+    test "halts oversized downloads while streaming" do
+      parent = self()
+
+      http_client = fn _url, opts ->
+        body = String.duplicate("a", @max_inline_bytes + 1)
+        response = %Req.Response{status: 200, body: ""}
+
+        case opts[:into].({:data, body}, {nil, response}) do
+          {:halt, {_request, response}} ->
+            send(parent, :halted)
+            {:ok, response}
+
+          {:cont, _acc} ->
+            flunk("expected the oversized body to halt the download")
+        end
+      end
+
+      assert {:error, :attachment_too_large} =
+               Attachments.default_fetch("https://93.184.216.34/huge.bin",
+                 http_client: http_client
+               )
+
+      assert_received :halted
+    end
+  end
+
   describe "resolve_url/2" do
     test "keeps regular URLs unchanged" do
       assert {:ok, "https://cdn.example.com/file.pdf"} =

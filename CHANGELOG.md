@@ -55,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - Centralized outbound URL validation in `Pincer.Utils.NetworkGuard`: rejects URL credentials, unsupported schemes, loopback/private/link-local/metadata/reserved IPv4 and IPv6 ranges, resolves all A/AAAA records, and pins `web_fetch` and attachment downloads to the validated address while preserving TLS SNI and the `Host` header. Redirects are revalidated and repinned; browser requests are checked by the Playwright sidecar.
-- Capped `web_fetch`, attachment, and Discord attachment response bodies and added connect timeouts; removed the invalid `max_body_length` Req option that raised at runtime.
+- Capped `web_fetch` and attachment bodies with a streaming Req sink that halts downloads above the limit, and added connect timeouts; removed the invalid `max_body_length` Req option that raised at runtime.
 - Removed unvalidated MCP `shell_server.py` and Node `mcp_sidecar` PoC; blocked MCP `run_command` execution in `Pincer.Adapters.NativeToolRegistry`.
 - Hardened `SafeShell` to require approval for destructive/exec/file-writing `find` and `git log` flags.
 - Enforced workspace path confinement (`WorkspaceGuard`) across media, channel actions, code skeleton, and archive extraction.
