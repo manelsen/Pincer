@@ -168,6 +168,7 @@ defmodule Pincer.Application do
       Pincer.Core.Session.Supervisor,
       {Pincer.Core.Registry, name: Pincer.Core.Project.Registry, backend: :local},
       Pincer.Core.Project.Supervisor,
+      Pincer.Core.Project.Recovery,
       Pincer.Adapters.Cron.Scheduler,
       Pincer.Adapters.Tools.TimerServer,
       Pincer.Channels.Supervisor,

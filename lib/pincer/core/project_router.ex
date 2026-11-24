@@ -5,6 +5,7 @@ defmodule Pincer.Core.ProjectRouter do
   """
   require Logger
   alias Pincer.Core.Project.Server, as: ProjectServer
+  alias Pincer.Core.Project.Store
   alias Pincer.Core.ProjectOrchestrator
   alias Pincer.Core.Structs.Usage
 
@@ -42,6 +43,12 @@ defmodule Pincer.Core.ProjectRouter do
 
       ["/project", "stop", id] ->
         {:ok, :stop, id}
+
+      ["/project", "list"] ->
+        {:ok, :list, nil}
+
+      ["/project", "status", id] ->
+        {:ok, :project_status, id}
 
       ["/project", "modify", id_and_tasks] ->
         case String.split(id_and_tasks, " ", parts: 2) do
@@ -90,6 +97,12 @@ defmodule Pincer.Core.ProjectRouter do
       :stop ->
         ProjectServer.stop(args)
 
+      :list ->
+        format_projects(session_id)
+
+      :project_status ->
+        format_project(args)
+
       :modify ->
         {id, tasks} = args
         ProjectServer.update_plan(id, tasks)
@@ -114,7 +127,33 @@ defmodule Pincer.Core.ProjectRouter do
   @doc """
   Starts or resumes the project orchestrator wizard.
   """
-  def project(session_id, seed \\ nil), do: ProjectOrchestrator.start(session_id, seed)
+  def project(session_id, seed \\ nil) when is_binary(session_id) do
+    case seed do
+      nil ->
+        ProjectOrchestrator.start(session_id, nil)
+
+      seed when is_binary(seed) ->
+        case parse("/project " <> String.trim(seed)) do
+          {:ok, cmd, args}
+          when cmd in [:start, :list, :project_status, :approve, :pause, :resume, :stop, :modify] ->
+            cmd
+            |> handle_command(args, session_id)
+            |> channel_result()
+
+          _ ->
+            ProjectOrchestrator.start(session_id, seed)
+        end
+
+      _ ->
+        ProjectOrchestrator.start(session_id, seed)
+    end
+  end
+
+  defp channel_result({:ok, message}) when is_binary(message), do: message
+  defp channel_result(:ok), do: "Project command executed."
+  defp channel_result({:error, reason}), do: "Project command failed: #{inspect(reason)}"
+  defp channel_result(other) when is_binary(other), do: other
+  defp channel_result(other), do: inspect(other)
 
   @spec continue_if_collecting(String.t(), String.t(), keyword()) ::
           :not_handled | {:handled, String.t()}
@@ -210,6 +249,53 @@ defmodule Pincer.Core.ProjectRouter do
 
       _ ->
         {:error, "Could not retrieve session status."}
+    end
+  end
+
+  defp format_projects(session_id) do
+    case Store.list(session_id: session_id, limit: 20) do
+      {:ok, []} ->
+        {:ok, "No projects found for this session."}
+
+      {:ok, projects} ->
+        lines =
+          Enum.map(projects, fn project ->
+            objective = Map.get(project.payload, :objective) || "untitled"
+            "- `#{project.id}` [#{project.status}] #{String.slice(to_string(objective), 0, 80)}"
+          end)
+
+        {:ok, Enum.join(["Projects:", "" | lines], "\n")}
+
+      {:error, reason} ->
+        {:error, "Could not list projects: #{inspect(reason)}"}
+    end
+  end
+
+  defp format_project(id) when is_binary(id) do
+    case ProjectServer.get_status(id) do
+      {:ok, state} ->
+        progress =
+          case state.items do
+            [] -> "no plan"
+            items -> "#{state.active_task_index}/#{length(items)} tasks"
+          end
+
+        {:ok,
+         """
+         Project: #{id}
+         Status: #{state.status}
+         Objective: #{state.objective}
+         Progress: #{progress}
+         Retries: #{state.retry_count}/#{state.max_retries}
+         Last error: #{inspect(state.last_error)}
+         """
+         |> String.trim()}
+
+      {:error, :not_found} ->
+        {:error, "Project not found."}
+
+      {:error, reason} ->
+        {:error, "Could not read project: #{inspect(reason)}"}
     end
   end
 

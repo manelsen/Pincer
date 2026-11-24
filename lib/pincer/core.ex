@@ -7,6 +7,8 @@ defmodule Pincer.Core do
       Session.Supervisor,
       Project.Server,
       Project.Supervisor,
+      Project.Recovery,
+      Project.Store,
       ProjectRouter,
       ProjectFlowDelivery,
       ProjectOrchestrator,

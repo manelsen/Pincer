@@ -101,6 +101,19 @@ defmodule Pincer.Infra.SQLite do
 
   CREATE INDEX IF NOT EXISTS idx_checkpoints_session ON checkpoints(session_id, status, inserted_at);
 
+  CREATE TABLE IF NOT EXISTS projects (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payload BLOB NOT NULL,
+    inserted_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_projects_session ON projects(session_id, updated_at);
+  CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(kind, status, updated_at);
+
   CREATE TABLE IF NOT EXISTS pairing_states (
     channel TEXT NOT NULL,
     sender_id TEXT NOT NULL,

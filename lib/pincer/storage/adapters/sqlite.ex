@@ -21,6 +21,8 @@ defmodule Pincer.Storage.Adapters.SQLite do
   alias Pincer.Infra.SQLite
   alias Pincer.Storage.Checkpoint
 
+  @project_statuses ~w(planning awaiting_approval running paused error completed stopped)
+
   # --- Messages ---
 
   @impl true
@@ -837,6 +839,213 @@ defmodule Pincer.Storage.Adapters.SQLite do
       {:ok, statuses}
     else
       {:error, :invalid_status}
+    end
+  end
+
+  # --- Durable Projects ---
+
+  @impl true
+  @spec save_project(map()) :: :ok | {:error, term()}
+  def save_project(project) when is_map(project) do
+    with {:ok, id} <- project_string(project, :id),
+         {:ok, session_id} <- project_string(project, :session_id),
+         {:ok, kind} <- project_string(project, :kind),
+         {:ok, status} <- project_status(project),
+         {:ok, payload} <- project_payload(project) do
+      now = now_iso8601()
+
+      SQLite.execute(
+        SQLite.default_server(),
+        """
+        INSERT INTO projects (id, session_id, kind, status, payload, inserted_at, updated_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        ON CONFLICT(id) DO UPDATE SET
+          session_id = excluded.session_id,
+          kind = excluded.kind,
+          status = excluded.status,
+          payload = excluded.payload,
+          updated_at = excluded.updated_at
+        """,
+        [id, session_id, kind, status, {:blob, payload}, now, now]
+      )
+    end
+  end
+
+  @impl true
+  @spec load_project(String.t()) :: {:ok, map()} | {:error, term()}
+  def load_project(id) when is_binary(id) do
+    case SQLite.query(
+           SQLite.default_server(),
+           "SELECT id, session_id, kind, status, payload, inserted_at, updated_at FROM projects WHERE id = ?1",
+           [id]
+         ) do
+      {:ok, %{rows: [row]}} -> project_from_row(row)
+      {:ok, %{rows: []}} -> {:error, :not_found}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @impl true
+  @spec list_projects(keyword()) :: {:ok, [map()]} | {:error, term()}
+  def list_projects(opts \\ []) when is_list(opts) do
+    with {:ok, statuses} <- project_statuses(opts),
+         {:ok, limit} <- project_limit(opts) do
+      {where, params} = project_filters(opts, statuses)
+
+      query = """
+      SELECT id, session_id, kind, status, payload, inserted_at, updated_at
+      FROM projects
+      #{where}
+      ORDER BY updated_at DESC
+      LIMIT ?#{length(params) + 1}
+      """
+
+      case SQLite.query(SQLite.default_server(), query, params ++ [limit]) do
+        {:ok, %{rows: rows}} ->
+          rows
+          |> Enum.reduce_while({:ok, []}, fn row, {:ok, acc} ->
+            case project_from_row(row) do
+              {:ok, project} -> {:cont, {:ok, [project | acc]}}
+              error -> {:halt, error}
+            end
+          end)
+          |> case do
+            {:ok, projects} -> {:ok, Enum.reverse(projects)}
+            error -> error
+          end
+
+        {:error, reason} ->
+          {:error, reason}
+      end
+    end
+  end
+
+  @impl true
+  @spec delete_project(String.t()) :: :ok | {:error, term()}
+  def delete_project(id) when is_binary(id) do
+    SQLite.execute(SQLite.default_server(), "DELETE FROM projects WHERE id = ?1", [id])
+  end
+
+  @impl true
+  @spec delete_projects_by_kind(String.t()) :: :ok | {:error, term()}
+  def delete_projects_by_kind(kind) when is_binary(kind) do
+    SQLite.execute(SQLite.default_server(), "DELETE FROM projects WHERE kind = ?1", [kind])
+  end
+
+  defp project_string(project, key) do
+    case Map.get(project, key, Map.get(project, Atom.to_string(key))) do
+      value when is_binary(value) and value != "" -> {:ok, value}
+      _ -> {:error, {:invalid_project, key}}
+    end
+  end
+
+  defp project_status(project) do
+    status = Map.get(project, :status, Map.get(project, "status", "planning"))
+    status_string = to_string(status)
+
+    if status_string in @project_statuses do
+      {:ok, status_string}
+    else
+      {:error, {:invalid_project_status, status}}
+    end
+  end
+
+  defp project_payload(project) do
+    payload = Map.get(project, :payload, Map.get(project, "payload", %{}))
+
+    if is_map(payload) do
+      {:ok, :erlang.term_to_binary(payload, compressed: 6)}
+    else
+      {:error, :invalid_project_payload}
+    end
+  end
+
+  defp project_statuses(opts) do
+    statuses =
+      (opts[:status] || @project_statuses)
+      |> List.wrap()
+      |> Enum.map(&to_string/1)
+      |> Enum.uniq()
+
+    if statuses != [] and Enum.all?(statuses, &(&1 in @project_statuses)) do
+      {:ok, statuses}
+    else
+      {:error, :invalid_status}
+    end
+  end
+
+  defp project_limit(opts) do
+    case Keyword.get(opts, :limit, 50) do
+      limit when is_integer(limit) and limit in 1..500 -> {:ok, limit}
+      _ -> {:error, :invalid_limit}
+    end
+  end
+
+  defp project_filters(opts, statuses) do
+    {clauses, params} =
+      [{:session_id, "session_id"}, {:kind, "kind"}]
+      |> Enum.reduce({[], []}, fn {key, column}, {clauses, params} ->
+        case Keyword.get(opts, key) do
+          value when is_binary(value) and value != "" ->
+            {clauses ++ ["#{column} = ?#{length(params) + 1}"], params ++ [value]}
+
+          _ ->
+            {clauses, params}
+        end
+      end)
+
+    {status_placeholders, params} = status_placeholders(statuses, params)
+    clauses = clauses ++ ["status IN (#{status_placeholders})"]
+
+    where = "WHERE " <> Enum.join(clauses, " AND ")
+    {where, params}
+  end
+
+  defp status_placeholders(statuses, params) do
+    {placeholders, params} =
+      Enum.map_reduce(statuses, params, fn status, acc ->
+        index = length(acc) + 1
+        {"?#{index}", acc ++ [status]}
+      end)
+
+    {Enum.join(placeholders, ", "), params}
+  end
+
+  defp project_from_row([id, session_id, kind, status, payload, inserted_at, updated_at]) do
+    with {:ok, decoded} <- decode_project_payload(payload) do
+      {:ok,
+       %{
+         id: id,
+         session_id: session_id,
+         kind: kind,
+         status: project_status_atom(status),
+         payload: decoded,
+         inserted_at: parse_timestamp(inserted_at),
+         updated_at: parse_timestamp(updated_at)
+       }}
+    end
+  end
+
+  defp decode_project_payload(payload) when is_binary(payload) do
+    try do
+      {:ok, :erlang.binary_to_term(payload, [:safe])}
+    rescue
+      _ -> {:error, :invalid_project_payload}
+    end
+  end
+
+  defp decode_project_payload(_payload), do: {:error, :invalid_project_payload}
+
+  defp project_status_atom(status) do
+    case status do
+      "planning" -> :planning
+      "awaiting_approval" -> :awaiting_approval
+      "running" -> :running
+      "paused" -> :paused
+      "error" -> :error
+      "completed" -> :completed
+      "stopped" -> :stopped
+      _ -> :unknown
     end
   end
 

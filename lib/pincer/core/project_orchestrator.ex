@@ -6,10 +6,12 @@ defmodule Pincer.Core.ProjectOrchestrator do
   a deterministic API for collection, board rendering, and execution recovery.
   """
   require Logger
+  alias Pincer.Core.Project.Store
   alias Pincer.Core.ProjectFSM
   alias Pincer.Utils.ETSHelper
 
   @table __MODULE__
+  @store_kind "orchestrator"
   @default_max_items 6
   @default_retry_limit 0
 
@@ -271,6 +273,7 @@ defmodule Pincer.Core.ProjectOrchestrator do
   def reset(session_id) when is_binary(session_id) do
     ensure_table()
     :ets.delete(@table, session_id)
+    _ = Store.delete(build_project_id(session_id))
     :ok
   end
 
@@ -279,6 +282,7 @@ defmodule Pincer.Core.ProjectOrchestrator do
   def reset_all do
     ensure_table()
     :ets.delete_all_objects(@table)
+    _ = Store.delete_kind(@store_kind)
     :ok
   end
 
@@ -839,30 +843,90 @@ defmodule Pincer.Core.ProjectOrchestrator do
   defp get_state(session_id) do
     ensure_table()
 
-    case :ets.lookup(@table, session_id) do
-      [{^session_id, state}] -> state
-      _ -> nil
+    case ets_lookup(session_id) do
+      nil -> load_state(session_id)
+      state -> state
     end
-  rescue
-    ArgumentError ->
-      ensure_table()
-
-      case :ets.lookup(@table, session_id) do
-        [{^session_id, state}] -> state
-        _ -> nil
-      end
   end
 
   defp put_state(%{session_id: session_id} = state) do
     ensure_table()
     :ets.insert(@table, {session_id, state})
+    persist_state(state)
     state
   rescue
     ArgumentError ->
       ensure_table()
       :ets.insert(@table, {session_id, state})
+      persist_state(state)
       state
   end
+
+  defp ets_lookup(session_id) do
+    case :ets.lookup(@table, session_id) do
+      [{^session_id, state}] -> state
+      _ -> nil
+    end
+  rescue
+    ArgumentError -> nil
+  end
+
+  defp load_state(session_id) do
+    with {:ok, project} <- Store.load(build_project_id(session_id)),
+         @store_kind <- project.kind,
+         ^session_id <- project.session_id,
+         state when is_map(state) <- project.payload do
+      state = normalize_loaded_state(state, session_id)
+      :ets.insert(@table, {session_id, state})
+      state
+    else
+      _ -> nil
+    end
+  end
+
+  defp normalize_loaded_state(state, session_id) do
+    state
+    |> Map.put(:session_id, session_id)
+    |> Map.update(:items, [], fn items ->
+      Enum.map(items, fn
+        %{status: :in_progress} = item -> %{item | status: :pending}
+        item -> item
+      end)
+    end)
+  end
+
+  defp persist_state(%{session_id: session_id, project_id: project_id} = state) do
+    project = %{
+      id: project_id,
+      session_id: session_id,
+      kind: @store_kind,
+      status: store_status(state),
+      payload: state
+    }
+
+    case Store.save(project) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("[PROJECT] Orchestrator persistence failed: #{inspect(reason)}")
+        :error
+    end
+  end
+
+  defp store_status(%{phase: :ready, items: items}) do
+    cond do
+      Enum.any?(items, &(&1.status == :in_progress)) -> :running
+      Enum.all?(items, &(&1.status == :done)) and items != [] -> :completed
+      true -> :awaiting_approval
+    end
+  end
+
+  defp store_status(%{phase: phase})
+       when phase in [:await_objective, :await_kind, :await_scope, :await_success],
+       do: :planning
+
+  defp store_status(_), do: :planning
 
   defp normalize_max_items(value) when is_integer(value) and value > 0, do: value
   defp normalize_max_items(_), do: @default_max_items

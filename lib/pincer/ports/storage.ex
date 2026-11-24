@@ -38,6 +38,20 @@ defmodule Pincer.Ports.Storage do
   @callback load_checkpoint(session_id :: String.t(), opts :: keyword()) ::
               {:ok, term()} | {:error, term()}
 
+  # --- Durable project state ---
+
+  @callback save_project(project :: map()) :: :ok | {:error, term()}
+  @callback load_project(id :: String.t()) :: {:ok, map()} | {:error, term()}
+  @callback list_projects(opts :: keyword()) :: {:ok, [map()]} | {:error, term()}
+  @callback delete_project(id :: String.t()) :: :ok | {:error, term()}
+  @callback delete_projects_by_kind(kind :: String.t()) :: :ok | {:error, term()}
+
+  @optional_callbacks save_project: 1,
+                      load_project: 1,
+                      list_projects: 1,
+                      delete_project: 1,
+                      delete_projects_by_kind: 1
+
   # --- Pairing State (durable pairs) ---
 
   @callback upsert_pairing_state(String.t(), String.t(), String.t() | nil, map()) ::
@@ -106,6 +120,14 @@ defmodule Pincer.Ports.Storage do
 
   def load_checkpoint(session_id, opts \\ []),
     do: adapter().load_checkpoint(session_id, opts)
+
+  def save_project(project), do: adapter().save_project(project)
+  def load_project(id), do: adapter().load_project(id)
+  def list_projects(opts \\ []), do: adapter().list_projects(opts)
+  def delete_project(id), do: adapter().delete_project(id)
+
+  def delete_projects_by_kind(kind),
+    do: adapter().delete_projects_by_kind(kind)
 
   def upsert_pairing_state(channel, sender_id, agent_id, raw_data \\ %{}),
     do: adapter().upsert_pairing_state(channel, sender_id, agent_id, raw_data)
