@@ -13,6 +13,7 @@ defmodule Pincer.Architecture.PincerPortsBoundaryTest do
     "LLM.RawResponseLogger",
     "Channel",
     "ChannelPolicy",
+    "Messaging",
     "Project",
     "PubSub",
     "Session",
@@ -62,7 +63,7 @@ defmodule Pincer.Architecture.PincerPortsBoundaryTest do
 
     for rel <- ~w(
           structs/usage structs/incoming_message session/context llm llm/provider
-          llm/raw_response_logger channel channel_policy project pubsub session skills_registry
+          llm/raw_response_logger channel channel_policy messaging project pubsub session skills_registry
           streaming ux
         ) do
       assert File.exists?("packages/pincer_ports/lib/pincer_ports/#{rel}.ex"),

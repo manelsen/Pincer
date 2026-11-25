@@ -246,6 +246,16 @@ existing callback declarations and default arguments.
 - The port resolves `:pincer, :pubsub_adapter` at runtime. Pincer's root config installs `Pincer.Infra.PubSub`, which publishes to the existing Registry. A standalone channel host supplies an adapter implementing `subscribe/1`, `unsubscribe/1`, and `broadcast/2`. Missing or invalid adapter configuration raises `ArgumentError`.
 - Topic names and mailbox messages are preserved. `broadcast/2` sends its message term to subscribers without wrapping it.
 
+### 12.2. Outbound messaging (`PincerPorts.Messaging`)
+
+- `deliver/2` publishes a session message through the host's existing PubSub.
+- `send_message/4`, `send_file/4`, and `reply_to/4` address a channel recipient
+  and return the transport's result. Replies carry the message ID as a send
+  option. Files have a name, contents, and a path already checked by the caller.
+- The host configures one `:messaging_adapter`. Pincer wires the channel adapter
+  in application config. Tools resolve destinations and check workspace paths
+  before dispatch. The channel adapter selects the transport and its capabilities.
+
 ### 13. Channel-Owned Formatting (`Pincer.Channels.Telegram.ResponseEnvelope`)
 
 Telegram HTML usage-footer formatting and reasoning delivery options reside in

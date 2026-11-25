@@ -1,5 +1,5 @@
 defmodule Pincer.Adapters.Tools.MediaTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Pincer.Adapters.Tools.Media
 
@@ -219,6 +219,30 @@ defmodule Pincer.Adapters.Tools.MediaTest do
              })
 
     assert msg =~ "not found"
+  end
+
+  test "transcribe uses the host's LLM port when no tool override is configured" do
+    previous = Application.fetch_env(:pincer, :llm_adapter)
+    Application.delete_env(:pincer, :media_llm_client)
+    Application.put_env(:pincer, :llm_adapter, StubLLM)
+
+    audio = tmp_audio()
+
+    on_exit(fn ->
+      File.rm(audio)
+
+      case previous do
+        {:ok, adapter} -> Application.put_env(:pincer, :llm_adapter, adapter)
+        :error -> Application.delete_env(:pincer, :llm_adapter)
+      end
+    end)
+
+    assert {:ok, "stub transcription"} =
+             Media.execute(%{"action" => "transcribe", "path" => Path.basename(audio)}, %{
+               "workspace_path" => @tmp_dir
+             })
+
+    assert_received {:transcribe_audio, ^audio, _opts}
   end
 
   # ---------------------------------------------------------------------------

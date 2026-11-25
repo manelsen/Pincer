@@ -12,11 +12,9 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
 
   require Logger
   alias Pincer.Core.Bindings
-  alias Pincer.Channels.Discord
-  alias Pincer.Channels.Telegram
-  alias Pincer.Channels.WhatsApp
   alias Pincer.Core.Session.Server
   alias Pincer.Core.WorkspaceGuard
+  alias PincerPorts.Messaging
 
   @type channel :: :telegram | :discord | :whatsapp
 
@@ -89,7 +87,7 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
   defp send_message(args, context) do
     with {:ok, content} <- fetch_required_string(args, "content"),
          {:ok, {channel, recipient}} <- resolve_destination(args, context),
-         {:ok, _message_id} <- dispatch(channel, recipient, content, []) do
+         {:ok, _message_id} <- Messaging.send_message(channel, recipient, content) do
       {:ok, "Message sent via #{channel} to #{recipient}."}
     else
       {:error, reason} when is_binary(reason) -> {:error, reason}
@@ -111,9 +109,9 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
          {:ok, {channel, recipient}} <- resolve_destination(args, context) do
       filename = Path.basename(abs_path)
       caption = Map.get(args, "caption", "")
-      files = [%{name: filename, body: binary, path: abs_path}]
+      file = %{name: filename, body: binary, path: abs_path}
 
-      case dispatch_file(channel, recipient, files, caption) do
+      case Messaging.send_file(channel, recipient, file, caption) do
         :ok -> {:ok, "File '#{filename}' sent via #{channel} to #{recipient}."}
         {:ok, _} -> {:ok, "File '#{filename}' sent via #{channel} to #{recipient}."}
         {:error, reason} when is_binary(reason) -> {:error, reason}
@@ -132,7 +130,7 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
     with {:ok, content} <- fetch_required_string(args, "content"),
          {:ok, message_id} <- fetch_required_string(args, "message_id"),
          {:ok, {channel, recipient}} <- resolve_destination(args, context),
-         {:ok, _} <- dispatch(channel, recipient, content, reply_to_message_id: message_id) do
+         {:ok, _} <- Messaging.reply_to(channel, recipient, message_id, content) do
       {:ok, "Reply sent via #{channel} to #{recipient} (re: #{message_id})."}
     else
       {:error, reason} when is_binary(reason) -> {:error, reason}
@@ -197,46 +195,6 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
     end
   end
 
-  defp dispatch(:telegram, recipient, content, opts) do
-    telegram_adapter().send_message(recipient, content, opts)
-  end
-
-  defp dispatch(:discord, recipient, content, opts) do
-    discord_adapter().send_message(recipient, content, opts)
-  end
-
-  defp dispatch(:whatsapp, recipient, content, opts) do
-    whatsapp_adapter().send_message(recipient, content, opts)
-  end
-
-  defp dispatch_file(:telegram, recipient, files, caption) do
-    case files do
-      [%{name: _name, path: path}] when is_binary(path) ->
-        telegram_adapter().send_document(recipient, path, caption: caption)
-
-      [%{name: name, body: body}] when is_binary(name) and is_binary(body) ->
-        tmp_path = write_temp_file!(name, body)
-
-        try do
-          telegram_adapter().send_document(recipient, tmp_path, caption: caption)
-        after
-          File.rm(tmp_path)
-        end
-
-      _ ->
-        {:error, "Telegram file payload is invalid."}
-    end
-  end
-
-  defp dispatch_file(:discord, recipient, files, caption) do
-    discord_adapter().send_message(recipient, caption, files: files)
-  end
-
-  defp dispatch_file(:whatsapp, _recipient, files, _caption) do
-    filename = files |> List.first(%{}) |> Map.get(:name, "file")
-    {:error, "File sending is not supported on WhatsApp (file: #{filename})."}
-  end
-
   defp normalize_channel(channel) when is_atom(channel),
     do: normalize_channel(Atom.to_string(channel))
 
@@ -270,29 +228,7 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
 
   defp fetch_non_empty(_), do: {:error, :invalid}
 
-  defp telegram_adapter do
-    Application.get_env(:pincer, :channel_actions_adapters, %{})
-    |> Map.get(:telegram, Telegram)
-  end
-
-  defp discord_adapter do
-    Application.get_env(:pincer, :channel_actions_adapters, %{})
-    |> Map.get(:discord, Discord)
-  end
-
-  defp whatsapp_adapter do
-    Application.get_env(:pincer, :channel_actions_adapters, %{})
-    |> Map.get(:whatsapp, WhatsApp)
-  end
-
   defp session_server do
     Application.get_env(:pincer, :channel_actions_session_server, Server)
-  end
-
-  defp write_temp_file!(name, body) do
-    filename = "#{System.unique_integer([:positive])}_#{Path.basename(name)}"
-    path = Path.join(System.tmp_dir!(), filename)
-    File.write!(path, body)
-    path
   end
 end
