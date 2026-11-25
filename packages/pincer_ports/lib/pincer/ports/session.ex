@@ -45,12 +45,27 @@ defmodule Pincer.Ports.Session do
   """
   @spec registry() :: atom()
   def registry do
-    Application.get_env(:pincer, :session_registry, Pincer.Core.Session.Registry)
+    fetch_env_atom!(:session_registry)
   end
 
   @doc false
   def adapter do
-    Application.get_env(:pincer, :session_adapter, Pincer.Core.Session.Adapter)
+    fetch_env_atom!(:session_adapter)
+  end
+
+  defp fetch_env_atom!(key) do
+    case Application.fetch_env(:pincer, key) do
+      {:ok, mod} when is_atom(mod) and not is_nil(mod) and not is_boolean(mod) ->
+        mod
+
+      {:ok, invalid} ->
+        raise ArgumentError,
+              "invalid #{inspect(key)} configuration for :pincer: #{inspect(invalid)}"
+
+      :error ->
+        raise ArgumentError,
+              "missing #{inspect(key)} configuration for :pincer (configure config :pincer, #{inspect(key)}, ...)"
+    end
   end
 
   def process_input(session_id, input), do: adapter().process_input(session_id, input)
@@ -65,7 +80,10 @@ defmodule Pincer.Ports.Session do
   def set_verbose(session_id, verbose), do: adapter().set_verbose(session_id, verbose)
   def set_usage(session_id, level), do: adapter().set_usage(session_id, level)
   def approve_all(session_id, seconds \\ 600), do: adapter().approve_all(session_id, seconds)
-  def resolve(channel, context, channel_config \\ %{}), do: adapter().resolve(channel, context, channel_config)
+
+  def resolve(channel, context, channel_config \\ %{}),
+    do: adapter().resolve(channel, context, channel_config)
+
   def start_session(session_id, opts \\ []), do: adapter().start_session(session_id, opts)
   def stop_session(session_id), do: adapter().stop_session(session_id)
   def ensure_started(session_id, opts), do: adapter().ensure_started(session_id, opts)

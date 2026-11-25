@@ -40,6 +40,12 @@ defmodule Pincer.Ports.Sandbox do
                         "IFS"
                       ])
 
+  @sandbox_short_names %{
+    "local" => :local,
+    "docker" => :docker,
+    "ssh" => :ssh
+  }
+
   # --- Dispatcher & Configuration ---
 
   @doc """
@@ -47,11 +53,24 @@ defmodule Pincer.Ports.Sandbox do
   """
   @spec adapter() :: module()
   def adapter do
-    configured = Application.get_env(:pincer, :sandbox_adapter)
+    case Application.fetch_env(:pincer, :sandbox_adapter) do
+      {:ok, nil} ->
+        raise ArgumentError,
+              "missing :sandbox_adapter configuration for :pincer (got nil)"
 
-    case resolve_adapter(configured) do
-      {:ok, mod} -> mod
-      {:error, _} -> default_adapter()
+      {:ok, configured} ->
+        case resolve_adapter(configured) do
+          {:ok, mod} ->
+            mod
+
+          {:error, reason} ->
+            raise ArgumentError,
+                  "invalid :sandbox_adapter configuration for :pincer: #{inspect(reason)}"
+        end
+
+      :error ->
+        raise ArgumentError,
+              "missing :sandbox_adapter configuration for :pincer (configure config :pincer, :sandbox_adapter, ...)"
     end
   end
 
@@ -59,16 +78,11 @@ defmodule Pincer.Ports.Sandbox do
   Resolves a short backend name, atom, or module name into an adapter module.
   """
   @spec resolve_adapter(term()) :: {:ok, module()} | {:error, {:unknown_sandbox_adapter, term()}}
-  def resolve_adapter(nil), do: {:ok, default_adapter()}
-  def resolve_adapter(:local), do: {:ok, sandbox_module("Local")}
-  def resolve_adapter(:docker), do: {:ok, sandbox_module("Docker")}
-  def resolve_adapter(:ssh), do: {:ok, sandbox_module("SSH")}
-  def resolve_adapter("local"), do: {:ok, sandbox_module("Local")}
-  def resolve_adapter("docker"), do: {:ok, sandbox_module("Docker")}
-  def resolve_adapter("ssh"), do: {:ok, sandbox_module("SSH")}
-  def resolve_adapter("Pincer.Adapters.Sandbox.Local"), do: {:ok, sandbox_module("Local")}
-  def resolve_adapter("Pincer.Adapters.Sandbox.Docker"), do: {:ok, sandbox_module("Docker")}
-  def resolve_adapter("Pincer.Adapters.Sandbox.SSH"), do: {:ok, sandbox_module("SSH")}
+  def resolve_adapter(nil), do: {:error, {:unknown_sandbox_adapter, nil}}
+
+  def resolve_adapter(key) when key in [:local, :docker, :ssh] do
+    resolve_short_adapter(key, key)
+  end
 
   def resolve_adapter(mod) when is_atom(mod) and not is_boolean(mod) do
     if String.starts_with?(Atom.to_string(mod), "Elixir.") do
@@ -79,20 +93,15 @@ defmodule Pincer.Ports.Sandbox do
   end
 
   def resolve_adapter(name) when is_binary(name) do
-    normalized = name |> String.trim() |> String.downcase()
+    trimmed = String.trim(name)
+    normalized = String.downcase(trimmed)
 
-    case normalized do
-      "local" ->
-        {:ok, sandbox_module("Local")}
+    case Map.fetch(@sandbox_short_names, normalized) do
+      {:ok, key} ->
+        resolve_short_adapter(key, name)
 
-      "docker" ->
-        {:ok, sandbox_module("Docker")}
-
-      "ssh" ->
-        {:ok, sandbox_module("SSH")}
-
-      _ ->
-        resolve_module_string(String.trim(name))
+      :error ->
+        resolve_module_string(trimmed)
     end
   end
 
@@ -255,9 +264,21 @@ defmodule Pincer.Ports.Sandbox do
     ArgumentError -> {:error, {:unknown_sandbox_adapter, trimmed}}
   end
 
-  defp default_adapter, do: sandbox_module("Local")
+  defp resolve_short_adapter(key, original) do
+    adapters = Application.get_env(:pincer, :sandbox_adapters, %{})
+    str_key = Atom.to_string(key)
 
-  defp sandbox_module(name) do
-    Module.concat(["Pincer", "Adapters", "Sandbox", name])
+    mod =
+      cond do
+        is_map(adapters) -> Map.get(adapters, key) || Map.get(adapters, str_key)
+        Keyword.keyword?(adapters) -> Keyword.get(adapters, key)
+        true -> nil
+      end
+
+    if is_atom(mod) and not is_nil(mod) and not is_boolean(mod) do
+      {:ok, mod}
+    else
+      {:error, {:unknown_sandbox_adapter, original}}
+    end
   end
 end

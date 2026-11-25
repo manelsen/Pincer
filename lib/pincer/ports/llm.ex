@@ -15,7 +15,18 @@ defmodule Pincer.Ports.LLM do
   # --- Dispatcher ---
 
   defp adapter do
-    Application.get_env(:pincer, :llm_adapter, Pincer.LLM.Client)
+    case Application.fetch_env(:pincer, :llm_adapter) do
+      {:ok, mod} when is_atom(mod) and not is_nil(mod) and not is_boolean(mod) ->
+        mod
+
+      {:ok, invalid} ->
+        raise ArgumentError,
+              "invalid :llm_adapter configuration for :pincer: #{inspect(invalid)}"
+
+      :error ->
+        raise ArgumentError,
+              "missing :llm_adapter configuration for :pincer (configure config :pincer, :llm_adapter, ...)"
+    end
   end
 
   def chat_completion(history, opts \\ []), do: adapter().chat_completion(history, opts)

@@ -8,6 +8,7 @@ defmodule Pincer.Infra.ConfigTest do
     keys = [
       :sandbox,
       :sandbox_adapter,
+      :sandbox_adapters,
       :storage_adapter,
       :sqlite_path,
       :storage,
@@ -168,6 +169,15 @@ defmodule Pincer.Infra.ConfigTest do
   end
 
   describe "sandbox config" do
+    test "loads a fully qualified sandbox adapter without the short-name registry" do
+      Application.delete_env(:pincer, :sandbox_adapters)
+      System.delete_env("PINCER_SANDBOX_ADAPTER")
+      path = write_yaml!("sandbox:\n  adapter: Pincer.Adapters.Sandbox.Docker\n")
+
+      assert :ok = Config.load(config_file: path, load_dotenv: false)
+      assert Application.fetch_env!(:pincer, :sandbox_adapter) == Pincer.Adapters.Sandbox.Docker
+    end
+
     test "loads sandbox backend and per-backend options from config yaml" do
       yaml =
         write_yaml!("""
@@ -233,7 +243,7 @@ defmodule Pincer.Infra.ConfigTest do
   end
 
   describe "sqlite storage config" do
-    test "configures Pincer.Adapters.Storage.SQLite via storage.adapter and storage.path" do
+    test "preserves configured storage adapter and sets sqlite_path via storage.adapter and storage.path" do
       yaml =
         write_yaml!("""
         storage:
@@ -247,6 +257,23 @@ defmodule Pincer.Infra.ConfigTest do
 
       assert Application.get_env(:pincer, :storage_adapter) == Pincer.Adapters.Storage.SQLite
       assert Application.get_env(:pincer, :sqlite_path) == "tmp/test_zero_infra.db"
+    end
+
+    test "does not set :storage_adapter when validating storage config" do
+      yaml =
+        write_yaml!("""
+        storage:
+          adapter: "sqlite"
+          path: "tmp/test_no_adapter_write.db"
+        """)
+
+      System.delete_env("PINCER_STORAGE")
+      System.delete_env("PINCER_SQLITE_PATH")
+      Application.delete_env(:pincer, :storage_adapter)
+
+      assert :ok = Config.load(config_file: yaml, load_dotenv: false)
+      assert Application.get_env(:pincer, :storage_adapter) == nil
+      assert Application.get_env(:pincer, :sqlite_path) == "tmp/test_no_adapter_write.db"
     end
 
     test "supports PINCER_STORAGE / PINCER_SQLITE_PATH overrides" do
