@@ -10,7 +10,11 @@ defmodule Pincer.Channels.SharedTest do
     assert opts[:deps] == [PincerPorts]
 
     assert opts[:exports] == [
+             Attachments,
+             Chunking,
+             Formatting,
              Inbound,
+             Pairing,
              ProjectBridge,
              SessionBridge,
              Text,

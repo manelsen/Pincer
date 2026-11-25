@@ -75,10 +75,7 @@ defmodule Pincer.Channels.Telegram do
   use Supervisor
   @behaviour PincerPorts.Channel
   require Logger
-  alias Pincer.Channels.Shared.Text
-
-  @file_extensions ~w(md go py pl sh am at be cc)
-  @file_extension_pattern ~r/(^|[^a-zA-Z0-9_\-\/])([a-zA-Z0-9_.\-\.\/]+\.(?:#{Enum.join(@file_extensions, "|")}))(?=$|[^a-zA-Z0-9_\-\/])/i
+  alias Pincer.Channels.Shared.{Chunking, Formatting}
 
   @doc """
   Starts the Telegram channel supervisor.
@@ -160,11 +157,9 @@ defmodule Pincer.Channels.Telegram do
       do_send_message(chat_id, text, Keyword.delete(opts, :parse_mode))
     else
       html_text =
-        if Keyword.get(opts, :skip_reasoning_strip, false) do
-          text |> Text.format_reasoning_html() |> markdown_to_html()
-        else
-          text |> Text.strip_reasoning() |> markdown_to_html()
-        end
+        text
+        |> Formatting.format_reasoning(opts)
+        |> markdown_to_html()
 
       do_send_message(chat_id, html_text, Keyword.put(opts, :parse_mode, "HTML"))
     end
@@ -189,11 +184,9 @@ defmodule Pincer.Channels.Telegram do
       end
     else
       html_text =
-        if Keyword.get(opts, :skip_reasoning_strip, false) do
-          text |> Text.format_reasoning_html() |> markdown_to_html()
-        else
-          text |> Text.strip_reasoning() |> markdown_to_html()
-        end
+        text
+        |> Formatting.format_reasoning(opts)
+        |> markdown_to_html()
 
       case Pincer.Channels.Telegram.api_client().edit_message_text(chat_id, message_id, html_text,
              parse_mode: "HTML"
@@ -230,14 +223,7 @@ defmodule Pincer.Channels.Telegram do
               "Telegram HTML update failed. Falling back to plain text update. Error: #{desc}"
             )
 
-            plain_text =
-              html_text
-              |> String.replace("&lt;", "<")
-              |> String.replace("&gt;", ">")
-              |> String.replace("&amp;", "&")
-              |> String.replace("&quot;", "\"")
-              |> String.replace(~r/<br\s*\/?>/i, "\n")
-              |> String.replace(~r/<[^>]+>/, "")
+            plain_text = Formatting.html_to_plain_text(html_text)
 
             case Pincer.Channels.Telegram.api_client().edit_message_text(
                    chat_id,
@@ -288,7 +274,7 @@ defmodule Pincer.Channels.Telegram do
         Logger.warning("Telegram message too long. Splitting into semantic chunks...")
 
         # Split into semantic chunks to keep line/tag integrity where possible
-        chunks = smart_chunk_text(text, 4000)
+        chunks = Chunking.split(text, 4000, strategy: :lines)
 
         # We return the first chunk's ID to keep the streaming flow if needed
         [first | rest] = chunks
@@ -320,15 +306,7 @@ defmodule Pincer.Channels.Telegram do
             "Telegram HTML parsing failed. Falling back to plain text. Error: #{desc}"
           )
 
-          plain_text =
-            text
-            |> String.replace("&lt;", "<")
-            |> String.replace("&gt;", ">")
-            |> String.replace("&amp;", "&")
-            |> String.replace("&quot;", "\"")
-            # Remove remaining HTML tags but keep newlines
-            |> String.replace(~r/<br\s*\/?>/i, "\n")
-            |> String.replace(~r/<[^>]+>/, "")
+          plain_text = Formatting.html_to_plain_text(text)
 
           # Re-call do_send_message WITHOUT the parse_mode
           do_send_message(chat_id, plain_text, Keyword.delete(opts, :parse_mode))
@@ -378,79 +356,17 @@ defmodule Pincer.Channels.Telegram do
   4. Unfences the protected HTML for a 100% faithful hybrid output.
   """
   def markdown_to_html(text) do
-    # 1. Pre-processing
-    prepared =
-      text
-      |> String.replace("\r\n", "\n")
+    Formatting.markdown_to_html(text,
+      render_markdown: fn fenced ->
+        case EarmarkParser.as_ast(fenced) do
+          {:ok, ast, _warnings} ->
+            Pincer.Channels.Telegram.Renderer.render(ast)
 
-    # 2. Sequential Protection (Fencing) for Hybrid HTML Support
-    # Order: Blocks (pre/code blocks) -> Inline Tags
-    {fenced, map} = {prepared, %{}}
-
-    # Phase A: Code Blocks and Pre blocks (Whole blocks)
-    {fenced, map} =
-      Regex.scan(~r/<(pre|code)(?:\s+[^>]*?)?>(.*?)<\/\1>/is, fenced)
-      |> Enum.reduce({fenced, map}, fn [full, tag, content], {t, m} ->
-        placeholder = "⦓B#{map_size(m)}⦔"
-        content = "<#{tag}>#{content}</#{tag}>"
-        {String.replace(t, full, placeholder), Map.put(m, placeholder, content)}
-      end)
-
-    # Phase B: Remaining safe inline tags
-    safe_tags = ~w(b i u s strong em strike del a blockquote)
-
-    {fenced, map} =
-      Enum.reduce(safe_tags, {fenced, map}, fn tag, {acc_text, acc_map} ->
-        # Opening tags
-        {acc_text, acc_map} =
-          Regex.scan(~r/<#{tag}(?:\s+[^>]*?)?>/i, acc_text)
-          |> Enum.uniq()
-          |> Enum.reduce({acc_text, acc_map}, fn [match], {t, m} ->
-            placeholder = "⦓T#{map_size(m)}⦔"
-            {String.replace(t, match, placeholder), Map.put(m, placeholder, match)}
-          end)
-
-        # Closing tags
-        {acc_text, acc_map} =
-          Regex.scan(~r/<\/#{tag}>/i, acc_text)
-          |> Enum.uniq()
-          |> Enum.reduce({acc_text, acc_map}, fn [match], {t, m} ->
-            placeholder = "⦓T#{map_size(m)}⦔"
-            {String.replace(t, match, placeholder), Map.put(m, placeholder, match)}
-          end)
-
-        {acc_text, acc_map}
-      end)
-
-    # 3. Main Parsing & Rendering (Professional AST approach)
-    rendered =
-      case EarmarkParser.as_ast(fenced) do
-        {:ok, ast, _warnings} ->
-          Pincer.Channels.Telegram.Renderer.render(ast)
-
-        {:error, ast, _errors} ->
-          Pincer.Channels.Telegram.Renderer.render(ast)
+          {:error, ast, _errors} ->
+            Pincer.Channels.Telegram.Renderer.render(ast)
+        end
       end
-
-    # 4. Restoration (Unfencing)
-    restored =
-      Enum.reduce(map, rendered, fn {placeholder, content}, acc ->
-        String.replace(acc, placeholder, content)
-      end)
-
-    # 5. File Reference Wrapping (OpenClaw style)
-    # This prevents Telegram from generating previews for README.md, main.go, etc.
-    final_html = wrap_file_references(restored)
-
-    String.trim(final_html)
-  end
-
-  defp wrap_file_references(html) do
-    # We skip content already inside <code>, <pre>, or <a> tags.
-    # We use a simple targeted regex replacement that avoids common HTML pitfalls.
-    Regex.replace(@file_extension_pattern, html, fn _full, prefix, filename ->
-      "#{prefix}<code>#{filename}</code>"
-    end)
+    )
   end
 
   @doc false
@@ -515,54 +431,10 @@ defmodule Pincer.Channels.Telegram do
   def api_client do
     Application.get_env(:pincer, :telegram_api, Pincer.Channels.Telegram.API.Adapter)
   end
-
-  defp smart_chunk_text(text, limit) do
-    lines = String.split(text, "\n", trim: false)
-    last_index = length(lines) - 1
-
-    {chunks, current_chunk} =
-      Enum.with_index(lines)
-      |> Enum.reduce({[], ""}, fn {line, idx}, {acc, current} ->
-        line_with_newline =
-          if idx < last_index do
-            line <> "\n"
-          else
-            line
-          end
-
-        cond do
-          # Line alone exceeds the limit - split it blindly
-          String.length(line_with_newline) > limit ->
-            # Finish current chunk first
-            acc = if current == "", do: acc, else: acc ++ [current]
-
-            # Split huge line into parts
-            blind_parts =
-              line_with_newline
-              |> String.codepoints()
-              |> Enum.chunk_every(limit)
-              |> Enum.map(&Enum.join/1)
-
-            # Last part of the blind split becomes the new current chunk
-            {new_current, rest} = List.pop_at(blind_parts, -1)
-            {acc ++ rest, new_current}
-
-          # Current chunk + line exceeds limit - start new chunk
-          String.length(current) + String.length(line_with_newline) > limit ->
-            {acc ++ [current], line_with_newline}
-
-          # Otherwise, keep adding to current chunk
-          true ->
-            {acc, current <> line_with_newline}
-        end
-      end)
-
-    if current_chunk == "", do: chunks, else: chunks ++ [current_chunk]
-  end
 end
 
 defmodule Pincer.Channels.Telegram.UpdatesProvider do
-  alias Pincer.Channels.Shared.Inbound
+  alias Pincer.Channels.Shared.{Attachments, Inbound, Pairing}
 
   @moduledoc """
   GenServer that polls Telegram for updates using long polling.
@@ -612,13 +484,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   @default_offset_path Path.join("sessions", "telegram_update_offset.txt")
   @max_attachment_bytes 104_857_600
   @groq_max_audio_bytes 25_165_824
-  @multimodal_extension_mime %{
-    ".pdf" => "application/pdf",
-    ".png" => "image/png",
-    ".jpg" => "image/jpeg",
-    ".jpeg" => "image/jpeg",
-    ".webp" => "image/webp",
-    ".gif" => "image/gif",
+  @extra_multimodal_mimes %{
     ".log" => "text/plain",
     ".txt" => "text/plain"
   }
@@ -856,8 +722,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     handle_command(chat_id, cmd, args, chat_type)
   end
 
-  alias PincerPorts.Structs.IncomingMessage
-
   # Photos and documents arrive without `text`, so routing the raw text field
   # gave `do_process_message/3` a nil and crashed the poller on every media
   # message. Text-only messages keep their text; anything else is prepared from
@@ -897,20 +761,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
         Logger.info("[TELEGRAM] Routing message to Session ID: #{session_id}")
 
-        # Create agnostic IncomingMessage
-        incoming =
-          case input_content do
-            text when is_binary(text) ->
-              IncomingMessage.new(session_id, text)
-
-            parts when is_list(parts) ->
-              # Split text from attachments
-              {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
-              text = Enum.map_join(text_parts, "\n", & &1["text"])
-              atts = Enum.map(att_parts, & &1["attachment"])
-
-              IncomingMessage.new(session_id, text: text, attachments: atts)
-          end
+        incoming = Attachments.to_incoming_message(session_id, input_content)
 
         case PincerPorts.Session.process_input(session_id, incoming) do
           {:ok, :started} ->
@@ -966,25 +817,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       |> normalize_text()
 
     {attachment_text, refs} = extract_attachment_parts(message, api_client)
-    text_content = [base_text, attachment_text] |> Enum.reject(&(&1 == "")) |> Enum.join("\n")
-
-    cond do
-      refs == [] and text_content == "" ->
-        :empty
-
-      refs == [] ->
-        {:ok, text_content}
-
-      true ->
-        text_parts =
-          if text_content == "" do
-            []
-          else
-            [%{"type" => "text", "text" => text_content}]
-          end
-
-        {:ok, text_parts ++ refs}
-    end
+    Attachments.combine_content(base_text, attachment_text, refs)
   end
 
   def prepare_input_content(_message, _api_client), do: :empty
@@ -1153,22 +986,39 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp maybe_collect_document({text_acc, refs_acc}, message, api_client) do
     case map_value(message, :document) do
       document when is_map(document) ->
-        filename = sanitize_filename(map_value(document, :file_name) || "document")
-        size = normalize_size(map_value(document, :file_size))
-        mime = normalize_mime(document, filename)
+        filename =
+          Attachments.sanitize_filename(
+            map_value(document, :file_name) || "document",
+            "document"
+          )
+
+        size = Attachments.normalize_size(map_value(document, :file_size))
+        mime = resolve_document_mime(document, filename)
         ext = filename |> Path.extname() |> String.downcase()
 
+        multimodal? =
+          Attachments.multimodal_extension?(ext, mime,
+            extra_mimes: @extra_multimodal_mimes,
+            allow_text_mime: true
+          )
+
         cond do
-          size > @max_attachment_bytes ->
-            text = append_text_meta(text_acc, filename, size, " (arquivo grande demais)")
+          Attachments.validate_size(size, @max_attachment_bytes) == {:error, :too_large} ->
+            text = Attachments.append_meta(text_acc, filename, size, " (arquivo grande demais)")
             {text, refs_acc}
 
-          not multimodal_extension?(ext, mime) ->
+          not multimodal? ->
             # Non-multimodal documents (zip, csv, json, etc.) — expose as workspace file ref
             # for the session server to download into the workspace incoming/ directory.
-            case build_attachment_ref(document, filename, size, mime, api_client) do
-              {:ok, ref} ->
-                workspace_ref = Map.put(ref, "type", "workspace_file_ref")
+            case build_attachment_ref(
+                   document,
+                   filename,
+                   size,
+                   mime,
+                   api_client,
+                   "workspace_file_ref"
+                 ) do
+              {:ok, workspace_ref} ->
                 {text_acc, refs_acc ++ [workspace_ref]}
 
               {:error, reason} ->
@@ -1176,7 +1026,9 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
                   "[TELEGRAM] Failed to resolve non-multimodal document '#{filename}': #{inspect(reason)}"
                 )
 
-                text = append_text_meta(text_acc, filename, size, " (erro ao resolver arquivo)")
+                text =
+                  Attachments.append_meta(text_acc, filename, size, " (erro ao resolver arquivo)")
+
                 {text, refs_acc}
             end
 
@@ -1190,7 +1042,9 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
                   "[TELEGRAM] Failed to resolve document attachment '#{filename}': #{inspect(reason)}"
                 )
 
-                text = append_text_meta(text_acc, filename, size, " (erro ao resolver arquivo)")
+                text =
+                  Attachments.append_meta(text_acc, filename, size, " (erro ao resolver arquivo)")
+
                 {text, refs_acc}
             end
         end
@@ -1203,14 +1057,14 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   defp maybe_collect_photo({text_acc, refs_acc}, message, api_client) do
     case map_value(message, :photo) do
       photos when is_list(photos) and photos != [] ->
-        case largest_photo(photos) do
+        case Attachments.largest_photo(photos) do
           nil ->
             {text_acc, refs_acc}
 
           photo ->
-            size = normalize_size(map_value(photo, :file_size))
+            size = Attachments.normalize_size(map_value(photo, :file_size))
             unique_id = map_value(photo, :file_unique_id) || map_value(photo, :file_id) || "photo"
-            filename = sanitize_filename("photo_#{unique_id}.jpg")
+            filename = Attachments.sanitize_filename("photo_#{unique_id}.jpg")
 
             case build_attachment_ref(photo, filename, size, "image/jpeg", api_client) do
               {:ok, ref} ->
@@ -1230,17 +1084,18 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     end
   end
 
-  defp build_attachment_ref(file_obj, filename, size, mime, api_client) do
+  defp build_attachment_ref(
+         file_obj,
+         filename,
+         size,
+         mime,
+         api_client,
+         type \\ "attachment_ref"
+       ) do
     with file_id when is_binary(file_id) <- normalize_binary(map_value(file_obj, :file_id)),
          {:ok, file_path} <- resolve_file_path(api_client, file_id) do
       {:ok,
-       %{
-         "type" => "attachment_ref",
-         "url" => "telegram://file/#{file_path}",
-         "mime_type" => mime,
-         "filename" => filename,
-         "size" => size
-       }}
+       Attachments.build_ref("telegram://file/#{file_path}", filename, mime, size, type: type)}
     else
       _ -> {:error, :file_resolution_failed}
     end
@@ -1266,52 +1121,9 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     end
   end
 
-  defp multimodal_extension?(ext, mime) do
-    Map.has_key?(@multimodal_extension_mime, ext) or String.starts_with?(mime, "text/")
-  end
-
-  defp normalize_mime(document, filename) do
-    ext = filename |> Path.extname() |> String.downcase()
+  defp resolve_document_mime(document, filename) do
     declared = normalize_binary(map_value(document, :mime_type))
-
-    cond do
-      is_binary(declared) and declared != "" ->
-        declared
-
-      Map.has_key?(@multimodal_extension_mime, ext) ->
-        @multimodal_extension_mime[ext]
-
-      true ->
-        "application/octet-stream"
-    end
-  end
-
-  defp normalize_size(value) when is_integer(value) and value >= 0, do: value
-
-  defp normalize_size(value) when is_binary(value) do
-    case Integer.parse(String.trim(value)) do
-      {parsed, ""} when parsed >= 0 -> parsed
-      _ -> 0
-    end
-  end
-
-  defp normalize_size(_), do: 0
-
-  defp append_text_meta(text_acc, filename, size, suffix) do
-    meta = "[Attachment: #{filename} (#{size} bytes)]#{suffix}"
-
-    [text_acc, meta]
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join("\n")
-  end
-
-  defp largest_photo(photos) do
-    photos
-    |> Enum.filter(&is_map/1)
-    |> Enum.max_by(
-      fn photo -> normalize_size(map_value(photo, :file_size)) end,
-      fn -> nil end
-    )
+    Attachments.resolve_mime(declared, filename, extra_mimes: @extra_multimodal_mimes)
   end
 
   defp normalize_text(value) do
@@ -1341,10 +1153,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     do: value |> Integer.to_string() |> normalize_binary()
 
   defp normalize_binary(_), do: nil
-
-  defp sanitize_filename(filename) do
-    String.replace(filename, ~r/[<>&"'\x00-\x1F]/, "_")
-  end
 
   @doc false
   defp handle_command(chat_id, "/ping", _text, _chat_type) do
@@ -1392,14 +1200,20 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp handle_command(chat_id, "/pair", text, chat_type) do
-    if normalize_chat_type(chat_type) == "private" do
-      handle_pairing_command(chat_id, text)
-    else
-      Pincer.Channels.Telegram.send_message(
-        chat_id,
-        "Pairing so pode ser concluido em DM privada."
-      )
-    end
+    old_session_id = session_context_for_chat(chat_id, "private").session_id
+
+    response =
+      case Pairing.approve(:telegram, chat_id, text,
+             is_dm: normalize_chat_type(chat_type) == "private",
+             include_bound_agent: true,
+             format_bound_agent: &"Esta DM agora aponta para o agente <code>#{&1}</code>.",
+             on_approved: fn -> PincerPorts.Session.stop_session(old_session_id) end
+           ) do
+        {:ok, message} -> message
+        {:error, _reason, message} -> message
+      end
+
+    Pincer.Channels.Telegram.send_message(chat_id, response)
   end
 
   defp handle_command(chat_id, "/status", _text, chat_type) do
@@ -1692,69 +1506,16 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
     )
   end
 
-  defp handle_pairing_command(chat_id, text) do
-    case String.trim(text || "") do
-      "" ->
-        Pincer.Channels.Telegram.send_message(
-          chat_id,
-          "Uso: /pair <codigo>. Solicite o codigo de pairing ao operador."
-        )
-
-      code ->
-        old_session_id = session_context_for_chat(chat_id, "private").session_id
-
-        case PincerPorts.ChannelPolicy.approve_code(:telegram, chat_id, code) do
-          :ok ->
-            PincerPorts.Session.stop_session(old_session_id)
-            Pincer.Channels.Telegram.send_message(chat_id, pairing_success_message(chat_id))
-
-          {:error, :not_pending} ->
-            Pincer.Channels.Telegram.send_message(
-              chat_id,
-              "Nenhum pairing pendente para este usuario. Solicite um novo codigo ao operador."
-            )
-
-          {:error, :expired} ->
-            Pincer.Channels.Telegram.send_message(
-              chat_id,
-              "Codigo de pairing expirado. Solicite um novo codigo ao operador."
-            )
-
-          {:error, :invalid_code} ->
-            Pincer.Channels.Telegram.send_message(
-              chat_id,
-              "Codigo de pairing invalido. Revise o codigo e tente novamente."
-            )
-
-          {:error, :attempts_exceeded} ->
-            Pincer.Channels.Telegram.send_message(
-              chat_id,
-              "Tentativas excedidas para este codigo. Solicite um novo codigo ao operador."
-            )
-        end
-    end
-  end
-
   defp map_value(map, key) when is_map(map) do
     Map.get(map, key) || Map.get(map, Atom.to_string(key))
   end
 
   defp map_value(_, _), do: nil
 
-  defp authorize_private_dm(chat_id, "private") do
+  defp authorize_private_dm(chat_id, chat_type) do
     policy_config = Application.get_env(:pincer, :telegram_channel_config, %{})
-
-    case PincerPorts.ChannelPolicy.allow?(:dm_access, %{
-           channel: :telegram,
-           sender_id: chat_id,
-           config: policy_config
-         }) do
-      {:allow, _meta} -> :allow
-      {:deny, %{user_message: message}} -> {:deny, message}
-    end
+    Pairing.authorize_dm(:telegram, chat_id, policy_config, is_dm: chat_type == "private")
   end
-
-  defp authorize_private_dm(_chat_id, _chat_type), do: :allow
 
   defp normalize_chat_type(nil), do: ""
 
@@ -1784,18 +1545,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         )
       end
     )
-  end
-
-  defp pairing_success_message(chat_id) do
-    bound_agent_id = PincerPorts.ChannelPolicy.bound_agent_id(:telegram, chat_id)
-
-    cond do
-      is_nil(bound_agent_id) ->
-        "Pairing concluido com sucesso. Agora sua DM esta autorizada."
-
-      true ->
-        "Pairing concluido com sucesso. Esta DM agora aponta para o agente <code>#{bound_agent_id}</code>."
-    end
   end
 
   defp maybe_start_project_execution(chat_id, %PincerPorts.Session.Context{} = context) do

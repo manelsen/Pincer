@@ -9,7 +9,7 @@ defmodule Pincer.Channels.WhatsApp do
   use PincerPorts.Channel
   require Logger
 
-  alias Pincer.Channels.Shared.Inbound
+  alias Pincer.Channels.Shared.{Attachments, Chunking, Inbound, Pairing}
 
   @default_bridge_module Pincer.Channels.WhatsApp.Bridge.Adapter
   @max_outbound_chunk_chars 3500
@@ -306,53 +306,17 @@ defmodule Pincer.Channels.WhatsApp do
   end
 
   defp handle_pairing(chat_id, sender_id, args, is_group, state) do
-    cond do
-      is_group ->
-        deliver_message(state, chat_id, "Pairing only works in direct messages.")
+    message =
+      case Pairing.approve(:whatsapp, sender_id, args,
+             is_dm: not is_group,
+             dm_only_message: "Pairing only works in direct messages.",
+             usage_message: "Usage: /pair <codigo>. Solicite o codigo ao operador."
+           ) do
+        {:ok, text} -> text
+        {:error, _reason, text} -> text
+      end
 
-      args == "" ->
-        deliver_message(state, chat_id, "Usage: /pair <codigo>. Solicite o codigo ao operador.")
-
-      true ->
-        code = String.trim(args)
-
-        case PincerPorts.ChannelPolicy.approve_code(:whatsapp, sender_id, code) do
-          :ok ->
-            deliver_message(
-              state,
-              chat_id,
-              "Pairing concluido com sucesso. Agora sua DM esta autorizada."
-            )
-
-          {:error, :not_pending} ->
-            deliver_message(
-              state,
-              chat_id,
-              "Nenhum pairing pendente para este usuario. Solicite um novo codigo ao operador."
-            )
-
-          {:error, :expired} ->
-            deliver_message(
-              state,
-              chat_id,
-              "Codigo de pairing expirado. Solicite um novo codigo ao operador."
-            )
-
-          {:error, :invalid_code} ->
-            deliver_message(
-              state,
-              chat_id,
-              "Codigo de pairing invalido. Revise o codigo e tente novamente."
-            )
-
-          {:error, :attempts_exceeded} ->
-            deliver_message(
-              state,
-              chat_id,
-              "Tentativas excedidas para este codigo. Solicite um novo codigo ao operador."
-            )
-        end
-    end
+    deliver_message(state, chat_id, message)
   end
 
   defp build_status(state, session_id) do
@@ -435,7 +399,7 @@ defmodule Pincer.Channels.WhatsApp do
       message = normalize_text(text) || ""
 
       message
-      |> split_outbound_chunks()
+      |> Chunking.split(@max_outbound_chunk_chars, strategy: :graphemes)
       |> Enum.reduce_while(:ok, fn chunk, _acc ->
         case state.bridge_module.send_message(state.bridge_pid, chat_id, chunk) do
           :ok ->
@@ -455,9 +419,7 @@ defmodule Pincer.Channels.WhatsApp do
     {:error, :bridge_unavailable}
   end
 
-  defp authorize_dm(_sender_id, _chat_id, true, _config), do: :allow
-
-  defp authorize_dm(sender_id, chat_id, false, config) do
+  defp authorize_dm(sender_id, chat_id, is_group, config) do
     candidate_id =
       cond do
         is_binary(sender_id) and sender_id != "" -> sender_id
@@ -465,14 +427,7 @@ defmodule Pincer.Channels.WhatsApp do
         true -> "unknown"
       end
 
-    case PincerPorts.ChannelPolicy.allow?(:dm_access, %{
-           channel: :whatsapp,
-           sender_id: candidate_id,
-           config: config
-         }) do
-      {:allow, _meta} -> :allow
-      {:deny, %{user_message: message}} -> {:deny, message}
-    end
+    Pairing.authorize_dm(:whatsapp, candidate_id, config, is_dm: not is_group)
   end
 
   defp resolve_session_context(chat_id, sender_id, is_group, config) do
@@ -597,19 +552,6 @@ defmodule Pincer.Channels.WhatsApp do
     end
   end
 
-  defp split_outbound_chunks(""), do: []
-
-  defp split_outbound_chunks(message) when is_binary(message) do
-    if String.length(message) <= @max_outbound_chunk_chars do
-      [message]
-    else
-      message
-      |> String.graphemes()
-      |> Enum.chunk_every(@max_outbound_chunk_chars)
-      |> Enum.map(&Enum.join/1)
-    end
-  end
-
   defp safe_apply(fun, args) when is_function(fun) and is_list(args) do
     try do
       case apply(fun, args) do
@@ -649,24 +591,12 @@ defmodule Pincer.Channels.WhatsApp do
 
   alias PincerPorts.Structs.IncomingMessage
 
+  defp default_process_input(session_id, %IncomingMessage{} = msg) do
+    PincerPorts.Session.process_input(session_id, msg)
+  end
+
   defp default_process_input(session_id, input) do
-    incoming =
-      case input do
-        text when is_binary(text) ->
-          IncomingMessage.new(session_id, text)
-
-        %IncomingMessage{} = msg ->
-          msg
-
-        parts when is_list(parts) ->
-          # Split text from attachments
-          {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
-          text = Enum.map_join(text_parts, "\n", & &1["text"])
-          atts = Enum.map(att_parts, & &1["attachment"])
-
-          IncomingMessage.new(session_id, text: text, attachments: atts)
-      end
-
+    incoming = Attachments.to_incoming_message(session_id, input)
     PincerPorts.Session.process_input(session_id, incoming)
   end
 
