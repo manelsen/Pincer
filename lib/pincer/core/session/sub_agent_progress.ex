@@ -44,13 +44,13 @@ defmodule Pincer.Core.Session.SubAgentProgress do
         :started ->
           %{
             entry
-            | goal: normalize_text(get_field(event, :goal)) || entry.goal,
+            | goal: Pincer.Utils.Text.trimmed_string(get_field(event, :goal)) || entry.goal,
               started?: true,
               state: :running
           }
 
         :tool ->
-          tool = normalize_text(get_field(event, :tool))
+          tool = Pincer.Utils.Text.trimmed_string(get_field(event, :tool))
 
           if tool do
             %{entry | last_tool: tool, started?: true, state: running_state(entry)}
@@ -59,7 +59,7 @@ defmodule Pincer.Core.Session.SubAgentProgress do
           end
 
         :llm_status ->
-          status = normalize_text(get_field(event, :status))
+          status = Pincer.Utils.Text.trimmed_string(get_field(event, :status))
 
           if status do
             %{entry | last_status: status, started?: true, state: running_state(entry)}
@@ -73,7 +73,7 @@ defmodule Pincer.Core.Session.SubAgentProgress do
             | started?: true,
               terminal?: true,
               state: :finished,
-              result: normalize_text(get_field(event, :result))
+              result: Pincer.Utils.Text.trimmed_string(get_field(event, :result))
           }
 
         :failed ->
@@ -82,7 +82,8 @@ defmodule Pincer.Core.Session.SubAgentProgress do
             | started?: true,
               terminal?: true,
               state: :failed,
-              failure: truncate_reason(normalize_text(get_field(event, :reason)) || "")
+              failure:
+                truncate_reason(Pincer.Utils.Text.trimmed_string(get_field(event, :reason)) || "")
           }
 
         _ ->
@@ -315,17 +316,6 @@ defmodule Pincer.Core.Session.SubAgentProgress do
   defp get_field(map, atom_key) when is_map(map) do
     Map.get(map, atom_key) || Map.get(map, Atom.to_string(atom_key))
   end
-
-  defp normalize_text(value) when is_binary(value) do
-    value
-    |> String.trim()
-    |> case do
-      "" -> nil
-      text -> text
-    end
-  end
-
-  defp normalize_text(_), do: nil
 
   defp running_state(%{terminal?: true, state: state}), do: state
   defp running_state(_entry), do: :running

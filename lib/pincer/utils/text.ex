@@ -14,6 +14,44 @@ defmodule Pincer.Utils.Text do
     "final"
   ]
 
+  @doc "Returns a trimmed nonblank string, or `nil` for blank and non-string values."
+  def trimmed_string(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      text -> text
+    end
+  end
+
+  def trimmed_string(_), do: nil
+
+  @doc "Keeps at most `limit` graphemes of text and appends `suffix` if more text remains."
+  def truncate(text, limit, suffix) do
+    case String.split_at(text, limit) do
+      {head, ""} -> head
+      {head, _tail} -> head <> suffix
+    end
+  end
+
+  @doc "Returns the first line, or an empty string for non-string input."
+  def first_line(text) when is_binary(text), do: text |> String.split("\n", parts: 2) |> hd()
+  def first_line(_), do: ""
+
+  @doc "Extracts plain text from a string or from multipart message content."
+  def content_to_text(content) when is_binary(content), do: content
+
+  def content_to_text(parts) when is_list(parts) do
+    Enum.map_join(parts, " ", fn
+      %{"text" => text} -> text
+      _ -> ""
+    end)
+  end
+
+  def content_to_text(_), do: ""
+
+  @doc "Extracts a session identifier from a stored `session:<id>:...` source."
+  def session_source_id("session:" <> rest), do: rest |> String.split(":", parts: 2) |> hd()
+  def session_source_id(_), do: nil
+
   @doc """
   Strips all assistant internal scaffolding (thinking tags, memory tags, etc.)
   from the given text, unless they are inside fenced code blocks.

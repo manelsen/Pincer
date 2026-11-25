@@ -136,11 +136,7 @@ defmodule Pincer.Core.Executor.ToolCall do
     "#{name}: #{first_val}"
   end
 
-  defp truncate(str, max) when is_binary(str) do
-    if String.length(str) > max, do: String.slice(str, 0, max) <> "…", else: str
-  end
-
-  defp truncate(val, max), do: val |> to_string() |> truncate(max)
+  defp truncate(value, max), do: value |> to_string() |> Pincer.Utils.Text.truncate(max, "…")
 
   defp blank?(nil), do: true
   defp blank?(str) when is_binary(str), do: String.trim(str) == ""

@@ -47,6 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Open-source governance files (`SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `CODE_OF_CONDUCT.md`).
 
 ### Fixed
+- `git_inspect` honors an atom-keyed workspace context and confines repository lookup to that workspace.
 - Telegram attachments can be loaded into model prompts using the bot token from the active channel configuration. Workspace files go into the session's `incoming/` directory.
 - Delegated sub-agents fail fast when a privileged tool other than `dispatch_agent` needs approval instead of broadcasting to an unattended topic and waiting for the 600-second timeout.
 - Approved `safe_shell` commands are re-validated against the static checks before execution, so approving a tool no longer bypasses the path and metacharacter guards.

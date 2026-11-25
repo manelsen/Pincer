@@ -39,6 +39,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   - **Allowed**: `lib/pincer.ex` (Relative path inside workspace)
   """
   @behaviour Pincer.Ports.Tool
+  alias Pincer.Adapters.Tools.Args
   alias Pincer.Core.WorkspaceGuard
   require Logger
 
@@ -204,11 +205,9 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     action = infer_action(args)
     raw_path = get_arg(args, "path") || default_path(action)
 
-    workspace_root =
-      Map.get(context, "workspace_path") || Map.get(context, :workspace_path) ||
-        get_workspace_root()
+    workspace_root = Args.workspace_root(context, &get_workspace_root/0)
 
-    session_id = Map.get(context, "session_id") || Map.get(context, :session_id)
+    session_id = Args.session_id(context)
     args = if is_binary(session_id), do: Map.put(args, "_session_id", session_id), else: args
 
     with {:ok, safe_path} <- validate_action_path(action, raw_path, workspace_root),
@@ -232,26 +231,7 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     end
   end
 
-  defp get_arg(map, key) when is_map(map) do
-    case Map.get(map, key) do
-      nil ->
-        case safe_existing_atom(key) do
-          {:ok, atom_key} -> Map.get(map, atom_key)
-          :error -> nil
-        end
-
-      value ->
-        value
-    end
-  end
-
-  defp safe_existing_atom(key) when is_binary(key) do
-    {:ok, String.to_existing_atom(key)}
-  rescue
-    ArgumentError -> :error
-  end
-
-  defp safe_existing_atom(_), do: :error
+  defp get_arg(args, key), do: Args.get(args, key)
 
   defp default_path("list"), do: "."
   defp default_path("search"), do: "."
@@ -759,18 +739,14 @@ defmodule Pincer.Adapters.Tools.FileSystem do
 
   defp zip_symlink?(_), do: false
 
-  defp fetch_required_string(args, key) do
-    case fetch_string(args, key) do
-      {:ok, ""} -> {:error, "'#{key}' cannot be empty."}
-      {:ok, value} -> {:ok, value}
-      error -> error
-    end
-  end
+  defp fetch_required_string(args, key), do: string_arg(args, key, :nonempty)
+  defp fetch_string(args, key), do: string_arg(args, key, :raw)
 
-  defp fetch_string(args, key) do
-    case get_arg(args, key) do
-      value when is_binary(value) -> {:ok, value}
-      _ -> {:error, "Missing or invalid '#{key}'."}
+  defp string_arg(args, key, mode) do
+    case Args.string(get_arg(args, key), mode) do
+      {:ok, value} -> {:ok, value}
+      {:error, :empty} -> {:error, "'#{key}' cannot be empty."}
+      {:error, _} -> {:error, "Missing or invalid '#{key}'."}
     end
   end
 

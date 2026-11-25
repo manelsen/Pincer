@@ -4,6 +4,7 @@ defmodule Pincer.Core.Executor.Ctx do
   and its collaborators, replacing process-dictionary dependency injection.
   """
 
+  alias Pincer.Utils.ModelOverride
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.Executor.Attachments
   alias Pincer.Core.Executor.Trace
@@ -83,7 +84,7 @@ defmodule Pincer.Core.Executor.Ctx do
       ref: Keyword.get(opts, :ref),
       workspace_path: opts[:workspace_path] || AgentPaths.workspace_root(session_id),
       deps: deps,
-      model_override: normalize_model_override(opts[:model_override]),
+      model_override: ModelOverride.normalize(opts[:model_override]),
       trace: trace,
       context_strategy: Keyword.get(opts, :context_strategy),
       long_term_memory: Keyword.get(opts, :long_term_memory, ""),
@@ -186,21 +187,4 @@ defmodule Pincer.Core.Executor.Ctx do
 
   def record_tool_outcome(%__MODULE__{} = ctx, :error),
     do: %{ctx | consecutive_errors: ctx.consecutive_errors + 1}
-
-  defp normalize_model_override(nil), do: nil
-
-  defp normalize_model_override(override) when is_map(override) do
-    provider = override[:provider] || override["provider"]
-    model = override[:model] || override["model"]
-    thinking = override[:thinking_level] || override["thinking_level"]
-
-    if is_binary(provider) and provider != "" and is_binary(model) and model != "" do
-      base = %{provider: provider, model: model}
-      if thinking, do: Map.put(base, :thinking_level, thinking), else: base
-    else
-      nil
-    end
-  end
-
-  defp normalize_model_override(_), do: nil
 end

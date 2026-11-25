@@ -53,6 +53,15 @@ defmodule Pincer.Adapters.Tools.GitInspectTest do
     assert output =~ "M notes.txt"
   end
 
+  test "status uses the atom-keyed workspace when the string key is absent", %{root: root} do
+    assert {:ok, output} =
+             GitInspect.execute(%{"action" => "status", "repo_path" => "repo"}, %{
+               workspace_path: root
+             })
+
+    assert output =~ "## feature/demo"
+  end
+
   test "diff can scope to a target file", %{context: context} do
     assert {:ok, output} =
              GitInspect.execute(

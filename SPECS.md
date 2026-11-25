@@ -384,6 +384,14 @@ configured service endpoint directly.
 Channels continue emitting the existing attachment fields, including the
 `url` field that holds the opaque reference.
 
+#### Tool argument and transport helpers
+
+Tool argument checks distinguish missing, invalid, and blank strings. File
+content is kept verbatim, while channel and session tokens can opt into
+trimming. Tools keep their own error messages and workspace guards. HTTP
+transport failure kinds come from `Pincer.Infra.Http`. Git command failures
+are interpreted from stderr.
+
 ### 13.3. Shared channel session bridge
 
 `Pincer.Channels.Shared.SessionBridge` centralizes per-channel worker

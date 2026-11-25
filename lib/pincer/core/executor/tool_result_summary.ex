@@ -133,7 +133,7 @@ defmodule Pincer.Core.Executor.ToolResultSummary do
         |> Enum.take(@max_items)
         |> Enum.map(fn commit ->
           sha = commit["sha"] || "(no sha)"
-          message = commit |> get_in(["commit", "message"]) |> first_line()
+          message = commit |> get_in(["commit", "message"]) |> Pincer.Utils.Text.first_line()
           author = get_in(commit, ["commit", "author", "name"])
           date = get_in(commit, ["commit", "author", "date"])
 
@@ -208,11 +208,5 @@ defmodule Pincer.Core.Executor.ToolResultSummary do
 
   defp summarize_repo_list_json(_content), do: nil
 
-  defp first_line(nil), do: ""
-  defp first_line(text) when is_binary(text), do: text |> String.split("\n") |> List.first()
-  defp first_line(_text), do: ""
-
-  defp is_nil_or_empty(nil), do: true
-  defp is_nil_or_empty(""), do: true
-  defp is_nil_or_empty(_value), do: false
+  defp is_nil_or_empty(value), do: value in [nil, ""]
 end

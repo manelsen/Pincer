@@ -4,6 +4,7 @@ defmodule Pincer.Adapters.Tools.Timer do
   """
   @behaviour Pincer.Ports.Tool
 
+  alias Pincer.Adapters.Tools.Args
   alias Pincer.Adapters.Tools.TimerServer
 
   @max_seconds 86_400
@@ -71,16 +72,11 @@ defmodule Pincer.Adapters.Tools.Timer do
     do: {:error, "schedule_timer_delay is missing required parameter: seconds."}
 
   defp fetch_session_id(args, context) do
-    sid =
-      Map.get(context, "session_id") ||
-        Map.get(context, :session_id) ||
-        Map.get(args, "session_id") ||
-        Map.get(args, :session_id)
+    sid = Args.session_id(context) || Args.session_id(args)
 
-    if is_binary(sid) and String.trim(sid) != "" do
-      {:ok, sid}
-    else
-      {:error, "schedule_timer_delay requires a valid session_id in context."}
+    case Args.string(sid, :nonblank) do
+      {:ok, value} -> {:ok, value}
+      {:error, _} -> {:error, "schedule_timer_delay requires a valid session_id in context."}
     end
   end
 

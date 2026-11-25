@@ -8,6 +8,7 @@ defmodule Pincer.Core.Memory.MemoryRecall do
   """
 
   require Logger
+  alias Pincer.Utils.Text
   alias Pincer.Core.Memory.CuratedMemory
   alias Pincer.Core.Telemetry
 
@@ -357,7 +358,7 @@ defmodule Pincer.Core.Memory.MemoryRecall do
       session_id ->
         Enum.filter(
           hits,
-          &(extract_session_id(Map.get(&1, :source) || Map.get(&1, "source")) == session_id)
+          &(Text.session_source_id(Map.get(&1, :source) || Map.get(&1, "source")) == session_id)
         )
     end
   end
@@ -384,14 +385,6 @@ defmodule Pincer.Core.Memory.MemoryRecall do
         (Map.get(hit, :forgotten?) || Map.get(hit, "forgotten?")) == true
     end)
   end
-
-  defp extract_session_id("session:" <> rest) do
-    rest
-    |> String.split(":", parts: 2)
-    |> List.first()
-  end
-
-  defp extract_session_id(_), do: nil
 
   defp normalize_hit(hit) do
     %{
@@ -514,7 +507,7 @@ defmodule Pincer.Core.Memory.MemoryRecall do
   defp bump_counter(map, key), do: Map.update(map, key, 1, &(&1 + 1))
 
   defp hit_session_id(hit) do
-    Map.get(hit, :session_id) || extract_session_id(Map.get(hit, :source))
+    Map.get(hit, :session_id) || Text.session_source_id(Map.get(hit, :source))
   end
 
   defp score_value(hit) do
@@ -547,18 +540,10 @@ defmodule Pincer.Core.Memory.MemoryRecall do
     end)
   end
 
-  defp content_to_text(content) when is_binary(content), do: content
+  defp content_to_text(parts) when is_list(parts),
+    do: parts |> Text.content_to_text() |> String.trim()
 
-  defp content_to_text(content) when is_list(content) do
-    Enum.map_join(content, " ", fn
-      %{"type" => "text", "text" => text} -> text
-      %{"text" => text} -> text
-      _ -> ""
-    end)
-    |> String.trim()
-  end
-
-  defp content_to_text(_), do: ""
+  defp content_to_text(content), do: Text.content_to_text(content)
 
   defp default_embedding(query) do
     Pincer.Ports.LLM.generate_embedding(query, provider: "openrouter")
