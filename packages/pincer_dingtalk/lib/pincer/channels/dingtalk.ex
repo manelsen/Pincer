@@ -43,6 +43,8 @@ defmodule Pincer.Channels.DingTalk do
   @behaviour PincerPorts.Channel
   require Logger
 
+  alias Pincer.Channels.Shared.{Inbound, SessionBridge}
+
   @doc """
   Starts the DingTalk channel supervisor.
 
@@ -100,9 +102,9 @@ defmodule Pincer.Channels.DingTalk do
     msg_param = Jason.encode!(%{"content" => text})
 
     if group_id?(chat_id) do
-      Pincer.Channels.DingTalk.API.send_group(chat_id, msg_param, "sampleText")
+      dingtalk_api().send_group(chat_id, msg_param, "sampleText")
     else
-      Pincer.Channels.DingTalk.API.send_dm([chat_id], msg_param, "sampleText")
+      dingtalk_api().send_dm([chat_id], msg_param, "sampleText")
     end
   end
 
@@ -204,31 +206,54 @@ defmodule Pincer.Channels.DingTalk do
   @spec handle_event(map()) :: :ok | {:error, term()}
   def handle_event(%{text: text} = event) when is_binary(text) and text != "" do
     config = Application.get_env(:pincer, :dingtalk_channel_config, %{})
+    conversation_id = Map.get(event, :conversation_id)
+    staff_id = Map.get(event, :staff_id)
+    is_dm = not group_id?(conversation_id)
 
     context =
       PincerPorts.Session.resolve(
         :dingtalk,
         %{
-          staff_id: Map.get(event, :staff_id),
-          conversation_id: Map.get(event, :conversation_id)
+          staff_id: staff_id,
+          conversation_id: conversation_id
         },
         config
       )
 
-    ensure_session_started(context)
+    chat_id = if is_dm, do: staff_id, else: conversation_id
 
-    chat_id =
-      if group_id?(Map.get(event, :conversation_id)),
-        do: Map.get(event, :conversation_id),
-        else: Map.get(event, :staff_id)
+    inbound = %{
+      channel: :dingtalk,
+      sender_id: staff_id,
+      is_dm: is_dm,
+      config: config,
+      text: text,
+      has_attachments: false,
+      session_id: context.session_id,
+      on_command: fn command ->
+        Inbound.handle_standard_command(command, %{
+          channel: :dingtalk,
+          session_id: context.session_id,
+          sender_id: staff_id,
+          is_dm: is_dm,
+          ensure_session: fn -> ensure_session_started(context) end,
+          send_reply: fn reply -> send_message(chat_id, reply) end
+        })
+      end,
+      on_denied: fn message -> send_message(chat_id, message) end,
+      on_project_response: fn response, _sid -> send_message(chat_id, response) end,
+      on_message: fn content ->
+        Inbound.dispatch_session_message(context.session_id, content,
+          ensure_session: fn -> ensure_session_started(context) end,
+          ensure_worker: fn ->
+            Pincer.Channels.DingTalk.Session.ensure_started(chat_id, context.session_id)
+          end
+        )
+      end
+    }
 
-    Pincer.Channels.DingTalk.Session.ensure_started(chat_id, context.session_id)
-
-    incoming = PincerPorts.Structs.IncomingMessage.new(context.session_id, text)
-
-    case PincerPorts.Session.process_input(context.session_id, incoming) do
-      {:ok, _status} -> :ok
-      {:error, reason} -> {:error, reason}
+    case Inbound.route(inbound) do
+      {:message, {:error, reason}} -> {:error, reason}
       _other -> :ok
     end
   end
@@ -236,7 +261,11 @@ defmodule Pincer.Channels.DingTalk do
   def handle_event(_event), do: :ok
 
   defp ensure_session_started(context) do
-    Pincer.Channels.Shared.SessionBridge.ensure_started(context)
+    SessionBridge.ensure_started(context)
+  end
+
+  defp dingtalk_api do
+    Application.get_env(:pincer, :dingtalk_api_module, Pincer.Channels.DingTalk.API)
   end
 
   # Group conversation IDs start with "cid" in DingTalk.

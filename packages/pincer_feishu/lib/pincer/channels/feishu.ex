@@ -45,7 +45,7 @@ defmodule Pincer.Channels.Feishu do
   require Logger
 
   alias Pincer.Channels.Feishu.{API, Cards}
-  alias Pincer.Channels.Shared.WebhookVerifier
+  alias Pincer.Channels.Shared.{Inbound, SessionBridge, WebhookVerifier}
 
   @doc """
   Starts the Feishu channel supervisor.
@@ -102,7 +102,7 @@ defmodule Pincer.Channels.Feishu do
           {:ok, map()} | {:error, term()}
   @impl PincerPorts.Channel
   def send_message(chat_id, text) do
-    API.send_message(chat_id, Jason.encode!(%{"text" => text}), "text")
+    feishu_api().send_message(chat_id, Jason.encode!(%{"text" => text}), "text")
   end
 
   @doc """
@@ -195,39 +195,64 @@ defmodule Pincer.Channels.Feishu do
   """
   @spec handle_event(map()) :: :ok | {:error, term()}
   def handle_event(%{open_id: open_id, chat_id: chat_id, content: text} = event) do
-    if is_binary(text) and String.trim(text) != "" do
-      config = Application.get_env(:pincer, :feishu_channel_config, %{})
+    config = Application.get_env(:pincer, :feishu_channel_config, %{})
+    chat_type = Map.get(event, :chat_type)
+    is_dm = chat_type in ["p2p", nil, ""]
 
-      context =
-        PincerPorts.Session.resolve(
-          :feishu,
-          %{
-            open_id: open_id,
-            chat_id: chat_id,
-            chat_type: Map.get(event, :chat_type)
-          },
-          config
+    context =
+      PincerPorts.Session.resolve(
+        :feishu,
+        %{
+          open_id: open_id,
+          chat_id: chat_id,
+          chat_type: chat_type
+        },
+        config
+      )
+
+    inbound = %{
+      channel: :feishu,
+      sender_id: open_id,
+      is_dm: is_dm,
+      config: config,
+      text: text,
+      has_attachments: false,
+      session_id: context.session_id,
+      on_command: fn command ->
+        Inbound.handle_standard_command(command, %{
+          channel: :feishu,
+          session_id: context.session_id,
+          sender_id: open_id,
+          is_dm: is_dm,
+          ensure_session: fn -> ensure_session_started(context) end,
+          send_reply: fn reply -> send_message(chat_id, reply) end
+        })
+      end,
+      on_denied: fn message -> send_message(chat_id, message) end,
+      on_project_response: fn response, _sid -> send_message(chat_id, response) end,
+      on_message: fn content ->
+        Inbound.dispatch_session_message(context.session_id, content,
+          ensure_session: fn -> ensure_session_started(context) end,
+          ensure_worker: fn ->
+            Pincer.Channels.Feishu.Session.ensure_started(chat_id, context.session_id)
+          end
         )
-
-      ensure_session_started(context)
-      Pincer.Channels.Feishu.Session.ensure_started(chat_id, context.session_id)
-
-      incoming =
-        PincerPorts.Structs.IncomingMessage.new(context.session_id, text)
-
-      case PincerPorts.Session.process_input(context.session_id, incoming) do
-        {:ok, _status} -> :ok
-        {:error, reason} -> {:error, reason}
-        _other -> :ok
       end
-    else
-      :ok
+    }
+
+    case Inbound.route(inbound) do
+      {:message, {:error, reason}} -> {:error, reason}
+      _other -> :ok
     end
   end
 
   def handle_event(_event), do: {:error, :invalid_event}
 
   defp ensure_session_started(context) do
-    Pincer.Channels.Shared.SessionBridge.ensure_started(context)
+    SessionBridge.ensure_started(context)
+  end
+
+  defp feishu_api do
+    Application.get_env(:pincer, :feishu_api_module, API)
   end
 end

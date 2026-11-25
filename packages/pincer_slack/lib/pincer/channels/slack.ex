@@ -9,6 +9,10 @@ defmodule Pincer.Channels.Slack do
 
   @impl PincerPorts.Channel
   def start_link(config) do
+    if is_map(config) do
+      Application.put_env(:pincer, :slack_channel_config, config)
+    end
+
     Supervisor.start_link(__MODULE__, config, name: __MODULE__)
   end
 
@@ -87,7 +91,7 @@ defmodule Pincer.Channels.Slack.Handler do
   """
   use Slack.Bot
   require Logger
-  alias PincerPorts.Structs.IncomingMessage
+  alias Pincer.Channels.Shared.{Inbound, SessionBridge}
 
   @impl true
   def handle_event(
@@ -95,15 +99,42 @@ defmodule Pincer.Channels.Slack.Handler do
         %{"text" => text, "user" => user_id, "channel" => channel_id} = _payload,
         _bot
       ) do
-    # Routing to Pincer session
+    config = Application.get_env(:pincer, :slack_channel_config, %{})
     session_id = "slack_#{channel_id}"
+    is_dm = String.starts_with?(to_string(channel_id), "D")
     Logger.info("[SLACK] Message received from #{user_id} in #{channel_id}")
 
-    ensure_session_started(session_id)
-    Pincer.Channels.Slack.Session.ensure_started(channel_id)
+    inbound = %{
+      channel: :slack,
+      sender_id: user_id,
+      is_dm: is_dm,
+      config: config,
+      text: text,
+      has_attachments: false,
+      session_id: session_id,
+      on_command: fn command ->
+        Inbound.handle_standard_command(command, %{
+          channel: :slack,
+          session_id: session_id,
+          sender_id: user_id,
+          is_dm: is_dm,
+          ensure_session: fn -> ensure_session_started(session_id) end,
+          send_reply: fn reply -> Pincer.Channels.Slack.send_message(channel_id, reply) end
+        })
+      end,
+      on_denied: fn message -> Pincer.Channels.Slack.send_message(channel_id, message) end,
+      on_project_response: fn response, _sid ->
+        Pincer.Channels.Slack.send_message(channel_id, response)
+      end,
+      on_message: fn content ->
+        Inbound.dispatch_session_message(session_id, content,
+          ensure_session: fn -> ensure_session_started(session_id) end,
+          ensure_worker: fn -> Pincer.Channels.Slack.Session.ensure_started(channel_id) end
+        )
+      end
+    }
 
-    incoming = IncomingMessage.new(session_id, text)
-    PincerPorts.Session.process_input(session_id, incoming)
+    Inbound.route(inbound)
     :ok
   end
 
@@ -113,7 +144,7 @@ defmodule Pincer.Channels.Slack.Handler do
   end
 
   defp ensure_session_started(session_id) do
-    case Pincer.Channels.Shared.SessionBridge.ensure_started(session_id,
+    case SessionBridge.ensure_started(session_id,
            strategy: :ensure_started
          ) do
       {:ok, _pid} ->

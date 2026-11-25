@@ -51,6 +51,8 @@ defmodule Pincer.Channels.Line do
   @behaviour PincerPorts.Channel
   require Logger
 
+  alias Pincer.Channels.Shared.{Inbound, SessionBridge, WebhookVerifier}
+
   @doc """
   Starts the LINE channel supervisor.
 
@@ -100,7 +102,7 @@ defmodule Pincer.Channels.Line do
           {:ok, map()} | {:error, term()}
   @impl PincerPorts.Channel
   def send_message(chat_id, text) do
-    Pincer.Channels.Line.API.push_message(chat_id, [
+    line_api().push_message(chat_id, [
       %{"type" => "text", "text" => text}
     ])
   end
@@ -153,7 +155,7 @@ defmodule Pincer.Channels.Line do
     secret_env = Map.get(config, "secret_env", "LINE_CHANNEL_SECRET")
     secret = System.get_env(secret_env) || ""
 
-    with :ok <- Pincer.Channels.Shared.WebhookVerifier.verify_line(body, secret, signature),
+    with :ok <- WebhookVerifier.verify_line(body, secret, signature),
          {:ok, payload} <- Jason.decode(body) do
       {:ok, parse_webhook_events(payload)}
     else
@@ -199,27 +201,54 @@ defmodule Pincer.Channels.Line do
   @spec handle_event(map()) :: :ok | {:error, term()}
   def handle_event(%{text: text} = event) when is_binary(text) and text != "" do
     config = Application.get_env(:pincer, :line_channel_config, %{})
+    user_id = Map.get(event, :user_id)
+    chat_id = Map.get(event, :chat_id) || user_id
+    source_type = Map.get(event, :source_type)
+    is_dm = source_type in ["user", nil, ""]
 
     context =
       PincerPorts.Session.resolve(
         :line,
         %{
-          user_id: Map.get(event, :user_id),
+          user_id: user_id,
           chat_id: Map.get(event, :chat_id),
-          source_type: Map.get(event, :source_type)
+          source_type: source_type
         },
         config
       )
 
-    ensure_session_started(context)
-    chat_id = Map.get(event, :chat_id) || Map.get(event, :user_id)
-    Pincer.Channels.Line.Session.ensure_started(chat_id, context.session_id)
+    inbound = %{
+      channel: :line,
+      sender_id: user_id || chat_id,
+      is_dm: is_dm,
+      config: config,
+      text: text,
+      has_attachments: false,
+      session_id: context.session_id,
+      on_command: fn command ->
+        Inbound.handle_standard_command(command, %{
+          channel: :line,
+          session_id: context.session_id,
+          sender_id: user_id || chat_id,
+          is_dm: is_dm,
+          ensure_session: fn -> ensure_session_started(context) end,
+          send_reply: fn reply -> send_message(chat_id, reply) end
+        })
+      end,
+      on_denied: fn message -> send_message(chat_id, message) end,
+      on_project_response: fn response, _sid -> send_message(chat_id, response) end,
+      on_message: fn content ->
+        Inbound.dispatch_session_message(context.session_id, content,
+          ensure_session: fn -> ensure_session_started(context) end,
+          ensure_worker: fn ->
+            Pincer.Channels.Line.Session.ensure_started(chat_id, context.session_id)
+          end
+        )
+      end
+    }
 
-    incoming = PincerPorts.Structs.IncomingMessage.new(context.session_id, text)
-
-    case PincerPorts.Session.process_input(context.session_id, incoming) do
-      {:ok, _status} -> :ok
-      {:error, reason} -> {:error, reason}
+    case Inbound.route(inbound) do
+      {:message, {:error, reason}} -> {:error, reason}
       _other -> :ok
     end
   end
@@ -227,7 +256,11 @@ defmodule Pincer.Channels.Line do
   def handle_event(_event), do: :ok
 
   defp ensure_session_started(context) do
-    Pincer.Channels.Shared.SessionBridge.ensure_started(context)
+    SessionBridge.ensure_started(context)
+  end
+
+  defp line_api do
+    Application.get_env(:pincer, :line_api_module, Pincer.Channels.Line.API)
   end
 
   defp text_message_event?(%{

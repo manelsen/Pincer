@@ -1,5 +1,5 @@
 defmodule Pincer.Channels.LineTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Pincer.Channels.Line
 
@@ -161,6 +161,128 @@ defmodule Pincer.Channels.LineTest do
 
     test "returns session ID unchanged if no prefix" do
       assert Line.resolve_recipient("something_else") == "something_else"
+    end
+  end
+
+  describe "inbound routing via Shared.Inbound" do
+    defmodule SessionStub do
+      @behaviour PincerPorts.Session
+
+      @impl true
+      def resolve(:line, ctx, _cfg) do
+        %PincerPorts.Session.Context{
+          channel: :line,
+          session_id: "line_#{ctx.user_id}",
+          root_agent_id: ctx.user_id,
+          root_agent_source: :session_scope,
+          workspace_path: "/tmp",
+          blackboard_scope: "line_#{ctx.user_id}"
+        }
+      end
+
+      @impl true
+      def process_input(sid, incoming) do
+        if pid = Application.get_env(:pincer, :line_test_pid),
+          do: send(pid, {:line_input, sid, incoming})
+
+        {:ok, :started}
+      end
+
+      @impl true
+      def ensure_started(_sid, _opts), do: {:ok, self()}
+      @impl true
+      def start_session(_sid, _opts), do: {:ok, self()}
+      @impl true
+      def stop_session(_sid), do: :ok
+      @impl true
+      def reset(_sid), do: :ok
+      @impl true
+      def get_status(_sid), do: {:ok, %{}}
+      @impl true
+      def set_model(_sid, _p, _m), do: :ok
+      @impl true
+      def set_thinking(_sid, _l), do: :ok
+      @impl true
+      def set_reasoning_visible(_sid, _v), do: :ok
+      @impl true
+      def set_verbose(_sid, _v), do: :ok
+      @impl true
+      def set_usage(_sid, _l), do: :ok
+      @impl true
+      def approve_all(_sid, _s), do: :ok
+    end
+
+    defmodule APIStub do
+      def push_message(to, messages) do
+        if pid = Application.get_env(:pincer, :line_test_pid),
+          do: send(pid, {:line_push, to, messages})
+
+        {:ok, %{}}
+      end
+    end
+
+    setup do
+      prev_session = Application.get_env(:pincer, :session_adapter)
+      prev_cfg = Application.get_env(:pincer, :line_channel_config)
+      prev_api = Application.get_env(:pincer, :line_api_module)
+
+      Application.put_env(:pincer, :session_adapter, SessionStub)
+      Application.put_env(:pincer, :line_api_module, APIStub)
+      Application.put_env(:pincer, :line_test_pid, self())
+
+      unless Process.whereis(Pincer.Channels.Line.SessionSupervisor) do
+        start_supervised!(Pincer.Channels.Line.SessionSupervisor)
+      end
+
+      on_exit(fn ->
+        if prev_session,
+          do: Application.put_env(:pincer, :session_adapter, prev_session),
+          else: Application.delete_env(:pincer, :session_adapter)
+
+        if prev_cfg,
+          do: Application.put_env(:pincer, :line_channel_config, prev_cfg),
+          else: Application.delete_env(:pincer, :line_channel_config)
+
+        if prev_api,
+          do: Application.put_env(:pincer, :line_api_module, prev_api),
+          else: Application.delete_env(:pincer, :line_api_module)
+
+        Application.delete_env(:pincer, :line_test_pid)
+      end)
+
+      :ok
+    end
+
+    test "routes text events through session port" do
+      Application.put_env(:pincer, :line_channel_config, %{"dm_policy" => %{"mode" => "open"}})
+
+      assert :ok ==
+               Line.handle_event(%{
+                 user_id: "U123",
+                 chat_id: "U123",
+                 source_type: "user",
+                 text: "Hello LINE"
+               })
+
+      assert_receive {:line_input, "line_U123", %{text: "Hello LINE"}}
+    end
+
+    test "blocks disabled DM access and replies via LINE API" do
+      Application.put_env(:pincer, :line_channel_config, %{
+        "dm_policy" => %{"mode" => "disabled"}
+      })
+
+      assert :ok ==
+               Line.handle_event(%{
+                 user_id: "U123",
+                 chat_id: "U123",
+                 source_type: "user",
+                 text: "Hello LINE"
+               })
+
+      assert_receive {:line_push, "U123", [%{"type" => "text", "text" => msg}]}
+      assert msg =~ "desativadas"
+      refute_receive {:line_input, _, _}, 50
     end
   end
 end

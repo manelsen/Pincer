@@ -9,7 +9,8 @@ defmodule Pincer.Core.AccessPolicy do
   alias Pincer.Core.Pairing
   alias Pincer.Utils.MapHelpers
 
-  @type channel :: :telegram | :discord | :whatsapp
+  @type channel ::
+          :telegram | :discord | :whatsapp | :dingtalk | :line | :feishu | :slack | atom()
   @type mode :: :open | :allowlist | :disabled | :pairing
 
   @type allow_result :: {:allow, %{mode: mode()}}
@@ -147,6 +148,10 @@ defmodule Pincer.Core.AccessPolicy do
   end
 
   defp not_allowlisted_message(:whatsapp) do
+    "Seu usuario nao esta autorizado para DM neste bot. Use /menu apos liberar seu ID."
+  end
+
+  defp not_allowlisted_message(_channel) do
     "Seu usuario nao esta autorizado para DM neste bot. Use /menu apos liberar seu ID."
   end
 

@@ -416,6 +416,25 @@ Discord, and WhatsApp share identical kickoff and error-recovery sequencing.
   `error_message/1`) on top of `PincerPorts.ChannelPolicy`, supporting
   channel-specific DM-only messages, bound-agent formatting, and post-approval hooks.
 
+### 13.6. Unified channel inbound pipeline (`Pincer.Channels.Shared.Inbound`)
+
+`Pincer.Channels.Shared.Inbound` serves as the standardized inbound entrypoint
+for all 7 messaging channels (Telegram, Discord, WhatsApp, DingTalk, LINE,
+Feishu, and Slack):
+
+- `route/2` normalizes blank text, allows DM `/pair` commands through, enforces
+  `Pincer.Channels.Shared.Pairing.authorize_dm/4` for DMs (returning
+  `{:denied, message}` and invoking `:on_denied` on denial), and delegates to
+  `dispatch/2` (defaulting `:resolve_shortcut` to
+  `PincerPorts.UX.resolve_shortcut/1` and `:continue_project` to
+  `Pincer.Channels.Shared.ProjectBridge.continue/3`).
+- `handle_standard_command/3` executes common slash commands (`/ping`, `/menu`,
+  `/help`, `/commands`, `/new`, `/reset`, `/kanban`, `/project`, `/pair`, and
+  unknown command hints) via port callbacks.
+- `dispatch_session_message/3` ensures the brain session and channel worker are
+  started before delivering `PincerPorts.Structs.IncomingMessage` to
+  `PincerPorts.Session.process_input/2`.
+
 ---
 
 ### 14. Sandbox Execution Port (`Pincer.Ports.Sandbox`)
