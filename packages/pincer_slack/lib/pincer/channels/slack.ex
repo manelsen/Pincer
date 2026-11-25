@@ -118,7 +118,9 @@ defmodule Pincer.Channels.Slack.Handler do
   end
 
   defp ensure_session_started(session_id) do
-    case PincerPorts.Session.ensure_started(session_id, []) do
+    case Pincer.Channels.Shared.SessionBridge.ensure_started(session_id,
+           strategy: :ensure_started
+         ) do
       {:ok, _pid} ->
         Logger.info("[SLACK] Session ready: #{session_id}")
         :ok

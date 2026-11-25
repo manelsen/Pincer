@@ -137,12 +137,13 @@ defmodule Pincer.Channels.Feishu do
   def parse_webhook_event(%{
         "event" => %{
           "sender" => %{"sender_id" => %{"open_id" => open_id}},
-          "message" => %{
-            "chat_id" => chat_id,
-            "message_id" => message_id,
-            "message_type" => msg_type,
-            "content" => content_json
-          } = message
+          "message" =>
+            %{
+              "chat_id" => chat_id,
+              "message_id" => message_id,
+              "message_type" => msg_type,
+              "content" => content_json
+            } = message
         }
       }) do
     content =
@@ -227,17 +228,6 @@ defmodule Pincer.Channels.Feishu do
   def handle_event(_event), do: {:error, :invalid_event}
 
   defp ensure_session_started(context) do
-    case Registry.lookup(PincerPorts.Session.registry(), context.session_id) do
-      [] ->
-        start_opts =
-          context
-          |> PincerPorts.Session.Context.to_start_opts()
-          |> Keyword.delete(:session_id)
-
-        PincerPorts.Session.start_session(context.session_id, start_opts)
-
-      [_] ->
-        :ok
-    end
+    Pincer.Channels.Shared.SessionBridge.ensure_started(context)
   end
 end

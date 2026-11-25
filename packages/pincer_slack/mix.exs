@@ -10,11 +10,15 @@ defmodule PincerSlack.MixProject do
       start_permanent: false,
       deps: [
         {:pincer_ports, "~> 0.1"},
+        {:pincer_shared, "~> 0.1"},
         {:slack_elixir, "~> 1.2"}
       ],
       description: "Slack channel adapter for the Pincer AI agent framework",
       package: [
-        name: "pincer_slack", licenses: ["MIT"], maintainers: ["Micelio"], links: %{"GitHub" => "https://github.com/manelsen/Pincer"},
+        name: "pincer_slack",
+        licenses: ["MIT"],
+        maintainers: ["Micelio"],
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"},
         files: ["lib", "priv/pincer_plugin.yaml", "mix.exs", "README.md", "LICENSE"]
       ]
     ]

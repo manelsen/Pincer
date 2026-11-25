@@ -4,6 +4,7 @@ defmodule Pincer.Channels.Telegram.Session do
   One process per active chat that listens to PubSub and sends to the Telegram API.
   """
   use PincerPorts.Channel
+  alias Pincer.Channels.Shared.SessionBridge
   alias Pincer.Channels.Telegram.ResponseEnvelope
 
   @preview_suppress_threshold 500
@@ -17,61 +18,39 @@ defmodule Pincer.Channels.Telegram.Session do
     GenServer.start_link(__MODULE__, chat_id, name: via_tuple(chat_id))
   end
 
-  defp via_tuple(chat_id),
-    do: {:via, Registry, {PincerPorts.Session.registry(), "telegram_session_worker_#{chat_id}"}}
+  defp via_tuple(chat_id), do: SessionBridge.via_tuple(:telegram, chat_id)
 
   def ensure_started(chat_id, session_id \\ nil)
 
   def ensure_started(chat_id, session_id) do
-    session_id = normalize_session_id(chat_id, session_id)
-
-    case Registry.lookup(PincerPorts.Session.registry(), "telegram_session_worker_#{chat_id}") do
-      [] ->
-        case Pincer.Channels.Telegram.SessionSupervisor.start_session(chat_id, session_id) do
-          {:ok, pid} ->
-            {:ok, pid}
-
-          {:error, {:already_started, pid}} ->
-            GenServer.cast(pid, {:bind_session, session_id})
-            {:error, {:already_started, pid}}
-
-          {:error, _reason} = error ->
-            error
-        end
-
-      [{pid, _value}] ->
-        GenServer.cast(pid, {:bind_session, session_id})
-        {:error, {:already_started, pid}}
-    end
+    SessionBridge.ensure_started({:telegram, chat_id},
+      session_id: session_id,
+      start_worker: &Pincer.Channels.Telegram.SessionSupervisor.start_session/2,
+      already_started: :error
+    )
   end
 
   @impl true
   def init(%{chat_id: chat_id, session_id: session_id} = args)
       when is_binary(session_id) and session_id != "" do
     super(args)
-    subscribe_session(session_id)
+    SessionBridge.subscribe(session_id)
     {:ok, state(chat_id, session_id)}
   end
 
   @impl true
   def init(chat_id) do
-    session_id = default_session_id(chat_id)
+    session_id = SessionBridge.default_session_id(:telegram, chat_id)
     super(chat_id)
-    subscribe_session(session_id)
+    SessionBridge.subscribe(session_id)
     {:ok, state(chat_id, session_id)}
   end
 
   @impl PincerPorts.Channel
-  def handles_session?(id),
-    do: id == "telegram_" <> to_string(id) or String.starts_with?(id, "telegram_")
+  def handles_session?(id), do: SessionBridge.handles_session?(:telegram, id)
 
   @impl PincerPorts.Channel
-  def resolve_recipient(id) do
-    case String.split(id, "_", parts: 2) do
-      ["telegram", chat_id] -> chat_id
-      _ -> id
-    end
-  end
+  def resolve_recipient(id), do: SessionBridge.resolve_recipient(:telegram, id)
 
   @impl PincerPorts.Channel
   def send_message(chat_id, text) do
@@ -81,18 +60,11 @@ defmodule Pincer.Channels.Telegram.Session do
   # --- Session bind ---
 
   @impl true
-  def handle_cast({:bind_session, session_id}, state) when is_binary(session_id) do
-    if state.session_id == session_id do
-      {:noreply, state}
-    else
-      unsubscribe_session(state.session_id)
-      subscribe_session(session_id)
-      {:noreply, state(state.chat_id, session_id)}
-    end
+  def handle_cast({:bind_session, session_id}, state) do
+    SessionBridge.bind_session(state, session_id,
+      on_rebind: fn s, sid -> state(s.chat_id, sid) end
+    )
   end
-
-  @impl true
-  def handle_cast({:bind_session, _invalid_session_id}, state), do: {:noreply, state}
 
   # --- Session PubSub callbacks ---
 
@@ -180,7 +152,11 @@ defmodule Pincer.Channels.Telegram.Session do
 
       {:error, reason} ->
         Logger.warning("[Telegram] Failed to send document: #{inspect(reason)}")
-        Pincer.Channels.Telegram.send_message(state.chat_id, "⚠️ Failed to send file: #{Path.basename(path)}")
+
+        Pincer.Channels.Telegram.send_message(
+          state.chat_id,
+          "⚠️ Failed to send file: #{Path.basename(path)}"
+        )
     end
 
     state
@@ -343,32 +319,17 @@ defmodule Pincer.Channels.Telegram.Session do
     )
   end
 
-  defp default_session_id(chat_id), do: "telegram_#{chat_id}"
-
-  defp normalize_session_id(_chat_id, session_id) when is_binary(session_id) and session_id != "",
-    do: session_id
-
-  defp normalize_session_id(chat_id, _), do: default_session_id(chat_id)
-
-  defp subscribe_session(session_id), do: PincerPorts.PubSub.subscribe("session:#{session_id}")
-
-  defp unsubscribe_session(session_id),
-    do: PincerPorts.PubSub.unsubscribe("session:#{session_id}")
-
   defp state(chat_id, session_id) do
-    Map.merge(
-      Map.merge(
-        %{
-          chat_id: chat_id,
-          session_id: session_id,
-          preview_suppressed: false,
-          subagent_progress_tracker: %{},
-          tool_calls: [],
-          orchestration_note: nil
-        },
-        PincerPorts.Streaming.status_initial_state()
-      ),
-      PincerPorts.Streaming.stream_initial_state()
+    SessionBridge.initial_state(
+      %{
+        chat_id: chat_id,
+        session_id: session_id,
+        preview_suppressed: false,
+        subagent_progress_tracker: %{},
+        tool_calls: [],
+        orchestration_note: nil
+      },
+      streaming: true
     )
   end
 

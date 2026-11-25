@@ -7,8 +7,8 @@ defmodule Pincer.Channels.SharedTest do
     assert [%{app: :pincer_shared, opts: opts}] =
              Shared.__info__(:attributes)[Boundary]
 
-    assert opts[:deps] == []
+    assert opts[:deps] == [PincerPorts]
 
-    assert opts[:exports] == [Inbound, Text, TokenCache, WebhookVerifier]
+    assert opts[:exports] == [Inbound, SessionBridge, Text, TokenCache, WebhookVerifier]
   end
 end

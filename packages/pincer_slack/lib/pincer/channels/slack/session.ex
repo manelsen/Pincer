@@ -3,6 +3,7 @@ defmodule Pincer.Channels.Slack.Session do
   Manages outgoing responses for a specific Slack channel.
   """
   use PincerPorts.Channel
+  alias Pincer.Channels.Shared.SessionBridge
 
   @impl PincerPorts.Channel
   def start_link(channel_id) do
@@ -10,33 +11,35 @@ defmodule Pincer.Channels.Slack.Session do
   end
 
   def ensure_started(channel_id) do
-    case Pincer.Channels.Slack.SessionSupervisor.start_worker(channel_id) do
-      {:ok, _pid} -> :ok
-      {:error, {:already_started, _pid}} -> :ok
-      err -> err
-    end
+    SessionBridge.ensure_started({:slack, channel_id},
+      registry: Pincer.Channels.Slack.Registry,
+      key: channel_id,
+      start_worker: &Pincer.Channels.Slack.SessionSupervisor.start_worker/1,
+      rebind: false,
+      already_started: :ok_atom
+    )
   end
 
-  defp via_tuple(channel_id), do: {:via, Registry, {Pincer.Channels.Slack.Registry, channel_id}}
+  defp via_tuple(channel_id),
+    do:
+      SessionBridge.via_tuple(:slack, channel_id,
+        registry: Pincer.Channels.Slack.Registry,
+        key: channel_id
+      )
 
   @impl true
   def init(channel_id) do
-    session_id = "slack_#{channel_id}"
+    session_id = SessionBridge.default_session_id(:slack, channel_id)
     super(channel_id)
-    PincerPorts.PubSub.subscribe("session:#{session_id}")
-    {:ok, %{channel_id: channel_id, session_id: session_id}}
+    SessionBridge.subscribe(session_id)
+    {:ok, SessionBridge.initial_state(%{channel_id: channel_id, session_id: session_id})}
   end
 
   @impl PincerPorts.Channel
-  def handles_session?(id), do: String.starts_with?(id, "slack_")
+  def handles_session?(id), do: SessionBridge.handles_session?(:slack, id)
 
   @impl PincerPorts.Channel
-  def resolve_recipient(id) do
-    case String.split(id, "_", parts: 2) do
-      ["slack", channel_id] -> channel_id
-      _ -> id
-    end
-  end
+  def resolve_recipient(id), do: SessionBridge.resolve_recipient(:slack, id)
 
   @impl PincerPorts.Channel
   def send_message(channel_id, text) do

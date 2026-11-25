@@ -1030,33 +1030,19 @@ defmodule Pincer.Channels.Discord do
     defp maybe_start_project_execution(_channel_id, _session_context), do: :ok
 
     defp ensure_brain_session_started(%PincerPorts.Session.Context{} = context) do
-      start_opts =
-        context
-        |> PincerPorts.Session.Context.to_start_opts()
-        |> Keyword.delete(:session_id)
-
-      case Registry.lookup(PincerPorts.Session.registry(), context.session_id) do
-        [] ->
+      Pincer.Channels.Shared.SessionBridge.ensure_started(context,
+        on_start: fn sid ->
           Logger.info(
-            "[DISCORD] Creating new brain session: #{context.session_id} (root_agent=#{context.root_agent_id})"
+            "[DISCORD] Creating new brain session: #{sid} (root_agent=#{context.root_agent_id})"
           )
-
-          PincerPorts.Session.start_session(context.session_id, start_opts)
-
-        [_] ->
-          :ok
-      end
+        end
+      )
     end
 
     defp ensure_brain_session_started(session_id) do
-      case Registry.lookup(PincerPorts.Session.registry(), session_id) do
-        [] ->
-          Logger.info("[DISCORD] Creating new brain session: #{session_id}")
-          PincerPorts.Session.start_session(session_id)
-
-        [_] ->
-          :ok
-      end
+      Pincer.Channels.Shared.SessionBridge.ensure_started(session_id,
+        on_start: fn sid -> Logger.info("[DISCORD] Creating new brain session: #{sid}") end
+      )
     end
 
     defp chunk_buttons(buttons) do
