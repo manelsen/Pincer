@@ -31,16 +31,10 @@ defmodule Pincer.LLM.Client do
   @behaviour PincerPorts.LLM
   require Logger
   alias Pincer.Core.AuthProfiles
-  alias Pincer.Core.LLM.CooldownStore
   alias Pincer.Core.LLM.FailoverPolicy
   alias Pincer.Core.Models.Registry, as: ModelRegistry
-  alias Pincer.Core.Policy
   alias Pincer.Core.RetryPolicy
-  alias PincerPorts.Structs.Usage
-  alias Pincer.Core.Telemetry, as: CoreTelemetry
-  alias Pincer.LLM.CooldownRouting
-  alias Pincer.LLM.RetrySettings
-  alias Pincer.LLM.StreamFallback
+  alias Pincer.LLM.{CooldownRouting, RetryEngine}
   alias Pincer.Utils.ETSHelper
 
   @type message :: PincerPorts.LLM.Provider.message()
@@ -61,85 +55,7 @@ defmodule Pincer.LLM.Client do
   """
   @spec chat_completion([message()], keyword()) :: chat_result()
   def chat_completion(messages, opts \\ []) do
-    registry = CooldownRouting.provider_registry()
-
-    # Setup default provider (fallback to first available if none specified)
-    default_provider_key =
-      Application.get_env(
-        :pincer,
-        :default_llm_provider,
-        case Map.keys(registry) do
-          [] -> "mock"
-          [first | _] -> first
-        end
-      )
-
-    requested_provider_id = Keyword.get(opts, :provider, default_provider_key)
-
-    provider_id =
-      CooldownRouting.route_around_cooldown(
-        requested_provider_id,
-        registry,
-        Keyword.has_key?(opts, :provider)
-      )
-
-    cond do
-      provider_id == "mock" ->
-        simulate_response(messages)
-
-      not is_map_key(registry, provider_id) ->
-        {:error, {:provider_not_found, provider_id}}
-
-      true ->
-        config = registry[provider_id]
-        requested_profile = Keyword.get(opts, :auth_profile)
-
-        case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
-          {:ok, auth_selection} ->
-            model = Keyword.get(opts, :model, config[:default_model])
-            tools = Keyword.get(opts, :tools, [])
-            adapter = config[:adapter]
-            config_with_auth = auth_selection.config
-
-            auth_context = %{
-              provider_id: provider_id,
-              profile: auth_selection.profile
-            }
-
-            retry_policy = retry_policy()
-
-            failover_state =
-              Keyword.get_lazy(opts, :failover_state, fn ->
-                FailoverPolicy.initial_state(
-                  provider: provider_id,
-                  model: model,
-                  registry: registry
-                )
-              end)
-
-            do_request_with_retry(
-              :chat_completion,
-              adapter,
-              messages,
-              model,
-              config_with_auth,
-              tools,
-              retry_policy.max_retries,
-              retry_policy.initial_backoff,
-              retry_policy,
-              System.monotonic_time(:millisecond),
-              failover_state,
-              auth_context
-            )
-
-          {:error, :missing_credentials} ->
-            env_key = config[:env_key] || "API_KEY"
-            {:error, {:missing_credentials, env_key}}
-
-          {:error, :all_profiles_cooling_down} ->
-            {:error, :all_profiles_cooling_down}
-        end
-    end
+    dispatch(:chat_completion, messages, opts)
   end
 
   @doc """
@@ -264,84 +180,7 @@ defmodule Pincer.LLM.Client do
   """
   @spec stream_completion([message()], keyword()) :: {:ok, Enumerable.t()} | {:error, any()}
   def stream_completion(messages, opts \\ []) do
-    registry = CooldownRouting.provider_registry()
-
-    default_provider_key =
-      Application.get_env(
-        :pincer,
-        :default_llm_provider,
-        case Map.keys(registry) do
-          [] -> "mock"
-          [first | _] -> first
-        end
-      )
-
-    requested_provider_id = Keyword.get(opts, :provider, default_provider_key)
-
-    provider_id =
-      CooldownRouting.route_around_cooldown(
-        requested_provider_id,
-        registry,
-        Keyword.has_key?(opts, :provider)
-      )
-
-    cond do
-      provider_id == "mock" ->
-        {:ok, [%{"choices" => [%{"delta" => %{"content" => "[MOCK STREAM] Hello!"}}]}]}
-
-      not is_map_key(registry, provider_id) ->
-        {:error, {:provider_not_found, provider_id}}
-
-      true ->
-        config = registry[provider_id]
-        requested_profile = Keyword.get(opts, :auth_profile)
-
-        case AuthProfiles.resolve(provider_id, config, requested_profile: requested_profile) do
-          {:ok, auth_selection} ->
-            model = Keyword.get(opts, :model, config[:default_model])
-            tools = Keyword.get(opts, :tools, [])
-            adapter = config[:adapter]
-            config_with_auth = auth_selection.config
-
-            auth_context = %{
-              provider_id: provider_id,
-              profile: auth_selection.profile
-            }
-
-            retry_policy = retry_policy()
-
-            failover_state =
-              Keyword.get_lazy(opts, :failover_state, fn ->
-                FailoverPolicy.initial_state(
-                  provider: provider_id,
-                  model: model,
-                  registry: registry
-                )
-              end)
-
-            do_request_with_retry(
-              :stream_completion,
-              adapter,
-              messages,
-              model,
-              config_with_auth,
-              tools,
-              retry_policy.max_retries,
-              retry_policy.initial_backoff,
-              retry_policy,
-              System.monotonic_time(:millisecond),
-              failover_state,
-              auth_context
-            )
-
-          {:error, :missing_credentials} ->
-            env_key = config[:env_key] || "API_KEY"
-            {:error, {:missing_credentials, env_key}}
-
-          {:error, :all_profiles_cooling_down} ->
-            {:error, :all_profiles_cooling_down}
-        end
-    end
+    dispatch(:stream_completion, messages, opts)
   end
 
   def transcribe_audio(file_path, opts \\ []) do
@@ -446,223 +285,74 @@ defmodule Pincer.LLM.Client do
 
   defp fallback_embedding_model(_model, config), do: config[:embedding_fallback_model]
 
-  defp do_request_with_retry(
-         action,
-         adapter,
-         messages,
-         model,
-         config,
-         tools,
-         retries,
-         delay,
-         retry_policy,
-         started_at_ms,
-         failover_state,
-         auth_context
-       ) do
-    # Dynamically call the adapter function based on action (:chat_completion or :stream_completion)
-    result = apply(adapter, action, [messages, model, config, tools])
+  defp dispatch(action, messages, opts) do
+    registry = CooldownRouting.provider_registry()
 
-    case result do
-      {:ok, message, usage} when action == :chat_completion ->
-        CooldownRouting.clear_provider_cooldown(failover_state)
-        CooldownRouting.clear_auth_profile_cooldown(auth_context)
-        {:ok, Pincer.LLM.ToolParser.parse(message), Usage.normalize_optional(usage)}
+    default_provider =
+      Application.get_env(:pincer, :default_llm_provider, Enum.at(Map.keys(registry), 0, "mock"))
 
-      {:ok, stream, usage} when action == :stream_completion ->
-        CooldownRouting.clear_provider_cooldown(failover_state)
-        CooldownRouting.clear_auth_profile_cooldown(auth_context)
+    requested_provider = Keyword.get(opts, :provider, default_provider)
 
-        case normalize_success(action, stream) do
-          {:ok, normalized} ->
-            {:ok, normalized, Usage.normalize_optional(usage)}
+    provider =
+      CooldownRouting.route_around_cooldown(
+        requested_provider,
+        registry,
+        Keyword.has_key?(opts, :provider)
+      )
 
-          {:error, stream_reason} ->
-            maybe_fallback_stream_to_chat(
-              action,
-              adapter,
-              messages,
-              model,
-              config,
-              tools,
-              retries,
-              delay,
-              retry_policy,
-              started_at_ms,
-              stream_reason,
-              failover_state,
-              auth_context
-            )
-        end
+    cond do
+      provider == "mock" ->
+        simulate_response(action)
 
-      {:ok, stream} ->
-        CooldownRouting.clear_provider_cooldown(failover_state)
-        CooldownRouting.clear_auth_profile_cooldown(auth_context)
+      not is_map_key(registry, provider) ->
+        {:error, {:provider_not_found, provider}}
 
-        case normalize_success(action, stream) do
-          {:ok, normalized} ->
-            {:ok, normalized}
-
-          {:error, stream_reason} ->
-            maybe_fallback_stream_to_chat(
-              action,
-              adapter,
-              messages,
-              model,
-              config,
-              tools,
-              retries,
-              delay,
-              retry_policy,
-              started_at_ms,
-              stream_reason,
-              failover_state,
-              auth_context
-            )
-        end
-
-      {:error, raw_reason} ->
-        reason = normalize_reason(raw_reason)
-
-        cond do
-          quota_exhausted?(reason) ->
-            Logger.error("Out of credits/quota detected. Failing fast without retry.")
-            CoreTelemetry.emit_error(reason, %{action: action, reason: :quota_exhausted})
-            {:error, reason}
-
-          retries > 0 and Policy.classify(:retryable, %{reason: reason}) ->
-            elapsed_ms = elapsed_since(started_at_ms)
-
-            if elapsed_ms >= retry_policy.max_elapsed_ms do
-              Logger.warning(
-                "Retry deadline reached (#{elapsed_ms}ms >= #{retry_policy.max_elapsed_ms}ms). Stopping retries."
-              )
-
-              CoreTelemetry.emit_error({:retry_timeout, reason}, %{
-                action: action,
-                reason: :deadline_reached
-              })
-
-              {:error, {:retry_timeout, reason}}
-            else
-              base_wait =
-                case Policy.budget(:retry_after_ms, %{
-                       reason: reason,
-                       elapsed_ms: elapsed_ms,
-                       max_elapsed_ms: retry_policy.max_elapsed_ms
-                     }) do
-                  ms when is_integer(ms) and ms > 0 -> ms
-                  _ -> delay
-                end
-
-              wait_ms = with_jitter(base_wait, retry_policy.jitter_ratio)
-
-              if elapsed_ms + wait_ms > retry_policy.max_elapsed_ms do
-                Logger.warning(
-                  "Retry deadline would be exceeded by next wait (elapsed=#{elapsed_ms}ms, wait=#{wait_ms}ms, max=#{retry_policy.max_elapsed_ms}ms)."
-                )
-
-                CoreTelemetry.emit_error({:retry_timeout, reason}, %{
-                  action: action,
-                  reason: :deadline_exceeded_by_wait
-                })
-
-                {:error, {:retry_timeout, reason}}
-              else
-                CoreTelemetry.emit_retry(reason, %{
-                  action: action,
-                  wait_ms: wait_ms,
-                  retries_left: retries
-                })
-
-                notify_runtime_status(%{
-                  kind: :retry_wait,
-                  action: action,
-                  reason: CooldownRouting.reason_label(reason),
-                  wait_ms: wait_ms,
-                  retries_left: retries
-                })
-
-                Logger.warning(
-                  "Transient LLM failure (#{CooldownRouting.reason_label(reason)}). Waiting #{wait_ms}ms... (Retries left: #{retries})"
-                )
-
-                receive do
-                  {:model_changed, new_provider, new_model} ->
-                    {latest_provider, latest_model} = drain_model_changed(new_provider, new_model)
-
-                    Logger.info(
-                      "[CLIENT] Model changed mid-backoff to #{latest_provider}. SWAPPING NOW."
-                    )
-
-                    if action == :chat_completion do
-                      chat_completion(messages,
-                        provider: latest_provider,
-                        model: latest_model,
-                        tools: tools
-                      )
-                    else
-                      stream_completion(messages,
-                        provider: latest_provider,
-                        model: latest_model,
-                        tools: tools
-                      )
-                    end
-                after
-                  wait_ms ->
-                    next_delay =
-                      delay
-                      |> Kernel.*(2)
-                      |> max(base_wait)
-                      |> min(retry_policy.max_backoff)
-
-                    do_request_with_retry(
-                      action,
-                      adapter,
-                      messages,
-                      model,
-                      config,
-                      tools,
-                      retries - 1,
-                      next_delay,
-                      retry_policy,
-                      started_at_ms,
-                      failover_state,
-                      auth_context
-                    )
-                end
-              end
-            end
-
-          true ->
-            maybe_handle_terminal_failure(
-              action,
-              adapter,
-              messages,
-              model,
-              config,
-              tools,
-              retries,
-              delay,
-              retry_policy,
-              started_at_ms,
-              reason,
-              failover_state,
-              auth_context
-            )
-        end
+      true ->
+        dispatch_to_provider(action, messages, opts, provider, registry)
     end
   end
 
-  defp normalize_success(:stream_completion, stream) do
-    if valid_stream?(stream) do
-      {:ok, stream}
-    else
-      {:error, {:invalid_stream_response, stream}}
+  defp dispatch_to_provider(action, messages, opts, provider, registry) do
+    config = Map.fetch!(registry, provider)
+    requested_profile = Keyword.get(opts, :auth_profile)
+
+    case AuthProfiles.resolve(provider, config, requested_profile: requested_profile) do
+      {:ok, auth} ->
+        model = Keyword.get(opts, :model, config[:default_model])
+
+        failover_state =
+          Keyword.get_lazy(opts, :failover_state, fn ->
+            FailoverPolicy.initial_state(provider: provider, model: model, registry: registry)
+          end)
+
+        request = %{
+          adapter: config[:adapter],
+          messages: messages,
+          model: model,
+          config: auth.config,
+          tools: Keyword.get(opts, :tools, []),
+          failover_state: failover_state,
+          auth_context: %{provider_id: provider, profile: auth.profile}
+        }
+
+        RetryEngine.run(action, request, &dispatch/3)
+
+      {:error, :missing_credentials} ->
+        {:error, {:missing_credentials, config[:env_key] || "API_KEY"}}
+
+      {:error, :all_profiles_cooling_down} ->
+        {:error, :all_profiles_cooling_down}
     end
   end
 
-  defp normalize_success(_action, result), do: {:ok, result}
+  defp simulate_response(:chat_completion) do
+    {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your LLM providers."},
+     nil}
+  end
+
+  defp simulate_response(:stream_completion) do
+    {:ok, [%{"choices" => [%{"delta" => %{"content" => "[MOCK STREAM] Hello!"}}]}]}
+  end
 
   defp model_selection_registry do
     llm_registry = llm_config_registry()
@@ -707,414 +397,12 @@ defmodule Pincer.LLM.Client do
   defp normalize_provider_id(provider_id),
     do: provider_id |> to_string() |> String.trim()
 
-  defp valid_stream?(stream) do
-    cond do
-      is_nil(Enumerable.impl_for(stream)) ->
-        false
+  defp normalize_error_result({:error, reason}),
+    do: {:error, RetryEngine.normalize_reason(reason)}
 
-      true ->
-        try do
-          _ = Enum.take(stream, 0)
-          true
-        rescue
-          _ -> false
-        catch
-          _, _ -> false
-        end
-    end
-  end
-
-  defp maybe_handle_terminal_failure(
-         :stream_completion,
-         _adapter,
-         messages,
-         _model,
-         _config,
-         tools,
-         _retries,
-         _delay,
-         _retry_policy,
-         _started_at_ms,
-         reason,
-         failover_state,
-         auth_context
-       ) do
-    if Policy.classify(:fail_fast, %{reason: reason}) do
-      CoreTelemetry.emit_error(reason, %{action: :stream_completion, failover_action: :fail_fast})
-      {:error, reason}
-    else
-      state = failover_state || FailoverPolicy.initial_state()
-      CooldownRouting.cooldown_auth_profile(auth_context, reason)
-      CooldownStore.cooldown_provider(state.current_provider, reason)
-      {action, next_state} = FailoverPolicy.next_action(reason, state)
-
-      case action do
-        :retry_same ->
-          CoreTelemetry.emit_error(reason, %{
-            action: :stream_completion,
-            failover_action: :retry_same
-          })
-
-          notify_runtime_status(%{
-            kind: :failover,
-            action: :stream_completion,
-            failover_action: :retry_same,
-            provider: next_state.current_provider,
-            model: next_state.current_model,
-            reason: CooldownRouting.reason_label(reason)
-          })
-
-          stream_completion(messages,
-            provider: next_state.current_provider,
-            model: next_state.current_model,
-            tools: tools,
-            failover_state: next_state
-          )
-
-        {:fallback_model, provider, model} ->
-          CoreTelemetry.emit_error(reason, %{
-            action: :stream_completion,
-            failover_action: :fallback_model,
-            provider: provider,
-            model: model
-          })
-
-          notify_runtime_status(%{
-            kind: :failover,
-            action: :stream_completion,
-            failover_action: :fallback_model,
-            provider: provider,
-            model: model,
-            reason: CooldownRouting.reason_label(reason)
-          })
-
-          stream_completion(messages,
-            provider: provider,
-            model: model,
-            tools: tools,
-            failover_state: next_state
-          )
-
-        {:fallback_provider, provider, model} ->
-          CoreTelemetry.emit_error(reason, %{
-            action: :stream_completion,
-            failover_action: :fallback_provider,
-            provider: provider,
-            model: model
-          })
-
-          notify_runtime_status(%{
-            kind: :failover,
-            action: :stream_completion,
-            failover_action: :fallback_provider,
-            provider: provider,
-            model: model,
-            reason: CooldownRouting.reason_label(reason)
-          })
-
-          stream_completion(messages,
-            provider: provider,
-            model: model,
-            tools: tools,
-            failover_state: next_state
-          )
-
-        :stop ->
-          attempts = next_state |> FailoverPolicy.summarize_attempts() |> Map.get(:attempts, [])
-
-          CoreTelemetry.emit_error(reason, %{
-            action: :stream_completion,
-            failover_action: :stop,
-            failover_attempts: length(attempts)
-          })
-
-          notify_runtime_status(%{
-            kind: :failover,
-            action: :stream_completion,
-            failover_action: :stop,
-            provider: next_state.current_provider,
-            model: next_state.current_model,
-            reason: CooldownRouting.reason_label(reason)
-          })
-
-          {:error, reason}
-      end
-    end
-  end
-
-  defp maybe_handle_terminal_failure(
-         :chat_completion,
-         _adapter,
-         messages,
-         _model,
-         _config,
-         tools,
-         _retries,
-         _delay,
-         _retry_policy,
-         _started_at_ms,
-         reason,
-         failover_state,
-         auth_context
-       ) do
-    if Policy.classify(:fail_fast, %{reason: reason}) do
-      CoreTelemetry.emit_error(reason, %{action: :chat_completion, failover_action: :fail_fast})
-      {:error, reason}
-    else
-      state = failover_state || FailoverPolicy.initial_state()
-      CooldownRouting.cooldown_auth_profile(auth_context, reason)
-      CooldownStore.cooldown_provider(state.current_provider, reason)
-      {action, next_state} = FailoverPolicy.next_action(reason, state)
-
-      case action do
-        :retry_same ->
-          CoreTelemetry.emit_error(reason, %{
-            action: :chat_completion,
-            failover_action: :retry_same
-          })
-
-          notify_runtime_status(%{
-            kind: :failover,
-            action: :chat_completion,
-            failover_action: :retry_same,
-            provider: next_state.current_provider,
-            model: next_state.current_model,
-            reason: CooldownRouting.reason_label(reason)
-          })
-
-          chat_completion(messages,
-            provider: next_state.current_provider,
-            model: next_state.current_model,
-            tools: tools,
-            failover_state: next_state
-          )
-
-        {:fallback_model, provider, model} ->
-          CoreTelemetry.emit_error(reason, %{
-            action: :chat_completion,
-            failover_action: :fallback_model,
-            provider: provider,
-            model: model
-          })
-
-          notify_runtime_status(%{
-            kind: :failover,
-            action: :chat_completion,
-            failover_action: :fallback_model,
-            provider: provider,
-            model: model,
-            reason: CooldownRouting.reason_label(reason)
-          })
-
-          chat_completion(messages,
-            provider: provider,
-            model: model,
-            tools: tools,
-            failover_state: next_state
-          )
-
-        {:fallback_provider, provider, model} ->
-          CoreTelemetry.emit_error(reason, %{
-            action: :chat_completion,
-            failover_action: :fallback_provider,
-            provider: provider,
-            model: model
-          })
-
-          notify_runtime_status(%{
-            kind: :failover,
-            action: :chat_completion,
-            failover_action: :fallback_provider,
-            provider: provider,
-            model: model,
-            reason: CooldownRouting.reason_label(reason)
-          })
-
-          chat_completion(messages,
-            provider: provider,
-            model: model,
-            tools: tools,
-            failover_state: next_state
-          )
-
-        :stop ->
-          attempts = next_state |> FailoverPolicy.summarize_attempts() |> Map.get(:attempts, [])
-
-          CoreTelemetry.emit_error(reason, %{
-            action: :chat_completion,
-            failover_action: :stop,
-            failover_attempts: length(attempts)
-          })
-
-          notify_runtime_status(%{
-            kind: :failover,
-            action: :chat_completion,
-            failover_action: :stop,
-            provider: next_state.current_provider,
-            model: next_state.current_model,
-            reason: CooldownRouting.reason_label(reason)
-          })
-
-          {:error, reason}
-      end
-    end
-  end
-
-  defp maybe_handle_terminal_failure(
-         action,
-         adapter,
-         messages,
-         model,
-         config,
-         tools,
-         retries,
-         delay,
-         retry_policy,
-         started_at_ms,
-         reason,
-         failover_state,
-         auth_context
-       ) do
-    maybe_fallback_stream_to_chat(
-      action,
-      adapter,
-      messages,
-      model,
-      config,
-      tools,
-      retries,
-      delay,
-      retry_policy,
-      started_at_ms,
-      reason,
-      failover_state,
-      auth_context
-    )
-  end
-
-  defp maybe_fallback_stream_to_chat(
-         :stream_completion,
-         adapter,
-         messages,
-         model,
-         config,
-         tools,
-         retries,
-         delay,
-         retry_policy,
-         started_at_ms,
-         reason,
-         failover_state,
-         auth_context
-       ) do
-    StreamFallback.stream_to_chat(
-      :stream_completion,
-      reason,
-      fn ->
-        do_request_with_retry(
-          :chat_completion,
-          adapter,
-          messages,
-          model,
-          config,
-          tools,
-          retries,
-          delay,
-          retry_policy,
-          started_at_ms,
-          failover_state,
-          auth_context
-        )
-      end,
-      fn fallback_reason ->
-        CoreTelemetry.emit_error(fallback_reason, %{
-          action: :stream_completion,
-          reason: :fallback_chat_failed
-        })
-      end
-    )
-  end
-
-  defp maybe_fallback_stream_to_chat(
-         _action,
-         _adapter,
-         _messages,
-         _model,
-         _config,
-         _tools,
-         _retries,
-         _delay,
-         _retry_policy,
-         _started_at_ms,
-         reason,
-         _failover_state,
-         _auth_context
-       ) do
-    StreamFallback.stream_to_chat(:chat_completion, reason, fn -> {:error, reason} end, fn r ->
-      CoreTelemetry.emit_error(r, %{action: :chat_completion})
-    end)
-  end
-
-  defp simulate_response(_messages) do
-    {:ok, %{"role" => "assistant", "content" => "[MOCK] Hello! Configure your LLM providers."},
-     nil}
-  end
-
-  defp drain_model_changed(provider, model) do
-    receive do
-      {:model_changed, newer_provider, newer_model} ->
-        drain_model_changed(newer_provider, newer_model)
-    after
-      0 ->
-        {provider, model}
-    end
-  end
-
-  defp retry_policy, do: RetrySettings.load(Application.get_env(:pincer, :llm_retry, []))
-
-  defp normalize_error_result({:error, reason}), do: {:error, normalize_reason(reason)}
   defp normalize_error_result(other), do: other
-
-  defp normalize_reason({:error, reason}), do: normalize_reason(reason)
-  defp normalize_reason({:EXIT, reason}), do: normalize_reason(reason)
-  defp normalize_reason(%Req.TransportError{reason: reason}), do: {:transport_error, reason}
-  defp normalize_reason(reason), do: reason
-
-  defp quota_exhausted?({:http_error, 429, body}) when is_binary(body) do
-    String.contains?(body, "余额不足") or String.contains?(body, "insufficient_quota")
-  end
-
-  defp quota_exhausted?({:http_error, 429, body, _meta}) when is_binary(body) do
-    String.contains?(body, "余额不足") or String.contains?(body, "insufficient_quota")
-  end
-
-  defp quota_exhausted?(_), do: false
 
   @doc false
   def parse_retry_after(value, now_ms \\ System.system_time(:millisecond))
   def parse_retry_after(value, now_ms), do: RetryPolicy.parse_retry_after(value, now_ms)
-
-  defp elapsed_since(started_at_ms), do: System.monotonic_time(:millisecond) - started_at_ms
-
-  defp with_jitter(base_ms, jitter_ratio) when is_integer(base_ms) and base_ms >= 0 do
-    jitter = trunc(base_ms * jitter_ratio)
-
-    if jitter <= 0 do
-      base_ms
-    else
-      random_delta = :rand.uniform(jitter * 2 + 1) - jitter - 1
-      max(0, base_ms + random_delta)
-    end
-  end
-
-  defp notify_runtime_status(payload) when is_map(payload) do
-    case Process.get(:session_pid) do
-      pid when is_pid(pid) ->
-        send(pid, {:llm_runtime_status, payload})
-        :ok
-
-      _ ->
-        :ok
-    end
-  end
 end

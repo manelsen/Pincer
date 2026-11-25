@@ -83,7 +83,9 @@ defmodule Pincer.LLM.FailoverDispatchTest do
                        action: :chat_completion,
                        failover_action: :stop,
                        provider: "primary"
-                     }}
+                     } = status}
+
+    refute Map.has_key?(status, :failover_attempts)
   end
 
   test "re-enters the caller with the route the policy chooses" do
