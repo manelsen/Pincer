@@ -5,7 +5,6 @@ defmodule Pincer.Channels.Telegram do
             [
               EarmarkParser,
               Pincer.Infra.PubSub,
-              Pincer.Utils.Text,
               Req
             ]}
 
@@ -83,7 +82,7 @@ defmodule Pincer.Channels.Telegram do
   use Supervisor
   @behaviour PincerPorts.Channel
   require Logger
-  alias Pincer.Utils.Text
+  alias Pincer.Channels.Shared.Text
 
   @file_extensions ~w(md go py pl sh am at be cc)
   @file_extension_pattern ~r/(^|[^a-zA-Z0-9_\-\/])([a-zA-Z0-9_.\-\.\/]+\.(?:#{Enum.join(@file_extensions, "|")}))(?=$|[^a-zA-Z0-9_\-\/])/i

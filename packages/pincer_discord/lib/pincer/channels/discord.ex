@@ -1,5 +1,4 @@
 defmodule Pincer.Channels.Discord do
-  @compile {:no_warn_undefined, Pincer.Utils.Text}
   @moduledoc """
   Discord channel adapter using Nostrum.
 
@@ -12,7 +11,7 @@ defmodule Pincer.Channels.Discord do
   use Supervisor
   require Logger
   alias PincerPorts.Structs.IncomingMessage
-  alias Pincer.Utils.Text
+  alias Pincer.Channels.Shared.Text
 
   @doc """
   Starts the Discord channel.

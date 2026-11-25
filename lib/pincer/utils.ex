@@ -1,6 +1,7 @@
 defmodule Pincer.Utils do
   @moduledoc "Generic utilities."
   use Boundary,
+    deps: [Pincer.Channels.Shared],
     check: [
       aliases: true,
       apps: [
