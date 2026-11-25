@@ -1,6 +1,7 @@
 defmodule Pincer.Ports do
   @moduledoc "Neutral Ports layer for Hexagonal Architecture."
   use Boundary,
+    type: :strict,
     deps: [Pincer.Infra],
     exports: [
       Messaging,
