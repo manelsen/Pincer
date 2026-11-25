@@ -10,7 +10,18 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
   import Mox
 
   alias Pincer.Core.Executor
+  alias Pincer.Core.Session.History
   alias Pincer.LLM.Providers.Google
+  alias PincerPorts.Structs.IncomingMessage
+
+  defmodule AttachmentAdapter do
+    @behaviour PincerPorts.Attachments
+
+    @impl true
+    def fetch("channel-file:document", :workspace), do: {:ok, "document contents"}
+    def fetch("channel-file:missing", :workspace), do: {:error, :not_found}
+    def fetch("channel-file:preview", {:inline, limit}) when limit > 0, do: {:ok, "preview"}
+  end
 
   # The Executor hex-test already defines these mocks; guard against duplicate defmock.
   # We reuse them here by just importing Mox.
@@ -20,6 +31,39 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
   # Executor.start uses spawn_link — global mode lets the spawned process see stubs.
   setup :set_mox_global
   setup :verify_on_exit!
+
+  @tag :tmp_dir
+  test "the default attachment paths accept opaque references through the port", %{tmp_dir: dir} do
+    original_adapter = Application.fetch_env!(:pincer, :attachment_adapter)
+    Application.put_env(:pincer, :attachment_adapter, AttachmentAdapter)
+    on_exit(fn -> Application.put_env(:pincer, :attachment_adapter, original_adapter) end)
+
+    message =
+      IncomingMessage.new("attachment-port",
+        text: "Review these files",
+        attachments: [
+          %{
+            "type" => "workspace_file_ref",
+            "filename" => "note.txt",
+            "url" => "channel-file:document"
+          },
+          %{
+            "type" => "workspace_file_ref",
+            "filename" => "missing.txt",
+            "url" => "channel-file:missing"
+          }
+        ]
+      )
+
+    assert %{"content" => content} = History.build_user_message(message, dir)
+    assert content =~ "note.txt saved to workspace at `incoming/note.txt`"
+    assert content =~ "missing.txt (download failed: :not_found)"
+    assert File.read!(Path.join(dir, "incoming/note.txt")) == "document contents"
+    refute File.exists?(Path.join(dir, "incoming/missing.txt"))
+
+    assert {:ok, Base.encode64("preview")} ==
+             Executor.Attachments.default_fetch("channel-file:preview")
+  end
 
   setup do
     original_providers = Application.get_env(:pincer, :llm_providers)

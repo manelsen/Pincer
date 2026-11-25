@@ -79,12 +79,6 @@ defmodule Pincer.Core.Executor do
     {:ok, pid}
   end
 
-  @doc false
-  defdelegate resolve_attachment_url(url, token), to: Attachments, as: :resolve_url
-
-  @doc false
-  defdelegate default_file_fetch(url), to: Attachments, as: :default_fetch
-
   # --- Execution Loop ---
 
   defp run_loop(logical_history, prompt_history, depth, %Ctx{} = ctx) do
