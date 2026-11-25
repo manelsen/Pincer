@@ -6,15 +6,16 @@ defmodule Pincer.Core.SessionResolver do
   `root_agent_id` is the canonical owner of persona, workspace and blackboard.
   """
 
+  alias Pincer.Core.AgentPaths
   alias Pincer.Core.Bindings
-  alias PincerPorts.Session.Context
   alias Pincer.Core.Policy
   alias Pincer.Utils.MapHelpers
+  alias PincerPorts.Session.Context
 
   @type channel :: :telegram | :discord | :whatsapp | :feishu | :line | :dingtalk
 
   @doc """
-  Resolves channel context and config into a `%Session.Context{}`.
+  Resolves channel context and config into a `%PincerPorts.Session.Context{}`.
   """
   @spec resolve(channel(), map(), map()) :: Context.t()
   def resolve(channel, context, channel_config \\ %{})
@@ -42,7 +43,8 @@ defmodule Pincer.Core.SessionResolver do
       principal_ref: principal_ref,
       conversation_ref: conversation_ref,
       root_agent_id: root_agent_id,
-      root_agent_source: root_agent_source
+      root_agent_source: root_agent_source,
+      workspace_path: AgentPaths.workspace_root(root_agent_id)
     )
   end
 
@@ -70,7 +72,8 @@ defmodule Pincer.Core.SessionResolver do
       principal_ref: principal_ref,
       conversation_ref: conversation_ref,
       root_agent_id: root_agent_id,
-      root_agent_source: root_agent_source
+      root_agent_source: root_agent_source,
+      workspace_path: AgentPaths.workspace_root(root_agent_id)
     )
   end
 
@@ -98,7 +101,8 @@ defmodule Pincer.Core.SessionResolver do
       principal_ref: principal_ref,
       conversation_ref: conversation_ref,
       root_agent_id: root_agent_id,
-      root_agent_source: root_agent_source
+      root_agent_source: root_agent_source,
+      workspace_path: AgentPaths.workspace_root(root_agent_id)
     )
   end
 
@@ -131,7 +135,8 @@ defmodule Pincer.Core.SessionResolver do
       principal_ref: principal_ref,
       conversation_ref: conversation_ref,
       root_agent_id: root_agent_id,
-      root_agent_source: root_agent_source
+      root_agent_source: root_agent_source,
+      workspace_path: AgentPaths.workspace_root(root_agent_id)
     )
   end
 
@@ -162,7 +167,8 @@ defmodule Pincer.Core.SessionResolver do
       principal_ref: principal_ref,
       conversation_ref: conversation_ref,
       root_agent_id: root_agent_id,
-      root_agent_source: root_agent_source
+      root_agent_source: root_agent_source,
+      workspace_path: AgentPaths.workspace_root(root_agent_id)
     )
   end
 
@@ -195,7 +201,8 @@ defmodule Pincer.Core.SessionResolver do
       principal_ref: principal_ref,
       conversation_ref: conversation_ref,
       root_agent_id: root_agent_id,
-      root_agent_source: root_agent_source
+      root_agent_source: root_agent_source,
+      workspace_path: AgentPaths.workspace_root(root_agent_id)
     )
   end
 
@@ -206,7 +213,8 @@ defmodule Pincer.Core.SessionResolver do
       session_id: session_id,
       conversation_ref: Bindings.conversation_ref(:unknown, :conversation, session_id),
       root_agent_id: session_id,
-      root_agent_source: :session_scope
+      root_agent_source: :session_scope,
+      workspace_path: AgentPaths.workspace_root(session_id)
     )
   end
 
