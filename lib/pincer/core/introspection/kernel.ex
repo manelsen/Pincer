@@ -35,8 +35,7 @@ defmodule Pincer.Core.Introspection.Kernel do
   alias Pincer.Core.Introspection.LessonStore
   alias Pincer.Core.Introspection.Mood
   alias Pincer.Core.Introspection.SelfState
-  alias Pincer.Core.Reflection
-  alias Pincer.Core.Skills.Generator, as: SkillGenerator
+  alias Pincer.Core.Introspection.Reflection
 
   @default_tick_interval 600_000
   @default_reflection_throttle 300_000
@@ -125,7 +124,11 @@ defmodule Pincer.Core.Introspection.Kernel do
 
     introspection_client = Keyword.get(opts, :introspection_client)
     workspace_path = Keyword.get(opts, :workspace_path, AgentPaths.workspace_root(agent_id))
-    skill_generator = Keyword.get(opts, :skill_generator, SkillGenerator)
+
+    skill_generator =
+      Keyword.get_lazy(opts, :skill_generator, fn ->
+        Application.fetch_env!(:pincer, :introspection_skill_generator)
+      end)
 
     skill_promotion_enabled? =
       Keyword.get(

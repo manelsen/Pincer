@@ -69,7 +69,7 @@ defmodule Pincer.Core.Routing do
 
   ## Adding a New Slash Command
 
-  1. Add a parse clause to `Pincer.Core.ProjectRouter.parse/1` matching the command string.
+  1. Add a parse clause to `Pincer.Core.Project.ProjectRouter.parse/1` matching the command string.
   2. Add a `handle_command/3` clause for the new command atom.
   3. Commands must return `{:ok, reply}` or `{:handled, reply}` on success,
      or `{:error, reason}` on failure.
@@ -77,7 +77,7 @@ defmodule Pincer.Core.Routing do
   ## See Also
 
   - `Pincer.Core.Dispatcher` — outbound message delivery
-  - `Pincer.Core.ProjectRouter` — slash command parsing and dispatch
+  - `Pincer.Core.Project.ProjectRouter` — slash command parsing and dispatch
   - `Pincer.Core.Executor` — agentic reasoning loop
   - `Pincer.Core.Session.Server` — per-user session state
   - `PincerPorts.Channel` — channel adapter behaviour contract

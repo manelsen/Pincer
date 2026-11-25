@@ -3,7 +3,7 @@ defmodule Pincer.Adapters.Storage.ZeroInfraSQLiteIntegrationTest do
 
   alias Pincer.Adapters.Cron.Job
   alias Pincer.Adapters.Cron.Storage, as: CronStorage
-  alias Pincer.Core.AuditLog
+  alias Pincer.Core.Executor.AuditLog
   alias Pincer.Core.CircuitBreaker
   alias Pincer.Core.DeadLetterQueue
   alias Pincer.Core.Introspection.Kernel

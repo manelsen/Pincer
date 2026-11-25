@@ -12,14 +12,14 @@ defmodule Pincer.Core.Session.Server do
   require Logger
 
   alias Pincer.Core.AgentPaths
-  alias Pincer.Core.AlignmentIntegrity
-  alias Pincer.Core.ErrorUX
+  alias Pincer.Core.Session.AlignmentIntegrity
+  alias Pincer.Core.Session.ErrorUX
   alias Pincer.Core.Executor
   alias Pincer.Core.Introspection
   alias Pincer.Core.Orchestration.Archivist
   alias Pincer.Core.Orchestration.Blackboard
-  alias Pincer.Core.ProjectRouter
-  alias Pincer.Core.PromptAssembly
+  alias Pincer.Core.Project.ProjectRouter
+  alias Pincer.Core.Executor.PromptAssembly
   alias Pincer.Core.Registry, as: CoreRegistry
   alias Pincer.Core.Session.Approval, as: SessionApproval
   alias Pincer.Core.Session.Blackboard, as: SessionBlackboard

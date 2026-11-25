@@ -6,7 +6,7 @@ defmodule Pincer.Core.RetryPolicy do
   channel/session/LLM flows do not maintain divergent error lists.
   """
 
-  alias Pincer.Core.ErrorClass
+  alias Pincer.Core.LLM.ErrorClass
 
   @transient_transport_reasons [
     :timeout,

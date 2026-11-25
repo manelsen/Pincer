@@ -53,7 +53,7 @@ similarity. FTS5 full-text search is always available.
 
 ## Subsystems
 
-### 1. Session Pruner (`Pincer.Core.Session.Pruner`)
+### 1. Session Pruner (`Pincer.Core.Executor.Pruner`)
 
 Replaces old tool results in conversation history with compact summaries
 to reduce token bloat. Integrated into `PromptAssembly.prepare/3`.
@@ -205,7 +205,7 @@ tool execution, trace emission), removing process-dictionary dependency injectio
 
 `Pincer.Core.Session.Server` delegates non-GenServer concerns to focused modules:
 
-- `Pincer.Core.PromptAssembly` builds the base system prompt (`build_system_prompt/1`,
+- `Pincer.Core.Executor.PromptAssembly` builds the base system prompt (`build_system_prompt/1`,
   `bootstrap_active?/2`) and prepares/prunes LLM prompt histories (`prepare/3`).
 - `Pincer.Core.Session.History` owns transcript loading, user/assistant persistence,
   reset snapshots, sliding-window pruning, system prompt hot-swap, and workspace
@@ -273,6 +273,18 @@ do not require exports.
 
 `Pincer.Core.UX` owns the interaction payload policy for model selectors,
 menus, and approval buttons.
+
+### 12.5. Core sub-boundaries
+
+Session, Project, Orchestration, Introspection, Skills, Executor, Memory, LLM,
+and Graph own the code in their namespaces. They declare sibling dependencies
+and export the modules those consumers use. The parent re-exports the external
+Core contract. Helpers that belong to a slice live under that owner.
+
+Session routes project commands through Project. Project reads and resets
+sessions through `PincerPorts.Session`. History pruning belongs to Executor's
+prompt assembly, so Executor can assemble prompts independently of Session.
+Host configuration supplies the skill generator used by Introspection.
 
 ### 13. Channel-Owned Formatting (`Pincer.Channels.Telegram.ResponseEnvelope`)
 

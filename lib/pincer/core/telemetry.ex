@@ -3,7 +3,7 @@ defmodule Pincer.Core.Telemetry do
   Thin wrapper around `:telemetry` with Pincer-specific events.
   """
 
-  alias Pincer.Core.ErrorClass
+  alias Pincer.Core.LLM.ErrorClass
 
   @error_event [:pincer, :error]
   @retry_event [:pincer, :retry]

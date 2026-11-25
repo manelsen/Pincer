@@ -17,13 +17,13 @@ defmodule Pincer.Core.Policy do
   alias Pincer.Core.AccessPolicy
   alias Pincer.Core.ChannelEventPolicy
   alias Pincer.Core.ContextOverflowRecovery
-  alias Pincer.Core.EmptyResponseRecoveryPolicy
-  alias Pincer.Core.ErrorClass
+  alias Pincer.Core.Executor.EmptyResponseRecoveryPolicy
+  alias Pincer.Core.LLM.ErrorClass
   alias Pincer.Core.RetryPolicy
   alias Pincer.Core.SessionScopePolicy
   alias Pincer.Core.StatusMessagePolicy
   alias Pincer.Core.StreamingPolicy
-  alias Pincer.Core.TurnOutcomePolicy
+  alias Pincer.Core.Executor.TurnOutcomePolicy
 
   @doc """
   Access-oriented allow/deny decisions.

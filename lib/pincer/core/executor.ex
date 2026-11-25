@@ -8,9 +8,13 @@ defmodule Pincer.Core.Executor do
   collaborators (`StreamAccumulator`, `ToolCall`, `ToolRunner`, `Attachments`).
   """
 
+  use Boundary,
+    deps: [Pincer.Core, Pincer.Core.Introspection, Pincer.Core.Memory, Pincer.Core.Skills],
+    exports: [EmptyResponseRecoveryPolicy, PromptAssembly, ToolRuntime, Trace, TurnOutcomePolicy]
+
   require Logger
 
-  alias Pincer.Core.EmptyResponseRecoveryPolicy
+  alias Pincer.Core.Executor.EmptyResponseRecoveryPolicy
   alias Pincer.Core.Executor.Attachments
   alias Pincer.Core.Executor.Ctx
   alias Pincer.Core.Executor.FallbackStrategy
@@ -18,13 +22,13 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.Executor.StreamAccumulator
   alias Pincer.Core.Executor.ToolCall
   alias Pincer.Core.Executor.ToolRunner
-  alias Pincer.Core.MemoryRecall
+  alias Pincer.Core.Memory.MemoryRecall
   alias Pincer.Core.Policy
-  alias Pincer.Core.PromptAssembly
+  alias Pincer.Core.Executor.PromptAssembly
   alias PincerPorts.Structs.Usage
-  alias Pincer.Core.ToolAnswerPatternPolicy
-  alias Pincer.Core.ToolOnlyOutcomeFormatter
-  alias Pincer.Core.TurnOutcomePolicy
+  alias Pincer.Core.Executor.ToolAnswerPatternPolicy
+  alias Pincer.Core.Executor.ToolOnlyOutcomeFormatter
+  alias Pincer.Core.Executor.TurnOutcomePolicy
   alias Pincer.Utils.Text
 
   @type outcome ::
