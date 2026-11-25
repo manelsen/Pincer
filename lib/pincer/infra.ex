@@ -2,6 +2,7 @@ defmodule Pincer.Infra do
   @moduledoc "Infrastructure layer."
   use Boundary,
     check: [
+      aliases: true,
       apps: [
         :req,
         :mix,

@@ -3,6 +3,7 @@ defmodule Pincer.Ports do
   use Boundary,
     type: :strict,
     deps: [Pincer.Infra],
+    check: [aliases: true],
     exports: [
       Messaging,
       Storage,
