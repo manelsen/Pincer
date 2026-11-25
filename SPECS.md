@@ -281,6 +281,11 @@ and Graph own the code in their namespaces. They declare sibling dependencies
 and export the modules those consumers use. The parent re-exports the external
 Core contract. Helpers that belong to a slice live under that owner.
 
+A sibling dependency grants access to the target boundary's exports. For
+example, Session can call `Executor.PromptAssembly`. A call to the private
+`Executor.Ctx` module produces a `not_exported` diagnostic. Compilation with
+`--warnings-as-errors` rejects that call.
+
 Session routes project commands through Project. Project reads and resets
 sessions through `PincerPorts.Session`. History pruning belongs to Executor's
 prompt assembly, so Executor can assemble prompts independently of Session.
