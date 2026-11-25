@@ -298,6 +298,24 @@ The media tool uses `PincerPorts.LLM` directly for image description, OCR, and
 audio transcription. Attachment resolution has a separate contract for obtaining
 bytes from stored references.
 
+### 13.2. Attachment retrieval
+
+`PincerPorts.Attachments.fetch(reference, mode)` delegates to the host's
+`:attachment_adapter` and returns `{:ok, binary}` or `{:error, reason}`.
+The Core passes the stored reference unchanged. The host adapter understands
+existing Telegram file references and HTTP(S) links. Telegram credentials
+stay in the adapter and are resolved at fetch time.
+HTTP(S) redirects are validated hop by hop. Telegram downloads use the
+configured service endpoint directly.
+
+- `{:inline, max_bytes}` fetches an attachment with a response size limit.
+  Executor converts the bytes into provider prompt parts.
+- `:workspace` fetches a channel file. Session History writes the bytes under
+  the session workspace's `incoming/` directory and records the result.
+
+Channels continue emitting the existing attachment fields, including the
+`url` field that holds the opaque reference.
+
 ---
 
 ### 14. Sandbox Execution Port (`Pincer.Ports.Sandbox`)

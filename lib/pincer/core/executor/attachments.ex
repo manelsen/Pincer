@@ -3,58 +3,18 @@ defmodule Pincer.Core.Executor.Attachments do
   Lazy attachment resolution and download helpers for executor prompt history.
   """
 
-  alias Pincer.Utils.{BoundedBody, MapHelpers, NetworkGuard}
+  alias Pincer.Utils.MapHelpers
 
   @max_inline_bytes Application.compile_env(:pincer, :max_inline_bytes, 6_291_456)
   @max_text_preview_chars 32_768
 
   @doc """
-  Resolves an attachment reference URL, expanding `telegram://file/...` schemes.
+  Fetches attachment bytes through the port and encodes them for prompt history.
   """
-  @spec resolve_url(term(), term()) ::
-          {:ok, String.t()} | {:error, :telegram_token_missing | :invalid_attachment_url}
-  def resolve_url("telegram://file/" <> _path, token) when token in [nil, ""],
-    do: {:error, :telegram_token_missing}
-
-  def resolve_url("telegram://file/" <> path, token) when is_binary(token),
-    do: {:ok, "https://api.telegram.org/file/bot#{token}/#{path}"}
-
-  def resolve_url(url, _token) when is_binary(url), do: {:ok, url}
-  def resolve_url(_url, _token), do: {:error, :invalid_attachment_url}
-
-  @doc """
-  Fetches a remote attachment over HTTP and returns Base64-encoded contents.
-
-  `:http_client` can be supplied for tests; defaults to `Req.get/2`.
-  """
-  @spec default_fetch(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
-  def default_fetch(url, opts \\ []) do
-    http_client = Keyword.get(opts, :http_client, &Req.get/2)
-
-    with {:ok, resolved_url} <- resolve_url(url, nil),
-         {:ok, target} <- NetworkGuard.safe_target(resolved_url),
-         {:ok, response} <-
-           http_client.(target.pinned_url,
-             headers: [{"Host", target.host_header}],
-             decode_body: false,
-             receive_timeout: 60_000,
-             connect_options: Keyword.put(target.connect_options, :timeout, 10_000),
-             into: BoundedBody.callback(@max_inline_bytes)
-           ) do
-      case response do
-        %{status: 200, body: body}
-        when is_binary(body) and byte_size(body) <= @max_inline_bytes ->
-          {:ok, Base.encode64(body)}
-
-        %{status: 200, body: body} when is_binary(body) ->
-          {:error, :attachment_too_large}
-
-        %{status: status} ->
-          {:error, "HTTP #{status}"}
-
-        _ ->
-          {:error, :invalid_response}
-      end
+  @spec default_fetch(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def default_fetch(reference) do
+    with {:ok, bytes} <- PincerPorts.Attachments.fetch(reference, {:inline, @max_inline_bytes}) do
+      {:ok, Base.encode64(bytes)}
     end
   end
 

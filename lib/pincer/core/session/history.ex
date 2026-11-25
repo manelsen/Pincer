@@ -6,10 +6,11 @@ defmodule Pincer.Core.Session.History do
 
   require Logger
 
-  alias Pincer.Core.Memory
+  alias Pincer.Core.{Memory, WorkspaceGuard}
   alias Pincer.Core.Session.Logger, as: SessionLogger
   alias PincerPorts.Structs.IncomingMessage
   alias Pincer.Ports.Storage
+  alias PincerPorts.Attachments
 
   @doc """
   Loads persisted messages for `session_id` and prepends the system prompt.
@@ -215,28 +216,14 @@ defmodule Pincer.Core.Session.History do
     if text in ["", nil], do: note_block, else: "#{note_block}\n#{text}"
   end
 
-  defp download_workspace_file("telegram://file/" <> file_path, filename, workspace_path) do
-    token = Application.get_env(:telegex, :token, "")
-    url = "https://api.telegram.org/file/bot#{token}/#{file_path}"
-    incoming_dir = Path.join(workspace_path, "incoming")
-    :ok = File.mkdir_p(incoming_dir)
-    dest_path = Path.join(incoming_dir, filename)
+  defp download_workspace_file(reference, filename, workspace_path) do
+    relative_path = Path.join("incoming", filename)
 
-    case Req.get(url, receive_timeout: 300_000) do
-      {:ok, %{status: 200, body: body}} when is_binary(body) ->
-        case File.write(dest_path, body) do
-          :ok -> {:ok, Path.relative_to(dest_path, workspace_path)}
-          {:error, reason} -> {:error, reason}
-        end
-
-      {:ok, %{status: status}} ->
-        {:error, {:http_error, status}}
-
-      {:error, reason} ->
-        {:error, reason}
+    with {:ok, dest_path} <- WorkspaceGuard.confine_path(relative_path, root: workspace_path),
+         {:ok, body} <- Attachments.fetch(reference, :workspace),
+         :ok <- File.mkdir_p(Path.dirname(dest_path)),
+         :ok <- File.write(dest_path, body) do
+      {:ok, Path.relative_to(dest_path, Path.expand(workspace_path))}
     end
   end
-
-  defp download_workspace_file(_url, _filename, _workspace_path),
-    do: {:error, :unsupported_url}
 end

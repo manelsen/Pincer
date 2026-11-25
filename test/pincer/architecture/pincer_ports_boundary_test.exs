@@ -13,6 +13,7 @@ defmodule Pincer.Architecture.PincerPortsBoundaryTest do
     "LLM.RawResponseLogger",
     "Channel",
     "ChannelPolicy",
+    "Attachments",
     "Messaging",
     "Project",
     "PubSub",
