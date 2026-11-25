@@ -67,6 +67,30 @@ defmodule Pincer.Channels.DiscordTest do
 
       assert Discord.send_message(channel_id, text, files: files) == {:ok, 12345}
     end
+
+    test "preserves option order when sending components and files" do
+      channel_id = "123456"
+      files = [%{path: "/tmp/test.txt", filename: "test.txt"}]
+      components = [%{type: 1, components: []}]
+
+      APIMock
+      |> expect(:create_message, fn id, "hello", opts ->
+        assert to_string(id) == channel_id
+        assert opts == [content: "hello", components: components, files: files]
+        {:ok, %{id: 12346}}
+      end)
+      |> expect(:create_message, fn id, "", opts ->
+        assert to_string(id) == channel_id
+        assert opts == [content: "", components: components, files: files]
+        {:ok, %{id: 12347}}
+      end)
+
+      assert Discord.send_message(channel_id, "hello", files: files, components: components) ==
+               {:ok, 12346}
+
+      assert Discord.send_message(channel_id, "", files: files, components: components) ==
+               {:ok, 12347}
+    end
   end
 
   describe "update_message/3" do

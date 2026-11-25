@@ -488,35 +488,37 @@ defmodule Pincer.Core.Onboard do
     provider = get_in(config, ["llm", "provider"]) |> normalize_string() || "z_ai"
     model = get_in(config, ["llm", provider, "default_model"]) |> normalize_string() || "glm-4.7"
 
-    storage_args =
+    rev_args = [
+      "--yes",
+      "--non-interactive",
+      "mix pincer.onboard"
+    ]
+
+    rev_args =
       if Defaults.sqlite_storage_config?(config) do
         sqlite_path = Defaults.sqlite_path(config)
-        ["--storage 'sqlite'", "--sqlite-path #{shell_quote(sqlite_path)}"]
+        ["--sqlite-path #{shell_quote(sqlite_path)}", "--storage 'sqlite'" | rev_args]
       else
         db_name = get_in(config, ["database", "database"]) |> normalize_string() || "pincer"
-        ["--db-name #{shell_quote(db_name)}"]
+        ["--db-name #{shell_quote(db_name)}" | rev_args]
       end
 
-    args =
-      [
-        "mix pincer.onboard",
-        "--non-interactive",
-        "--yes"
-      ] ++
-        storage_args ++
-        [
-          "--provider #{shell_quote(provider)}",
-          "--model #{shell_quote(model)}"
-        ]
+    rev_args = [
+      "--model #{shell_quote(model)}",
+      "--provider #{shell_quote(provider)}"
+      | rev_args
+    ]
 
-    args =
+    rev_args =
       if capabilities == [] do
-        args
+        rev_args
       else
-        args ++ ["--capabilities #{shell_quote(Enum.join(capabilities, ","))}"]
+        ["--capabilities #{shell_quote(Enum.join(capabilities, ","))}" | rev_args]
       end
 
-    Enum.join(args, " ")
+    rev_args
+    |> Enum.reverse()
+    |> Enum.join(" ")
   end
 
   defp shell_quote(value) when is_binary(value) do

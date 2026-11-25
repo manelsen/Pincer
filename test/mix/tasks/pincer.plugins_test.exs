@@ -81,6 +81,43 @@ defmodule Mix.Tasks.Pincer.PluginsTest do
       assert channel_enabled?(content, "telegram")
     end
 
+    test "preserves comments, formatting, and injects enabled at section end or EOF" do
+      yaml = """
+      # Header comment
+      channels:
+        telegram:
+          # Telegram comment
+          adapter: "Pincer.Channels.Telegram"
+          token_env: "TELEGRAM_BOT_TOKEN"
+        discord:
+          # Discord at EOF without enabled
+          adapter: "Pincer.Channels.Discord"
+      """
+
+      path = write_tmp_config(yaml)
+
+      ExUnit.CaptureIO.capture_io(fn ->
+        Plugins.run(["enable", "telegram", "--config", path])
+        Plugins.run(["enable", "discord", "--config", path])
+      end)
+
+      updated = File.read!(path)
+
+      assert updated == """
+             # Header comment
+             channels:
+               telegram:
+                 # Telegram comment
+                 adapter: "Pincer.Channels.Telegram"
+                 token_env: "TELEGRAM_BOT_TOKEN"
+                 enabled: true
+               discord:
+                 # Discord at EOF without enabled
+                 adapter: "Pincer.Channels.Discord"
+                 enabled: true
+             """
+    end
+
     test "retorna erro para canal não encontrado no config" do
       path = write_tmp_config(@config_with_disabled)
 

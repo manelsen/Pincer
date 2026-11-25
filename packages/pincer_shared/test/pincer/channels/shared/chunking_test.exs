@@ -58,6 +58,50 @@ defmodule Pincer.Channels.Shared.ChunkingTest do
       assert Enum.all?(chunks, &(String.length(&1) <= 6))
       assert Enum.join(chunks, "") == text
     end
+
+    test "lines strategy handles multi-chunk and overlong inputs cleanly in O(n)" do
+      lines =
+        for i <- 1..15_000 do
+          if rem(i, 500) == 0, do: String.duplicate("x", 45), else: "line #{i}"
+        end
+
+      text = Enum.join(lines, "\n")
+
+      {elapsed_us, chunks} =
+        :timer.tc(fn ->
+          Chunking.split(text, 20, strategy: :lines)
+        end)
+
+      assert length(chunks) > 5_000
+      assert Enum.all?(chunks, &(String.length(&1) <= 20))
+      assert Enum.join(chunks, "") == text
+      assert elapsed_us < 1_000_000
+    end
+
+    test "newline_window strategy handles multi-chunk inputs cleanly in O(n)" do
+      block = String.duplicate("abcdefghij\n", 10)
+      text = String.duplicate(block, 600)
+
+      {elapsed_us, chunks} =
+        :timer.tc(fn ->
+          Chunking.split(text, 50, strategy: :newline_window, search_range: 20)
+        end)
+
+      assert length(chunks) > 1_200
+      assert Enum.all?(chunks, &(String.length(&1) <= 50))
+      assert Enum.join(chunks, "") == text
+      assert elapsed_us < 500_000
+    end
+
+    test "newline_window strategy respects search_range: 0 and CRLF boundaries" do
+      text = "aaa\r\nbbb\r\nccc"
+      chunks = Chunking.split(text, 5, strategy: :newline_window, search_range: 5)
+      assert Enum.join(chunks, "") == text
+      assert Enum.all?(chunks, &(String.length(&1) <= 5))
+
+      no_range_chunks = Chunking.split("ab\ncdef", 4, strategy: :newline_window, search_range: 0)
+      assert no_range_chunks == ["ab\nc", "def"]
+    end
   end
 
   describe "streaming buffer helpers" do

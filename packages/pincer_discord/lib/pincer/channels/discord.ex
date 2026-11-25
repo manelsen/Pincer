@@ -94,14 +94,7 @@ defmodule Pincer.Channels.Discord do
 
   defp do_send_chunks(channel_id, [first | rest], files, opts) do
     # Send first chunk with files and components
-    nostrum_opts = [content: first]
-
-    nostrum_opts =
-      if opts[:components],
-        do: nostrum_opts ++ [components: opts[:components]],
-        else: nostrum_opts
-
-    nostrum_opts = if Enum.any?(files), do: nostrum_opts ++ [files: files], else: nostrum_opts
+    nostrum_opts = build_nostrum_opts(first, files, opts)
 
     case api_client().create_message(channel_id, first, nostrum_opts) do
       {:ok, %{id: mid}} ->
@@ -130,14 +123,7 @@ defmodule Pincer.Channels.Discord do
 
   defp do_send_chunks(channel_id, [], files, opts) when files != [] do
     # No text, just files
-    nostrum_opts = [content: ""]
-
-    nostrum_opts =
-      if opts[:components],
-        do: nostrum_opts ++ [components: opts[:components]],
-        else: nostrum_opts
-
-    nostrum_opts = nostrum_opts ++ [files: files]
+    nostrum_opts = build_nostrum_opts("", files, opts)
 
     case api_client().create_message(channel_id, "", nostrum_opts) do
       {:ok, %{id: mid}} -> {:ok, mid}
@@ -146,6 +132,17 @@ defmodule Pincer.Channels.Discord do
   end
 
   defp do_send_chunks(_, [], [], _), do: :ok
+
+  defp build_nostrum_opts(content, files, opts) do
+    nostrum_opts = if Enum.any?(files), do: [files: files], else: []
+
+    nostrum_opts =
+      if opts[:components],
+        do: [{:components, opts[:components]} | nostrum_opts],
+        else: nostrum_opts
+
+    [{:content, content} | nostrum_opts]
+  end
 
   def split_into_chunks(text, max_len) do
     Chunking.split(text, max_len, strategy: :newline_window, search_range: 500)

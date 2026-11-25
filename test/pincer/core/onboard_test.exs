@@ -325,6 +325,10 @@ defmodule Pincer.Core.OnboardTest do
       assert String.contains?(plan.onboard_command, "--provider 'openrouter'")
       assert String.contains?(plan.onboard_command, "--model 'openrouter/free'")
       assert String.contains?(plan.onboard_command, "--capabilities 'workspace_dirs,config_yaml'")
+
+      assert plan.onboard_command ==
+               "mix pincer.onboard --non-interactive --yes --storage 'sqlite' --sqlite-path 'data/remote.db' --provider 'openrouter' --model 'openrouter/free' --capabilities 'workspace_dirs,config_yaml'"
+
       assert Enum.any?(plan.steps, &String.contains?(&1, "ssh deploy@vps.example.com"))
     end
 
