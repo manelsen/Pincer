@@ -9,8 +9,7 @@ defmodule Pincer.Core.Skills do
   - install path confinement inside sandbox root
   """
 
-  alias Pincer.Adapters.SkillsRegistry.ClawHub, as: ClawHubRegistry
-  alias Pincer.Adapters.SkillsRegistry.Local, as: LocalRegistry
+  alias Pincer.Ports.SkillsRegistry
 
   @default_sandbox_root "skills"
   @skill_id_regex ~r/^[a-zA-Z0-9._-]+$/
@@ -23,12 +22,18 @@ defmodule Pincer.Core.Skills do
           install_path: String.t()
         }
 
+  @doc """
+  Lists skills from the selected registry.
+  """
   @spec discover(keyword()) :: {:ok, [map()]} | {:error, term()}
   def discover(opts \\ []) do
     {registry, registry_opts} = registry_config(opts)
-    registry.list_skills(registry_opts)
+    SkillsRegistry.list_skills(registry, registry_opts)
   end
 
+  @doc """
+  Installs a skill after its registry entry passes source, checksum and path checks.
+  """
   @spec install(String.t(), keyword()) :: {:ok, install_result()} | {:error, term()}
   def install(skill_id, opts \\ [])
 
@@ -46,7 +51,7 @@ defmodule Pincer.Core.Skills do
 
     with :ok <- ensure_install_allowed(allow_install?),
          :ok <- validate_skill_id(skill_id),
-         {:ok, skill} <- registry.fetch_skill(skill_id, registry_opts),
+         {:ok, skill} <- SkillsRegistry.fetch_skill(registry, skill_id, registry_opts),
          :ok <- validate_skill_identity(skill_id, skill),
          :ok <- validate_source(skill, allowed_sources, allowed_schemes),
          {:ok, checksum} <- validate_checksum(skill, expected_checksum),
@@ -68,12 +73,7 @@ defmodule Pincer.Core.Skills do
   defp ensure_install_allowed(_), do: {:error, :install_not_allowed}
 
   defp registry_config(opts) do
-    registry =
-      case Keyword.get(opts, :registry, LocalRegistry) do
-        :clawhub -> ClawHubRegistry
-        module -> module
-      end
-
+    registry = Keyword.get(opts, :registry, :local)
     registry_opts = Keyword.get(opts, :registry_opts, [])
     {registry, registry_opts}
   end

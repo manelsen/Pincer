@@ -137,6 +137,16 @@ skills = Loader.discover(bundled: "priv/skills", shared: "~/.pincer/skills",
 issues = Loader.check_requirements(skills |> hd())
 ```
 
+#### Skills registry adapters
+
+`PincerPorts.SkillsRegistry` defines `list_skills/1` and `fetch_skill/2` for
+catalog adapters. Discovery and installation use the configured `:local`
+adapter by default. Callers can select `:clawhub` or supply an adapter module
+through `:registry`. Modules supplied per call take precedence and receive
+`:registry_opts` unchanged. Pincer configures the named adapters in
+`:skills_registry_adapters`. The `:skills_registry` setting remains the local
+catalog.
+
 ### 6. Consciousness Kernel (`Pincer.Core.Kernel`)
 
 Per-agent GenServer with configurable tick loop for introspection and

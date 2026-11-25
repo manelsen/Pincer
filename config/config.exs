@@ -87,6 +87,11 @@ config :pincer, :default_llm_provider, "openrouter"
 
 config :pincer, :tool_adapters, [Pincer.Adapters.NativeToolRegistry]
 
+config :pincer, :skills_registry_adapters, %{
+  local: Pincer.Adapters.SkillsRegistry.Local,
+  clawhub: Pincer.Adapters.SkillsRegistry.ClawHub
+}
+
 # Configuração de Logs
 config :logger,
   level: :info,

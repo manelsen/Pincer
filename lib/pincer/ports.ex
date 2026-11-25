@@ -22,6 +22,7 @@ defmodule Pincer.Ports do
       Project,
       PubSub,
       Session,
+      SkillsRegistry,
       Streaming,
       UX
     ]
