@@ -1,6 +1,7 @@
 defmodule Pincer.Adapters.Health do
   @moduledoc "HTTP health endpoint adapter."
   use Boundary,
-    deps: [Pincer.Core, Pincer.Ports, Pincer.Infra],
+    type: :strict,
+    deps: [Pincer.Core, Pincer.Infra, Jason, Plug],
     exports: [Plug]
 end

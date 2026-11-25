@@ -2,7 +2,7 @@ defmodule Pincer.Ports do
   @moduledoc "Neutral Ports layer for Hexagonal Architecture."
   use Boundary,
     type: :strict,
-    deps: [Pincer.Infra, PincerPorts],
+    deps: [PincerPorts],
     check: [
       aliases: true,
       apps: [

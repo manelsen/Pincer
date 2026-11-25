@@ -29,7 +29,14 @@ config :pincer, :project_adapter, Pincer.Core.Project.Adapter
 config :pincer, :channel_policy_adapter, Pincer.Core.ChannelPolicy.Adapter
 config :pincer, :streaming_adapter, Pincer.Core.Streaming.Adapter
 config :pincer, :pubsub_adapter, Pincer.Infra.PubSub
-config :pincer, :messaging_adapter, Pincer.Channels.OutboundMessaging
+config :pincer, :messaging_adapter, Pincer.Adapters.Messaging.PubSub
+
+config :pincer, :channel_actions_adapters, %{
+  telegram: Pincer.Channels.Telegram,
+  discord: Pincer.Channels.Discord,
+  whatsapp: Pincer.Channels.WhatsApp
+}
+
 config :pincer, :attachment_adapter, Pincer.Adapters.AttachmentFetcher
 config :pincer, :introspection_skill_generator, Pincer.Core.Skills.Generator
 
