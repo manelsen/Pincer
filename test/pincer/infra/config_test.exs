@@ -233,7 +233,7 @@ defmodule Pincer.Infra.ConfigTest do
   end
 
   describe "sqlite storage config" do
-    test "configures Pincer.Storage.Adapters.SQLite via storage.adapter and storage.path" do
+    test "configures Pincer.Adapters.Storage.SQLite via storage.adapter and storage.path" do
       yaml =
         write_yaml!("""
         storage:
@@ -245,7 +245,7 @@ defmodule Pincer.Infra.ConfigTest do
       System.delete_env("PINCER_SQLITE_PATH")
       assert :ok = Config.load(config_file: yaml, load_dotenv: false)
 
-      assert Application.get_env(:pincer, :storage_adapter) == Pincer.Storage.Adapters.SQLite
+      assert Application.get_env(:pincer, :storage_adapter) == Pincer.Adapters.Storage.SQLite
       assert Application.get_env(:pincer, :sqlite_path) == "tmp/test_zero_infra.db"
     end
 
@@ -261,7 +261,7 @@ defmodule Pincer.Infra.ConfigTest do
       System.put_env("PINCER_SQLITE_PATH", "/tmp/pincer_override.db")
       assert :ok = Config.load(config_file: yaml, load_dotenv: false)
 
-      assert Application.get_env(:pincer, :storage_adapter) == Pincer.Storage.Adapters.SQLite
+      assert Application.get_env(:pincer, :storage_adapter) == Pincer.Adapters.Storage.SQLite
       assert Application.get_env(:pincer, :sqlite_path) == "/tmp/pincer_override.db"
     end
 
@@ -306,7 +306,7 @@ defmodule Pincer.Infra.ConfigTest do
       assert log =~ unknown_top
       assert log =~ unknown_db
       assert Config.get(:tools) == %{"restrict_to_workspace" => true}
-      assert Application.get_env(:pincer, :storage_adapter) == Pincer.Storage.Adapters.SQLite
+      assert Application.get_env(:pincer, :storage_adapter) == Pincer.Adapters.Storage.SQLite
 
       assert_raise ArgumentError, fn ->
         String.to_existing_atom(unknown_top)

@@ -171,7 +171,7 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
       send(pid, {:load_checkpoint, session_id, opts})
 
       {:ok,
-       %Pincer.Storage.Checkpoint{
+       %Pincer.Adapters.Storage.Checkpoint{
          id: Pincer.Infra.UUID.generate(),
          session_id: session_id,
          status: "running",

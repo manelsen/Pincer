@@ -1,8 +1,8 @@
-defmodule Pincer.Storage.Adapters.SQLiteCheckpointStatusTest do
+defmodule Pincer.Adapters.Storage.SQLiteCheckpointStatusTest do
   use ExUnit.Case, async: false
 
   alias Pincer.Infra.SQLite
-  alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
+  alias Pincer.Adapters.Storage.SQLite, as: SQLiteStorage
 
   setup do
     prev_server = Application.get_env(:pincer, :sqlite_server)

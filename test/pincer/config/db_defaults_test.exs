@@ -6,7 +6,7 @@ defmodule Pincer.Infra.Config.DBDefaultsTest do
   end
 
   test "test config uses the embedded SQLite backend" do
-    assert Application.get_env(:pincer, :storage_adapter) == Pincer.Storage.Adapters.SQLite
+    assert Application.get_env(:pincer, :storage_adapter) == Pincer.Adapters.Storage.SQLite
     assert Application.get_env(:pincer, :sqlite_path) == ":memory:"
     assert Application.get_env(:pincer, :sqlite_vec) == :auto
   end

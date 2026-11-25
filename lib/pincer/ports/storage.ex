@@ -66,7 +66,7 @@ defmodule Pincer.Ports.Storage do
   # --- Dispatcher ---
 
   defp adapter do
-    Application.get_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
+    Application.get_env(:pincer, :storage_adapter, Pincer.Adapters.Storage.SQLite)
   end
 
   def get_messages(session_id), do: adapter().get_messages(session_id)

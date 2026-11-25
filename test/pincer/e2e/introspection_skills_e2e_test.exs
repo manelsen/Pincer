@@ -7,7 +7,7 @@ defmodule Pincer.E2E.IntrospectionSkillsE2ETest do
   alias Pincer.Core.Session.Server
   alias Pincer.Infra.PubSub
   alias Pincer.Infra.SQLite
-  alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
+  alias Pincer.Adapters.Storage.SQLite, as: SQLiteStorage
 
   defmodule SynthesisClientStub do
     def chat_completion(_messages, _opts) do

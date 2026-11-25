@@ -410,12 +410,17 @@ defmodule Pincer.Infra.Config do
             "PostgreSQL storage is no longer supported; set storage.adapter to \"sqlite\""
     end
 
-    unless normalized in ["sqlite", "sqlite3", "pincer.storage.adapters.sqlite"] do
+    unless normalized in [
+             "sqlite",
+             "sqlite3",
+             "pincer.adapters.storage.sqlite",
+             "pincer.storage.adapters.sqlite"
+           ] do
       raise ArgumentError,
             "Unsupported storage adapter #{inspect(selected)}; only \"sqlite\" is supported"
     end
 
-    Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
+    Application.put_env(:pincer, :storage_adapter, Pincer.Adapters.Storage.SQLite)
 
     sqlite_path =
       first_non_empty([

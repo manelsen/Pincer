@@ -8,7 +8,7 @@ defmodule Pincer.Core.Session.Logger do
 
   ## Purpose
 
-  While `Pincer.Storage` handles structured message persistence for LLM context,
+  While `Pincer.Ports.Storage` handles structured message persistence for LLM context,
   this logger creates narrative-style logs suitable for:
 
   - Human review and auditing

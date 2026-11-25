@@ -9,7 +9,7 @@ defmodule Pincer.Contracts.StorageAdapterContractTest do
   use ExUnit.Case, async: true
 
   @storage_adapters [
-    Pincer.Storage.Adapters.SQLite
+    Pincer.Adapters.Storage.SQLite
   ]
 
   @required_callbacks [
