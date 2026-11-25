@@ -256,6 +256,13 @@ existing callback declarations and default arguments.
   in application config. Tools resolve destinations and check workspace paths
   before dispatch. The channel adapter selects the transport and its capabilities.
 
+### 12.3. External package boundaries
+
+`Pincer.Adapters`, `Pincer.Core`, `Pincer.Ports`, and `Pincer.LLM` check references
+to Pincer's package applications. Calls to an external package boundary require
+an explicit dependency on that boundary. Host configuration selects the
+concrete channel and provider modules.
+
 ### 13. Channel-Owned Formatting (`Pincer.Channels.Telegram.ResponseEnvelope`)
 
 Telegram HTML usage-footer formatting and reasoning delivery options reside in

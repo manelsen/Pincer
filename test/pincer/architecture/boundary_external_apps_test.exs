@@ -34,6 +34,25 @@ defmodule Pincer.Architecture.BoundaryExternalAppsTest do
     assert Keyword.get(opts, :type) == :strict
   end
 
+  test "host layers check external channel, provider, and shared package references" do
+    layers = [
+      {"lib/pincer/adapters.ex", [:Pincer, :Adapters]},
+      {"lib/pincer/core.ex", [:Pincer, :Core]},
+      {"lib/pincer/ports.ex", [:Pincer, :Ports]},
+      {"lib/pincer/llm.ex", [:Pincer, :LLM]}
+    ]
+
+    missing =
+      for {file, module} <- layers,
+          opts = boundary_opts!(file, module),
+          apps = opts |> Keyword.get(:check, []) |> Keyword.get(:apps, []),
+          unchecked = @pincer_packages -- apps,
+          unchecked != [],
+          do: {file, unchecked}
+
+    assert missing == []
+  end
+
   test "Pincer.Utils declares check: [apps: ...] blocking forbidden external apps" do
     opts = boundary_opts!("lib/pincer/utils.ex", [:Pincer, :Utils])
     apps = opts |> Keyword.get(:check, []) |> Keyword.get(:apps, [])
