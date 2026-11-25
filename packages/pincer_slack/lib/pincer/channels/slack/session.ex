@@ -1,7 +1,4 @@
 defmodule Pincer.Channels.Slack.Session do
-  @compile {:no_warn_undefined, [
-    Pincer.Infra.PubSub
-  ]}
   @moduledoc """
   Manages outgoing responses for a specific Slack channel.
   """
@@ -26,7 +23,7 @@ defmodule Pincer.Channels.Slack.Session do
   def init(channel_id) do
     session_id = "slack_#{channel_id}"
     super(channel_id)
-    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+    PincerPorts.PubSub.subscribe("session:#{session_id}")
     {:ok, %{channel_id: channel_id, session_id: session_id}}
   end
 

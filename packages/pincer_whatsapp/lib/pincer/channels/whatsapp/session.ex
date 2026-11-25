@@ -1,5 +1,4 @@
 defmodule Pincer.Channels.WhatsApp.Session do
-  @compile {:no_warn_undefined, Pincer.Infra.PubSub}
 
   @moduledoc """
   WhatsApp session worker that forwards session PubSub events to a chat ID.
@@ -132,10 +131,10 @@ defmodule Pincer.Channels.WhatsApp.Session do
 
   defp normalize_session_id(chat_id, _), do: default_session_id(chat_id)
 
-  defp subscribe_session(session_id), do: Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+  defp subscribe_session(session_id), do: PincerPorts.PubSub.subscribe("session:#{session_id}")
 
   defp unsubscribe_session(session_id),
-    do: Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
+    do: PincerPorts.PubSub.unsubscribe("session:#{session_id}")
 
   defp maybe_advance_project_flow(state) do
     PincerPorts.Project.on_agent_response(

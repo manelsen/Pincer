@@ -61,6 +61,8 @@ defmodule Pincer.Infra.PubSub do
   - Direct message sending (no serialization overhead)
   - O(n) broadcast where n = number of subscribers on topic
   """
+  @behaviour PincerPorts.PubSub
+
   @registry_name Pincer.Infra.PubSub.Registry
 
   @doc """
@@ -130,6 +132,7 @@ defmodule Pincer.Infra.PubSub do
       end
   """
   @spec subscribe(String.t()) :: {:ok, pid()} | {:error, {:already_registered, pid()}}
+  @impl PincerPorts.PubSub
   def subscribe(topic) do
     Registry.register(@registry_name, topic, [])
   end
@@ -166,6 +169,7 @@ defmodule Pincer.Infra.PubSub do
       })
   """
   @spec broadcast(String.t(), term()) :: :ok
+  @impl PincerPorts.PubSub
   def broadcast(topic, message) do
     Registry.dispatch(@registry_name, topic, fn entries ->
       for {pid, _} <- entries, do: send(pid, message)
@@ -178,6 +182,7 @@ defmodule Pincer.Infra.PubSub do
   If the process is not subscribed to the topic, this is a no-op.
   """
   @spec unsubscribe(String.t()) :: :ok
+  @impl PincerPorts.PubSub
   def unsubscribe(topic) do
     Registry.unregister(@registry_name, topic)
   end

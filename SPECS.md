@@ -230,6 +230,12 @@ the shared port for model and provider discovery and audio transcription.
 `Pincer.Ports.LLM` forwards calls during the migration and preserves the
 existing callback declarations and default arguments.
 
+### 12.1. Channel PubSub (`PincerPorts.PubSub`)
+
+- Channel packages subscribe with `PincerPorts.PubSub.subscribe/1` and remove subscriptions with `unsubscribe/1`. The `PincerPorts.Channel` macro subscribes channel workers to `system:delivery`.
+- The port resolves `:pincer, :pubsub_adapter` at runtime. Pincer's root config installs `Pincer.Infra.PubSub`, which publishes to the existing Registry. A standalone channel host supplies an adapter implementing `subscribe/1`, `unsubscribe/1`, and `broadcast/2`. Missing or invalid adapter configuration raises `ArgumentError`.
+- Topic names and mailbox messages are preserved. `broadcast/2` sends its message term to subscribers without wrapping it.
+
 ### 13. Channel-Owned Formatting (`Pincer.Channels.Telegram.ResponseEnvelope`)
 
 Telegram HTML usage-footer formatting and reasoning delivery options reside in

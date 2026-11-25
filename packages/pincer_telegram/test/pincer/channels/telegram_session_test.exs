@@ -112,7 +112,7 @@ defmodule Pincer.Channels.Telegram.SessionTest do
 
     Process.sleep(50)
 
-    Pincer.Infra.PubSub.broadcast(
+    PincerPorts.PubSub.broadcast(
       "session:telegram_main",
       {:agent_response, "Main scope reply", nil}
     )

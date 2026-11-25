@@ -20,6 +20,7 @@ defmodule Pincer.Ports do
       Channel,
       ChannelPolicy,
       Project,
+      PubSub,
       Session,
       Streaming,
       UX

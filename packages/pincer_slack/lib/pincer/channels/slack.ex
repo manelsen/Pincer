@@ -1,7 +1,4 @@
 defmodule Pincer.Channels.Slack do
-  @compile {:no_warn_undefined, [
-    Pincer.Infra.PubSub
-  ]}
   @moduledoc """
   Slack channel implementation using Slack (Socket Mode).
   """

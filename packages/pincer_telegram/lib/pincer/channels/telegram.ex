@@ -4,7 +4,6 @@ defmodule Pincer.Channels.Telegram do
   @compile {:no_warn_undefined,
             [
               EarmarkParser,
-              Pincer.Infra.PubSub,
               Req
             ]}
 
@@ -571,7 +570,6 @@ end
 defmodule Pincer.Channels.Telegram.UpdatesProvider do
   @compile {:no_warn_undefined,
             [
-              Pincer.Infra.PubSub,
               Req
             ]}
 
@@ -686,7 +684,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       Logger.info("Telegram Poller Started (Manual Mode).")
 
       # Subscribe to outbound message delivery
-      Pincer.Infra.PubSub.subscribe("system:delivery")
+      PincerPorts.PubSub.subscribe("system:delivery")
 
       # Asynchronously cleanup and register commands
       Task.start(fn ->

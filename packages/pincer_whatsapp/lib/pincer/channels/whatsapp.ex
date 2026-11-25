@@ -1,5 +1,4 @@
 defmodule Pincer.Channels.WhatsApp do
-  @compile {:no_warn_undefined, Pincer.Infra.PubSub}
 
   @moduledoc """
   WhatsApp channel adapter backed by the Go `whatsapp_bridge` sidecar process.

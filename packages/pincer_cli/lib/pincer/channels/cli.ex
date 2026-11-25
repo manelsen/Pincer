@@ -1,9 +1,4 @@
 defmodule Pincer.Channels.CLI do
-  # These modules live in the host pincer project and are available at runtime
-  # but not at pincer_cli compile time. Suppress the "undefined module" warnings.
-  @compile {:no_warn_undefined, [
-    Pincer.Infra.PubSub
-  ]}
   @moduledoc """
   Command-line interface channel for direct terminal interaction.
 
@@ -87,7 +82,7 @@ defmodule Pincer.Channels.CLI do
   def init(state) do
     Logger.info("CLI Channel Enabled.")
     # We still need session-specific subscription for direct agent events (thinking, etc)
-    Pincer.Infra.PubSub.subscribe("session:cli_user")
+    PincerPorts.PubSub.subscribe("session:cli_user")
 
     # Macro init handles "system:delivery"
     super(state)
