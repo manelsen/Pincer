@@ -2,7 +2,7 @@ defmodule Pincer.Adapters.MediaDispatcher do
   @moduledoc """
   Dispatcher for media understanding operations.
 
-  Routes transcription requests to `Pincer.LLM.Providers.GroqWhisper` and
+  Routes transcription requests to Groq Whisper and
   image description requests to the provider configured via
   `Application.get_env(:pincer, :image_provider, "google")`.
   """

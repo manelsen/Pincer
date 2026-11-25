@@ -17,6 +17,7 @@ defmodule PincerPorts do
   - `PincerPorts.LLM.RawResponseLogger` — shared raw provider payload logging
   - `PincerPorts.Channel` — contract for bidirectional channel adapters
   - `PincerPorts.ChannelPolicy` — access and approval rules for channels
+  - `PincerPorts.Messaging` — outbound text, files, and replies
   - `PincerPorts.Project` — project wizard as seen from a channel
   - `PincerPorts.PubSub` — topic subscriptions and event delivery
   - `PincerPorts.Session` — driving agent sessions from a channel
@@ -36,6 +37,7 @@ defmodule PincerPorts do
       LLM.RawResponseLogger,
       Channel,
       ChannelPolicy,
+      Messaging,
       Project,
       PubSub,
       Session,
