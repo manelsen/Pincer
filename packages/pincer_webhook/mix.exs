@@ -8,10 +8,19 @@ defmodule PincerWebhook.MixProject do
       elixir: "~> 1.14",
       elixirc_options: [warnings_as_errors: true],
       start_permanent: false,
-      deps: [{:pincer_ports, "~> 0.1"}, {:pincer_shared, "~> 0.1"}],
+      deps: [
+        {:pincer_ports, "~> 0.1"},
+        {:pincer_shared, "~> 0.1"},
+        {:jason, "~> 1.4"},
+        {:plug, "~> 1.16"},
+        {:bandit, "~> 1.5"}
+      ],
       description: "HTTP webhook channel adapter for the Pincer AI agent framework",
       package: [
-        name: "pincer_webhook", licenses: ["MIT"], maintainers: ["Micelio"], links: %{"GitHub" => "https://github.com/manelsen/Pincer"},
+        name: "pincer_webhook",
+        licenses: ["MIT"],
+        maintainers: ["Micelio"],
+        links: %{"GitHub" => "https://github.com/manelsen/Pincer"},
         files: ["lib", "priv/pincer_plugin.yaml", "mix.exs", "README.md", "LICENSE"]
       ]
     ]

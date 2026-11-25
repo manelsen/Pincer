@@ -34,6 +34,13 @@ defmodule Pincer.Channels.Factory.Test do
     def extra_child_specs, do: [MockExtraChild]
   end
 
+  defmodule MockChannelWithConfigExtras do
+    @behaviour PincerPorts.Channel
+    def start_link(_), do: {:ok, self()}
+    def send_message(_, _), do: :ok
+    def extra_child_specs(cfg), do: [{MockExtraChild, cfg}]
+  end
+
   defp clean_whitelist(ctx) do
     old = Application.get_env(:pincer, :enabled_channels)
     Application.delete_env(:pincer, :enabled_channels)
@@ -132,6 +139,18 @@ defmodule Pincer.Channels.Factory.Test do
       [{first_module, _} | rest] = specs
       assert first_module == MockChannelWithExtras
       assert [MockExtraChild] == rest
+    end
+
+    test "inclui extra_child_specs/1 passando a configuração do canal" do
+      cfg = %{
+        "enabled" => true,
+        "adapter" => "Pincer.Channels.Factory.Test.MockChannelWithConfigExtras",
+        "port" => 4123
+      }
+
+      specs = Factory.create_channel_specs(%{"channels" => %{"mock" => cfg}})
+
+      assert [{MockChannelWithConfigExtras, ^cfg}, {MockExtraChild, ^cfg}] = specs
     end
   end
 

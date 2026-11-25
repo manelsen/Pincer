@@ -148,18 +148,18 @@ defmodule Pincer.Channels.Factory do
           Logger.info("✅ CHANNEL ENABLED: #{name} (Adapter: #{module})")
 
           extra =
-            if function_exported?(module, :extra_child_specs, 0),
-              do: module.extra_child_specs(),
-              else: []
+            cond do
+              function_exported?(module, :extra_child_specs, 1) ->
+                module.extra_child_specs(cfg)
 
-          specs =
-            if module == Pincer.Channels.Webhook do
-              [{module, cfg}, {Pincer.Channels.Webhook.Listener, cfg}]
-            else
-              [{module, cfg}]
+              function_exported?(module, :extra_child_specs, 0) ->
+                module.extra_child_specs()
+
+              true ->
+                []
             end
 
-          specs ++ extra
+          [{module, cfg}] ++ extra
       end
     end)
   end

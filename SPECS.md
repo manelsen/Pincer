@@ -573,8 +573,8 @@ Closes shell-execution bypasses, sidecar PoC leaks, and unhardened defaults befo
 - **`SafeShell` `find` & `git log` Hardening**:
   - `find` rejects destructive/exec/file-writing flags (`-delete`, `-exec`, `-execdir`, `-ok`, `-okdir`, `-fprint`, `-fprint0`, `-fprintf`, `-fls`) unless explicitly approved.
   - `git log` rejects `--output` / `--output=*`, `--ext-diff`, and `--textconv` unless explicitly approved.
-- **Constant-Time Webhook Token Auth**:
-  - `Pincer.Channels.Webhook` (`packages/pincer_webhook`) verifies tokens using `:crypto.hash_equals/2` after length matching.
+- **Constant-Time Webhook Token Auth & Self-Contained Package**:
+  - `Pincer.Channels.Webhook` (`packages/pincer_webhook`) verifies tokens using `:crypto.hash_equals/2` after length matching, owns `Pincer.Channels.Webhook.{Plug, Listener, RateLimiter}`, and exposes `extra_child_specs/1` so `Pincer.Channels.Factory` boots the listener polymorphically without hardcoded adapter checks.
 - **Loopback Default for `/health` Endpoint**:
   - `Pincer.Adapters.Health.Plug.bind_ip/0` resolves `health_ip` / `PINCER_HEALTH_IP` and defaults `Bandit` to `{127, 0, 0, 1}`.
 
