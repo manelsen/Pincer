@@ -3,6 +3,10 @@ defmodule Pincer.CLI do
   CLI Frontend.
   Can run locally (Standalone) or connect to a remote server.
   """
+  use Boundary,
+    deps: [Pincer.Channels, Pincer.Core],
+    exports: []
+
   alias Pincer.CLI.History
   require Logger
 
