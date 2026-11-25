@@ -1,4 +1,4 @@
-defmodule Pincer.DX.Macros do
+defmodule Pincer.Test.Support.DXMacros do
   @moduledoc """
   Developer ergonomics macros for tests and small workflow helpers.
   """

@@ -89,6 +89,18 @@ defmodule Pincer.Application do
   """
 
   use Application
+
+  use Boundary,
+    deps: [
+      Pincer.Adapters,
+      Pincer.Channels,
+      Pincer.Core,
+      Pincer.Infra,
+      Pincer.Telemetry,
+      Pincer.Utils
+    ],
+    exports: []
+
   require Logger
 
   @impl true
