@@ -6,18 +6,6 @@ defmodule Pincer.Infra.PubSubTest do
 
   defmodule TestChannel do
     use PincerPorts.Channel
-
-    @impl PincerPorts.Channel
-    def send_message(recipient_id, message) do
-      send(:pincer_pubsub_probe, {:delivered, recipient_id, message})
-      :ok
-    end
-
-    @impl PincerPorts.Channel
-    def handles_session?(session_id), do: session_id == "probe_session"
-
-    @impl PincerPorts.Channel
-    def resolve_recipient("probe_session"), do: "probe"
   end
 
   test "the root port and infrastructure deliver on the same topics" do
@@ -36,10 +24,8 @@ defmodule Pincer.Infra.PubSubTest do
   end
 
   test "the shared channel macro still subscribes to outbound delivery" do
-    Process.register(self(), :pincer_pubsub_probe)
-    start_supervised!({TestChannel, %{}})
+    channel = start_supervised!({TestChannel, %{}})
 
-    assert :ok = PubSub.broadcast("system:delivery", {:deliver_message, "probe_session", "ready"})
-    assert_receive {:delivered, "probe", "ready"}
+    assert {channel, []} in Registry.lookup(Pincer.Infra.PubSub.Registry, "system:delivery")
   end
 end

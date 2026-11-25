@@ -195,6 +195,7 @@ defmodule PincerPorts.Channel do
 
       def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
+      @impl GenServer
       def init(state) do
         PincerPorts.PubSub.subscribe("system:delivery")
         {:ok, state}
