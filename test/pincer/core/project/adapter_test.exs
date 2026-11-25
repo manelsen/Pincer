@@ -16,7 +16,7 @@ defmodule Pincer.Core.Project.AdapterTest do
   @dispatch_session "project-adapter-test-dispatch"
 
   defmodule Stub do
-    @behaviour Pincer.Ports.Project
+    @behaviour PincerPorts.Project
 
     def handle_command(command, args, session_id),
       do: {:handle_command, command, args, session_id}
@@ -44,16 +44,16 @@ defmodule Pincer.Core.Project.AdapterTest do
       |> Keyword.get_values(:behaviour)
       |> List.flatten()
 
-    assert Pincer.Ports.Project in behaviours
+    assert PincerPorts.Project in behaviours
 
-    for {fun, arity} <- Pincer.Ports.Project.behaviour_info(:callbacks) do
+    for {fun, arity} <- PincerPorts.Project.behaviour_info(:callbacks) do
       assert function_exported?(Adapter, fun, arity),
              "Adapter does not implement #{fun}/#{arity}"
     end
   end
 
   test "the test double covers every port callback" do
-    for {fun, arity} <- Pincer.Ports.Project.behaviour_info(:callbacks) do
+    for {fun, arity} <- PincerPorts.Project.behaviour_info(:callbacks) do
       assert function_exported?(Stub, fun, arity),
              "Stub does not implement #{fun}/#{arity} - update it with the port"
     end

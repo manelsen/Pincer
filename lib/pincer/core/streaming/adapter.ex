@@ -1,12 +1,12 @@
 defmodule Pincer.Core.Streaming.Adapter do
   @moduledoc """
-  Implements `Pincer.Ports.Streaming` on top of the Core presentation policies.
+  Implements `PincerPorts.Streaming` on top of the Core presentation policies.
 
   The single place that maps the port's flat surface to the individual policy
   modules, so channel sessions depend on the port alone.
   """
 
-  @behaviour Pincer.Ports.Streaming
+  @behaviour PincerPorts.Streaming
 
   alias Pincer.Core.SubAgentProgress
   alias Pincer.Core.StatusDelivery

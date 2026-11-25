@@ -15,7 +15,7 @@ defmodule Pincer.Core.ChannelPolicy.AdapterTest do
   @unpaired_sender "port-test-unpaired-#{System.unique_integer([:positive])}"
 
   defmodule Stub do
-    @behaviour Pincer.Ports.ChannelPolicy
+    @behaviour PincerPorts.ChannelPolicy
 
     def allow?(kind, attrs), do: {:allow?, kind, attrs}
     def classify(kind, attrs), do: {:classify, kind, attrs}
@@ -51,16 +51,16 @@ defmodule Pincer.Core.ChannelPolicy.AdapterTest do
       |> Keyword.get_values(:behaviour)
       |> List.flatten()
 
-    assert Pincer.Ports.ChannelPolicy in behaviours
+    assert PincerPorts.ChannelPolicy in behaviours
 
-    for {fun, arity} <- Pincer.Ports.ChannelPolicy.behaviour_info(:callbacks) do
+    for {fun, arity} <- PincerPorts.ChannelPolicy.behaviour_info(:callbacks) do
       assert function_exported?(Adapter, fun, arity),
              "Adapter does not implement #{fun}/#{arity}"
     end
   end
 
   test "the test double covers every port callback" do
-    for {fun, arity} <- Pincer.Ports.ChannelPolicy.behaviour_info(:callbacks) do
+    for {fun, arity} <- PincerPorts.ChannelPolicy.behaviour_info(:callbacks) do
       assert function_exported?(Stub, fun, arity),
              "Stub does not implement #{fun}/#{arity} - update it with the port"
     end

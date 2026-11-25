@@ -6,7 +6,7 @@ defmodule Pincer.Core.Session.Preferences do
   so they survive restarts. Stored as JSON in the workspace `.pincer/` directory.
   """
 
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
 
   @filename "preferences.json"
 

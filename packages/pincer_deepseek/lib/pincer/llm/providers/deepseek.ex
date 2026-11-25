@@ -6,7 +6,7 @@ defmodule Pincer.LLM.Providers.DeepSeek do
   - OpenAI-compatible endpoints (`https://api.deepseek.com/chat/completions`).
   - Supports `deepseek-chat` and `deepseek-reasoner`.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   @impl true
   def chat_completion(messages, model, config, tools) do

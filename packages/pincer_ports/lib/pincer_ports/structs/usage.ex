@@ -1,4 +1,4 @@
-defmodule Pincer.Core.Structs.Usage do
+defmodule PincerPorts.Structs.Usage do
   @moduledoc """
   Normalized token usage accounting struct across LLM providers, Executor,
   session preferences, and channel adapters.

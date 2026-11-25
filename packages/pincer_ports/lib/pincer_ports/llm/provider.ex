@@ -1,4 +1,4 @@
-defmodule Pincer.LLM.Provider do
+defmodule PincerPorts.LLM.Provider do
   @moduledoc """
   Defines the standard behaviour that all LLM Provider Adapters must implement.
   """

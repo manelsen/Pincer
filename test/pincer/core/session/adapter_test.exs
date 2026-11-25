@@ -4,7 +4,7 @@ defmodule Pincer.Core.Session.AdapterTest do
   alias Pincer.Core.Session.Adapter
 
   defmodule Stub do
-    @behaviour Pincer.Ports.Session
+    @behaviour PincerPorts.Session
 
     def process_input(sid, input), do: {:process_input, sid, input}
     def get_status(sid), do: {:status, sid}
@@ -27,16 +27,16 @@ defmodule Pincer.Core.Session.AdapterTest do
       |> Keyword.get_values(:behaviour)
       |> List.flatten()
 
-    assert Pincer.Ports.Session in behaviours
+    assert PincerPorts.Session in behaviours
 
-    for {fun, arity} <- Pincer.Ports.Session.behaviour_info(:callbacks) do
+    for {fun, arity} <- PincerPorts.Session.behaviour_info(:callbacks) do
       assert function_exported?(Adapter, fun, arity),
              "Adapter does not implement #{fun}/#{arity}"
     end
   end
 
   test "the test double covers every port callback" do
-    for {fun, arity} <- Pincer.Ports.Session.behaviour_info(:callbacks) do
+    for {fun, arity} <- PincerPorts.Session.behaviour_info(:callbacks) do
       assert function_exported?(Stub, fun, arity),
              "Stub does not implement #{fun}/#{arity} - update it with the port"
     end

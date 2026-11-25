@@ -2,7 +2,7 @@ defmodule Pincer.Channels.Telegram.ResponseEnvelopeTest do
   use ExUnit.Case, async: true
 
   alias Pincer.Channels.Telegram.ResponseEnvelope
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
 
   test "builds telegram final text with token usage footer from Usage struct" do
     usage = %Usage{prompt_tokens: 12, completion_tokens: 34, total_tokens: 46}

@@ -3,7 +3,7 @@ defmodule Pincer.Core.Session.Blackboard do
   Formatting, history ingestion, and pure LLM evaluation for session Blackboard updates.
   """
 
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
   alias Pincer.Core.SubAgentProgress
   alias Pincer.Ports.LLM
 

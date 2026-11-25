@@ -1,4 +1,4 @@
-defmodule Pincer.Ports.Streaming do
+defmodule PincerPorts.Streaming do
   @moduledoc """
   Port for the streaming and status-presentation policies a channel session needs.
 

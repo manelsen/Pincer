@@ -1,4 +1,4 @@
-defmodule Pincer.Ports.ChannelPolicy do
+defmodule PincerPorts.ChannelPolicy do
   @moduledoc """
   Port for the access and approval rules a channel must apply.
 
@@ -9,7 +9,7 @@ defmodule Pincer.Ports.ChannelPolicy do
 
   ## Example
 
-      case Pincer.Ports.ChannelPolicy.allow?(:dm_access, %{channel: :telegram, sender_id: id}) do
+      case PincerPorts.ChannelPolicy.allow?(:dm_access, %{channel: :telegram, sender_id: id}) do
         {:allow, _} -> handle(message)
         {:deny, %{user_message: text}} -> send_message(chat_id, text)
       end

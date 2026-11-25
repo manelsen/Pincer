@@ -2,7 +2,7 @@ defmodule Pincer.LLM.Providers.GroqWhisper do
   @moduledoc """
   Adapter for Groq Whisper (Audio-to-Text) API.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
   require Logger
 
   @impl true

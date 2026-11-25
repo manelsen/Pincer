@@ -6,7 +6,7 @@ defmodule Pincer.Channels.Feishu do
   Feishu (Lark) channel adapter.
 
   A Supervisor that starts the Feishu channel process tree. Implements the
-  `Pincer.Ports.Channel` behaviour for integration with Pincer's channel
+  `PincerPorts.Channel` behaviour for integration with Pincer's channel
   infrastructure.
 
   ## Architecture
@@ -44,7 +44,7 @@ defmodule Pincer.Channels.Feishu do
   """
 
   use Supervisor
-  @behaviour Pincer.Ports.Channel
+  @behaviour PincerPorts.Channel
   require Logger
 
   alias Pincer.Channels.Feishu.{API, Cards}
@@ -57,7 +57,7 @@ defmodule Pincer.Channels.Feishu do
   to skip this channel.
   """
   @spec start_link(config :: map()) :: Supervisor.on_start()
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def start_link(config) do
     Application.put_env(:pincer, :feishu_channel_config, config)
 
@@ -103,7 +103,7 @@ defmodule Pincer.Channels.Feishu do
   """
   @spec send_message(chat_id :: String.t(), text :: String.t()) ::
           {:ok, map()} | {:error, term()}
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def send_message(chat_id, text) do
     API.send_message(chat_id, Jason.encode!(%{"text" => text}), "text")
   end
@@ -116,7 +116,7 @@ defmodule Pincer.Channels.Feishu do
   """
   @spec update_message(recipient_id :: String.t(), message_id :: any(), text :: String.t()) ::
           {:ok, map()} | {:error, term()}
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def update_message(_recipient_id, message_id, text) do
     API.update_card(message_id, Cards.create_card(text))
   end
@@ -201,7 +201,7 @@ defmodule Pincer.Channels.Feishu do
       config = Application.get_env(:pincer, :feishu_channel_config, %{})
 
       context =
-        Pincer.Ports.Session.resolve(
+        PincerPorts.Session.resolve(
           :feishu,
           %{
             open_id: open_id,
@@ -215,9 +215,9 @@ defmodule Pincer.Channels.Feishu do
       Pincer.Channels.Feishu.Session.ensure_started(chat_id, context.session_id)
 
       incoming =
-        Pincer.Core.Structs.IncomingMessage.new(context.session_id, text)
+        PincerPorts.Structs.IncomingMessage.new(context.session_id, text)
 
-      case Pincer.Ports.Session.process_input(context.session_id, incoming) do
+      case PincerPorts.Session.process_input(context.session_id, incoming) do
         {:ok, _status} -> :ok
         {:error, reason} -> {:error, reason}
         _other -> :ok
@@ -230,14 +230,14 @@ defmodule Pincer.Channels.Feishu do
   def handle_event(_event), do: {:error, :invalid_event}
 
   defp ensure_session_started(context) do
-    case Registry.lookup(Pincer.Ports.Session.registry(), context.session_id) do
+    case Registry.lookup(PincerPorts.Session.registry(), context.session_id) do
       [] ->
         start_opts =
           context
-          |> Pincer.Core.Session.Context.to_start_opts()
+          |> PincerPorts.Session.Context.to_start_opts()
           |> Keyword.delete(:session_id)
 
-        Pincer.Ports.Session.start_session(context.session_id, start_opts)
+        PincerPorts.Session.start_session(context.session_id, start_opts)
 
       [_] ->
         :ok

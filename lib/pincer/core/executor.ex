@@ -21,7 +21,7 @@ defmodule Pincer.Core.Executor do
   alias Pincer.Core.MemoryRecall
   alias Pincer.Core.Policy
   alias Pincer.Core.PromptAssembly
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
   alias Pincer.Core.ToolAnswerPatternPolicy
   alias Pincer.Core.ToolOnlyOutcomeFormatter
   alias Pincer.Core.TurnOutcomePolicy

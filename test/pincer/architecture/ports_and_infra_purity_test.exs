@@ -26,15 +26,20 @@ defmodule Pincer.Architecture.PortsAndInfraPurityTest do
            "Expected no concrete adapter references in lib/pincer/ports/** code, found: #{inspect(offenders)}"
   end
 
-  test "packages/pincer_ports/lib/pincer/ports/** does not define concrete Core defaults in code" do
+  test "packages/pincer_ports/lib/** does not define concrete Core defaults in code" do
     core_prefix = "Pincer." <> "Core."
     adapter_regex = Regex.compile!(Regex.escape(core_prefix) <> "[A-Za-z0-9_.]+\\.Adapter\\b")
     registry_name = core_prefix <> "Session." <> "Registry"
 
-    offenders =
-      "packages/pincer_ports/lib/pincer/ports/**/*.ex"
+    files =
+      "packages/pincer_ports/lib/**/*.ex"
       |> Path.wildcard()
       |> Enum.sort()
+
+    assert files != [], "Expected packages/pincer_ports/lib/** to contain source files"
+
+    offenders =
+      files
       |> Enum.filter(fn file ->
         code = code_without_docs(file)
         Regex.match?(adapter_regex, code) or String.contains?(code, registry_name)

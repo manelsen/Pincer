@@ -6,7 +6,7 @@ defmodule Pincer.LLM.Providers.Groq do
   - High-performance inference.
   - OpenAI-compatible endpoints (`https://api.groq.com/openai/v1/chat/completions`).
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
   alias Pincer.LLM.Providers.OpenAICompat
 
   @impl true

@@ -1,12 +1,12 @@
 defmodule Pincer.Core.ChannelPolicy.Adapter do
   @moduledoc """
-  Implements `Pincer.Ports.ChannelPolicy` on top of the Core policy modules.
+  Implements `PincerPorts.ChannelPolicy` on top of the Core policy modules.
 
   The only place that knows which Core module owns each rule, so channel
   packages can depend on the port alone.
   """
 
-  @behaviour Pincer.Ports.ChannelPolicy
+  @behaviour PincerPorts.ChannelPolicy
 
   alias Pincer.Core.{ChannelEventPolicy, ChannelInteractionPolicy, Pairing, Policy}
 

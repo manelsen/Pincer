@@ -3,7 +3,7 @@ defmodule Pincer.Test.Support.LLMProviderDefaults do
 
   defmacro __using__(_opts) do
     quote do
-      @behaviour Pincer.LLM.Provider
+      @behaviour PincerPorts.LLM.Provider
 
       @impl true
       def list_models(_config), do: {:ok, []}
@@ -22,4 +22,4 @@ end
 Mox.defmock(Pincer.Channels.Discord.APIMock, for: Pincer.Channels.Discord.API)
 Mox.defmock(Pincer.Channels.Telegram.APIMock, for: Pincer.Channels.Telegram.API)
 Mox.defmock(Pincer.Channels.Slack.APIMock, for: Pincer.Channels.Slack.API)
-Mox.defmock(Pincer.LLM.ClientMock, for: Pincer.LLM.Provider)
+Mox.defmock(Pincer.LLM.ClientMock, for: PincerPorts.LLM.Provider)

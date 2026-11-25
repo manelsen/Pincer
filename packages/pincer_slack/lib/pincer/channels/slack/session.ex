@@ -5,9 +5,9 @@ defmodule Pincer.Channels.Slack.Session do
   @moduledoc """
   Manages outgoing responses for a specific Slack channel.
   """
-  use Pincer.Ports.Channel
+  use PincerPorts.Channel
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def start_link(channel_id) do
     GenServer.start_link(__MODULE__, channel_id, name: via_tuple(channel_id))
   end
@@ -30,10 +30,10 @@ defmodule Pincer.Channels.Slack.Session do
     {:ok, %{channel_id: channel_id, session_id: session_id}}
   end
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def handles_session?(id), do: String.starts_with?(id, "slack_")
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def resolve_recipient(id) do
     case String.split(id, "_", parts: 2) do
       ["slack", channel_id] -> channel_id
@@ -41,7 +41,7 @@ defmodule Pincer.Channels.Slack.Session do
     end
   end
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def send_message(channel_id, text) do
     Pincer.Channels.Slack.send_message(channel_id, text)
   end

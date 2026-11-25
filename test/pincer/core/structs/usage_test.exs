@@ -1,7 +1,7 @@
 defmodule Pincer.Core.Structs.UsageTest do
   use ExUnit.Case, async: true
 
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
 
   describe "normalize/1" do
     test "returns zeroed struct for nil and non-map inputs" do

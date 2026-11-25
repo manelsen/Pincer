@@ -8,7 +8,7 @@ defmodule Pincer.Core.Session.History do
 
   alias Pincer.Core.Memory
   alias Pincer.Core.Session.Logger, as: SessionLogger
-  alias Pincer.Core.Structs.IncomingMessage
+  alias PincerPorts.Structs.IncomingMessage
   alias Pincer.Ports.Storage
 
   @doc """

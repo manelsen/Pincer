@@ -1,6 +1,6 @@
 defmodule Pincer.Channels.Discord.Session do
   @compile {:no_warn_undefined, [
-    Pincer.Ports.Session.registry(),
+    PincerPorts.Session.registry(),
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM
   ]}
@@ -8,9 +8,9 @@ defmodule Pincer.Channels.Discord.Session do
   Driven Adapter for Discord.
   One process per active Discord channel that listens to PubSub and sends messages via Nostrum.
   """
-  use Pincer.Ports.Channel
+  use PincerPorts.Channel
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def start_link(%{channel_id: channel_id} = args) do
     GenServer.start_link(__MODULE__, args, name: via_tuple(channel_id))
   end
@@ -20,14 +20,14 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   defp via_tuple(channel_id),
-    do: {:via, Registry, {Pincer.Ports.Session.registry(), "discord_session_worker_#{channel_id}"}}
+    do: {:via, Registry, {PincerPorts.Session.registry(), "discord_session_worker_#{channel_id}"}}
 
   def ensure_started(channel_id, session_id \\ nil)
 
   def ensure_started(channel_id, session_id) do
     session_id = normalize_session_id(channel_id, session_id)
 
-    case Registry.lookup(Pincer.Ports.Session.registry(), "discord_session_worker_#{channel_id}") do
+    case Registry.lookup(PincerPorts.Session.registry(), "discord_session_worker_#{channel_id}") do
       [] ->
         case Pincer.Channels.Discord.SessionSupervisor.start_session(channel_id, session_id) do
           {:ok, pid} ->
@@ -65,10 +65,10 @@ defmodule Pincer.Channels.Discord.Session do
     {:ok, state(channel_id, session_id)}
   end
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def handles_session?(id), do: String.starts_with?(id, "discord_")
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def resolve_recipient(id) do
     case String.split(id, "_", parts: 2) do
       ["discord", channel_id] -> channel_id
@@ -76,7 +76,7 @@ defmodule Pincer.Channels.Discord.Session do
     end
   end
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def send_message(channel_id, text) do
     Pincer.Channels.Discord.send_message(channel_id, text)
   end
@@ -101,7 +101,7 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def on_agent_partial(token, state) do
-    Pincer.Ports.Streaming.handle_partial(
+    PincerPorts.Streaming.handle_partial(
       state,
       token,
       System.system_time(:millisecond),
@@ -111,7 +111,7 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def on_agent_response(text, _usage, state) do
-    state = Pincer.Ports.Streaming.handle_final(state, text, stream_transport(state))
+    state = PincerPorts.Streaming.handle_final(state, text, stream_transport(state))
     maybe_advance_project_flow(state)
     state
   end
@@ -120,7 +120,7 @@ defmodule Pincer.Channels.Discord.Session do
   def on_agent_error(text, state) do
     Pincer.Channels.Discord.send_message(
       "#{state.channel_id}",
-      Pincer.Ports.ChannelPolicy.error_message(:discord, text)
+      PincerPorts.ChannelPolicy.error_message(:discord, text)
     )
 
     maybe_recover_project_flow(state)
@@ -129,7 +129,7 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def on_agent_status(text, state) do
-    if Pincer.Ports.ChannelPolicy.status_kind(text) == :subagent do
+    if PincerPorts.ChannelPolicy.status_kind(text) == :subagent do
       deliver_subagent_status(state, text)
     else
       Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
@@ -145,8 +145,8 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def on_subagent_progress(event, state) do
-    tracker = Pincer.Ports.Streaming.progress_apply_event(state.subagent_progress_tracker, event)
-    dashboard = Pincer.Ports.Streaming.progress_render_dashboard(tracker)
+    tracker = PincerPorts.Streaming.progress_apply_event(state.subagent_progress_tracker, event)
+    dashboard = PincerPorts.Streaming.progress_render_dashboard(tracker)
 
     %{state | subagent_progress_tracker: tracker}
     |> deliver_subagent_dashboard(dashboard)
@@ -154,7 +154,7 @@ defmodule Pincer.Channels.Discord.Session do
 
   @impl true
   def on_approval_ui(_call_id, command, state) do
-    text = Pincer.Ports.ChannelPolicy.approval_message(:discord, command)
+    text = PincerPorts.ChannelPolicy.approval_message(:discord, command)
     components = build_approval_components()
     Pincer.Channels.Discord.send_message("#{state.channel_id}", text, components: components)
     state
@@ -180,7 +180,7 @@ defmodule Pincer.Channels.Discord.Session do
   defp deliver_subagent_dashboard(state, text) do
     channel_id = "#{state.channel_id}"
 
-    Pincer.Ports.Streaming.deliver_status(
+    PincerPorts.Streaming.deliver_status(
       state,
       text,
       send: fn content -> Pincer.Channels.Discord.send_message(channel_id, content) end,
@@ -192,7 +192,7 @@ defmodule Pincer.Channels.Discord.Session do
 
   defp build_approval_components do
     buttons =
-      Pincer.Ports.ChannelPolicy.approval_button_spec()
+      PincerPorts.ChannelPolicy.approval_button_spec()
       |> Enum.with_index()
       |> Enum.map(fn {{label, payload}, idx} ->
         style = if idx == 0, do: 3, else: 4
@@ -205,7 +205,7 @@ defmodule Pincer.Channels.Discord.Session do
   defp deliver_subagent_status(state, text) do
     channel_id = "#{state.channel_id}"
 
-    Pincer.Ports.Streaming.deliver_status(
+    PincerPorts.Streaming.deliver_status(
       state,
       text,
       send: fn content -> Pincer.Channels.Discord.send_message(channel_id, content) end,
@@ -216,7 +216,7 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   defp maybe_advance_project_flow(state) do
-    Pincer.Ports.Project.on_agent_response(
+    PincerPorts.Project.on_agent_response(
       state.session_id,
       send_message: fn text ->
         Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
@@ -225,7 +225,7 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   defp maybe_recover_project_flow(state) do
-    Pincer.Ports.Project.on_agent_error(
+    PincerPorts.Project.on_agent_error(
       state.session_id,
       send_message: fn text ->
         Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
@@ -254,9 +254,9 @@ defmodule Pincer.Channels.Discord.Session do
           session_id: session_id,
           subagent_progress_tracker: %{}
         },
-        Pincer.Ports.Streaming.status_initial_state()
+        PincerPorts.Streaming.status_initial_state()
       ),
-      Pincer.Ports.Streaming.stream_initial_state()
+      PincerPorts.Streaming.stream_initial_state()
     )
   end
 end

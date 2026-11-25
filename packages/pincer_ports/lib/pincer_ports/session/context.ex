@@ -1,4 +1,4 @@
-defmodule Pincer.Core.Session.Context do
+defmodule PincerPorts.Session.Context do
   @moduledoc """
   Resolved runtime context for a conversation session.
 

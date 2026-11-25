@@ -4,7 +4,7 @@ defmodule Pincer.Core.Session.ServerTest do
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.Orchestration.Blackboard
   alias Pincer.Core.Session.Server
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
 
   defmodule StorageStub do
     @behaviour Pincer.Ports.Storage

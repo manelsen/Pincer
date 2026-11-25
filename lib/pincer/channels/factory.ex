@@ -68,7 +68,7 @@ defmodule Pincer.Channels.Factory do
   ## See Also
 
   - `Pincer.Channels.Supervisor` - Uses Factory to start channels
-  - `Pincer.Ports.Channel` - Behaviour that channels implement
+  - `PincerPorts.Channel` - Behaviour that channels implement
   - `Pincer.Infra.Config` - Configuration loading from YAML
   """
 

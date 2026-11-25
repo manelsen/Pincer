@@ -4,7 +4,7 @@ defmodule Pincer.Channels.CLITest do
   alias Pincer.Channels.CLI
 
   defmodule SessionStub do
-    @behaviour Pincer.Ports.Session
+    @behaviour PincerPorts.Session
 
     def process_input(sid, input), do: send_fact({:process_input, sid, input})
     def get_status(sid), do: send_fact({:get_status, sid})

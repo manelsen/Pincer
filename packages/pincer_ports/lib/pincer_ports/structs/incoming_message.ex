@@ -1,4 +1,4 @@
-defmodule Pincer.Core.Structs.IncomingMessage do
+defmodule PincerPorts.Structs.IncomingMessage do
   @moduledoc """
   Agnostic structure for incoming messages from any channel.
   This is the entry point of the Anti-Corruption Layer (ACL).

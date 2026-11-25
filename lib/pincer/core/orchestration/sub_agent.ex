@@ -94,7 +94,7 @@ defmodule Pincer.Core.Orchestration.SubAgent do
   alias Pincer.Core.Executor
   alias Pincer.Core.Orchestration.Blackboard
   alias Pincer.Core.Orchestration.SubAgentRegistry
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
 
   @checkpoint_statuses ~w(running paused completed finished failed interrupted)
   @checkpoint_interval 10

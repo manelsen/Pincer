@@ -4,7 +4,7 @@ defmodule Pincer.Core.Streaming.AdapterTest do
   alias Pincer.Core.Streaming.Adapter
 
   defmodule Stub do
-    @behaviour Pincer.Ports.Streaming
+    @behaviour PincerPorts.Streaming
 
     def stream_initial_state, do: {:stream_initial_state}
     def stream_extract(assigns), do: {:stream_extract, assigns}
@@ -43,16 +43,16 @@ defmodule Pincer.Core.Streaming.AdapterTest do
       |> Keyword.get_values(:behaviour)
       |> List.flatten()
 
-    assert Pincer.Ports.Streaming in behaviours
+    assert PincerPorts.Streaming in behaviours
 
-    for {fun, arity} <- Pincer.Ports.Streaming.behaviour_info(:callbacks) do
+    for {fun, arity} <- PincerPorts.Streaming.behaviour_info(:callbacks) do
       assert function_exported?(Adapter, fun, arity),
              "Adapter does not implement #{fun}/#{arity}"
     end
   end
 
   test "the test double covers every port callback" do
-    for {fun, arity} <- Pincer.Ports.Streaming.behaviour_info(:callbacks) do
+    for {fun, arity} <- PincerPorts.Streaming.behaviour_info(:callbacks) do
       assert function_exported?(Stub, fun, arity),
              "Stub does not implement #{fun}/#{arity} - update it with the port"
     end

@@ -6,7 +6,7 @@ defmodule Pincer.LLM.Providers.OpenRouter do
   - Strongly compatible with OpenAI (`https://openrouter.ai/api/v1/chat/completions`).
   - Requires `HTTP-Referer` and `X-Title` headers for application ranking.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   @impl true
   def chat_completion(messages, model, config, tools) do

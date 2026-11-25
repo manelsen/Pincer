@@ -10,7 +10,7 @@ defmodule Pincer.Contracts.ChannelAdapterContractTest do
     Enum.each(@channel_modules, fn channel_module ->
       behaviours = channel_module.module_info(:attributes)[:behaviour] || []
 
-      assert Pincer.Ports.Channel in behaviours or Supervisor in behaviours
+      assert PincerPorts.Channel in behaviours or Supervisor in behaviours
       assert function_exported?(channel_module, :start_link, 1)
       assert function_exported?(channel_module, :send_message, 2)
       assert function_exported?(channel_module, :update_message, 3)

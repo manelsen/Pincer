@@ -1,6 +1,5 @@
 defmodule Pincer.Channels.WhatsApp.Session do
   @compile {:no_warn_undefined, [
-    Pincer.Core.Session.Context,
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM
   ]}
@@ -8,9 +7,9 @@ defmodule Pincer.Channels.WhatsApp.Session do
   @moduledoc """
   WhatsApp session worker that forwards session PubSub events to a chat ID.
   """
-  use Pincer.Ports.Channel
+  use PincerPorts.Channel
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def start_link(%{chat_id: chat_id} = args) do
     GenServer.start_link(__MODULE__, args, name: via_tuple(chat_id))
   end
@@ -20,14 +19,14 @@ defmodule Pincer.Channels.WhatsApp.Session do
   end
 
   defp via_tuple(chat_id),
-    do: {:via, Registry, {Pincer.Ports.Session.registry(), "whatsapp_session_worker_#{chat_id}"}}
+    do: {:via, Registry, {PincerPorts.Session.registry(), "whatsapp_session_worker_#{chat_id}"}}
 
   def ensure_started(chat_id, session_id \\ nil)
 
   def ensure_started(chat_id, session_id) do
     session_id = normalize_session_id(chat_id, session_id)
 
-    case Registry.lookup(Pincer.Ports.Session.registry(), "whatsapp_session_worker_#{chat_id}") do
+    case Registry.lookup(PincerPorts.Session.registry(), "whatsapp_session_worker_#{chat_id}") do
       [] ->
         case Pincer.Channels.WhatsApp.SessionSupervisor.start_session(chat_id, session_id) do
           {:ok, pid} ->
@@ -63,10 +62,10 @@ defmodule Pincer.Channels.WhatsApp.Session do
     {:ok, %{chat_id: chat_id, session_id: session_id}}
   end
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def handles_session?(id), do: String.starts_with?(id, "whatsapp_")
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def resolve_recipient(id) do
     case String.split(id, "_", parts: 2) do
       ["whatsapp", chat_id] -> chat_id
@@ -74,7 +73,7 @@ defmodule Pincer.Channels.WhatsApp.Session do
     end
   end
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def send_message(chat_id, text) do
     Pincer.Channels.WhatsApp.send_message(chat_id, text)
   end
@@ -108,7 +107,7 @@ defmodule Pincer.Channels.WhatsApp.Session do
   def on_agent_error(text, state) do
     Pincer.Channels.WhatsApp.send_message(
       state.chat_id,
-      Pincer.Ports.ChannelPolicy.error_message(:whatsapp, text)
+      PincerPorts.ChannelPolicy.error_message(:whatsapp, text)
     )
 
     maybe_recover_project_flow(state)
@@ -142,14 +141,14 @@ defmodule Pincer.Channels.WhatsApp.Session do
     do: Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
 
   defp maybe_advance_project_flow(state) do
-    Pincer.Ports.Project.on_agent_response(
+    PincerPorts.Project.on_agent_response(
       state.session_id,
       send_message: fn text -> Pincer.Channels.WhatsApp.send_message(state.chat_id, text) end
     )
   end
 
   defp maybe_recover_project_flow(state) do
-    Pincer.Ports.Project.on_agent_error(
+    PincerPorts.Project.on_agent_error(
       state.session_id,
       send_message: fn text -> Pincer.Channels.WhatsApp.send_message(state.chat_id, text) end
     )

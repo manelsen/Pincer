@@ -63,7 +63,7 @@ defmodule Pincer.Core.Routing do
 
   ## Adding a New Channel
 
-  1. Implement `Pincer.Ports.Channel` behaviour in `lib/pincer/channels/<name>.ex`.
+  1. Implement `PincerPorts.Channel` behaviour in `lib/pincer/channels/<name>.ex`.
   2. Register it in `config.yaml` under `channels:`.
   3. The channel supervisor (`Pincer.Channels.Supervisor`) starts it automatically.
 
@@ -80,7 +80,7 @@ defmodule Pincer.Core.Routing do
   - `Pincer.Core.ProjectRouter` — slash command parsing and dispatch
   - `Pincer.Core.Executor` — agentic reasoning loop
   - `Pincer.Core.Session.Server` — per-user session state
-  - `Pincer.Ports.Channel` — channel adapter behaviour contract
+  - `PincerPorts.Channel` — channel adapter behaviour contract
   - `Pincer.Ports.Messaging` — outbound messaging port
   """
 end

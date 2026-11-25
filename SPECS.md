@@ -211,14 +211,14 @@ tool execution, trace emission), removing process-dictionary dependency injectio
 `:horde` (default, cluster-wide via `Horde.Registry`) and `:local` (via Elixir
 `Registry`) backends with `keys: :unique`, replacing per-domain registry wrappers.
 
-### 12. Boundary Normalization (`Pincer.Infra.Config`, `Pincer.Core.Structs.Usage`)
+### 12. Boundary Normalization (`Pincer.Infra.Config`, `PincerPorts.Structs.Usage`)
 
 External payloads are normalized once at ingestion boundaries:
 
 - `Pincer.Infra.Config.load_file/1` and `normalize_keys/1` convert YAML and merged
   configuration keys to canonical `snake_case` strings at load time (preserving
   structs and uppercase env-var keys), eliminating camelCase/snake_case dual lookups.
-- `Pincer.Core.Structs.Usage` defines `%Usage{prompt_tokens, completion_tokens, total_tokens}`
+- `PincerPorts.Structs.Usage` defines `%Usage{prompt_tokens, completion_tokens, total_tokens}`
   normalized once at `Pincer.LLM.Client`, `Executor`, and `Session.Preferences` boundaries.
 - `model_override` is normalized to atom-keyed maps (`%{provider: ..., model: ...}`).
 

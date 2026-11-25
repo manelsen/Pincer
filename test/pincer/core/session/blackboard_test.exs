@@ -2,7 +2,7 @@ defmodule Pincer.Core.Session.BlackboardTest do
   use ExUnit.Case, async: true
 
   alias Pincer.Core.Session.Blackboard, as: SessionBlackboard
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
 
   defmodule LLMStub do
     def chat_completion(_history, _opts) do

@@ -74,11 +74,11 @@ defmodule Pincer.Channels.CLI do
       Pincer.Channels.CLI.send_message("cli_user", "Response text")
   """
 
-  use Pincer.Ports.Channel
+  use PincerPorts.Channel
 
-  alias Pincer.Ports.Session
+  alias PincerPorts.Session
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def start_link(_config) do
     GenServer.start_link(__MODULE__, %{frontend_pid: nil}, name: __MODULE__)
   end
@@ -112,7 +112,7 @@ defmodule Pincer.Channels.CLI do
   @doc """
   Sends a message to the CLI frontend.
 
-  This implements the `Pincer.Ports.Channel.send_message/2` callback. The message
+  This implements the `PincerPorts.Channel.send_message/2` callback. The message
   is dispatched to the attached frontend via `:dispatch` cast.
 
   ## Parameters
@@ -129,13 +129,13 @@ defmodule Pincer.Channels.CLI do
       Pincer.Channels.CLI.send_message("cli_user", "Hello from the agent!")
   """
   @spec send_message(chat_id :: String.t(), text :: String.t()) :: :ok
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def send_message(_chat_id, text) do
     GenServer.cast(__MODULE__, {:dispatch, text})
     :ok
   end
 
-  alias Pincer.Core.Structs.IncomingMessage
+  alias PincerPorts.Structs.IncomingMessage
 
   @doc false
   @impl true

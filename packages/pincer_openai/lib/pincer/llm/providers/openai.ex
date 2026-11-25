@@ -9,7 +9,7 @@ defmodule Pincer.LLM.Providers.OpenAI do
   - `list_models/1` discovers available models via `GET /v1/models`.
   - API key is read from the `OPENAI_API_KEY` environment variable.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   require Logger
 

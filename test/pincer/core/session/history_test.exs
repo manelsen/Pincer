@@ -2,7 +2,7 @@ defmodule Pincer.Core.Session.HistoryTest do
   use ExUnit.Case, async: true
 
   alias Pincer.Core.Session.History
-  alias Pincer.Core.Structs.IncomingMessage
+  alias PincerPorts.Structs.IncomingMessage
 
   defmodule StorageSpy do
     def get_messages("s-with-history"),

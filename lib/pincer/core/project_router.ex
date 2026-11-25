@@ -7,7 +7,7 @@ defmodule Pincer.Core.ProjectRouter do
   alias Pincer.Core.Project.Server, as: ProjectServer
   alias Pincer.Core.Project.Store
   alias Pincer.Core.ProjectOrchestrator
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
 
   @doc """
   Parses a textual command into a structured `{:ok, command, args}` tuple.

@@ -6,7 +6,7 @@ defmodule Pincer.Core.UX.AdapterTest do
   alias Pincer.Core.UX.Adapter
 
   defmodule Stub do
-    @behaviour Pincer.Ports.UX
+    @behaviour PincerPorts.UX
 
     def commands, do: {:commands}
     def help_text(channel), do: {:help_text, channel}
@@ -26,16 +26,16 @@ defmodule Pincer.Core.UX.AdapterTest do
       |> Keyword.get_values(:behaviour)
       |> List.flatten()
 
-    assert Pincer.Ports.UX in behaviours
+    assert PincerPorts.UX in behaviours
 
-    for {fun, arity} <- Pincer.Ports.UX.behaviour_info(:callbacks) do
+    for {fun, arity} <- PincerPorts.UX.behaviour_info(:callbacks) do
       assert function_exported?(Adapter, fun, arity),
              "Adapter does not implement #{fun}/#{arity}"
     end
   end
 
   test "the test double covers every port callback" do
-    for {fun, arity} <- Pincer.Ports.UX.behaviour_info(:callbacks) do
+    for {fun, arity} <- PincerPorts.UX.behaviour_info(:callbacks) do
       assert function_exported?(Stub, fun, arity),
              "Stub does not implement #{fun}/#{arity} - update it with the port"
     end

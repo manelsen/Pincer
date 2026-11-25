@@ -27,20 +27,20 @@ defmodule Pincer.Channels.Line.Session do
   - `Pincer.Channels.Line.API` - LINE Messaging API client
   """
 
-  use Pincer.Ports.Channel
+  use PincerPorts.Channel
   @chunk_size 500
 
   # Sentence-ending punctuation followed by whitespace or end-of-string
   @sentence_boundary ~r/[.!?](\s|$)/
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def start_link(%{chat_id: chat_id} = args) do
     GenServer.start_link(__MODULE__, args, name: via_tuple(chat_id))
   end
 
   @spec ensure_started(String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
   def ensure_started(chat_id, session_id) do
-    case Registry.lookup(Pincer.Ports.Session.registry(), worker_key(chat_id)) do
+    case Registry.lookup(PincerPorts.Session.registry(), worker_key(chat_id)) do
       [{pid, _}] ->
         GenServer.cast(pid, {:bind_session, session_id})
         {:ok, pid}
@@ -58,12 +58,12 @@ defmodule Pincer.Channels.Line.Session do
     {:ok, initial_state(chat_id, session_id)}
   end
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def handles_session?(id) do
     String.starts_with?(id, "line_")
   end
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def resolve_recipient(id) do
     case String.split(id, "_", parts: 2) do
       ["line", user_id] -> user_id
@@ -71,7 +71,7 @@ defmodule Pincer.Channels.Line.Session do
     end
   end
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def send_message(chat_id, text) do
     Pincer.Channels.Line.send_message(chat_id, text)
   end
@@ -152,7 +152,7 @@ defmodule Pincer.Channels.Line.Session do
   end
 
   defp via_tuple(chat_id) do
-    {:via, Registry, {Pincer.Ports.Session.registry(), worker_key(chat_id)}}
+    {:via, Registry, {PincerPorts.Session.registry(), worker_key(chat_id)}}
   end
 
   defp worker_key(chat_id), do: "line_session_worker_#{chat_id}"
