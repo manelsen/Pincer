@@ -57,15 +57,15 @@ defmodule Pincer.Ports.SandboxTest do
   end
 
   setup do
-    previous = Application.get_env(:pincer, :sandbox_adapter)
+    keys = [:sandbox_adapter, :sandbox_adapters]
+    previous = Enum.map(keys, &{&1, Application.fetch_env(:pincer, &1)})
     Application.put_env(:pincer, :sandbox_adapter, FakeSandboxAdapter)
 
     on_exit(fn ->
-      if previous do
-        Application.put_env(:pincer, :sandbox_adapter, previous)
-      else
-        Application.delete_env(:pincer, :sandbox_adapter)
-      end
+      Enum.each(previous, fn
+        {key, {:ok, value}} -> Application.put_env(:pincer, key, value)
+        {key, :error} -> Application.delete_env(:pincer, key)
+      end)
     end)
 
     :ok
@@ -134,20 +134,20 @@ defmodule Pincer.Ports.SandboxTest do
     end
 
     test "resolves short names via :sandbox_adapters application config" do
-      previous = Application.fetch_env(:pincer, :sandbox_adapters)
-
-      on_exit(fn ->
-        case previous do
-          {:ok, val} -> Application.put_env(:pincer, :sandbox_adapters, val)
-          :error -> Application.delete_env(:pincer, :sandbox_adapters)
-        end
-      end)
-
       Application.put_env(:pincer, :sandbox_adapters, %{local: FakeSandboxAdapter})
       assert {:ok, FakeSandboxAdapter} = Sandbox.resolve_adapter(:local)
       assert {:ok, FakeSandboxAdapter} = Sandbox.resolve_adapter("local")
       assert {:error, {:unknown_sandbox_adapter, :docker}} = Sandbox.resolve_adapter(:docker)
       assert {:error, {:unknown_sandbox_adapter, "ssh"}} = Sandbox.resolve_adapter("ssh")
+    end
+
+    test "fully qualified module names resolve without the short-name registry" do
+      Application.delete_env(:pincer, :sandbox_adapters)
+
+      assert {:ok, Pincer.Adapters.Sandbox.Docker} =
+               Sandbox.resolve_adapter("Pincer.Adapters.Sandbox.Docker")
+
+      assert {:error, {:unknown_sandbox_adapter, "docker"}} = Sandbox.resolve_adapter("docker")
     end
   end
 
