@@ -59,6 +59,30 @@ jobs:
       - name: Run QA gate (format + compile + test)
         run: mix qa
 
+  package-isolation:
+    name: Standalone Package Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Elixir and OTP
+        uses: erlef/setup-beam@v1
+        with:
+          elixir-version: "1.20.5"
+          otp-version: "27.2"
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: packages/pincer_whatsapp/priv/src/whatsapp_bridge/go.sum
+
+      - name: Build and test packages outside the host application
+        run: elixir scripts/check_packages.exs
+
   sqlite-smoke:
     name: Zero-Infra SQLite Smoke & Posture Gate
     runs-on: ubuntu-latest

@@ -6,10 +6,14 @@ defmodule Pincer.Channels.TelegramTest do
   alias Pincer.Channels.Telegram.APIMock
 
   setup do
+    previous = Application.fetch_env(:pincer, :telegram_api)
     Application.put_env(:pincer, :telegram_api, APIMock)
 
     on_exit(fn ->
-      Application.put_env(:pincer, :telegram_api, Pincer.Channels.TestAdapter)
+      case previous do
+        {:ok, adapter} -> Application.put_env(:pincer, :telegram_api, adapter)
+        :error -> Application.delete_env(:pincer, :telegram_api)
+      end
     end)
 
     verify_on_exit!()

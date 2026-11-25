@@ -6,6 +6,7 @@ defmodule PincerWebhook.MixProject do
       app: :pincer_webhook,
       version: "0.1.0",
       elixir: "~> 1.14",
+      elixirc_options: [warnings_as_errors: true],
       start_permanent: false,
       deps: [{:pincer_ports, "~> 0.1"}, {:pincer_shared, "~> 0.1"}],
       description: "HTTP webhook channel adapter for the Pincer AI agent framework",
