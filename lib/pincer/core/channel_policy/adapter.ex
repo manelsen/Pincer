@@ -8,7 +8,8 @@ defmodule Pincer.Core.ChannelPolicy.Adapter do
 
   @behaviour PincerPorts.ChannelPolicy
 
-  alias Pincer.Core.{ChannelEventPolicy, ChannelInteractionPolicy, Pairing, Policy}
+  alias Pincer.Core.{ChannelEventPolicy, Pairing, Policy}
+  alias Pincer.Core.UX.ChannelInteractionPolicy
 
   @impl true
   def allow?(kind, attrs), do: Policy.allow?(kind, attrs)

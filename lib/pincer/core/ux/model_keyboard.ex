@@ -1,7 +1,7 @@
 defmodule Pincer.Core.UX.ModelKeyboard do
   @moduledoc "Model button pagination module for channel keyboards."
 
-  alias Pincer.Core.ChannelInteractionPolicy
+  alias Pincer.Core.UX.ChannelInteractionPolicy
 
   @page_size 8
 

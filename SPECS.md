@@ -263,6 +263,17 @@ to Pincer's package applications. Calls to an external package boundary require
 an explicit dependency on that boundary. Host configuration selects the
 concrete channel and provider modules.
 
+### 12.4. Core exports
+
+`Pincer.Core` exports modules used from outside Core by host code or named
+as adapters in host configuration. The architecture test uses compiler
+references for host code, including supervised children and Mix tasks, and
+checks configuration and package sources separately. Registered process names
+do not require exports.
+
+`Pincer.Core.UX` owns the interaction payload policy for model selectors,
+menus, and approval buttons.
+
 ### 13. Channel-Owned Formatting (`Pincer.Channels.Telegram.ResponseEnvelope`)
 
 Telegram HTML usage-footer formatting and reasoning delivery options reside in

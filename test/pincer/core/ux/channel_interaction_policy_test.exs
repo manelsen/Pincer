@@ -1,7 +1,7 @@
-defmodule Pincer.Core.ChannelInteractionPolicyTest do
+defmodule Pincer.Core.UX.ChannelInteractionPolicyTest do
   use ExUnit.Case, async: true
 
-  alias Pincer.Core.ChannelInteractionPolicy
+  alias Pincer.Core.UX.ChannelInteractionPolicy
 
   describe "payload builders" do
     test "builds provider selector payload within channel limits" do
