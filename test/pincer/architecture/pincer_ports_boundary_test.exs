@@ -98,7 +98,8 @@ defmodule Pincer.Architecture.PincerPortsBoundaryTest do
       |> Keyword.get(:exports, [])
       |> Enum.map(&Macro.to_string/1)
 
-    for expected <- ~w(Channel ChannelPolicy LLM Project PubSub Session SkillsRegistry Streaming UX) do
+    for expected <-
+          ~w(Channel ChannelPolicy LLM Project PubSub Session SkillsRegistry Streaming UX) do
       assert expected in exports
     end
   end
