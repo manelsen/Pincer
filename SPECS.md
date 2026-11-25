@@ -240,6 +240,13 @@ the shared port for model and provider discovery and audio transcription.
 `Pincer.Ports.LLM` forwards calls during the migration and preserves the
 existing callback declarations and default arguments.
 
+`Pincer.LLM.Client` dispatches chat and streaming requests through one provider
+and auth selection path. The retry engine keeps the current request, retry
+budget, and failover state together. A terminal failure re-enters the same
+action through `FailoverDispatch`. An invalid stream may use a one-shot chat
+fallback on the same route. Attempt counts appear in stop telemetry. Session
+status messages keep their action, provider, model, and reason.
+
 ### 12.1. Channel PubSub (`PincerPorts.PubSub`)
 
 - Channel packages subscribe with `PincerPorts.PubSub.subscribe/1` and remove subscriptions with `unsubscribe/1`. The `PincerPorts.Channel` macro subscribes channel workers to `system:delivery`.

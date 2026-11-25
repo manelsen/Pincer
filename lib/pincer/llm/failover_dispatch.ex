@@ -59,15 +59,10 @@ defmodule Pincer.LLM.FailoverDispatch do
     deps.retry.(next_state.current_provider, next_state.current_model, next_state)
   end
 
-  defp dispatch({:fallback_model, provider, model}, next_state, action, reason, deps) do
-    report(:fallback_model, next_state, action, reason, %{provider: provider, model: model}, deps)
-
-    deps.retry.(provider, model, next_state)
-  end
-
-  defp dispatch({:fallback_provider, provider, model}, next_state, action, reason, deps) do
+  defp dispatch({fallback, provider, model}, next_state, action, reason, deps)
+       when fallback in [:fallback_model, :fallback_provider] do
     report(
-      :fallback_provider,
+      fallback,
       next_state,
       action,
       reason,
@@ -99,7 +94,7 @@ defmodule Pincer.LLM.FailoverDispatch do
           model: next_state.current_model,
           reason: CooldownRouting.reason_label(reason)
         },
-        extra
+        Map.take(extra, [:provider, :model])
       )
     )
   end
