@@ -27,6 +27,13 @@ defmodule Pincer.Utils.TextTest do
     assert Text.strip_reasoning(input) == "Ola! Como posso ajudar?"
   end
 
+  test "format_reasoning_html through the root utility preserves rendered output" do
+    input = "<thought>a & b</thought> Visible"
+
+    assert Text.format_reasoning_html(input) ==
+             "<b>💭 Reasoning</b>\n<i>&lt;thought&gt;a &amp; b&lt;/thought&gt;</i> Visible"
+  end
+
   test "extract_xml_tool_calls does not break closed thinking blocks" do
     input = "<thinking>\nsegredo interno\n</thinking>\n\nOla! Como posso ajudar?"
 
