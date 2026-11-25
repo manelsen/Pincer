@@ -9,8 +9,6 @@ defmodule Pincer.Core.UX do
     deps: [Pincer.Core, Pincer.Ports],
     exports: [Adapter, ChannelInteractionPolicy, MenuPolicy, ModelKeyboard]
 
-  @behaviour Pincer.Ports.UserMenu
-
   @type command :: %{name: String.t(), description: String.t()}
   @type shortcut_result :: {:ok, String.t()} | :error
 
