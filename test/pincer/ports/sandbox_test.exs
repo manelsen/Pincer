@@ -71,44 +71,6 @@ defmodule Pincer.Ports.SandboxTest do
     :ok
   end
 
-  describe "validate_env/1" do
-    test "accepts nil, empty list, keyword-like tuples, and string maps" do
-      assert {:ok, []} = Sandbox.validate_env(nil)
-      assert {:ok, []} = Sandbox.validate_env([])
-
-      assert {:ok, [{"FOO", "bar"}, {"BAZ_1", "qux"}]} =
-               Sandbox.validate_env([{"FOO", "bar"}, {"BAZ_1", "qux"}])
-
-      assert {:ok, normalized} = Sandbox.validate_env(%{"FOO_1" => "val", "BAR" => "2"})
-      assert Enum.sort(normalized) == [{"BAR", "2"}, {"FOO_1", "val"}]
-    end
-
-    test "rejects dangerous loader and shell startup environment variables" do
-      for forbidden <- [
-            "LD_PRELOAD",
-            "LD_LIBRARY_PATH",
-            "DYLD_INSERT_LIBRARIES",
-            "DYLD_LIBRARY_PATH",
-            "BASH_ENV",
-            "ENV",
-            "IFS"
-          ] do
-        assert {:error, {:forbidden_env, ^forbidden}} =
-                 Sandbox.validate_env([{forbidden, "/tmp/evil.so"}])
-      end
-    end
-
-    test "rejects malformed variable names and non-binary entries" do
-      for bad_key <- ["", "BAD-KEY", "123", "FOO=BAR", "a;b", "HAS SPACE"] do
-        assert {:error, {:invalid_env_key, ^bad_key}} = Sandbox.validate_env([{bad_key, "ok"}])
-      end
-
-      assert {:error, :invalid_env_entry} = Sandbox.validate_env([{:ATOM_KEY, "val"}])
-      assert {:error, :invalid_env_entry} = Sandbox.validate_env([{"VALID_KEY", 123}])
-      assert {:error, :invalid_env_entry} = Sandbox.validate_env(["NOT_A_TUPLE"])
-    end
-  end
-
   describe "resolve_adapter/1" do
     test "resolves short names, atoms, and known module strings" do
       assert {:ok, Pincer.Adapters.Sandbox.Local} = Sandbox.resolve_adapter("local")
@@ -195,36 +157,6 @@ defmodule Pincer.Ports.SandboxTest do
       Application.put_env(:pincer, :sandbox_adapter, ProbeSandboxAdapter)
 
       assert Sandbox.probe() == {:error, :nope}
-    end
-  end
-
-  describe "backend_config/1 and run_with_timeout/2" do
-    test "reads configured backend options ignoring unknown string keys safely" do
-      previous_cfg = Application.get_env(:pincer, :sandbox)
-
-      on_exit(fn ->
-        if previous_cfg do
-          Application.put_env(:pincer, :sandbox, previous_cfg)
-        else
-          Application.delete_env(:pincer, :sandbox)
-        end
-      end)
-
-      Application.put_env(:pincer, :sandbox, %{
-        "docker" => %{"image" => "elixir:1.18", "nonexistent_atom_key_xyz_987" => "ignored"}
-      })
-
-      cfg = Sandbox.backend_config(:docker)
-      assert Keyword.get(cfg, :image) == "elixir:1.18"
-      assert Sandbox.backend_config(:ssh) == []
-    end
-
-    test "enforces timeout and returns task exit errors cleanly" do
-      assert {:ok, :done} = Sandbox.run_with_timeout(fn -> :done end, 1_000)
-      assert {:ok, :no_timer} = Sandbox.run_with_timeout(fn -> :no_timer end, :infinity)
-
-      assert {:error, :timeout} =
-               Sandbox.run_with_timeout(fn -> Process.sleep(200) end, 25)
     end
   end
 end

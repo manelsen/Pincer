@@ -14,7 +14,7 @@ defmodule Pincer.Adapters.Sandbox.Bwrap do
   Linux only. Fail-closed: callers must treat an unavailable probe as an error.
   """
 
-  alias Pincer.Ports.Sandbox
+  alias Pincer.Adapters.Sandbox.Runtime
 
   @default_system_paths ["/usr", "/bin", "/lib", "/lib64"]
   @default_limits %{memory_mb: 1_024, cpu_seconds: 120, pids: 4_096, open_files: 1_024}
@@ -83,7 +83,7 @@ defmodule Pincer.Adapters.Sandbox.Bwrap do
   `:workspace_path` is required and must be an existing directory other than
   `/`. An optional `:cwd` must be the workspace itself or a directory inside it;
   it is mapped to `/workspace` or `/workspace/<relative>`. Environment entries
-  are expected to be validated by `Pincer.Ports.Sandbox.validate_env/1`.
+  are expected to be validated by `Pincer.Adapters.Sandbox.Runtime.validate_env/1`.
   """
   @spec build_command(String.t(), keyword()) ::
           {:ok, {String.t(), [String.t()]}} | {:error, term()}
@@ -335,7 +335,7 @@ defmodule Pincer.Adapters.Sandbox.Bwrap do
       end
     end
 
-    case Sandbox.run_with_timeout(probe_fun, @probe_timeout_ms) do
+    case Runtime.run_with_timeout(probe_fun, @probe_timeout_ms) do
       {:ok, {_output, 0}} ->
         :ok
 
