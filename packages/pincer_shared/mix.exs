@@ -12,8 +12,12 @@ defmodule PincerShared.MixProject do
       elixirc_options: [warnings_as_errors: true],
       start_permanent: false,
       compilers: [:boundary] ++ Mix.compilers(),
-      deps: [{:boundary, "~> 0.12", runtime: false}],
-      description: "Shared utilities for Pincer channel adapters (TokenCache, WebhookVerifier)",
+      deps: [
+        {:pincer_ports, "~> 0.1"},
+        {:boundary, "~> 0.12", runtime: false}
+      ],
+      description:
+        "Shared utilities for Pincer channel adapters (Inbound, SessionBridge, Text, TokenCache, WebhookVerifier)",
       package: package(),
       name: "PincerShared",
       source_url: @source_url

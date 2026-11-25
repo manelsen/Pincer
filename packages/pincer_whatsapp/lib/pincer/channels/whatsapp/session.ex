@@ -1,9 +1,9 @@
 defmodule Pincer.Channels.WhatsApp.Session do
-
   @moduledoc """
   WhatsApp session worker that forwards session PubSub events to a chat ID.
   """
   use PincerPorts.Channel
+  alias Pincer.Channels.Shared.SessionBridge
 
   @impl PincerPorts.Channel
   def start_link(%{chat_id: chat_id} = args) do
@@ -14,60 +14,39 @@ defmodule Pincer.Channels.WhatsApp.Session do
     GenServer.start_link(__MODULE__, chat_id, name: via_tuple(chat_id))
   end
 
-  defp via_tuple(chat_id),
-    do: {:via, Registry, {PincerPorts.Session.registry(), "whatsapp_session_worker_#{chat_id}"}}
+  defp via_tuple(chat_id), do: SessionBridge.via_tuple(:whatsapp, chat_id)
 
   def ensure_started(chat_id, session_id \\ nil)
 
   def ensure_started(chat_id, session_id) do
-    session_id = normalize_session_id(chat_id, session_id)
-
-    case Registry.lookup(PincerPorts.Session.registry(), "whatsapp_session_worker_#{chat_id}") do
-      [] ->
-        case Pincer.Channels.WhatsApp.SessionSupervisor.start_session(chat_id, session_id) do
-          {:ok, pid} ->
-            {:ok, pid}
-
-          {:error, {:already_started, pid}} ->
-            GenServer.cast(pid, {:bind_session, session_id})
-            {:error, {:already_started, pid}}
-
-          {:error, _reason} = error ->
-            error
-        end
-
-      [{pid, _value}] ->
-        GenServer.cast(pid, {:bind_session, session_id})
-        {:error, {:already_started, pid}}
-    end
+    SessionBridge.ensure_started({:whatsapp, chat_id},
+      session_id: session_id,
+      start_worker: &Pincer.Channels.WhatsApp.SessionSupervisor.start_session/2,
+      already_started: :error
+    )
   end
 
   @impl true
   def init(%{chat_id: chat_id, session_id: session_id} = args)
       when is_binary(session_id) and session_id != "" do
     super(args)
-    subscribe_session(session_id)
-    {:ok, %{chat_id: chat_id, session_id: session_id}}
+    SessionBridge.subscribe(session_id)
+    {:ok, SessionBridge.initial_state(%{chat_id: chat_id, session_id: session_id})}
   end
 
   @impl true
   def init(chat_id) do
-    session_id = default_session_id(chat_id)
+    session_id = SessionBridge.default_session_id(:whatsapp, chat_id)
     super(chat_id)
-    subscribe_session(session_id)
-    {:ok, %{chat_id: chat_id, session_id: session_id}}
+    SessionBridge.subscribe(session_id)
+    {:ok, SessionBridge.initial_state(%{chat_id: chat_id, session_id: session_id})}
   end
 
   @impl PincerPorts.Channel
-  def handles_session?(id), do: String.starts_with?(id, "whatsapp_")
+  def handles_session?(id), do: SessionBridge.handles_session?(:whatsapp, id)
 
   @impl PincerPorts.Channel
-  def resolve_recipient(id) do
-    case String.split(id, "_", parts: 2) do
-      ["whatsapp", chat_id] -> chat_id
-      _ -> id
-    end
-  end
+  def resolve_recipient(id), do: SessionBridge.resolve_recipient(:whatsapp, id)
 
   @impl PincerPorts.Channel
   def send_message(chat_id, text) do
@@ -77,18 +56,9 @@ defmodule Pincer.Channels.WhatsApp.Session do
   # --- Session bind ---
 
   @impl true
-  def handle_cast({:bind_session, session_id}, state) when is_binary(session_id) do
-    if state.session_id == session_id do
-      {:noreply, state}
-    else
-      unsubscribe_session(state.session_id)
-      subscribe_session(session_id)
-      {:noreply, %{state | session_id: session_id}}
-    end
+  def handle_cast({:bind_session, session_id}, state) do
+    SessionBridge.bind_session(state, session_id)
   end
-
-  @impl true
-  def handle_cast({:bind_session, _invalid_session_id}, state), do: {:noreply, state}
 
   # --- Session PubSub callbacks ---
 
@@ -122,19 +92,6 @@ defmodule Pincer.Channels.WhatsApp.Session do
   # on_approval_ui → no-op (macro default)
 
   # --- Private helpers ---
-
-  defp default_session_id(chat_id), do: "whatsapp_#{chat_id}"
-
-  defp normalize_session_id(_chat_id, session_id)
-       when is_binary(session_id) and session_id != "",
-       do: session_id
-
-  defp normalize_session_id(chat_id, _), do: default_session_id(chat_id)
-
-  defp subscribe_session(session_id), do: PincerPorts.PubSub.subscribe("session:#{session_id}")
-
-  defp unsubscribe_session(session_id),
-    do: PincerPorts.PubSub.unsubscribe("session:#{session_id}")
 
   defp maybe_advance_project_flow(state) do
     PincerPorts.Project.on_agent_response(

@@ -1777,22 +1777,13 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp ensure_session_started(%PincerPorts.Session.Context{} = context) do
-    start_opts =
-      context
-      |> PincerPorts.Session.Context.to_start_opts()
-      |> Keyword.delete(:session_id)
-
-    case Registry.lookup(PincerPorts.Session.registry(), context.session_id) do
-      [] ->
+    Pincer.Channels.Shared.SessionBridge.ensure_started(context,
+      on_start: fn sid ->
         Logger.info(
-          "[TELEGRAM] Creating new session: #{context.session_id} (root_agent=#{context.root_agent_id})"
+          "[TELEGRAM] Creating new session: #{sid} (root_agent=#{context.root_agent_id})"
         )
-
-        PincerPorts.Session.start_session(context.session_id, start_opts)
-
-      [_] ->
-        :ok
-    end
+      end
+    )
   end
 
   defp pairing_success_message(chat_id) do

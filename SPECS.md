@@ -362,6 +362,19 @@ configured service endpoint directly.
 Channels continue emitting the existing attachment fields, including the
 `url` field that holds the opaque reference.
 
+### 13.3. Shared channel session bridge
+
+`Pincer.Channels.Shared.SessionBridge` centralizes per-channel worker
+registration (`via_tuple/2-3`), worker/session startup (`ensure_started/2`),
+PubSub subscription lifecycle (`subscribe/1`, `unsubscribe/1`, `bind_session/2-3`),
+session identifier helpers (`default_session_id/2`, `normalize_session_id/3`,
+`handles_session?/2`, `resolve_recipient/2`), and worker state initialization
+(`initial_state/2`).
+
+Channel session workers and adapters delegate session lifecycle mechanics to
+`SessionBridge` while keeping transport-specific streaming, card updates, and
+project-flow delivery callbacks in each channel package.
+
 ---
 
 ### 14. Sandbox Execution Port (`Pincer.Ports.Sandbox`)

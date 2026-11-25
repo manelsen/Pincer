@@ -4,6 +4,7 @@ defmodule Pincer.Channels.Discord.Session do
   One process per active Discord channel that listens to PubSub and sends messages via Nostrum.
   """
   use PincerPorts.Channel
+  alias Pincer.Channels.Shared.SessionBridge
 
   @impl PincerPorts.Channel
   def start_link(%{channel_id: channel_id} = args) do
@@ -14,62 +15,41 @@ defmodule Pincer.Channels.Discord.Session do
     GenServer.start_link(__MODULE__, channel_id, name: via_tuple(channel_id))
   end
 
-  defp via_tuple(channel_id),
-    do: {:via, Registry, {PincerPorts.Session.registry(), "discord_session_worker_#{channel_id}"}}
+  defp via_tuple(channel_id), do: SessionBridge.via_tuple(:discord, channel_id)
 
   def ensure_started(channel_id, session_id \\ nil)
 
   def ensure_started(channel_id, session_id) do
-    session_id = normalize_session_id(channel_id, session_id)
-
-    case Registry.lookup(PincerPorts.Session.registry(), "discord_session_worker_#{channel_id}") do
-      [] ->
-        case Pincer.Channels.Discord.SessionSupervisor.start_session(channel_id, session_id) do
-          {:ok, pid} ->
-            {:ok, pid}
-
-          {:error, {:already_started, pid}} ->
-            GenServer.cast(pid, {:bind_session, session_id})
-            {:error, {:already_started, pid}}
-
-          {:error, _reason} = error ->
-            error
-        end
-
-      [{pid, _value}] ->
-        GenServer.cast(pid, {:bind_session, session_id})
-        {:error, {:already_started, pid}}
-    end
+    SessionBridge.ensure_started({:discord, channel_id},
+      session_id: session_id,
+      start_worker: &Pincer.Channels.Discord.SessionSupervisor.start_session/2,
+      already_started: :error
+    )
   end
 
   @impl true
   def init(%{channel_id: channel_id, session_id: session_id} = args)
       when is_binary(session_id) and session_id != "" do
     super(args)
-    subscribe_session(session_id)
+    SessionBridge.subscribe(session_id)
     Logger.info("[DISCORD SESSION] Worker started for channel: #{channel_id}")
     {:ok, state(channel_id, session_id)}
   end
 
   @impl true
   def init(channel_id) do
-    session_id = default_session_id(channel_id)
+    session_id = SessionBridge.default_session_id(:discord, channel_id)
     super(channel_id)
-    subscribe_session(session_id)
+    SessionBridge.subscribe(session_id)
     Logger.info("[DISCORD SESSION] Worker started for channel: #{channel_id}")
     {:ok, state(channel_id, session_id)}
   end
 
   @impl PincerPorts.Channel
-  def handles_session?(id), do: String.starts_with?(id, "discord_")
+  def handles_session?(id), do: SessionBridge.handles_session?(:discord, id)
 
   @impl PincerPorts.Channel
-  def resolve_recipient(id) do
-    case String.split(id, "_", parts: 2) do
-      ["discord", channel_id] -> channel_id
-      _ -> id
-    end
-  end
+  def resolve_recipient(id), do: SessionBridge.resolve_recipient(:discord, id)
 
   @impl PincerPorts.Channel
   def send_message(channel_id, text) do
@@ -79,18 +59,11 @@ defmodule Pincer.Channels.Discord.Session do
   # --- Session bind ---
 
   @impl true
-  def handle_cast({:bind_session, session_id}, state) when is_binary(session_id) do
-    if state.session_id == session_id do
-      {:noreply, state}
-    else
-      unsubscribe_session(state.session_id)
-      subscribe_session(session_id)
-      {:noreply, state(state.channel_id, session_id)}
-    end
+  def handle_cast({:bind_session, session_id}, state) do
+    SessionBridge.bind_session(state, session_id,
+      on_rebind: fn s, sid -> state(s.channel_id, sid) end
+    )
   end
-
-  @impl true
-  def handle_cast({:bind_session, _invalid_session_id}, state), do: {:noreply, state}
 
   # --- Session PubSub callbacks ---
 
@@ -228,30 +201,14 @@ defmodule Pincer.Channels.Discord.Session do
     )
   end
 
-  defp default_session_id(channel_id), do: "discord_#{channel_id}"
-
-  defp normalize_session_id(_channel_id, session_id)
-       when is_binary(session_id) and session_id != "",
-       do: session_id
-
-  defp normalize_session_id(channel_id, _), do: default_session_id(channel_id)
-
-  defp subscribe_session(session_id), do: PincerPorts.PubSub.subscribe("session:#{session_id}")
-
-  defp unsubscribe_session(session_id),
-    do: PincerPorts.PubSub.unsubscribe("session:#{session_id}")
-
   defp state(channel_id, session_id) do
-    Map.merge(
-      Map.merge(
-        %{
-          channel_id: channel_id,
-          session_id: session_id,
-          subagent_progress_tracker: %{}
-        },
-        PincerPorts.Streaming.status_initial_state()
-      ),
-      PincerPorts.Streaming.stream_initial_state()
+    SessionBridge.initial_state(
+      %{
+        channel_id: channel_id,
+        session_id: session_id,
+        subagent_progress_tracker: %{}
+      },
+      streaming: true
     )
   end
 end

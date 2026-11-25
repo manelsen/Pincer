@@ -24,6 +24,7 @@ defmodule Pincer.Channels.Line.Session do
   """
 
   use PincerPorts.Channel
+  alias Pincer.Channels.Shared.SessionBridge
   @chunk_size 500
 
   # Sentence-ending punctuation followed by whitespace or end-of-string
@@ -36,36 +37,26 @@ defmodule Pincer.Channels.Line.Session do
 
   @spec ensure_started(String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
   def ensure_started(chat_id, session_id) do
-    case Registry.lookup(PincerPorts.Session.registry(), worker_key(chat_id)) do
-      [{pid, _}] ->
-        GenServer.cast(pid, {:bind_session, session_id})
-        {:ok, pid}
-
-      [] ->
-        Pincer.Channels.Line.SessionSupervisor.start_session(chat_id, session_id)
-    end
+    SessionBridge.ensure_started({:line, chat_id},
+      session_id: session_id,
+      start_worker: &Pincer.Channels.Line.SessionSupervisor.start_session/2,
+      already_started: :ok
+    )
   end
 
   @impl true
   def init(%{chat_id: chat_id} = args) do
-    session_id = Map.get(args, :session_id, "line_#{chat_id}")
+    session_id = Map.get(args, :session_id, SessionBridge.default_session_id(:line, chat_id))
     super(args)
-    subscribe_session(session_id)
+    SessionBridge.subscribe(session_id)
     {:ok, initial_state(chat_id, session_id)}
   end
 
   @impl PincerPorts.Channel
-  def handles_session?(id) do
-    String.starts_with?(id, "line_")
-  end
+  def handles_session?(id), do: SessionBridge.handles_session?(:line, id)
 
   @impl PincerPorts.Channel
-  def resolve_recipient(id) do
-    case String.split(id, "_", parts: 2) do
-      ["line", user_id] -> user_id
-      _ -> id
-    end
-  end
+  def resolve_recipient(id), do: SessionBridge.resolve_recipient(:line, id)
 
   @impl PincerPorts.Channel
   def send_message(chat_id, text) do
@@ -73,14 +64,8 @@ defmodule Pincer.Channels.Line.Session do
   end
 
   @impl true
-  def handle_cast({:bind_session, session_id}, state) when is_binary(session_id) do
-    if session_id == state.session_id do
-      {:noreply, state}
-    else
-      unsubscribe_session(state.session_id)
-      subscribe_session(session_id)
-      {:noreply, %{state | session_id: session_id}}
-    end
+  def handle_cast({:bind_session, session_id}, state) do
+    SessionBridge.bind_session(state, session_id)
   end
 
   # --- Session PubSub callbacks ---
@@ -147,25 +132,13 @@ defmodule Pincer.Channels.Line.Session do
     Application.get_env(:pincer, :line_api_module, Pincer.Channels.Line.API)
   end
 
-  defp via_tuple(chat_id) do
-    {:via, Registry, {PincerPorts.Session.registry(), worker_key(chat_id)}}
-  end
-
-  defp worker_key(chat_id), do: "line_session_worker_#{chat_id}"
-
-  defp subscribe_session(session_id) do
-    PincerPorts.PubSub.subscribe("session:#{session_id}")
-  end
-
-  defp unsubscribe_session(session_id) do
-    PincerPorts.PubSub.unsubscribe("session:#{session_id}")
-  end
+  defp via_tuple(chat_id), do: SessionBridge.via_tuple(:line, chat_id)
 
   defp initial_state(chat_id, session_id) do
-    %{
+    SessionBridge.initial_state(%{
       chat_id: chat_id,
       session_id: session_id,
       buffer: ""
-    }
+    })
   end
 end

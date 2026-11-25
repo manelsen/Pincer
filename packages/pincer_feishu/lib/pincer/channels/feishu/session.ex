@@ -31,6 +31,7 @@ defmodule Pincer.Channels.Feishu.Session do
 
   use PincerPorts.Channel
   alias Pincer.Channels.Feishu.Cards
+  alias Pincer.Channels.Shared.SessionBridge
 
   @impl PincerPorts.Channel
   def start_link(%{chat_id: chat_id} = args) do
@@ -39,36 +40,26 @@ defmodule Pincer.Channels.Feishu.Session do
 
   @spec ensure_started(String.t(), String.t()) :: {:ok, pid()} | {:error, term()}
   def ensure_started(chat_id, session_id) do
-    case Registry.lookup(PincerPorts.Session.registry(), worker_key(chat_id)) do
-      [{pid, _}] ->
-        GenServer.cast(pid, {:bind_session, session_id})
-        {:ok, pid}
-
-      [] ->
-        Pincer.Channels.Feishu.SessionSupervisor.start_session(chat_id, session_id)
-    end
+    SessionBridge.ensure_started({:feishu, chat_id},
+      session_id: session_id,
+      start_worker: &Pincer.Channels.Feishu.SessionSupervisor.start_session/2,
+      already_started: :ok
+    )
   end
 
   @impl true
   def init(%{chat_id: chat_id} = args) do
-    session_id = Map.get(args, :session_id, "feishu_#{chat_id}")
+    session_id = Map.get(args, :session_id, SessionBridge.default_session_id(:feishu, chat_id))
     super(args)
-    subscribe_session(session_id)
+    SessionBridge.subscribe(session_id)
     {:ok, initial_state(chat_id, session_id)}
   end
 
   @impl PincerPorts.Channel
-  def handles_session?(id) do
-    String.starts_with?(id, "feishu_")
-  end
+  def handles_session?(id), do: SessionBridge.handles_session?(:feishu, id)
 
   @impl PincerPorts.Channel
-  def resolve_recipient(id) do
-    case String.split(id, "_", parts: 2) do
-      ["feishu", open_id] -> open_id
-      _ -> id
-    end
-  end
+  def resolve_recipient(id), do: SessionBridge.resolve_recipient(:feishu, id)
 
   @impl PincerPorts.Channel
   def send_message(chat_id, text) do
@@ -78,14 +69,8 @@ defmodule Pincer.Channels.Feishu.Session do
   # --- Session PubSub callbacks ---
 
   @impl true
-  def handle_cast({:bind_session, session_id}, state) when is_binary(session_id) do
-    if session_id == state.session_id do
-      {:noreply, state}
-    else
-      unsubscribe_session(state.session_id)
-      subscribe_session(session_id)
-      {:noreply, %{state | session_id: session_id}}
-    end
+  def handle_cast({:bind_session, session_id}, state) do
+    SessionBridge.bind_session(state, session_id)
   end
 
   @impl true
@@ -140,26 +125,14 @@ defmodule Pincer.Channels.Feishu.Session do
     Application.get_env(:pincer, :feishu_api_module, Pincer.Channels.Feishu.API)
   end
 
-  defp via_tuple(chat_id) do
-    {:via, Registry, {PincerPorts.Session.registry(), worker_key(chat_id)}}
-  end
-
-  defp worker_key(chat_id), do: "feishu_session_worker_#{chat_id}"
-
-  defp subscribe_session(session_id) do
-    PincerPorts.PubSub.subscribe("session:#{session_id}")
-  end
-
-  defp unsubscribe_session(session_id) do
-    PincerPorts.PubSub.unsubscribe("session:#{session_id}")
-  end
+  defp via_tuple(chat_id), do: SessionBridge.via_tuple(:feishu, chat_id)
 
   defp initial_state(chat_id, session_id) do
-    %{
+    SessionBridge.initial_state(%{
       chat_id: chat_id,
       session_id: session_id,
       buffer: "",
       card_ref: nil
-    }
+    })
   end
 end

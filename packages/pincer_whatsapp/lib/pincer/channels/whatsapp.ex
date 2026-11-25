@@ -1,5 +1,4 @@
 defmodule Pincer.Channels.WhatsApp do
-
   @moduledoc """
   WhatsApp channel adapter backed by the Go `whatsapp_bridge` sidecar process.
 
@@ -486,7 +485,11 @@ defmodule Pincer.Channels.WhatsApp do
         true -> "unknown"
       end
 
-    case PincerPorts.ChannelPolicy.allow?(:dm_access, %{channel: :whatsapp, sender_id: candidate_id, config: config}) do
+    case PincerPorts.ChannelPolicy.allow?(:dm_access, %{
+           channel: :whatsapp,
+           sender_id: candidate_id,
+           config: config
+         }) do
       {:allow, _meta} -> :allow
       {:deny, %{user_message: message}} -> {:deny, message}
     end
@@ -646,36 +649,14 @@ defmodule Pincer.Channels.WhatsApp do
          session_id,
          %PincerPorts.Session.Context{} = session_context
        ) do
-    start_opts =
-      session_context
-      |> PincerPorts.Session.Context.to_start_opts()
-      |> Keyword.delete(:session_id)
-
-    case Registry.lookup(PincerPorts.Session.registry(), session_id) do
-      [] ->
-        case PincerPorts.Session.start_session(session_id, start_opts) do
-          {:ok, _pid} -> :ok
-          {:error, {:already_started, _pid}} -> :ok
-          {:error, reason} -> {:error, reason}
-        end
-
-      [_] ->
-        :ok
-    end
+    Pincer.Channels.Shared.SessionBridge.ensure_started(session_context,
+      session_id: session_id,
+      normalize_result?: true
+    )
   end
 
   defp default_ensure_session_started(session_id, _session_context) do
-    case Registry.lookup(PincerPorts.Session.registry(), session_id) do
-      [] ->
-        case PincerPorts.Session.start_session(session_id) do
-          {:ok, _pid} -> :ok
-          {:error, {:already_started, _pid}} -> :ok
-          {:error, reason} -> {:error, reason}
-        end
-
-      [_] ->
-        :ok
-    end
+    Pincer.Channels.Shared.SessionBridge.ensure_started(session_id, normalize_result?: true)
   end
 
   defp default_ensure_channel_session(chat_id, session_id) do
