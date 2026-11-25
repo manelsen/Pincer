@@ -7,7 +7,6 @@ defmodule Pincer.Core.Onboard do
   CLI and other surfaces should call this module as an adapter boundary.
   """
 
-  @behaviour Pincer.Ports.Onboarding
   alias Pincer.Core.ConfigProbe
   alias Pincer.Core.Onboard.Defaults
   alias Pincer.Core.Onboard.Preflight

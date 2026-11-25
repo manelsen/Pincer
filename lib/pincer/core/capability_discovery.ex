@@ -6,8 +6,6 @@ defmodule Pincer.Core.CapabilityDiscovery do
   and stays provider/channel-agnostic.
   """
 
-  @behaviour Pincer.Ports.CapabilityDiscovery
-
   @capabilities [
     %{
       id: "C01",
@@ -67,12 +65,10 @@ defmodule Pincer.Core.CapabilityDiscovery do
     }
   ]
 
-  @impl true
   def list_capabilities(_context \\ %{}) do
     @capabilities
   end
 
-  @impl true
   def find_capability(id, context \\ %{}) do
     wanted = id |> to_string() |> String.upcase()
 
