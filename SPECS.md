@@ -286,6 +286,20 @@ sessions through `PincerPorts.Session`. History pruning belongs to Executor's
 prompt assembly, so Executor can assemble prompts independently of Session.
 Host configuration supplies the skill generator used by Introspection.
 
+### 12.6. Local Git port
+
+`Pincer.Ports.Git` delegates to the host's `:git_adapter`. It exposes project
+branch provisioning and two read-only queries for the graph indexer.
+
+- `ensure_branch(name, cwd: workspace)` returns branch status, source branch and
+  repository path. In a non-Git workspace it initializes an isolated repository
+  under the project's directory.
+- `files(workspace, :changed | :tracked)` returns paths relative to the workspace
+  or a tagged error. Graph sync skips incremental scans and falls back to a
+  filesystem walk for full scans when the workspace has no local Git metadata.
+
+The host application no longer starts the proof-of-concept GitHub poller.
+
 ### 13. Channel-Owned Formatting (`Pincer.Channels.Telegram.ResponseEnvelope`)
 
 Telegram HTML usage-footer formatting and reasoning delivery options reside in

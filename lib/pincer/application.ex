@@ -191,13 +191,6 @@ defmodule Pincer.Application do
        port: Application.get_env(:pincer, :health_port, 4001)}
     ]
 
-    children =
-      if Application.get_env(:pincer, :enable_heartbeat_watchers, true) do
-        children ++ [Pincer.Core.Heartbeat.GitHubWatcher]
-      else
-        children
-      end
-
     # Only start Code Reloader in dev env
     children =
       if Application.get_env(:pincer, :enable_browser, false) do

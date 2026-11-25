@@ -281,7 +281,7 @@ requires touching the package's `mix.exs`/`CHANGELOG.md` too.
 - Provider doubles use `use Pincer.Test.Support.LLMProviderDefaults` for
   `list_models/1`, `transcribe_audio/3`, `generate_embedding/3`.
 - Test config disables heavy subsystems: `workspaces_dir: "tmp/test_workspaces"`,
-  `enable_graph_watcher: false`, `enable_heartbeat_watchers: false`, `health_port: 0`.
+  `enable_graph_watcher: false`, `health_port: 0`.
   Put new background watchers behind similar flags.
 - Storage is the embedded SQLite adapter; there is no SQL sandbox and no checkout step.
   Tests that need isolation either use the `:memory:` connection from `config/test.exs`

@@ -8,6 +8,7 @@ defmodule Pincer.Core.ProjectOrchestrator do
   require Logger
   alias Pincer.Core.Project.Store
   alias Pincer.Core.ProjectFSM
+  alias Pincer.Ports.Git
   alias Pincer.Utils.ETSHelper
 
   @table __MODULE__
@@ -837,7 +838,7 @@ defmodule Pincer.Core.ProjectOrchestrator do
   end
 
   defp git_adapter do
-    Application.get_env(:pincer, :project_git, Pincer.Core.ProjectGit)
+    Application.get_env(:pincer, :project_git, Git)
   end
 
   defp get_state(session_id) do

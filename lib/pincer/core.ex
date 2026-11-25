@@ -59,7 +59,6 @@ defmodule Pincer.Core do
       Orchestration.SubAgent,
       Orchestration.SubAgentRegistry,
       Graph.Sync,
-      Heartbeat.GitHubWatcher,
       HookDispatcher,
       StartupGuard,
       CircuitBreaker,
