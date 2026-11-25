@@ -1,8 +1,14 @@
 defmodule Pincer.Ports.LLM do
-  @moduledoc "Port for Large Language Model operations."
+  @moduledoc """
+  Compatibility facade for `PincerPorts.LLM`.
 
-  @type usage :: map()
+  Existing adapters can still declare this behaviour. New callers and
+  adapters should use `PincerPorts.LLM` directly.
+  """
 
+  @type usage :: PincerPorts.LLM.usage()
+
+  # Preserve the callback metadata used by existing adapters and mocks.
   @callback chat_completion(list(map()), keyword()) ::
               {:ok, map(), usage() | nil} | {:error, term()}
   @callback stream_completion(list(map()), keyword()) ::
@@ -12,31 +18,12 @@ defmodule Pincer.Ports.LLM do
   @callback transcribe_audio(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   @callback provider_config(String.t()) :: map() | nil
 
-  # --- Dispatcher ---
-
-  defp adapter do
-    case Application.fetch_env(:pincer, :llm_adapter) do
-      {:ok, mod} when is_atom(mod) and not is_nil(mod) and not is_boolean(mod) ->
-        mod
-
-      {:ok, invalid} ->
-        raise ArgumentError,
-              "invalid :llm_adapter configuration for :pincer: #{inspect(invalid)}"
-
-      :error ->
-        raise ArgumentError,
-              "missing :llm_adapter configuration for :pincer (configure config :pincer, :llm_adapter, ...)"
-    end
-  end
-
-  def chat_completion(history, opts \\ []), do: adapter().chat_completion(history, opts)
-  def stream_completion(history, opts \\ []), do: adapter().stream_completion(history, opts)
-  def list_providers, do: adapter().list_providers()
-  def list_models(provider_id), do: adapter().list_models(provider_id)
-  def provider_config(provider_id), do: adapter().provider_config(provider_id)
-  def generate_embedding(text, opts \\ []), do: adapter().generate_embedding(text, opts)
-
-  def transcribe_audio(file_path, opts \\ []) do
-    adapter().transcribe_audio(file_path, opts)
-  end
+  @doc "Dispatches a chat completion through the shared LLM port."
+  defdelegate chat_completion(history, opts \\ []), to: PincerPorts.LLM
+  defdelegate stream_completion(history, opts \\ []), to: PincerPorts.LLM
+  defdelegate list_providers(), to: PincerPorts.LLM
+  defdelegate list_models(provider_id), to: PincerPorts.LLM
+  defdelegate provider_config(provider_id), to: PincerPorts.LLM
+  defdelegate generate_embedding(text, opts \\ []), to: PincerPorts.LLM
+  defdelegate transcribe_audio(file_path, opts \\ []), to: PincerPorts.LLM
 end

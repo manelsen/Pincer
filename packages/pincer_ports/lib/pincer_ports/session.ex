@@ -9,7 +9,7 @@ defmodule PincerPorts.Session do
   process exists) and leaves the implementation to whoever registers it.
 
   The implementation is resolved at runtime from `:session_adapter`, mirroring
-  `Pincer.Ports.LLM`. In the full application it points at
+  `PincerPorts.LLM`. In the full application it points at
   `Pincer.Core.Session.Adapter`; in a package test it can point at a stub.
 
   ## Example

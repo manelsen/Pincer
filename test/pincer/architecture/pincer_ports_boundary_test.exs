@@ -8,6 +8,7 @@ defmodule Pincer.Architecture.PincerPortsBoundaryTest do
     "Structs.Usage",
     "Structs.IncomingMessage",
     "Session.Context",
+    "LLM",
     "LLM.Provider",
     "LLM.RawResponseLogger",
     "Channel",
@@ -58,7 +59,7 @@ defmodule Pincer.Architecture.PincerPortsBoundaryTest do
            "legacy packages/pincer_ports/lib/pincer directory must be removed"
 
     for rel <- ~w(
-          structs/usage structs/incoming_message session/context llm/provider
+          structs/usage structs/incoming_message session/context llm llm/provider
           llm/raw_response_logger channel channel_policy project session streaming ux
         ) do
       assert File.exists?("packages/pincer_ports/lib/pincer_ports/#{rel}.ex"),
@@ -85,9 +86,18 @@ defmodule Pincer.Architecture.PincerPortsBoundaryTest do
       |> Keyword.get(:exports, [])
       |> Enum.map(&Macro.to_string/1)
 
-    for expected <- ~w(Channel ChannelPolicy Project Session Streaming UX) do
+    for expected <- ~w(Channel ChannelPolicy LLM Project Session Streaming UX) do
       assert expected in exports
     end
+  end
+
+  test "packages consume the shared LLM port without referencing the root facade" do
+    offenders =
+      for file <- Path.wildcard("packages/*/lib/**/*.ex"),
+          String.contains?(File.read!(file), "Pincer.Ports.LLM"),
+          do: file
+
+    assert offenders == []
   end
 
   test "legacy root-namespace contract modules are no longer defined by pincer_ports" do

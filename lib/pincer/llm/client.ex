@@ -22,13 +22,13 @@ defmodule Pincer.LLM.Client do
 
   ## Examples
 
-      iex> Pincer.Ports.LLM.chat_completion([
+      iex> PincerPorts.LLM.chat_completion([
       ...>   %{"role" => "user", "content" => "Hello!"}
       ...> ], provider: "openrouter")
       {:ok, %{"role" => "assistant", "content" => "Hello! How can I help you?"}}
   """
 
-  @behaviour Pincer.Ports.LLM
+  @behaviour PincerPorts.LLM
   require Logger
   alias Pincer.Core.AuthProfiles
   alias Pincer.Core.LLM.CooldownStore

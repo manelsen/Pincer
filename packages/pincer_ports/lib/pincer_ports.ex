@@ -12,6 +12,7 @@ defmodule PincerPorts do
   - `PincerPorts.Structs.Usage` — normalized token usage accounting
   - `PincerPorts.Structs.IncomingMessage` — channel-agnostic inbound message
   - `PincerPorts.Session.Context` — resolved runtime context of a session
+  - `PincerPorts.LLM` — dispatch to the host's LLM adapter
   - `PincerPorts.LLM.Provider` — behaviour implemented by LLM provider adapters
   - `PincerPorts.LLM.RawResponseLogger` — shared raw provider payload logging
   - `PincerPorts.Channel` — contract for bidirectional channel adapters
@@ -28,6 +29,7 @@ defmodule PincerPorts do
       Structs.Usage,
       Structs.IncomingMessage,
       Session.Context,
+      LLM,
       LLM.Provider,
       LLM.RawResponseLogger,
       Channel,

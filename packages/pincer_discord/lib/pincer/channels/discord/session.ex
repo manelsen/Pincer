@@ -1,9 +1,6 @@
 defmodule Pincer.Channels.Discord.Session do
-  @compile {:no_warn_undefined, [
-    PincerPorts.Session.registry(),
-    Pincer.Infra.PubSub,
-    Pincer.Ports.LLM
-  ]}
+  @compile {:no_warn_undefined, Pincer.Infra.PubSub}
+
   @moduledoc """
   Driven Adapter for Discord.
   One process per active Discord channel that listens to PubSub and sends messages via Nostrum.
