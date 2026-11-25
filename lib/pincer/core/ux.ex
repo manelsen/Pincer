@@ -7,7 +7,7 @@ defmodule Pincer.Core.UX do
   """
   use Boundary,
     deps: [Pincer.Core, Pincer.Ports],
-    exports: [MenuPolicy, ModelKeyboard]
+    exports: [Adapter, ChannelInteractionPolicy, MenuPolicy, ModelKeyboard]
 
   @behaviour Pincer.Ports.UserMenu
 

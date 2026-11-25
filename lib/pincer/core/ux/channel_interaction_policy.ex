@@ -1,4 +1,4 @@
-defmodule Pincer.Core.ChannelInteractionPolicy do
+defmodule Pincer.Core.UX.ChannelInteractionPolicy do
   @moduledoc """
   Shared policy for channel interaction payloads (Telegram/Discord).
 
