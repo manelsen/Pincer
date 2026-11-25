@@ -55,7 +55,7 @@ defmodule Pincer.Core.RetryPolicy do
   def retryable?({:http_error, status, _, _}) when is_integer(status),
     do: status in @retryable_http_statuses
 
-  def retryable?(%Req.TransportError{reason: reason}),
+  def retryable?({:transport_error, reason}),
     do: reason in @transient_transport_reasons
 
   def retryable?({:timeout, _}), do: true

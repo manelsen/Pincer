@@ -84,6 +84,9 @@ defmodule Pincer.LLM.CooldownRoutingTest do
     test "labels timeouts and transport errors" do
       assert CooldownRouting.reason_label({:timeout, :deadline}) == "internal timeout"
 
+      assert CooldownRouting.reason_label({:transport_error, :econnrefused}) ==
+               "transport :econnrefused"
+
       assert CooldownRouting.reason_label(%Req.TransportError{reason: :econnrefused}) ==
                "transport :econnrefused"
     end

@@ -39,7 +39,8 @@ defmodule Pincer.Adapters.AttachmentFetcher do
   defp resolve(_reference, {:inline, _limit}, _opts), do: {:error, :invalid_attachment_url}
 
   defp download(url, :workspace, http_client, _redirects) do
-    case http_client.(url, decode_body: false, redirect: false, receive_timeout: 300_000) do
+    case http_client.(url, decode_body: false, redirect: false, receive_timeout: 300_000)
+         |> normalize_http_result() do
       {:ok, %{status: 200, body: body}} when is_binary(body) -> {:ok, body}
       {:ok, %{status: status}} -> {:error, {:http_error, status}}
       {:ok, _response} -> {:error, :invalid_response}
@@ -57,7 +58,8 @@ defmodule Pincer.Adapters.AttachmentFetcher do
              receive_timeout: 60_000,
              connect_options: Keyword.put(target.connect_options, :timeout, 10_000),
              into: BoundedBody.callback(limit)
-           ) do
+           )
+           |> normalize_http_result() do
       case response do
         %{status: status} when status in @redirect_statuses and redirects > 0 ->
           with {:ok, next} <- redirect_url(url, response) do
@@ -78,6 +80,11 @@ defmodule Pincer.Adapters.AttachmentFetcher do
       end
     end
   end
+
+  defp normalize_http_result({:error, %Req.TransportError{reason: reason}}),
+    do: {:error, {:transport_error, reason}}
+
+  defp normalize_http_result(other), do: other
 
   defp redirect_url(url, response) do
     case Req.Response.get_header(response, "location") do

@@ -47,23 +47,25 @@ defmodule Pincer.Core.LLM.ErrorClass do
   defp classify_normalized({:http_error, status, _}) when is_integer(status) and status >= 500,
     do: :http_5xx
 
-  defp classify_normalized(%Req.TransportError{reason: :timeout}), do: :transport_timeout
-  defp classify_normalized(%Req.TransportError{reason: :connect_timeout}), do: :transport_timeout
-  defp classify_normalized(%Req.TransportError{reason: :econnrefused}), do: :transport_connect
-  defp classify_normalized(%Req.TransportError{reason: :closed}), do: :transport_connect
-  defp classify_normalized(%Req.TransportError{reason: :enetunreach}), do: :transport_connect
-  defp classify_normalized(%Req.TransportError{reason: :ehostunreach}), do: :transport_connect
-  defp classify_normalized(%Req.TransportError{reason: :nxdomain}), do: :transport_dns
-  defp classify_normalized(%Req.TransportError{}), do: :transport_other
+  defp classify_normalized({:transport_error, :timeout}), do: :transport_timeout
+  defp classify_normalized({:transport_error, :connect_timeout}), do: :transport_timeout
+  defp classify_normalized({:transport_error, :econnrefused}), do: :transport_connect
+  defp classify_normalized({:transport_error, :closed}), do: :transport_connect
+  defp classify_normalized({:transport_error, :enetunreach}), do: :transport_connect
+  defp classify_normalized({:transport_error, :ehostunreach}), do: :transport_connect
+  defp classify_normalized({:transport_error, :nxdomain}), do: :transport_dns
+  defp classify_normalized({:transport_error, _reason}), do: :transport_other
 
   defp classify_normalized({:timeout, _}), do: :process_timeout
   defp classify_normalized({:retry_timeout, _}), do: :retry_timeout
   defp classify_normalized(:tool_loop), do: :tool_loop
   defp classify_normalized({:depth_exceeded, _}), do: :depth_exceeded
 
-  defp classify_normalized(%Exqlite.Error{} = error) do
-    if db_schema_message?(Exception.message(error)), do: :db_schema, else: :db
+  defp classify_normalized({:db_error, msg}) when is_binary(msg) do
+    if db_schema_message?(msg), do: :db_schema, else: :db
   end
+
+  defp classify_normalized({:db_error, _reason}), do: :db
 
   defp classify_normalized(%RuntimeError{message: msg}) when is_binary(msg) do
     if db_schema_message?(msg), do: :db_schema, else: :internal

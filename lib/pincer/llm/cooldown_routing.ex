@@ -108,6 +108,7 @@ defmodule Pincer.LLM.CooldownRouting do
   @spec reason_label(term()) :: String.t()
   def reason_label({:http_error, status, _}), do: "HTTP #{status}"
   def reason_label({:http_error, status, _, _}), do: "HTTP #{status}"
+  def reason_label({:transport_error, reason}), do: "transport #{inspect(reason)}"
   def reason_label(%Req.TransportError{reason: reason}), do: "transport #{inspect(reason)}"
   def reason_label({:timeout, _}), do: "internal timeout"
   def reason_label(other), do: inspect(other)

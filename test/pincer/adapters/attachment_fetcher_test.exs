@@ -106,6 +106,25 @@ defmodule Pincer.Adapters.AttachmentFetcherTest do
              )
   end
 
+  test "normalizes Req transport errors into {:transport_error, reason}" do
+    with_env(:pincer, :network_guard_resolver, fn "api.telegram.org" ->
+      {:ok, [{93, 184, 216, 34}]}
+    end)
+
+    failing_client = fn _url, _opts -> {:error, %Req.TransportError{reason: :timeout}} end
+
+    assert {:error, {:transport_error, :timeout}} =
+             AttachmentFetcher.fetch("telegram://file/docs/a.txt", :workspace,
+               telegram_token: "test_token",
+               http_client: failing_client
+             )
+
+    assert {:error, {:transport_error, :timeout}} =
+             AttachmentFetcher.fetch("https://api.telegram.org/file.txt", {:inline, 128},
+               http_client: failing_client
+             )
+  end
+
   defp with_env(app, key, value) do
     previous = Application.fetch_env(app, key)
     Application.put_env(app, key, value)

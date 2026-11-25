@@ -8,8 +8,8 @@ defmodule Pincer.Core.RetryPolicyTest do
       assert RetryPolicy.retryable?({:http_error, 408, "timeout"})
       assert RetryPolicy.retryable?({:http_error, 429, "rate"})
       assert RetryPolicy.retryable?({:http_error, 503, "upstream"})
-      assert RetryPolicy.retryable?(%Req.TransportError{reason: :timeout})
-      assert RetryPolicy.retryable?(%Req.TransportError{reason: :econnrefused})
+      assert RetryPolicy.retryable?({:transport_error, :timeout})
+      assert RetryPolicy.retryable?({:transport_error, :econnrefused})
       assert RetryPolicy.retryable?({:timeout, :gen_server_call})
     end
 
@@ -23,7 +23,7 @@ defmodule Pincer.Core.RetryPolicyTest do
   describe "transient?/1" do
     test "returns true for transient operational classes" do
       assert RetryPolicy.transient?({:http_error, 503, "upstream"})
-      assert RetryPolicy.transient?(%Req.TransportError{reason: :timeout})
+      assert RetryPolicy.transient?({:transport_error, :timeout})
       assert RetryPolicy.transient?({:invalid_stream_response, %{}})
     end
 
@@ -46,7 +46,7 @@ defmodule Pincer.Core.RetryPolicyTest do
 
     test "returns false for transient classes" do
       refute RetryPolicy.fail_fast?({:http_error, 503, "upstream"})
-      refute RetryPolicy.fail_fast?(%Req.TransportError{reason: :timeout})
+      refute RetryPolicy.fail_fast?({:transport_error, :timeout})
     end
   end
 
