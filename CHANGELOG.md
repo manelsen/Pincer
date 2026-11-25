@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Doctor, SecurityAudit, and assisted onboarding share channel token and DM policy checks. Doctor and onboarding now flag enabled webhooks with no `token_env`, and onboarding warns about open, missing, or invalid DM modes.
+- Malformed DM policies disable direct messages. Doctor and assisted onboarding check provider credentials using the configured auth profiles.
 - Onboarding preflight rejects unsupported storage backends using the same configuration precedence as Doctor and runtime startup.
 - Port dispatch requires configured adapters. In particular, missing or invalid `:sandbox_adapter` application configuration raises an explicit error. The application config still selects the local sandbox by default.
 - Storage is SQLite-only: PostgreSQL/pgvector support, Ecto, `Ecto.Repo`, migrations, `mix ecto.*` setup, `PINCER_DB_*` overrides, and the Postgres test path are removed. Models are plain structs validated by `Pincer.Utils.Validation`; `storage.adapter` accepts only `"sqlite"` (PostgreSQL is rejected at boot) and the full test suite runs on in-memory SQLite with no external database service.

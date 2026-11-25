@@ -336,9 +336,15 @@ errors into Core:
 
 Doctor, SecurityAudit, and assisted onboarding use the same token and DM
 checks for enabled channels. An enabled webhook requires `token_env`. Missing
-and invalid DM modes still default to open at runtime and produce warnings in
-reports. Doctor and SecurityAudit keep their existing check IDs. Assisted
+and unrecognized string DM modes default to open at runtime and produce
+warnings in reports. Legacy character data can still name a known mode.
+Other malformed policy values disable DMs. Doctor and SecurityAudit keep
+their existing check IDs. Assisted
 onboarding reports token errors as warnings and includes remediation hints.
+
+Doctor and assisted onboarding check credential environment keys from the
+same provider profiles used at runtime. The diagnostics check configured
+credentials independently of any current profile cooldowns.
 
 Doctor, onboarding preflight, and runtime configuration check `PINCER_STORAGE`
 before `storage.adapter`. With neither set, they select SQLite.

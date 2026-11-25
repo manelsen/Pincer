@@ -381,6 +381,16 @@ defmodule Pincer.Core.Onboard do
           )
         ]
 
+      {provider, nil, :invalid_auth_config} ->
+        [
+          assisted_warn(
+            {:provider_env, provider},
+            "Provider #{provider} declares an auth chain without a usable environment key",
+            "Set env_key or configure a named auth profile with an environment key.",
+            %{provider: provider}
+          )
+        ]
+
       {provider, key, :present} ->
         [
           assisted_ok(

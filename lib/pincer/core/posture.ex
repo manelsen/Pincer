@@ -11,7 +11,8 @@ defmodule Pincer.Core.Posture do
     pairing: {:ok, "DM policy requires pairing"},
     open: {:warn, "DM policy is open (insecure for production)"},
     missing: {:warn, "DM policy missing (defaults to open behavior)"},
-    invalid: {:warn, "DM policy mode is invalid (falls back to open behavior)"}
+    invalid: {:warn, "DM policy mode is invalid (falls back to open behavior)"},
+    malformed: {:warn, "DM policy is malformed (direct messages are disabled)"}
   }
 
   @doc "Loads a config source and reports the result using the resolved path."

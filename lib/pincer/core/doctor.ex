@@ -385,6 +385,15 @@ defmodule Pincer.Core.Doctor do
           )
         ]
 
+      {provider, nil, :invalid_auth_config} ->
+        [
+          error_check(
+            {:llm_provider, provider},
+            "Provider '#{provider}' declares an auth chain without a usable environment key",
+            %{provider: provider}
+          )
+        ]
+
       {provider, key, :present} ->
         [
           ok_check(

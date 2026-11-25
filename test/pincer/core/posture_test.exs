@@ -35,7 +35,7 @@ defmodule Pincer.Core.PostureTest do
         enabled: true
         token_env: DISCORD_TEST_TOKEN
         dm_policy:
-          mode: [invalid]
+          mode: [disabled]
     """)
 
     env = fn
@@ -58,13 +58,18 @@ defmodule Pincer.Core.PostureTest do
 
     for report <- [doctor, audit, onboard] do
       assert dm_findings(report) == [
-               {"discord", :warn, "invalid"},
+               {"discord", :ok, "disabled"},
                {"telegram", :ok, "allowlist"}
              ]
     end
 
-    assert {:allow, %{mode: :open}} =
+    assert {:deny, %{mode: :disabled, reason: :dm_disabled}} =
              AccessPolicy.authorize_dm(:discord, "123", config["channels"]["discord"])
+  end
+
+  test "denies direct messages when structured policy values cannot name a mode" do
+    assert {:deny, %{mode: :disabled, reason: :dm_disabled}} =
+             AccessPolicy.authorize_dm(:discord, "123", %{"dm_policy" => %{"mode" => %{}}})
   end
 
   defp channel_findings(report, check_id) do

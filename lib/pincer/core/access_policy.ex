@@ -33,7 +33,7 @@ defmodule Pincer.Core.AccessPolicy do
   """
   @spec authorize_dm(channel(), String.t() | integer(), map()) :: result()
   def authorize_dm(channel, sender_id, config \\ %{}) when is_map(config) do
-    policy = dm_policy(config)
+    policy = MapHelpers.read_field(config, "dm_policy")
     mode = ConfigProbe.effective_dm_mode(policy)
     sender = normalize_sender(sender_id)
 
@@ -76,13 +76,6 @@ defmodule Pincer.Core.AccessPolicy do
              user_message: pairing_message(channel)
            }}
         end
-    end
-  end
-
-  defp dm_policy(config) do
-    case MapHelpers.read_field(config, "dm_policy") do
-      map when is_map(map) -> map
-      _ -> %{}
     end
   end
 

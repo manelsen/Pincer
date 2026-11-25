@@ -10,6 +10,7 @@ defmodule Pincer.Core.ConfigProbe do
   or which channels require a token. Each caller keeps its own report shape.
   """
 
+  alias Pincer.Core.AuthProfiles
   alias Pincer.Utils.MapHelpers
 
   @channels_requiring_token MapSet.new(["telegram", "discord", "slack", "webhook"])
@@ -17,7 +18,7 @@ defmodule Pincer.Core.ConfigProbe do
 
   @type channel_name :: String.t()
   @type channel_config :: map()
-  @type dm_mode :: :open | :allowlist | :disabled | :pairing | :missing | :invalid
+  @type dm_mode :: :open | :allowlist | :disabled | :pairing | :missing | :invalid | :malformed
   @type token_state :: :present | :missing_value | :missing_env_key
 
   @doc "True when a channel requires `token_env` to be configured."
@@ -110,7 +111,7 @@ defmodule Pincer.Core.ConfigProbe do
   @doc "Returns the selected provider's credential state, or `nil` when no provider is selected."
   @spec provider_env(map(), map(), (String.t() -> String.t() | nil)) ::
           {String.t(), String.t() | nil,
-           :unregistered | :not_required | :present | :missing_value}
+           :unregistered | :not_required | :present | :missing_value | :invalid_auth_config}
           | nil
   def provider_env(config, registry, env_fetcher) do
     provider = config |> MapHelpers.read_field(:llm) |> MapHelpers.read_field(:provider)
@@ -120,11 +121,19 @@ defmodule Pincer.Core.ConfigProbe do
 
       case MapHelpers.read_field(registry, provider) do
         entry when is_map(entry) ->
-          key = MapHelpers.read_field(entry, :env_key)
+          case AuthProfiles.configured_env_keys(entry) do
+            {:ok, []} ->
+              {provider, nil, :not_required}
 
-          if is_binary(key) and MapHelpers.present?(key),
-            do: {provider, key, env_state(key, env_fetcher)},
-            else: {provider, nil, :not_required}
+            {:ok, [first | _] = keys} ->
+              case Enum.find(keys, &(env_state(&1, env_fetcher) == :present)) do
+                nil -> {provider, first, :missing_value}
+                key -> {provider, key, :present}
+              end
+
+            {:error, :invalid_auth_config} ->
+              {provider, nil, :invalid_auth_config}
+          end
 
         _ ->
           {provider, nil, :unregistered}
@@ -146,7 +155,7 @@ defmodule Pincer.Core.ConfigProbe do
     |> dm_mode_value()
   end
 
-  def dm_mode(_), do: :invalid
+  def dm_mode(_), do: :malformed
 
   @doc "Normalises a raw DM mode value."
   @spec dm_mode_value(term()) :: dm_mode()
@@ -163,13 +172,25 @@ defmodule Pincer.Core.ConfigProbe do
     end
   end
 
-  def dm_mode_value(_), do: :invalid
+  def dm_mode_value(value) when is_list(value) do
+    with text when is_binary(text) <- :unicode.characters_to_binary(value),
+         mode when mode in [:open, :allowlist, :disabled, :pairing] <- dm_mode_value(text) do
+      mode
+    else
+      _ -> :malformed
+    end
+  rescue
+    ArgumentError -> :malformed
+  end
 
-  @doc "Returns the runtime DM mode, with open behavior for missing and invalid modes."
+  def dm_mode_value(_), do: :malformed
+
+  @doc "Uses open for absent or unrecognized string modes and disables malformed policies."
   @spec effective_dm_mode(term()) :: :open | :allowlist | :disabled | :pairing
   def effective_dm_mode(policy) do
     case dm_mode(policy) do
       mode when mode in [:missing, :invalid] -> :open
+      :malformed -> :disabled
       mode -> mode
     end
   end

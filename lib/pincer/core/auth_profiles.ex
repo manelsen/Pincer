@@ -83,6 +83,16 @@ defmodule Pincer.Core.AuthProfiles do
 
   def resolve(_provider_id, _provider_config, _opts), do: {:error, :missing_credentials}
 
+  @doc "Lists environment keys in credential selection order without consulting cooldowns."
+  @spec configured_env_keys(map()) :: {:ok, [String.t()]} | {:error, :invalid_auth_config}
+  def configured_env_keys(config) when is_map(config) do
+    keys = Enum.map(provider_profiles(config), & &1.env_key)
+
+    if keys == [] and declares_auth_chain?(config),
+      do: {:error, :invalid_auth_config},
+      else: {:ok, keys}
+  end
+
   @spec cooldown_profile(String.t(), String.t(), term(), keyword()) :: :ok
   def cooldown_profile(provider_id, profile_name, reason_or_class, opts \\ [])
 

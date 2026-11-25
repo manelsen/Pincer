@@ -3,6 +3,28 @@ defmodule Pincer.Core.ConfigProbeTest do
 
   alias Pincer.Core.ConfigProbe
 
+  test "provider checks accept a configured secondary credential and flag empty auth chains" do
+    config = %{"llm" => %{"provider" => "profiled"}}
+
+    registry = %{
+      "profiled" => %{
+        auth_profiles: [
+          %{name: "primary", env_key: "FIRST"},
+          %{name: "secondary", env_key: "SECOND"}
+        ]
+      }
+    }
+
+    assert ConfigProbe.provider_env(config, registry, &%{"SECOND" => "fixture"}[&1]) ==
+             {"profiled", "SECOND", :present}
+
+    assert ConfigProbe.provider_env(config, registry, fn _ -> nil end) ==
+             {"profiled", "FIRST", :missing_value}
+
+    assert ConfigProbe.provider_env(config, %{"profiled" => %{env_key: nil}}, fn _ -> nil end) ==
+             {"profiled", nil, :invalid_auth_config}
+  end
+
   defp config do
     %{
       "channels" => %{
@@ -97,7 +119,8 @@ defmodule Pincer.Core.ConfigProbeTest do
       assert ConfigProbe.dm_mode(%{}) == :missing
       assert ConfigProbe.dm_mode(%{"mode" => ""}) == :missing
       assert ConfigProbe.dm_mode(%{"mode" => "nonsense"}) == :invalid
-      assert ConfigProbe.dm_mode("not-a-map") == :invalid
+      assert ConfigProbe.dm_mode("not-a-map") == :malformed
+      assert ConfigProbe.dm_mode(%{"mode" => ~c"disabled"}) == :disabled
     end
   end
 
