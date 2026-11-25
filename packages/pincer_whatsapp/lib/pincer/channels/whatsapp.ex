@@ -1,9 +1,5 @@
 defmodule Pincer.Channels.WhatsApp do
-  @compile {:no_warn_undefined, [
-    PincerPorts.Session.registry(),
-    Pincer.Infra.PubSub,
-    Pincer.Ports.LLM
-  ]}
+  @compile {:no_warn_undefined, Pincer.Infra.PubSub}
 
   @moduledoc """
   WhatsApp channel adapter backed by the Go `whatsapp_bridge` sidecar process.
@@ -60,8 +56,8 @@ defmodule Pincer.Channels.WhatsApp do
            status_fn: read_fun(config, "status_fn", &default_status/1),
            set_model_fn: read_fun(config, "set_model_fn", &default_set_model/3),
            list_providers_fn:
-             read_fun(config, "list_providers_fn", &Pincer.Ports.LLM.list_providers/0),
-           list_models_fn: read_fun(config, "list_models_fn", &Pincer.Ports.LLM.list_models/1)
+             read_fun(config, "list_providers_fn", &PincerPorts.LLM.list_providers/0),
+           list_models_fn: read_fun(config, "list_models_fn", &PincerPorts.LLM.list_models/1)
          }}
 
       :ignore ->

@@ -1,10 +1,5 @@
 defmodule Pincer.Channels.Discord do
-  @compile {:no_warn_undefined,
-            [
-              PincerPorts.Session.registry(),
-              Pincer.Ports.LLM,
-              Pincer.Utils.Text
-            ]}
+  @compile {:no_warn_undefined, Pincer.Utils.Text}
   @moduledoc """
   Discord channel adapter using Nostrum.
 
@@ -230,12 +225,6 @@ defmodule Pincer.Channels.Discord do
   end
 
   defmodule Consumer do
-    @compile {:no_warn_undefined,
-              [
-                PincerPorts.Session.registry(),
-                Pincer.Ports.LLM
-              ]}
-
     @moduledoc """
     Consumes Discord events and routes messages to Pincer sessions.
     """
@@ -476,7 +465,7 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_command(msg, "/models") do
-      providers = Pincer.Ports.LLM.list_providers()
+      providers = PincerPorts.LLM.list_providers()
       buttons = build_provider_buttons(providers)
 
       buttons =
@@ -733,7 +722,7 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_models_command(interaction) do
-      providers = Pincer.Ports.LLM.list_providers()
+      providers = PincerPorts.LLM.list_providers()
       buttons = build_provider_buttons(providers)
 
       buttons =
@@ -844,7 +833,7 @@ defmodule Pincer.Channels.Discord do
       # Defer formatting: Nostrum interactions usually need to be ACKed
       case PincerPorts.ChannelPolicy.parse(:discord, read_interaction_custom_id(interaction)) do
         {:ok, {:page, provider_id, page}} ->
-          models = Pincer.Ports.LLM.list_models(provider_id)
+          models = PincerPorts.LLM.list_models(provider_id)
           session_id = resolve_session_id(interaction)
           current_model = current_model_for_session(session_id)
 
@@ -875,7 +864,7 @@ defmodule Pincer.Channels.Discord do
           send_interaction_response(interaction, response)
 
         {:ok, {:select_provider, provider_id}} ->
-          models = Pincer.Ports.LLM.list_models(provider_id)
+          models = PincerPorts.LLM.list_models(provider_id)
           session_id = resolve_session_id(interaction)
           current_model = current_model_for_session(session_id)
 
@@ -922,7 +911,7 @@ defmodule Pincer.Channels.Discord do
           send_interaction_response(interaction, response)
 
         {:ok, :back_to_providers} ->
-          providers = Pincer.Ports.LLM.list_providers()
+          providers = PincerPorts.LLM.list_providers()
           buttons = build_provider_buttons(providers)
 
           buttons =

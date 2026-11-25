@@ -222,6 +222,14 @@ External payloads are normalized once at ingestion boundaries:
   normalized once at `Pincer.LLM.Client`, `Executor`, and `Session.Preferences` boundaries.
 - `model_override` is normalized to atom-keyed maps (`%{provider: ..., model: ...}`).
 
+#### LLM dispatch port
+
+`PincerPorts.LLM` defines the LLM adapter callbacks and dispatches calls through
+the host's `:pincer, :llm_adapter` application setting. Channel packages use
+the shared port for model and provider discovery and audio transcription.
+`Pincer.Ports.LLM` forwards calls during the migration and preserves the
+existing callback declarations and default arguments.
+
 ### 13. Channel-Owned Formatting (`Pincer.Channels.Telegram.ResponseEnvelope`)
 
 Telegram HTML usage-footer formatting and reasoning delivery options reside in

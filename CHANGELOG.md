@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Require Elixir 1.20.5 / OTP 27 across `mix.exs`, mise/asdf, the Docker image, and CI. Remove compiler warnings surfaced by 1.20 (unused `require Logger` and unreachable/redundant clauses) so `warnings_as_errors` stays clean.
 - The `pincer_ports` package now exports its channel and provider contracts and shared structs under `PincerPorts.*`. Custom channels use `PincerPorts.Channel` and custom LLM providers implement `PincerPorts.LLM.Provider`.
 - Callers of `PincerPorts.Session.Context.new/1` must supply the resolved `:workspace_path`. Pincer continues to select workspaces by root agent for channel sessions.
+- Channel packages access the host LLM adapter through `PincerPorts.LLM`. The `Pincer.Ports.LLM` facade forwards existing calls during the migration.
 
 ### Added
 - Optional `sqlite-vec` semantic search, loaded from `priv/sqlite_vec/vec0.so` (built by `./scripts/build_sqlite_vec.sh`, version pinned in the script). Configure with `storage.vec` / `storage.vec_path` / `storage.vec_dimensions` or `PINCER_SQLITE_VEC*`; when the extension is absent or disabled, search falls back to in-process cosine similarity.

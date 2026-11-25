@@ -5,7 +5,6 @@ defmodule Pincer.Channels.Telegram do
             [
               EarmarkParser,
               Pincer.Infra.PubSub,
-              Pincer.Ports.LLM,
               Pincer.Utils.Text,
               Req
             ]}
@@ -574,7 +573,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   @compile {:no_warn_undefined,
             [
               Pincer.Infra.PubSub,
-              Pincer.Ports.LLM,
               Req
             ]}
 
@@ -1106,7 +1104,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
                   process_large_audio(temp_file, file_id)
                 else
                   # Call LLM Port for transcription
-                  Pincer.Ports.LLM.transcribe_audio(temp_file, provider: "groq_whisper")
+                  PincerPorts.LLM.transcribe_audio(temp_file, provider: "groq_whisper")
                 end
 
               # Clean up
@@ -1148,7 +1146,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         texts =
           chunks
           |> Enum.map(fn chunk ->
-            case Pincer.Ports.LLM.transcribe_audio(chunk, provider: "groq_whisper") do
+            case PincerPorts.LLM.transcribe_audio(chunk, provider: "groq_whisper") do
               {:ok, text} -> text
               _ -> "[Transcription of chunk failed]"
             end
@@ -1162,7 +1160,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
       {error, _} ->
         Logger.error("[TELEGRAM] ffmpeg split failed: #{inspect(error)}")
         # Fallback: try to transcribe original file anyway, maybe it's just on the edge
-        Pincer.Ports.LLM.transcribe_audio(input_file, provider: "groq_whisper")
+        PincerPorts.LLM.transcribe_audio(input_file, provider: "groq_whisper")
     end
   end
 
@@ -1382,7 +1380,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp handle_command(chat_id, "/models", _text, _chat_type) do
-    providers = Pincer.Ports.LLM.list_providers()
+    providers = PincerPorts.LLM.list_providers()
     buttons = build_provider_buttons(providers)
 
     if buttons == [] do
@@ -1566,7 +1564,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
     case PincerPorts.ChannelPolicy.parse(:telegram, payload) do
       {:ok, {:page, provider_id, page}} ->
-        models = Pincer.Ports.LLM.list_models(provider_id)
+        models = PincerPorts.LLM.list_models(provider_id)
         current_model = current_model_for_session(session_id)
 
         buttons =
@@ -1591,7 +1589,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         end
 
       {:ok, {:select_provider, provider_id}} ->
-        models = Pincer.Ports.LLM.list_models(provider_id)
+        models = PincerPorts.LLM.list_models(provider_id)
         current_model = current_model_for_session(session_id)
 
         buttons =
@@ -1628,7 +1626,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
         )
 
       {:ok, :back_to_providers} ->
-        providers = Pincer.Ports.LLM.list_providers()
+        providers = PincerPorts.LLM.list_providers()
         buttons = build_provider_buttons(providers)
 
         if buttons == [] do
