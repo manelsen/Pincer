@@ -55,7 +55,6 @@ defmodule Pincer.Core do
       LLM.FailoverPolicy,
       LLM.CooldownStore,
       LLM.SkillsSidecarPolicy,
-      Tooling.CommandProfile,
       WorkspaceGuard,
       Orchestration.Blackboard,
       Orchestration.SubAgent,

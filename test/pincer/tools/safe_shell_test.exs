@@ -2,6 +2,7 @@ defmodule Pincer.Adapters.Tools.SafeShellTest do
   use ExUnit.Case, async: false
 
   alias Pincer.Adapters.Tools.SafeShell
+  alias Pincer.Core.WorkspaceGuard
 
   defmodule StubSandbox do
     @behaviour Pincer.Ports.Sandbox
@@ -180,6 +181,69 @@ defmodule Pincer.Adapters.Tools.SafeShellTest do
                )
 
       assert_received {:stub_sandbox_ran, "ls .", _opts}
+    end
+  end
+
+  describe "WorkspaceGuard policy consolidation parity" do
+    test "WorkspaceGuard.command_allowed?/2 and SafeShell.approved_command_allowed?/2 produce identical verdicts",
+         %{workspace: workspace} do
+      File.mkdir_p!(Path.join(workspace, "sub/dir"))
+      File.write!(Path.join(workspace, "sub/dir/file.txt"), "ok\n")
+      File.write!(Path.join(workspace, "mix.exs"), "defmodule Fixture.MixProject do\nend\n")
+      File.write!(Path.join(workspace, "package.json"), ~s({"scripts":{"lint":"eslint ."}}))
+
+      commands = [
+        {"du -sh", :ok},
+        {"du -sh sub/dir", :ok},
+        {"du -sh ../outside", :error},
+        {"find . -maxdepth 2", :ok},
+        {"find . -delete", :error},
+        {"find . -exec sh -c id \\;", :error},
+        {"git log -n 5", :ok},
+        {"git log --output=/tmp/x", :error},
+        {"grep foo bar", :error},
+        {"cat ../outside", :error},
+        {"ls ../outside", :error},
+        {"cat ~/.ssh/config", :error},
+        {"ls; rm -rf /", :error},
+        {"ls | cat", :error},
+        {"ls $(id)", :error},
+        {"ls `id`", :error},
+        {"ls > out.txt", :error},
+        {"ls\ncat /etc/passwd", :error},
+        {"mix format", :ok},
+        {"mix format /etc/passwd", :error},
+        {"npm run lint", :ok},
+        {"npm run release", :error}
+      ]
+
+      opts = [workspace_root: workspace, workspace_restrict: true]
+
+      for {cmd, expected} <- commands do
+        wg_verdict = WorkspaceGuard.command_allowed?(cmd, opts)
+        ss_verdict = SafeShell.approved_command_allowed?(cmd, opts)
+
+        assert wg_verdict == ss_verdict,
+               "Verdict mismatch for #{inspect(cmd)}: WorkspaceGuard=#{inspect(wg_verdict)} SafeShell=#{inspect(ss_verdict)}"
+
+        case expected do
+          :ok -> assert wg_verdict == :ok
+          :error -> assert match?({:error, _}, wg_verdict)
+        end
+      end
+    end
+
+    test "SafeShell delegates policy constants and parser to WorkspaceGuard" do
+      source =
+        Path.expand("../../../lib/pincer/adapters/tools/safe_shell.ex", __DIR__)
+        |> File.read!()
+
+      refute source =~ "@max_command_length"
+      refute source =~ "@dangerous_chars"
+      refute source =~ "@multiline_or_line_continuation"
+      refute source =~ "@forbidden_find_flags"
+      refute source =~ "@forbidden_git_log_flags"
+      refute source =~ "defp parse_and_validate"
     end
   end
 end
