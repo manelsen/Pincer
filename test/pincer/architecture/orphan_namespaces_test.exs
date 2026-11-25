@@ -33,6 +33,26 @@ defmodule Pincer.Architecture.OrphanNamespacesTest do
     assert [PromEx] == export_names(opts)
   end
 
+  test "Application and CLI boundaries pin explicit deps and exports" do
+    app_opts = extract_boundary_opts!("lib/pincer/application.ex")
+
+    assert Enum.sort(dep_names(app_opts)) ==
+             Enum.sort([
+               Pincer.Adapters,
+               Pincer.Channels,
+               Pincer.Core,
+               Pincer.Infra,
+               Pincer.Telemetry,
+               Pincer.Utils
+             ])
+
+    assert Keyword.get(app_opts, :exports) == []
+
+    cli_opts = extract_boundary_opts!("lib/pincer/cli.ex")
+    assert Enum.sort(dep_names(cli_opts)) == Enum.sort([Pincer.Channels, Pincer.Core])
+    assert Keyword.get(cli_opts, :exports) == []
+  end
+
   test "orphan dead modules and production DX macros are removed" do
     Enum.each(@removed_orphan_files, fn file ->
       refute File.exists?(file), "Expected orphan file #{file} to be removed"
@@ -76,6 +96,15 @@ defmodule Pincer.Architecture.OrphanNamespacesTest do
 
     assert is_list(found), "Expected #{file} to declare `use Boundary`"
     found
+  end
+
+  defp dep_names(opts) do
+    opts
+    |> Keyword.get(:deps, [])
+    |> Enum.map(fn
+      {:__aliases__, _, parts} -> Module.concat(parts)
+      other -> other
+    end)
   end
 
   defp export_names(opts) do
