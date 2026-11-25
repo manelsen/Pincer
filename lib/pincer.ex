@@ -1,6 +1,6 @@
 defmodule Pincer do
   @moduledoc "Autonomous AI Agent Framework."
-  use Boundary, deps: [PincerPorts]
+  use Boundary, deps: [PincerPorts, Pincer.Channels.Shared]
 end
 
 defmodule Pincer.Mix do
