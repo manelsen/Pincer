@@ -33,5 +33,18 @@ defmodule PincerPorts.Messaging do
     send_message(channel, recipient, text, reply_to_message_id: message_id)
   end
 
-  defp adapter, do: Application.fetch_env!(:pincer, :messaging_adapter)
+  defp adapter do
+    case Application.fetch_env(:pincer, :messaging_adapter) do
+      {:ok, mod} when is_atom(mod) and not is_nil(mod) and not is_boolean(mod) ->
+        mod
+
+      {:ok, invalid} ->
+        raise ArgumentError,
+              "invalid :messaging_adapter configuration for :pincer: #{inspect(invalid)}"
+
+      :error ->
+        raise ArgumentError,
+              "missing :messaging_adapter configuration for :pincer (configure config :pincer, :messaging_adapter, ...)"
+    end
+  end
 end

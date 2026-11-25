@@ -1,7 +1,18 @@
 defmodule Pincer.Adapters.Tools do
   @moduledoc "Tool adapters."
   use Boundary,
-    deps: [Pincer.Core, Pincer.Ports, Pincer.Infra],
+    type: :strict,
+    deps: [
+      Pincer.Adapters,
+      Pincer.Core,
+      Pincer.Ports,
+      Pincer.Infra,
+      Pincer.Utils,
+      PincerPorts,
+      Jason,
+      Logger,
+      Req
+    ],
     exports: [
       SafeShell,
       FileSystem,
@@ -10,10 +21,18 @@ defmodule Pincer.Adapters.Tools do
       GitInspect,
       ChannelActions,
       Scheduler,
+      Timer,
       TimerServer,
       Browser,
       Media,
       Workflow,
-      SessionSearch
+      SessionSearch,
+      Config,
+      Orchestrator,
+      BlackboardReader,
+      GraphMemory,
+      CodeSkeleton,
+      Learning,
+      ExternalKnowledge
     ]
 end

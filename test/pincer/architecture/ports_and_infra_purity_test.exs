@@ -77,7 +77,8 @@ defmodule Pincer.Architecture.PortsAndInfraPurityTest do
       {:ux_adapter, &Pincer.Ports.UX.adapter/0},
       {:project_adapter, &Pincer.Ports.Project.adapter/0},
       {:channel_policy_adapter, &Pincer.Ports.ChannelPolicy.adapter/0},
-      {:streaming_adapter, &Pincer.Ports.Streaming.adapter/0}
+      {:streaming_adapter, &Pincer.Ports.Streaming.adapter/0},
+      {:messaging_adapter, fn -> Pincer.Ports.Messaging.deliver("s", "m") end}
     ]
 
     for {key, fun} <- cases, setting <- [:__delete__, nil] do

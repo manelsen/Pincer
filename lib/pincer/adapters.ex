@@ -1,7 +1,20 @@
 defmodule Pincer.Adapters do
   @moduledoc "Registry and umbrella for all Adapters."
   use Boundary,
-    deps: [Pincer.Core, Pincer.Ports, Pincer.Infra, Pincer.Utils],
+    type: :strict,
+    deps: [
+      Pincer.Core,
+      Pincer.Ports,
+      Pincer.Infra,
+      Pincer.Utils,
+      PincerPorts,
+      Crontab.CronExpression.Parser,
+      Crontab.Scheduler,
+      Jason,
+      Logger,
+      Plug,
+      Req
+    ],
     check: [
       apps: [
         :pincer_anthropic,
@@ -31,5 +44,15 @@ defmodule Pincer.Adapters do
         :pincer_zhipu
       ]
     ],
-    exports: [Storage.SQLite, Storage.Checkpoint, Storage.MemoryHelpers]
+    exports: [
+      Storage.SQLite,
+      Storage.Checkpoint,
+      Storage.MemoryHelpers,
+      Cron.Scheduler,
+      Browser.Pool,
+      Messaging.PubSub,
+      Connectors.MCP.Manager,
+      Health.Plug,
+      Tools.TimerServer
+    ]
 end
