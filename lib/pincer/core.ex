@@ -4,6 +4,8 @@ defmodule Pincer.Core do
     deps: [Pincer.Ports, Pincer.Infra, Pincer.Utils],
     check: [
       apps: [
+        :exqlite,
+        :req,
         :pincer_anthropic,
         :pincer_cli,
         :pincer_deepseek,

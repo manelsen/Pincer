@@ -359,7 +359,9 @@ defmodule Pincer.LLM.Client do
         {:ok, auth_selection} ->
           model = Keyword.get(opts, :model, config[:default_model])
           config_with_auth = auth_selection.config
+
           apply(adapter, :transcribe_audio, [file_path, model, config_with_auth])
+          |> normalize_error_result()
 
         {:error, reason} ->
           {:error, reason}
@@ -403,7 +405,8 @@ defmodule Pincer.LLM.Client do
   end
 
   defp generate_embedding_with_fallback(adapter, text, model, config, provider_id, opts) do
-    case apply(adapter, :generate_embedding, [text, model, config]) do
+    case apply(adapter, :generate_embedding, [text, model, config])
+         |> normalize_error_result() do
       {:error, reason} = error ->
         maybe_retry_embedding(adapter, text, model, config, provider_id, opts, reason, error)
 
@@ -422,6 +425,7 @@ defmodule Pincer.LLM.Client do
       )
 
       apply(adapter, :generate_embedding, [text, fallback_model, config])
+      |> normalize_error_result()
     else
       _ -> error
     end
@@ -1068,8 +1072,12 @@ defmodule Pincer.LLM.Client do
 
   defp retry_policy, do: RetrySettings.load(Application.get_env(:pincer, :llm_retry, []))
 
+  defp normalize_error_result({:error, reason}), do: {:error, normalize_reason(reason)}
+  defp normalize_error_result(other), do: other
+
   defp normalize_reason({:error, reason}), do: normalize_reason(reason)
   defp normalize_reason({:EXIT, reason}), do: normalize_reason(reason)
+  defp normalize_reason(%Req.TransportError{reason: reason}), do: {:transport_error, reason}
   defp normalize_reason(reason), do: reason
 
   defp quota_exhausted?({:http_error, 429, body}) when is_binary(body) do

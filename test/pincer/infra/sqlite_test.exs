@@ -134,6 +134,18 @@ defmodule Pincer.Infra.SQLiteTest do
       assert {:ok, %{rows: [["first commit"]]}} =
                SQLite.query(db, "SELECT content FROM messages WHERE session_id = ?1", ["tx-sess"])
     end
+
+    test "normalizes query and Exqlite transaction errors into {:db_error, reason}", %{db: db} do
+      assert {:error, {:db_error, message}} =
+               SQLite.query(db, "SELECT * FROM nonexistent_table")
+
+      assert is_binary(message) and message =~ "no such table"
+
+      assert {:error, {:db_error, "database is locked"}} =
+               SQLite.transaction(db, fn _tx ->
+                 raise Exqlite.Error, message: "database is locked"
+               end)
+    end
   end
 
   describe "decode_json/2 and parse_datetime/1" do

@@ -94,7 +94,7 @@ defmodule Pincer.LLM.ClientTelemetryTest do
       max_elapsed_ms: 100
     )
 
-    assert {:error, %Req.TransportError{reason: :timeout}} = Client.chat_completion([])
+    assert {:error, {:transport_error, :timeout}} = Client.chat_completion([])
 
     assert_receive {:telemetry, [:pincer, :error], %{count: 1}, metadata}
     assert metadata.class == :transport_timeout

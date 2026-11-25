@@ -56,9 +56,9 @@ defmodule Pincer.Core.Session.ErrorUXTest do
     end
 
     test "maps transport errors" do
-      assert ErrorUX.friendly(%Req.TransportError{reason: :timeout}) =~ "Timeout"
-      assert ErrorUX.friendly(%Req.TransportError{reason: :econnrefused}) =~ "Conexao recusada"
-      assert ErrorUX.friendly(%Req.TransportError{reason: :nxdomain}) =~ "DNS"
+      assert ErrorUX.friendly({:transport_error, :timeout}) =~ "Timeout"
+      assert ErrorUX.friendly({:transport_error, :econnrefused}) =~ "Conexao recusada"
+      assert ErrorUX.friendly({:transport_error, :nxdomain}) =~ "DNS"
     end
 
     test "maps nested errors" do
@@ -72,9 +72,12 @@ defmodule Pincer.Core.Session.ErrorUXTest do
       assert ErrorUX.friendly({:retry_timeout, :x}) =~ "tempo maximo"
     end
 
-    test "maps database schema issue" do
-      msg = ErrorUX.friendly(%RuntimeError{message: "undefined table: cron_jobs"})
-      assert msg =~ "schema esperado"
+    test "maps database schema and storage errors" do
+      assert ErrorUX.friendly({:db_error, "no such table: cron_jobs"}) =~ "schema esperado"
+      assert ErrorUX.friendly({:db_error, "disk I/O error"}) =~ "armazenamento SQLite"
+
+      assert ErrorUX.friendly(%RuntimeError{message: "undefined table: cron_jobs"}) =~
+               "schema esperado"
     end
 
     test "maps decode/match/function class errors" do

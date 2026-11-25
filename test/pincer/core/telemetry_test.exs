@@ -29,7 +29,7 @@ defmodule Pincer.Core.TelemetryTest do
   end
 
   test "emit_error/2 publishes classified event" do
-    Telemetry.emit_error(%Req.TransportError{reason: :timeout}, %{component: :llm_client})
+    Telemetry.emit_error({:transport_error, :timeout}, %{component: :llm_client})
 
     assert_receive {:telemetry, [:pincer, :error], %{count: 1}, metadata}
     assert metadata.class == :transport_timeout

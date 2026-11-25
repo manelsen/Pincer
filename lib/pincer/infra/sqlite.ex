@@ -321,12 +321,13 @@ defmodule Pincer.Infra.SQLite do
                :ok <- Sqlite3.execute(conn, "DROP TABLE _health_fts;") do
             :ok
           end
+          |> normalize_sqlite_result()
         after
           _ = Sqlite3.close(conn)
         end
 
-      {:error, reason} ->
-        {:error, reason}
+      {:error, _reason} = error ->
+        normalize_sqlite_result(error)
     end
   end
 
@@ -469,7 +470,7 @@ defmodule Pincer.Infra.SQLite do
     conn = state.conn
 
     reply =
-      with :ok <- Sqlite3.execute(conn, "BEGIN IMMEDIATE;") do
+      with :ok <- Sqlite3.execute(conn, "BEGIN IMMEDIATE;") |> normalize_sqlite_result() do
         try do
           result = fun.({:sqlite_tx, conn, state.vec_enabled})
 
@@ -479,7 +480,7 @@ defmodule Pincer.Infra.SQLite do
               err
 
             _other ->
-              case Sqlite3.execute(conn, "COMMIT;") do
+              case Sqlite3.execute(conn, "COMMIT;") |> normalize_sqlite_result() do
                 :ok ->
                   result
 
@@ -489,6 +490,10 @@ defmodule Pincer.Infra.SQLite do
               end
           end
         rescue
+          e in Exqlite.Error ->
+            _ = Sqlite3.execute(conn, "ROLLBACK;")
+            {:error, {:db_error, Exception.message(e)}}
+
           e ->
             _ = Sqlite3.execute(conn, "ROLLBACK;")
             {:error, {:exception, e}}
@@ -653,14 +658,25 @@ defmodule Pincer.Infra.SQLite do
           with :ok <- Sqlite3.bind(stmt, params) do
             fun.(stmt)
           end
+          |> normalize_sqlite_result()
         rescue
-          e -> {:error, Exception.message(e)}
+          e -> {:error, {:db_error, Exception.message(e)}}
         after
           _ = Sqlite3.release(conn, stmt)
         end
 
-      {:error, reason} ->
-        {:error, reason}
+      {:error, _reason} = error ->
+        normalize_sqlite_result(error)
     end
   end
+
+  defp normalize_sqlite_result(:ok), do: :ok
+  defp normalize_sqlite_result({:ok, _} = ok), do: ok
+  defp normalize_sqlite_result({:error, {:db_error, _}} = err), do: err
+
+  defp normalize_sqlite_result({:error, %Exqlite.Error{} = error}),
+    do: {:error, {:db_error, Exception.message(error)}}
+
+  defp normalize_sqlite_result({:error, reason}),
+    do: {:error, {:db_error, reason}}
 end

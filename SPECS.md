@@ -316,6 +316,22 @@ and user-facing result conventions.
 - IntrospectionStore reads and writes lesson records and per-agent self-state.
   Lesson reads support active and confidence-ranked queries.
 
+### 12.8. Domain error normalization and Core app boundary
+
+Adapters and infrastructure normalize external client exceptions before returning
+errors into Core:
+
+- HTTP, LLM, and attachment boundaries normalize `%Req.TransportError{reason: reason}`
+  into `{:transport_error, reason}`.
+- `Pincer.Infra.SQLite` normalizes `Exqlite` query, execute, health-check, and
+  transaction failures into `{:db_error, reason}` (preserving application-returned
+  `{:error, reason}` values and non-SQLite exceptions inside transactions).
+- `Pincer.Core.LLM.ErrorClass` and `Pincer.Core.RetryPolicy` classify only domain
+  error tuples (`{:transport_error, reason}`, `{:db_error, reason}`) without
+  referencing `Req` or `Exqlite`.
+- `Pincer.Core` blocks `:req` and `:exqlite` via Boundary `check: [apps: ...]`
+  (inherited by Core sub-boundaries).
+
 ### 13. Channel-Owned Formatting (`Pincer.Channels.Telegram.ResponseEnvelope`)
 
 Telegram HTML usage-footer formatting and reasoning delivery options reside in

@@ -53,6 +53,14 @@ defmodule Pincer.Architecture.BoundaryExternalAppsTest do
     assert missing == []
   end
 
+  test "Pincer.Core declares check: [apps: ...] blocking :req and :exqlite" do
+    opts = boundary_opts!("lib/pincer/core.ex", [:Pincer, :Core])
+    apps = opts |> Keyword.get(:check, []) |> Keyword.get(:apps, [])
+
+    assert :req in apps, "Expected Pincer.Core check.apps to block :req"
+    assert :exqlite in apps, "Expected Pincer.Core check.apps to block :exqlite"
+  end
+
   test "Pincer.Utils declares check: [apps: ...] blocking forbidden external apps" do
     opts = boundary_opts!("lib/pincer/utils.ex", [:Pincer, :Utils])
     apps = opts |> Keyword.get(:check, []) |> Keyword.get(:apps, [])

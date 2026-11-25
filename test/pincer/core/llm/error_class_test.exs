@@ -43,9 +43,10 @@ defmodule Pincer.Core.LLM.ErrorClassTest do
     end
 
     test "classifies transport and process failures" do
-      assert ErrorClass.classify(%Req.TransportError{reason: :timeout}) == :transport_timeout
-      assert ErrorClass.classify(%Req.TransportError{reason: :econnrefused}) == :transport_connect
-      assert ErrorClass.classify(%Req.TransportError{reason: :nxdomain}) == :transport_dns
+      assert ErrorClass.classify({:transport_error, :timeout}) == :transport_timeout
+      assert ErrorClass.classify({:transport_error, :econnrefused}) == :transport_connect
+      assert ErrorClass.classify({:transport_error, :nxdomain}) == :transport_dns
+      assert ErrorClass.classify({:transport_error, :other}) == :transport_other
       assert ErrorClass.classify({:timeout, :gen_server_call}) == :process_timeout
       assert ErrorClass.classify({:retry_timeout, :x}) == :retry_timeout
     end
@@ -60,6 +61,8 @@ defmodule Pincer.Core.LLM.ErrorClassTest do
                description: ""
              }) == :stream_payload
 
+      assert ErrorClass.classify({:db_error, "no such table: lessons"}) == :db_schema
+      assert ErrorClass.classify({:db_error, "database is locked"}) == :db
       assert ErrorClass.classify(%RuntimeError{message: "undefined table: events"}) == :db_schema
     end
 
