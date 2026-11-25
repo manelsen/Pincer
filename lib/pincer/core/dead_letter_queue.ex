@@ -16,7 +16,7 @@ defmodule Pincer.Core.DeadLetterQueue do
 
   require Logger
 
-  alias Pincer.Infra.SQLite
+  alias Pincer.Ports.DeadLetterQueue, as: Store
 
   defstruct id: nil,
             operation_type: nil,
@@ -50,7 +50,7 @@ defmodule Pincer.Core.DeadLetterQueue do
 
     changeset = changeset(%__MODULE__{}, params)
 
-    result = sqlite_insert(changeset)
+    result = insert(changeset)
 
     result
     |> tap(fn
@@ -65,181 +65,28 @@ defmodule Pincer.Core.DeadLetterQueue do
   @doc "List unresolved DLQ entries, optionally filtered by operation_type."
   @spec pending(String.t() | nil) :: [%__MODULE__{}]
   def pending(operation_type \\ nil) do
-    sqlite_pending(operation_type)
+    Store.pending(operation_type)
+    |> Enum.map(&struct!(__MODULE__, &1))
   end
 
   @doc "Mark a DLQ entry as resolved."
   @spec resolve(binary(), String.t()) :: {:ok, term()} | {:error, term()}
   def resolve(id, resolution \\ "manual") do
-    case fetch_entry(id) do
-      nil ->
-        {:error, :not_found}
-
-      entry ->
-        changeset = changeset(entry, %{resolved_at: DateTime.utc_now(), resolution: resolution})
-        sqlite_update(changeset)
-    end
+    id |> Store.resolve(resolution, DateTime.utc_now()) |> to_entry()
   end
 
   @doc "Increment attempt count and update last_attempted_at for an entry."
   @spec increment_attempt(binary()) :: {:ok, term()} | {:error, term()}
   def increment_attempt(id) do
-    case fetch_entry(id) do
-      nil ->
-        {:error, :not_found}
-
-      entry ->
-        changeset =
-          changeset(entry, %{
-            attempt_count: entry.attempt_count + 1,
-            last_attempted_at: DateTime.utc_now()
-          })
-
-        sqlite_update(changeset)
-    end
+    id |> Store.increment_attempt(DateTime.utc_now()) |> to_entry()
   end
 
-  # --- SQLite persistence helpers ---
-
-  defp fetch_entry(id) do
-    sqlite_get(id)
+  defp insert(%{valid?: true} = changeset) do
+    changeset |> apply_changes() |> Map.from_struct() |> Store.insert() |> to_entry()
   end
 
-  defp sqlite_insert(changeset) do
-    if changeset.valid? do
-      now = DateTime.utc_now()
-      now_str = DateTime.to_iso8601(now)
-      e = %{apply_changes(changeset) | id: SQLite.uuid(), inserted_at: now, updated_at: now}
+  defp insert(changeset), do: {:error, changeset}
 
-      case SQLite.execute(
-             SQLite.default_server(),
-             """
-             INSERT INTO dead_letter_queue
-               (id, operation_type, payload, error, attempt_count, last_attempted_at,
-                resolved_at, resolution, inserted_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-             """,
-             [
-               e.id,
-               e.operation_type,
-               Jason.encode!(e.payload || %{}),
-               e.error,
-               e.attempt_count || 1,
-               e.last_attempted_at && DateTime.to_iso8601(e.last_attempted_at),
-               e.resolved_at && DateTime.to_iso8601(e.resolved_at),
-               e.resolution,
-               now_str,
-               now_str
-             ]
-           ) do
-        :ok -> {:ok, e}
-        error -> error
-      end
-    else
-      {:error, changeset}
-    end
-  end
-
-  defp sqlite_update(changeset) do
-    if changeset.valid? do
-      now = DateTime.utc_now()
-      now_str = DateTime.to_iso8601(now)
-      e = %{apply_changes(changeset) | updated_at: now}
-
-      case SQLite.execute(
-             SQLite.default_server(),
-             """
-             UPDATE dead_letter_queue
-             SET attempt_count = ?1, last_attempted_at = ?2, resolved_at = ?3,
-                 resolution = ?4, updated_at = ?5
-             WHERE id = ?6
-             """,
-             [
-               e.attempt_count || 1,
-               e.last_attempted_at && DateTime.to_iso8601(e.last_attempted_at),
-               e.resolved_at && DateTime.to_iso8601(e.resolved_at),
-               e.resolution,
-               now_str,
-               e.id
-             ]
-           ) do
-        :ok -> {:ok, e}
-        error -> error
-      end
-    else
-      {:error, changeset}
-    end
-  end
-
-  defp sqlite_get(id) do
-    case SQLite.query(
-           SQLite.default_server(),
-           """
-           SELECT id, operation_type, payload, error, attempt_count, last_attempted_at,
-                  resolved_at, resolution, inserted_at, updated_at
-           FROM dead_letter_queue
-           WHERE id = ?1
-           LIMIT 1
-           """,
-           [to_string(id)]
-         ) do
-      {:ok, %{rows: [row]}} -> hydrate_entry(row)
-      _ -> nil
-    end
-  end
-
-  defp sqlite_pending(nil) do
-    case SQLite.query(
-           SQLite.default_server(),
-           """
-           SELECT id, operation_type, payload, error, attempt_count, last_attempted_at,
-                  resolved_at, resolution, inserted_at, updated_at
-           FROM dead_letter_queue
-           WHERE resolved_at IS NULL
-           ORDER BY inserted_at ASC, rowid ASC
-           """
-         ) do
-      {:ok, %{rows: rows}} -> Enum.map(rows, &hydrate_entry/1)
-      _ -> []
-    end
-  end
-
-  defp sqlite_pending(op_type) do
-    case SQLite.query(
-           SQLite.default_server(),
-           """
-           SELECT id, operation_type, payload, error, attempt_count, last_attempted_at,
-                  resolved_at, resolution, inserted_at, updated_at
-           FROM dead_letter_queue
-           WHERE resolved_at IS NULL AND operation_type = ?1
-           ORDER BY inserted_at ASC, rowid ASC
-           """,
-           [to_string(op_type)]
-         ) do
-      {:ok, %{rows: rows}} -> Enum.map(rows, &hydrate_entry/1)
-      _ -> []
-    end
-  end
-
-  defp hydrate_entry([id, op, payload, error, attempts, last_at, resolved_at, res, ins, upd]) do
-    %__MODULE__{
-      id: id,
-      operation_type: op,
-      payload: decode_payload(payload),
-      error: error,
-      attempt_count: attempts,
-      last_attempted_at: SQLite.parse_datetime(last_at),
-      resolved_at: SQLite.parse_datetime(resolved_at),
-      resolution: res,
-      inserted_at: SQLite.parse_datetime(ins),
-      updated_at: SQLite.parse_datetime(upd)
-    }
-  end
-
-  defp decode_payload(bin) do
-    case SQLite.decode_json(bin, %{}) do
-      map when is_map(map) -> map
-      _ -> %{}
-    end
-  end
+  defp to_entry({:ok, fields}), do: {:ok, struct!(__MODULE__, fields)}
+  defp to_entry({:error, _reason} = error), do: error
 end

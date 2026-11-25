@@ -23,7 +23,7 @@ defmodule Pincer.Core.Introspection.LessonStore do
   """
 
   alias Pincer.Core.Introspection.LessonSchema
-  alias Pincer.Infra.SQLite
+  alias Pincer.Ports.IntrospectionStore, as: Store
 
   import Pincer.Utils.Validation, only: [apply_changes: 1]
 
@@ -46,7 +46,7 @@ defmodule Pincer.Core.Introspection.LessonStore do
       {:error, :duplicate}
     else
       changeset = LessonSchema.changeset(%LessonSchema{}, Map.put(attrs, :agent_id, agent_id))
-      sqlite_insert(changeset)
+      persist(changeset, &Store.insert_lesson/1)
     end
   end
 
@@ -60,7 +60,7 @@ defmodule Pincer.Core.Introspection.LessonStore do
   def top_lessons(agent_id, limit \\ 5, opts \\ []) do
     min_conf = Keyword.get(opts, :min_confidence, 0.0)
 
-    sqlite_top_lessons(agent_id, limit, min_conf)
+    list_lessons(agent_id, {:top, limit, min_conf})
   end
 
   @doc """
@@ -183,192 +183,32 @@ defmodule Pincer.Core.Introspection.LessonStore do
   @doc "Returns all active lessons for an agent."
   @spec list_active(String.t()) :: [LessonSchema.t()]
   def list_active(agent_id) do
-    sqlite_list_active(agent_id)
+    list_lessons(agent_id, :active)
   end
 
   # --- Private ---
 
+  defp list_lessons(agent_id, query) do
+    Store.list_lessons(agent_id, query)
+    |> Enum.map(&struct!(LessonSchema, &1))
+  end
+
   defp fetch_lesson(lesson_id) do
-    sqlite_get(lesson_id)
-  end
-
-  defp persist_update(changeset) do
-    sqlite_update(changeset)
-  end
-
-  defp sqlite_insert(changeset) do
-    if changeset.valid? do
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
-      now_str = DateTime.to_iso8601(now)
-      l = %{apply_changes(changeset) | id: SQLite.uuid(), inserted_at: now, updated_at: now}
-
-      case SQLite.execute(
-             SQLite.default_server(),
-             """
-             INSERT INTO lessons
-               (id, agent_id, content, source, confidence, extraction_confidence,
-                success_count, failure_count, contradiction_penalty, active,
-                last_applied_at, last_outcome, meta, inserted_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-             """,
-             [
-               l.id,
-               l.agent_id,
-               l.content,
-               l.source || "reflection",
-               (l.confidence || 0.5) * 1.0,
-               (l.extraction_confidence || 0.5) * 1.0,
-               l.success_count || 0,
-               l.failure_count || 0,
-               (l.contradiction_penalty || 0.0) * 1.0,
-               if(l.active == false, do: 0, else: 1),
-               l.last_applied_at && DateTime.to_iso8601(l.last_applied_at),
-               l.last_outcome,
-               Jason.encode!(l.meta || %{}),
-               now_str,
-               now_str
-             ]
-           ) do
-        :ok -> {:ok, l}
-        error -> error
-      end
-    else
-      {:error, changeset}
+    case Store.get_lesson(lesson_id) do
+      nil -> nil
+      fields -> struct!(LessonSchema, fields)
     end
   end
 
-  defp sqlite_update(changeset) do
-    if changeset.valid? do
-      now = DateTime.utc_now() |> DateTime.truncate(:second)
-      now_str = DateTime.to_iso8601(now)
-      l = %{apply_changes(changeset) | updated_at: now}
+  defp persist_update(changeset), do: persist(changeset, &Store.update_lesson/1)
 
-      case SQLite.execute(
-             SQLite.default_server(),
-             """
-             UPDATE lessons
-             SET confidence = ?1, success_count = ?2, failure_count = ?3,
-                 contradiction_penalty = ?4, active = ?5, last_applied_at = ?6,
-                 last_outcome = ?7, meta = ?8, updated_at = ?9
-             WHERE id = ?10
-             """,
-             [
-               (l.confidence || 0.5) * 1.0,
-               l.success_count || 0,
-               l.failure_count || 0,
-               (l.contradiction_penalty || 0.0) * 1.0,
-               if(l.active == false, do: 0, else: 1),
-               l.last_applied_at && DateTime.to_iso8601(l.last_applied_at),
-               l.last_outcome,
-               Jason.encode!(l.meta || %{}),
-               now_str,
-               l.id
-             ]
-           ) do
-        :ok -> {:ok, l}
-        error -> error
-      end
-    else
-      {:error, changeset}
+  defp persist(%{valid?: true} = changeset, write) do
+    with {:ok, fields} <- changeset |> apply_changes() |> Map.from_struct() |> write.() do
+      {:ok, struct!(LessonSchema, fields)}
     end
   end
 
-  defp sqlite_get(lesson_id) do
-    case SQLite.query(
-           SQLite.default_server(),
-           """
-           SELECT id, agent_id, content, source, confidence, extraction_confidence,
-                  success_count, failure_count, contradiction_penalty, active,
-                  last_applied_at, last_outcome, meta, inserted_at, updated_at
-           FROM lessons
-           WHERE id = ?1
-           LIMIT 1
-           """,
-           [lesson_id]
-         ) do
-      {:ok, %{rows: [row]}} -> hydrate_lesson(row)
-      _ -> nil
-    end
-  end
-
-  defp sqlite_top_lessons(agent_id, limit, min_conf) do
-    case SQLite.query(
-           SQLite.default_server(),
-           """
-           SELECT id, agent_id, content, source, confidence, extraction_confidence,
-                  success_count, failure_count, contradiction_penalty, active,
-                  last_applied_at, last_outcome, meta, inserted_at, updated_at
-           FROM lessons
-           WHERE agent_id = ?1 AND active = 1 AND confidence >= ?2
-           ORDER BY confidence DESC
-           LIMIT ?3
-           """,
-           [agent_id, min_conf * 1.0, limit]
-         ) do
-      {:ok, %{rows: rows}} -> Enum.map(rows, &hydrate_lesson/1)
-      _ -> []
-    end
-  end
-
-  defp sqlite_list_active(agent_id) do
-    case SQLite.query(
-           SQLite.default_server(),
-           """
-           SELECT id, agent_id, content, source, confidence, extraction_confidence,
-                  success_count, failure_count, contradiction_penalty, active,
-                  last_applied_at, last_outcome, meta, inserted_at, updated_at
-           FROM lessons
-           WHERE agent_id = ?1 AND active = 1
-           """,
-           [agent_id]
-         ) do
-      {:ok, %{rows: rows}} -> Enum.map(rows, &hydrate_lesson/1)
-      _ -> []
-    end
-  end
-
-  defp hydrate_lesson([
-         id,
-         agent_id,
-         content,
-         source,
-         confidence,
-         ext_conf,
-         succ,
-         fail,
-         penalty,
-         active,
-         last_applied_at,
-         last_outcome,
-         meta_json,
-         ins,
-         upd
-       ]) do
-    %LessonSchema{
-      id: id,
-      agent_id: agent_id,
-      content: content,
-      source: source,
-      confidence: confidence,
-      extraction_confidence: ext_conf,
-      success_count: succ,
-      failure_count: fail,
-      contradiction_penalty: penalty,
-      active: active == 1,
-      last_applied_at: SQLite.parse_datetime(last_applied_at),
-      last_outcome: last_outcome,
-      meta: decode_meta(meta_json),
-      inserted_at: SQLite.parse_datetime(ins),
-      updated_at: SQLite.parse_datetime(upd)
-    }
-  end
-
-  defp decode_meta(bin) do
-    case SQLite.decode_json(bin, %{}) do
-      map when is_map(map) -> map
-      _ -> %{}
-    end
-  end
+  defp persist(changeset, _write), do: {:error, changeset}
 
   defp duplicate?(content, existing) do
     Enum.any?(existing, fn lesson ->
