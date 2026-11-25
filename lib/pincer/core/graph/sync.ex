@@ -3,6 +3,7 @@ defmodule Pincer.Core.Graph.Sync do
   Logic for synchronizing the knowledge graph with the local filesystem and Git.
   """
   require Logger
+  alias Pincer.Ports.Git
   alias Pincer.Ports.Storage
   alias Pincer.Ports.LLM
   alias Pincer.Utils.CodeSkeleton
@@ -10,92 +11,48 @@ defmodule Pincer.Core.Graph.Sync do
   @doc """
   Performs an incremental sync using Git within a specific workspace.
   """
-  def sync_git(workspace_root) do
-    git_dir = Path.join(workspace_root, ".git")
-
-    if File.dir?(git_dir) do
-      try do
-        case System.cmd("git", ["diff", "--name-only", "HEAD"], cd: workspace_root) do
-          {output, 0} ->
-            files =
-              output
-              |> String.split("\n", trim: true)
-              |> Enum.filter(&supported_file?/1)
-
-            Logger.info(
-              "[GRAPH-SYNC] Git detected #{length(files)} changed files in #{workspace_root}. Syncing..."
-            )
-
-            Enum.each(files, fn rel_path ->
-              abs_path = Path.expand(rel_path, workspace_root)
-              index_file(abs_path, workspace_root)
-            end)
-
-            {:ok, files}
-
-          _ ->
-            {:error, :git_failed}
-        end
-      rescue
-        _ ->
-          Logger.warning(
-            "[GRAPH-SYNC] Git command failed in #{workspace_root}. Incremental sync skipped."
-          )
-
-          {:error, :enoent}
-      end
-    else
-      Logger.debug(
-        "[GRAPH-SYNC] Not a Git repository at #{workspace_root}. Skipping incremental sync."
-      )
-
-      {:ok, []}
-    end
-  end
+  @spec sync_git(String.t()) :: Git.file_result()
+  def sync_git(workspace_root), do: sync_using_git(workspace_root, :changed)
 
   @doc """
   Performs a full sync of all supported files in the workspace.
   """
-  def sync_full(workspace_root) do
-    git_dir = Path.join(workspace_root, ".git")
+  @spec sync_full(String.t()) :: Git.file_result()
+  def sync_full(workspace_root), do: sync_using_git(workspace_root, :tracked)
 
-    if File.dir?(git_dir) do
-      try do
-        case System.cmd("git", ["ls-files"], cd: workspace_root) do
-          {output, 0} ->
-            files =
-              output
-              |> String.split("\n", trim: true)
-              |> Enum.filter(&supported_file?/1)
+  defp sync_using_git(workspace_root, query) do
+    case Git.files(workspace_root, query) do
+      {:ok, git_paths} ->
+        files = Enum.filter(git_paths, &supported_file?/1)
+        Logger.info("[GRAPH-SYNC] Indexing #{length(files)} #{query} files in #{workspace_root}.")
 
-            Logger.info(
-              "[GRAPH-SYNC] Full sync detected #{length(files)} files in #{workspace_root}. Indexing..."
-            )
+        Enum.each(files, fn rel_path ->
+          index_file(Path.expand(rel_path, workspace_root), workspace_root)
+        end)
 
-            Enum.each(files, fn rel_path ->
-              abs_path = Path.expand(rel_path, workspace_root)
-              index_file(abs_path, workspace_root)
-            end)
+        {:ok, files}
 
-            {:ok, files}
+      {:error, :not_a_repository} ->
+        sync_without_git(workspace_root, query)
 
-          _ ->
-            {:error, :git_failed}
-        end
-      rescue
-        _ ->
-          Logger.warning(
-            "[GRAPH-SYNC] Git command failed in #{workspace_root}. Full sync skipped."
-          )
-
-          {:error, :enoent}
-      end
-    else
-      # If no git, fallback to recursive scan
-      Logger.debug("[GRAPH-SYNC] No Git at #{workspace_root}. Performing recursive scan...")
-      scan_and_index(workspace_root, workspace_root)
-      {:ok, []}
+      {:error, reason} = error ->
+        Logger.warning("[GRAPH-SYNC] Git sync failed in #{workspace_root}: #{reason}")
+        error
     end
+  end
+
+  defp sync_without_git(workspace_root, :tracked) do
+    Logger.debug("[GRAPH-SYNC] No Git at #{workspace_root}. Performing recursive scan...")
+    scan_and_index(workspace_root, workspace_root)
+    {:ok, []}
+  end
+
+  defp sync_without_git(workspace_root, :changed) do
+    Logger.debug(
+      "[GRAPH-SYNC] Not a Git repository at #{workspace_root}. Skipping incremental sync."
+    )
+
+    {:ok, []}
   end
 
   defp scan_and_index(path, workspace_root) do

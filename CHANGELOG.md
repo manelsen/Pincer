@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Model lists are cached per provider configuration, so switching providers or reloading `config.yaml` no longer serves the previous list for up to an hour.
 
 ### Removed
+- The experimental GitHub commit poller and its `enable_heartbeat_watchers` flag.
 - Unused modules that were only referenced by their own tests (`ModelRouter`, `ProjectBoard`, `ContractEngine`, `Capabilities`, `Session.CommandQueue`, `ReleaseValidation`, `Storage.Port`, `Core.SubAgent`) and the incomplete Matrix channel tree, which pointed at a non-existent session module.
 - Manual debug scripts moved from `test/` to `scripts/manual/` so they no longer run as part of `mix test`.
 

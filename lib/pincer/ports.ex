@@ -43,6 +43,7 @@ defmodule Pincer.Ports do
       UserMenu,
       Tool,
       Cron,
+      Git,
       Hook,
       Sandbox,
       Channel,

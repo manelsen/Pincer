@@ -1,7 +1,7 @@
-defmodule Pincer.Core.ProjectGitTest do
+defmodule Pincer.Adapters.GitTest do
   use ExUnit.Case, async: false
 
-  alias Pincer.Core.ProjectGit
+  alias Pincer.Adapters.Git
 
   setup do
     unless System.find_executable("git") do
@@ -29,7 +29,7 @@ defmodule Pincer.Core.ProjectGitTest do
 
     assert code != 0, "Test folder #{root} should not be a git repository"
 
-    case ProjectGit.ensure_branch("project/research-language-policy", cwd: root) do
+    case Git.ensure_branch("project/research-language-policy", cwd: root) do
       {:ok, result} ->
         assert result.status == :created,
                "Expected :created, got #{inspect(result.status)}. Repo path: #{result.repo_path}"
@@ -47,7 +47,39 @@ defmodule Pincer.Core.ProjectGitTest do
         assert String.trim(branch_out) == "project/research-language-policy"
 
       {:error, reason} ->
-        flunk("ProjectGit.ensure_branch failed with reason: #{inspect(reason)}")
+        flunk("Git.ensure_branch failed with reason: #{inspect(reason)}")
     end
   end
+
+  @tag :tmp_dir
+  test "reports tracked paths and changes with the actual filenames", %{tmp_dir: root} do
+    assert {:error, :not_a_repository} = Git.files(root, :tracked)
+    assert {_, 0} = git(root, ["init"])
+    assert {:error, :git_failed} = Git.files(root, :changed)
+
+    path = "notas á.md"
+    File.write!(Path.join(root, path), "first")
+    assert {_, 0} = git(root, ["add", "--", path])
+
+    assert {_, 0} =
+             git(root, [
+               "-c",
+               "user.name=Pincer",
+               "-c",
+               "user.email=test@example.invalid",
+               "-c",
+               "commit.gpgsign=false",
+               "commit",
+               "-m",
+               "fixture"
+             ])
+
+    assert {:ok, [^path]} = Git.files(root, :tracked)
+    assert {:ok, []} = Git.files(root, :changed)
+
+    File.write!(Path.join(root, path), "second")
+    assert {:ok, [^path]} = Git.files(root, :changed)
+  end
+
+  defp git(root, args), do: System.cmd("git", args, cd: root, stderr_to_stdout: true)
 end

@@ -107,7 +107,6 @@ defmodule Pincer.Infra.Config do
     "cron" => :cron,
     "enable_browser" => :enable_browser,
     "enable_graph_watcher" => :enable_graph_watcher,
-    "enable_heartbeat_watchers" => :enable_heartbeat_watchers,
     "enable_skill_promotion" => :enable_skill_promotion,
     "enabled_channels" => :enabled_channels,
     "gateway" => :gateway,

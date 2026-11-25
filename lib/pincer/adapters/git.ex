@@ -1,22 +1,32 @@
-defmodule Pincer.Core.ProjectGit do
+defmodule Pincer.Adapters.Git do
   @moduledoc """
-  Minimal Git adapter for project branch provisioning.
-
-  The adapter creates project branches locally without checking them out, keeping
-  runtime side-effects low for the current process.
+  Runs local Git queries for graph indexing and provisions project branches.
   """
 
-  @type branch_result ::
-          {:ok,
-           %{
-             name: String.t(),
-             status: :created | :existing,
-             source_branch: String.t(),
-             repo_path: String.t(),
-             bootstrapped: boolean()
-           }}
-          | {:error, any()}
+  @behaviour Pincer.Ports.Git
+  alias Pincer.Ports.Git, as: GitPort
 
+  @impl true
+  @doc "Returns repository-relative paths for the graph's Git query."
+  @spec files(String.t(), GitPort.file_query()) :: GitPort.file_result()
+  def files(workspace, query) do
+    if File.dir?(Path.join(workspace, ".git")) do
+      case System.cmd("git", file_args(query), cd: workspace) do
+        {output, 0} -> {:ok, String.split(output, "\0", trim: true)}
+        {_output, _code} -> {:error, :git_failed}
+      end
+    else
+      {:error, :not_a_repository}
+    end
+  rescue
+    error in ErlangError ->
+      if error.original == :enoent, do: {:error, :enoent}, else: reraise(error, __STACKTRACE__)
+  end
+
+  defp file_args(:changed), do: ["diff", "--no-ext-diff", "--name-only", "-z", "HEAD", "--"]
+  defp file_args(:tracked), do: ["ls-files", "-z"]
+
+  @impl true
   @doc """
   Ensures a local branch exists.
 
@@ -26,7 +36,7 @@ defmodule Pincer.Core.ProjectGit do
   ## Options
   - `:cwd` - repository directory to operate on. Defaults to the process cwd.
   """
-  @spec ensure_branch(String.t(), keyword()) :: branch_result()
+  @spec ensure_branch(String.t(), keyword()) :: GitPort.branch_result()
   def ensure_branch(branch_name, opts \\ [])
 
   def ensure_branch(branch_name, opts) when is_binary(branch_name) and is_list(opts) do
