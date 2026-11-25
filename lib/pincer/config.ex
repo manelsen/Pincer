@@ -340,9 +340,18 @@ defmodule Pincer.Infra.Config do
         _ -> is_map(sandbox_config) && sandbox_config["adapter"]
       end
 
-    case resolve_sandbox_module(adapter_spec) do
-      nil -> :ok
-      mod -> Application.put_env(:pincer, :sandbox_adapter, mod)
+    case resolve_sandbox_adapter(adapter_spec) do
+      {:ok, mod_or_key} ->
+        Application.put_env(:pincer, :sandbox_adapter, mod_or_key)
+
+      {:invalid, spec} ->
+        Logger.warning(
+          "Ignoring invalid sandbox adapter #{inspect(spec)}; " <>
+            "expected one of #{Enum.join(Map.keys(@sandbox_short_names), ", ")}"
+        )
+
+      :ignore ->
+        :ok
     end
   end
 
@@ -370,33 +379,35 @@ defmodule Pincer.Infra.Config do
 
   defp apply_sandbox_transport_override(_config), do: nil
 
-  defp resolve_sandbox_module(spec) when is_binary(spec) do
+  defp resolve_sandbox_adapter(spec) when is_binary(spec) do
     trimmed = String.trim(spec)
     normalized = String.downcase(trimmed)
 
-    case Map.fetch(@sandbox_short_names, normalized) do
-      {:ok, key} ->
+    cond do
+      trimmed == "" ->
+        :ignore
+
+      Map.has_key?(@sandbox_short_names, normalized) ->
+        key = Map.fetch!(@sandbox_short_names, normalized)
         adapters = Application.get_env(:pincer, :sandbox_adapters, %{})
 
-        cond do
-          is_map(adapters) -> Map.get(adapters, key) || Map.get(adapters, normalized)
-          Keyword.keyword?(adapters) -> Keyword.get(adapters, key)
-          true -> nil
-        end
+        resolved =
+          cond do
+            is_map(adapters) -> Map.get(adapters, key) || Map.get(adapters, normalized) || key
+            Keyword.keyword?(adapters) -> Keyword.get(adapters, key) || key
+            true -> key
+          end
 
-      :error ->
-        safe_existing_module(trimmed)
+        {:ok, resolved}
+
+      true ->
+        {:invalid, trimmed}
     end
   end
 
-  defp resolve_sandbox_module(_), do: nil
-
-  defp safe_existing_module(spec) do
-    parts = spec |> String.trim_leading("Elixir.") |> String.split(".", trim: true)
-    if parts != [], do: Module.safe_concat(["Elixir" | parts]), else: nil
-  rescue
-    ArgumentError -> nil
-  end
+  defp resolve_sandbox_adapter(nil), do: :ignore
+  defp resolve_sandbox_adapter(false), do: :ignore
+  defp resolve_sandbox_adapter(other), do: {:invalid, other}
 
   defp configure_storage(config) do
     storage_config =

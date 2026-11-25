@@ -66,6 +66,23 @@ defmodule Pincer.Architecture.PortsAndInfraPurityTest do
            "Expected #{file} code not to reference #{inspect(found)}"
   end
 
+  test "lib/pincer/config.ex and lib/pincer/ports/sandbox.ex do not use Module.concat or Module.safe_concat in code" do
+    forbidden = ["Module.concat", "Module.safe_concat"]
+
+    offenders =
+      ["lib/pincer/config.ex", "lib/pincer/ports/sandbox.ex"]
+      |> Enum.flat_map(fn file ->
+        code = code_without_docs(file)
+
+        forbidden
+        |> Enum.filter(&String.contains?(code, &1))
+        |> Enum.map(&{file, &1})
+      end)
+
+    assert offenders == [],
+           "Expected no dynamic Module.concat/Module.safe_concat calls, found: #{inspect(offenders)}"
+  end
+
   test "port dispatchers raise ArgumentError clearly when adapter env key is deleted or nil" do
     cases = [
       {:llm_adapter, &Pincer.Ports.LLM.list_providers/0},

@@ -72,7 +72,7 @@ defmodule Pincer.Ports.SandboxTest do
   end
 
   describe "resolve_adapter/1" do
-    test "resolves short names, atoms, and known module strings" do
+    test "resolves registered short names and direct module atoms, rejecting string module paths" do
       assert {:ok, Pincer.Adapters.Sandbox.Local} = Sandbox.resolve_adapter("local")
       assert {:ok, Pincer.Adapters.Sandbox.Local} = Sandbox.resolve_adapter(:local)
       assert {:ok, Pincer.Adapters.Sandbox.Docker} = Sandbox.resolve_adapter("docker")
@@ -82,7 +82,7 @@ defmodule Pincer.Ports.SandboxTest do
 
       assert {:ok, FakeSandboxAdapter} = Sandbox.resolve_adapter(FakeSandboxAdapter)
 
-      assert {:ok, Pincer.Adapters.Sandbox.Docker} =
+      assert {:error, {:unknown_sandbox_adapter, "Pincer.Adapters.Sandbox.Docker"}} =
                Sandbox.resolve_adapter("Pincer.Adapters.Sandbox.Docker")
     end
 
@@ -103,13 +103,14 @@ defmodule Pincer.Ports.SandboxTest do
       assert {:error, {:unknown_sandbox_adapter, "ssh"}} = Sandbox.resolve_adapter("ssh")
     end
 
-    test "fully qualified module names resolve without the short-name registry" do
+    test "rejects string module paths and unregistered short names without :sandbox_adapters" do
       Application.delete_env(:pincer, :sandbox_adapters)
 
-      assert {:ok, Pincer.Adapters.Sandbox.Docker} =
+      assert {:error, {:unknown_sandbox_adapter, "Pincer.Adapters.Sandbox.Docker"}} =
                Sandbox.resolve_adapter("Pincer.Adapters.Sandbox.Docker")
 
       assert {:error, {:unknown_sandbox_adapter, "docker"}} = Sandbox.resolve_adapter("docker")
+      assert {:ok, FakeSandboxAdapter} = Sandbox.resolve_adapter(FakeSandboxAdapter)
     end
   end
 
