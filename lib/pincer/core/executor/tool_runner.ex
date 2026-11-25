@@ -11,12 +11,12 @@ defmodule Pincer.Core.Executor.ToolRunner do
 
   require Logger
 
-  alias Pincer.Core.AuditLog
+  alias Pincer.Core.Executor.AuditLog
   alias Pincer.Core.Executor.Ctx
   alias Pincer.Core.Executor.ToolCall
   alias Pincer.Core.Policy
-  alias Pincer.Core.RBAC
-  alias Pincer.Core.ToolRuntime
+  alias Pincer.Core.Executor.RBAC
+  alias Pincer.Core.Executor.ToolRuntime
   alias Pincer.Infra.PubSub
 
   @approval_timeout_ms Application.compile_env(:pincer, :approval_timeout_ms, 600_000)

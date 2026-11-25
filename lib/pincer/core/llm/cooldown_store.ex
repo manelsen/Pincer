@@ -5,7 +5,7 @@ defmodule Pincer.Core.LLM.CooldownStore do
   Stores temporary provider unavailability windows keyed by provider id.
   """
 
-  alias Pincer.Core.ErrorClass
+  alias Pincer.Core.LLM.ErrorClass
   alias Pincer.Utils.ETSHelper
   alias Pincer.Utils.Time
   alias Pincer.Utils.Value

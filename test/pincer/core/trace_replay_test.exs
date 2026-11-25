@@ -1,7 +1,7 @@
 defmodule Pincer.Core.TraceReplayTest do
   use ExUnit.Case, async: true
 
-  alias Pincer.Core.Trace
+  alias Pincer.Core.Executor.Trace
   alias Pincer.Core.TraceReplay
 
   test "replay returns deterministic summary without executing tools" do

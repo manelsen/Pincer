@@ -6,7 +6,7 @@ defmodule Pincer.Core.LLM.FailoverPolicy do
   replayable state transition model.
   """
 
-  alias Pincer.Core.ErrorClass
+  alias Pincer.Core.LLM.ErrorClass
   alias Pincer.Core.LLM.CooldownStore
   alias Pincer.Core.Models.Registry, as: ModelRegistry
   alias Pincer.Core.Policy

@@ -6,7 +6,7 @@ defmodule Pincer.Core.Executor.Ctx do
 
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.Executor.Attachments
-  alias Pincer.Core.Trace
+  alias Pincer.Core.Executor.Trace
 
   @default_max_recursion_depth 100
 

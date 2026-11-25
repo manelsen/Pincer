@@ -118,7 +118,8 @@ defmodule Pincer.Core.Doctor do
   end
 
   defp alignment_integrity_checks do
-    alias Pincer.Core.{AgentPaths, AlignmentIntegrity}
+    alias Pincer.Core.AgentPaths
+    alias Pincer.Core.Session.AlignmentIntegrity
 
     base = AgentPaths.base_dir()
 
@@ -359,13 +360,13 @@ defmodule Pincer.Core.Doctor do
       ),
       check_runtime(
         :trace_runtime,
-        Pincer.Core.Trace,
+        Pincer.Core.Executor.Trace,
         [new: 2, add_step: 4, to_checkpoint_metadata: 1],
         "Trace runtime is available"
       ),
       check_runtime(
         :tool_risk_runtime,
-        Pincer.Core.ToolRuntime,
+        Pincer.Core.Executor.ToolRuntime,
         [classify: 1, requires_approval?: 1, execute: 5],
         "Tool risk runtime is available"
       ),

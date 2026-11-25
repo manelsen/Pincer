@@ -23,8 +23,8 @@ defmodule Pincer.Core.SelfImprovementTest do
 
   test "/learn command persists a new lesson" do
     text = "/learn Always use pattern matching"
-    {:ok, cmd, args} = Pincer.Core.ProjectRouter.parse(text)
-    Pincer.Core.ProjectRouter.handle_command(cmd, args, "cli_user")
+    {:ok, cmd, args} = Pincer.Core.Project.ProjectRouter.parse(text)
+    Pincer.Core.Project.ProjectRouter.handle_command(cmd, args, "cli_user")
 
     learnings = Storage.list_recent_learnings(1)
     assert length(learnings) == 1

@@ -5,7 +5,7 @@ defmodule Pincer.Core.Executor.StreamAccumulator do
   and XML tool-call scaffolding.
   """
 
-  alias Pincer.Core.TurnOutcomePolicy
+  alias Pincer.Core.Executor.TurnOutcomePolicy
   alias Pincer.Utils.Text
 
   @filter_tags [

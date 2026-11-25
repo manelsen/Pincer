@@ -7,7 +7,7 @@ defmodule Pincer.Core.MemoryDiagnostics do
   """
 
   alias Pincer.Core.MemoryObservability
-  alias Pincer.Core.MemoryRecall
+  alias Pincer.Core.Memory.MemoryRecall
   alias Pincer.Ports.Storage
 
   @default_limit 5

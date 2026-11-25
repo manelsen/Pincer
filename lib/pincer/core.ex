@@ -80,6 +80,7 @@ defmodule Pincer.Core do
       Reloader,
       SecurityAudit,
       Session.Adapter,
+      Skills.Generator,
       Streaming.Adapter,
       UX.Adapter
     ]

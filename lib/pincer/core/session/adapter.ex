@@ -42,7 +42,7 @@ defmodule Pincer.Core.Session.Adapter do
 
   @impl true
   def resolve(channel, context, channel_config),
-    do: Pincer.Core.SessionResolver.resolve(channel, context, channel_config)
+    do: Pincer.Core.Session.SessionResolver.resolve(channel, context, channel_config)
 
   @impl true
   def start_session(session_id, opts), do: Supervisor.start_session(session_id, opts)

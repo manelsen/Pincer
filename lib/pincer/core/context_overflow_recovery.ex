@@ -7,7 +7,7 @@ defmodule Pincer.Core.ContextOverflowRecovery do
   on the next attempt.
   """
 
-  alias Pincer.Core.ErrorClass
+  alias Pincer.Core.LLM.ErrorClass
 
   @type plan :: %{
           safe_limit_scale: float(),

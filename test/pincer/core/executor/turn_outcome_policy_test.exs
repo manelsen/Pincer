@@ -1,0 +1,63 @@
+defmodule Pincer.Core.Executor.TurnOutcomePolicyTest do
+  use ExUnit.Case, async: true
+
+  alias Pincer.Core.Executor.TurnOutcomePolicy
+
+  test "prefers explicit final text when present" do
+    assert {:final_text, "Final"} =
+             TurnOutcomePolicy.resolve(%{
+               final_text: "Final",
+               streamed_text: "Partial",
+               tool_messages: [],
+               tool_call_count: 0
+             })
+  end
+
+  test "falls back to streamed text when final text is empty" do
+    assert {:final_text, "Streamed"} =
+             TurnOutcomePolicy.resolve(%{
+               final_text: nil,
+               streamed_text: "Streamed",
+               tool_messages: [],
+               tool_call_count: 0
+             })
+  end
+
+  test "builds tool-only summary when no visible answer exists after tools" do
+    assert {:tool_only, tool_messages} =
+             TurnOutcomePolicy.resolve(%{
+               final_text: nil,
+               streamed_text: nil,
+               tool_messages: [
+                 %{"name" => "file_system", "content" => "Files in workspace\nREADME.md"}
+               ],
+               tool_call_count: 0
+             })
+
+    assert [%{"name" => "file_system", "content" => "Files in workspace\nREADME.md"}] =
+             tool_messages
+  end
+
+  test "returns empty response error when nothing user-visible exists" do
+    assert {:error, :empty_response} =
+             TurnOutcomePolicy.resolve(%{
+               final_text: nil,
+               streamed_text: nil,
+               tool_messages: [],
+               tool_call_count: 0
+             })
+  end
+
+  test "merge_reasoning_and_content hides reasoning-only text and preserves visible content" do
+    assert TurnOutcomePolicy.merge_reasoning_and_content("", "") == ""
+    assert TurnOutcomePolicy.merge_reasoning_and_content("Final", "") == "Final"
+    assert TurnOutcomePolicy.merge_reasoning_and_content("Final", "thought") == "Final"
+    assert TurnOutcomePolicy.merge_reasoning_and_content("   ", "thought") == ""
+  end
+
+  test "reasoning_only?/1 identifies messages with no text outside reasoning tags" do
+    assert TurnOutcomePolicy.reasoning_only?("<thinking>secret</thinking>")
+    refute TurnOutcomePolicy.reasoning_only?("<thinking>secret</thinking>Visible answer")
+    refute TurnOutcomePolicy.reasoning_only?(nil)
+  end
+end

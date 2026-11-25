@@ -6,7 +6,7 @@ defmodule Pincer.Channels.WhatsAppSessionTest do
     alias Pincer.Channels.WhatsApp
     alias Pincer.Channels.WhatsApp.Session
     alias Pincer.Core.ProjectOrchestrator
-    alias Pincer.Core.ProjectRouter
+    alias Pincer.Core.Project.ProjectRouter
 
     defmodule FakeBridge do
       @behaviour Pincer.Channels.WhatsApp.Bridge

@@ -7,6 +7,10 @@ defmodule Pincer.Core.Memory do
   - `MEMORY.md`: curated long-term memory plus consolidation markers for old history entries.
   """
 
+  use Boundary,
+    deps: [Pincer.Core],
+    exports: [CuratedMemory, MemoryRecall]
+
   @default_history_path "HISTORY.md"
   @default_memory_path "MEMORY.md"
   @default_window_size 20

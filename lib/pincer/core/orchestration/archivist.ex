@@ -91,7 +91,7 @@ defmodule Pincer.Core.Orchestration.Archivist do
   use GenServer
   require Logger
   alias Pincer.Core.AgentPaths
-  alias Pincer.Core.CuratedMemory
+  alias Pincer.Core.Memory.CuratedMemory
   alias Pincer.Core.Memory
   alias Pincer.Core.MemoryTypes
   alias Pincer.Ports.LLM

@@ -26,6 +26,7 @@ config :pincer, :channel_policy_adapter, Pincer.Core.ChannelPolicy.Adapter
 config :pincer, :streaming_adapter, Pincer.Core.Streaming.Adapter
 config :pincer, :pubsub_adapter, Pincer.Infra.PubSub
 config :pincer, :messaging_adapter, Pincer.Channels.OutboundMessaging
+config :pincer, :introspection_skill_generator, Pincer.Core.Skills.Generator
 
 config :pincer, :llm_providers, %{
   "google" => %{

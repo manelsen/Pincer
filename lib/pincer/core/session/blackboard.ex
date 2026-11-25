@@ -4,7 +4,7 @@ defmodule Pincer.Core.Session.Blackboard do
   """
 
   alias PincerPorts.Structs.Usage
-  alias Pincer.Core.SubAgentProgress
+  alias Pincer.Core.Session.SubAgentProgress
   alias Pincer.Ports.LLM
 
   @doc """

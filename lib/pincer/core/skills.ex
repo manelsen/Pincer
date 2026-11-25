@@ -9,6 +9,10 @@ defmodule Pincer.Core.Skills do
   - install path confinement inside sandbox root
   """
 
+  use Boundary,
+    deps: [Pincer.Core, Pincer.Core.Introspection],
+    exports: [Generator, PromptIndex]
+
   alias Pincer.Ports.SkillsRegistry
 
   @default_sandbox_root "skills"

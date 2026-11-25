@@ -232,7 +232,7 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
     send(task.pid, {:tool_approval_result, "c_audit", :approved})
     Task.await(task, 2_000)
 
-    events = Pincer.Core.AuditLog.by_actor(session_id)
+    events = Pincer.Core.Executor.AuditLog.by_actor(session_id)
     assert Enum.any?(events, &(&1.event_type == "tool_approval"))
     assert Enum.any?(events, &(&1.outcome == "approved"))
   end
@@ -411,7 +411,7 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
     assert context["subagent_depth"] == 1
     assert context["root_session_id"] == "root_runner_dispatch"
 
-    events = Pincer.Core.AuditLog.by_actor(session_id)
+    events = Pincer.Core.Executor.AuditLog.by_actor(session_id)
 
     assert Enum.any?(
              events,
@@ -444,7 +444,7 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
     refute_received {:approval_required, _id, _prompt}
     assert micros < 500_000
 
-    events = Pincer.Core.AuditLog.by_actor(session_id)
+    events = Pincer.Core.Executor.AuditLog.by_actor(session_id)
     assert Enum.any?(events, &(&1.event_type == "tool_approval" and &1.outcome == "denied"))
   end
 

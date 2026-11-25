@@ -5,7 +5,7 @@ defmodule Pincer.Core.MemoryPipeline do
   """
 
   alias Pincer.Core.Memory
-  alias Pincer.Core.MemoryRecall
+  alias Pincer.Core.Memory.MemoryRecall
   alias Pincer.Core.MemoryTypes
   alias Pincer.Utils.ETSHelper
   alias Pincer.Utils.Time

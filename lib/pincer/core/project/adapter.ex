@@ -8,7 +8,9 @@ defmodule Pincer.Core.Project.Adapter do
 
   @behaviour PincerPorts.Project
 
-  alias Pincer.Core.{ProjectFlowDelivery, ProjectOrchestrator, ProjectRouter}
+  alias Pincer.Core.ProjectOrchestrator
+  alias Pincer.Core.Project.ProjectFlowDelivery
+  alias Pincer.Core.Project.ProjectRouter
 
   @impl true
   def handle_command(command, args, session_id),

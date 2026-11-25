@@ -8,7 +8,7 @@ defmodule Pincer.Core.Streaming.Adapter do
 
   @behaviour PincerPorts.Streaming
 
-  alias Pincer.Core.SubAgentProgress
+  alias Pincer.Core.Session.SubAgentProgress
   alias Pincer.Core.StatusDelivery
   alias Pincer.Core.StatusMessagePolicy
   alias Pincer.Core.StreamDelivery

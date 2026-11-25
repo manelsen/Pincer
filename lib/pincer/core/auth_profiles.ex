@@ -8,7 +8,7 @@ defmodule Pincer.Core.AuthProfiles do
   - cooldown-aware profile rotation
   """
 
-  alias Pincer.Core.ErrorClass
+  alias Pincer.Core.LLM.ErrorClass
   alias Pincer.Utils.ETSHelper
   alias Pincer.Utils.MapHelpers
   alias Pincer.Utils.Time

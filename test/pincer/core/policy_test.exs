@@ -3,13 +3,13 @@ defmodule Pincer.Core.PolicyTest do
 
   alias Pincer.Core.AccessPolicy
   alias Pincer.Core.ChannelEventPolicy
-  alias Pincer.Core.EmptyResponseRecoveryPolicy
+  alias Pincer.Core.Executor.EmptyResponseRecoveryPolicy
   alias Pincer.Core.Policy
   alias Pincer.Core.RetryPolicy
   alias Pincer.Core.SessionScopePolicy
   alias Pincer.Core.StatusMessagePolicy
   alias Pincer.Core.StreamingPolicy
-  alias Pincer.Core.TurnOutcomePolicy
+  alias Pincer.Core.Executor.TurnOutcomePolicy
 
   describe "allow?/2" do
     test "delegates dm access decisions to AccessPolicy" do
