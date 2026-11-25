@@ -15,7 +15,7 @@ modes, and `vec_nodes` is an auxiliary index.
 Prerequisites: `git`, `make`, and a C compiler (`cc` or `gcc`).
 
 ```bash
-./scripts/build_sqlite_vec.sh          # no-op if priv/sqlite_vec/vec0.so exists
+./scripts/build_sqlite_vec.sh          # no-op if priv/sqlite_vec/vec0.{so,dylib} exists
 ./scripts/build_sqlite_vec.sh --force  # rebuild
 ```
 
@@ -24,7 +24,8 @@ The script:
 - clones the pinned sqlite-vec tag (`v0.1.10-alpha.4` by default) into
   `.cache/sqlite-vec`, shallow, once;
 - runs `make loadable`;
-- copies `dist/vec0.so` to `priv/sqlite_vec/vec0.so`.
+- copies the built loadable library (`dist/vec0.so` or `dist/vec0.dylib`) to
+  `priv/sqlite_vec/vec0.so` on Linux or `priv/sqlite_vec/vec0.dylib` on macOS (Darwin).
 
 Overrides:
 
@@ -32,7 +33,7 @@ Overrides:
 |---|---|---|
 | `SQLITE_VEC_VERSION` | `v0.1.10-alpha.4` | sqlite-vec git tag |
 | `SQLITE_VEC_BUILD_DIR` | `.cache/sqlite-vec` | clone/build directory |
-| `SQLITE_VEC_OUT_DIR` | `priv/sqlite_vec` | output directory for `vec0.so` |
+| `SQLITE_VEC_OUT_DIR` | `priv/sqlite_vec` | output directory for `vec0.so` / `vec0.dylib` |
 
 The `Dockerfile` runs the script with `--force` before `mix compile`, and CI runs it in
 every job. Bumping the version means editing the default in the script (or setting
@@ -80,9 +81,9 @@ checks, in order:
 3. `priv/sqlite_vec/vec0.dylib`
 
 Each relative candidate is checked both against the process working directory and against
-the application's `:code.priv_dir(:pincer)`. The `.dylib` entries cover macOS builds;
-`scripts/build_sqlite_vec.sh` itself produces `vec0.so`, so macOS builds may need a manual
-copy or a script tweak.
+the application's `:code.priv_dir(:pincer)`. `scripts/build_sqlite_vec.sh` automatically
+produces `priv/sqlite_vec/vec0.so` on Linux and `priv/sqlite_vec/vec0.dylib` on macOS
+(Darwin), so no manual post-build copy is needed.
 
 ## Dimensions
 
