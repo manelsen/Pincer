@@ -262,7 +262,7 @@ defmodule Pincer.Channels.Discord do
 
               case Inbound.dispatch(inbound,
                      resolve_shortcut: &PincerPorts.UX.resolve_shortcut/1,
-                     continue_project: &PincerPorts.Project.continue_if_collecting/3
+                     continue_project: &Pincer.Channels.Shared.ProjectBridge.continue/3
                    ) do
                 {:message, _content} ->
                   deliver_inbound_message(msg, session_context, trimmed)
@@ -1003,28 +1003,14 @@ defmodule Pincer.Channels.Discord do
 
     defp maybe_start_project_execution(channel_id, %PincerPorts.Session.Context{} = context)
          when not is_nil(channel_id) do
-      case PincerPorts.Project.kickoff(context.session_id) do
-        {:ok, kickoff} ->
-          ensure_brain_session_started(context)
+      Pincer.Channels.Shared.ProjectBridge.kickoff(context.session_id,
+        ensure_session: fn -> ensure_brain_session_started(context) end,
+        ensure_worker: fn ->
           Pincer.Channels.Discord.Session.ensure_started(channel_id, context.session_id)
-
-          Pincer.Channels.Discord.send_message(
-            "#{channel_id}",
-            "Project Runner: #{kickoff.status_message}"
-          )
-
-          _ = PincerPorts.Session.process_input(context.session_id, kickoff.prompt)
-          :ok
-
-        :not_ready ->
-          :ok
-
-        :already_started ->
-          :ok
-
-        :completed ->
-          :ok
-      end
+        end,
+        send_message: fn text -> Pincer.Channels.Discord.send_message("#{channel_id}", text) end,
+        log_tag: "DISCORD"
+      )
     end
 
     defp maybe_start_project_execution(_channel_id, _session_context), do: :ok

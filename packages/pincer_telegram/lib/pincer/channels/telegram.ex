@@ -842,7 +842,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
 
       Inbound.dispatch(inbound,
         resolve_shortcut: &PincerPorts.UX.resolve_shortcut/1,
-        continue_project: &PincerPorts.Project.continue_if_collecting/3
+        continue_project: &Pincer.Channels.Shared.ProjectBridge.continue/3
       )
     end
   end
@@ -1799,40 +1799,14 @@ defmodule Pincer.Channels.Telegram.UpdatesProvider do
   end
 
   defp maybe_start_project_execution(chat_id, %PincerPorts.Session.Context{} = context) do
-    case PincerPorts.Project.kickoff(context.session_id) do
-      {:ok, kickoff} ->
-        ensure_session_started(context)
+    Pincer.Channels.Shared.ProjectBridge.kickoff(context.session_id,
+      ensure_session: fn -> ensure_session_started(context) end,
+      ensure_worker: fn ->
         Pincer.Channels.Telegram.Session.ensure_started(chat_id, context.session_id)
-
-        Pincer.Channels.Telegram.send_message(
-          chat_id,
-          "Project Runner: #{kickoff.status_message}"
-        )
-
-        dispatch_project_task(context.session_id, kickoff.prompt)
-
-      :not_ready ->
-        :ok
-
-      :already_started ->
-        :ok
-
-      :completed ->
-        :ok
-    end
-  end
-
-  defp dispatch_project_task(session_id, prompt) when is_binary(prompt) do
-    case PincerPorts.Session.process_input(session_id, prompt) do
-      {:ok, _status} ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning("[TELEGRAM] Project task dispatch failed: #{inspect(reason)}")
-
-      other ->
-        Logger.debug("[TELEGRAM] Project task dispatch result: #{inspect(other)}")
-    end
+      end,
+      send_message: fn text -> Pincer.Channels.Telegram.send_message(chat_id, text) end,
+      log_tag: "TELEGRAM"
+    )
   end
 
   defp send_project_message(chat_id, session_id, response) do
