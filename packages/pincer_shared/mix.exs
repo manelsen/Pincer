@@ -9,6 +9,7 @@ defmodule PincerShared.MixProject do
       app: :pincer_shared,
       version: @version,
       elixir: "~> 1.14",
+      elixirc_options: [warnings_as_errors: true],
       start_permanent: false,
       compilers: [:boundary] ++ Mix.compilers(),
       deps: [{:boundary, "~> 0.12", runtime: false}],

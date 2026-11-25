@@ -6,6 +6,7 @@ defmodule PincerAnthropic.MixProject do
       app: :pincer_anthropic,
       version: "0.1.0",
       elixir: "~> 1.14",
+      elixirc_options: [warnings_as_errors: true],
       start_permanent: false,
       deps: [
         {:pincer_ports, "~> 0.1"},

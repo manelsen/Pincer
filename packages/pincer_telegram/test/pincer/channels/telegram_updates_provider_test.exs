@@ -6,8 +6,15 @@ defmodule Pincer.Channels.Telegram.UpdatesProviderTest do
   alias Pincer.Channels.Telegram.APIMock
   alias Pincer.Channels.Telegram.UpdatesProvider
 
+  defmodule TestChannelPolicy do
+    def emit_error(_reason, _metadata), do: :ok
+    def classify(:transient, _context), do: true
+  end
+
   setup do
-    Application.put_env(:pincer, :telegram_api, APIMock)
+    settings = [telegram_api: APIMock, channel_policy_adapter: TestChannelPolicy]
+    previous = Enum.map(settings, fn {key, _} -> {key, Application.fetch_env(:pincer, key)} end)
+    Application.put_all_env(pincer: settings)
 
     offset_path =
       Path.join(
@@ -16,7 +23,11 @@ defmodule Pincer.Channels.Telegram.UpdatesProviderTest do
       )
 
     on_exit(fn ->
-      Application.put_env(:pincer, :telegram_api, Pincer.Channels.TestAdapter)
+      Enum.each(previous, fn
+        {key, {:ok, adapter}} -> Application.put_env(:pincer, key, adapter)
+        {key, :error} -> Application.delete_env(:pincer, key)
+      end)
+
       File.rm(offset_path)
     end)
 
@@ -42,7 +53,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProviderTest do
     assert %{offset: 42} = :sys.get_state(pid)
 
     send(pid, :poll)
-    Process.sleep(50)
 
     assert %{offset: 45} = :sys.get_state(pid)
     assert File.read!(offset_path) == "45\n"
@@ -70,7 +80,7 @@ defmodule Pincer.Channels.Telegram.UpdatesProviderTest do
     log =
       capture_log(fn ->
         send(pid, :poll)
-        Process.sleep(200)
+        _ = :sys.get_state(pid)
       end)
 
     assert Process.alive?(pid), "UpdatesProvider must remain alive after malformed callbacks"
@@ -91,11 +101,9 @@ defmodule Pincer.Channels.Telegram.UpdatesProviderTest do
     allow(APIMock, self(), pid)
 
     send(pid, :poll)
-    Process.sleep(100)
     assert %{failures: 1} = :sys.get_state(pid)
 
     send(pid, :poll)
-    Process.sleep(100)
     assert %{failures: 0} = :sys.get_state(pid)
   end
 
@@ -110,7 +118,6 @@ defmodule Pincer.Channels.Telegram.UpdatesProviderTest do
     allow(APIMock, self(), pid)
 
     send(pid, :poll)
-    Process.sleep(100)
 
     assert %{offset: 10} = :sys.get_state(pid)
   end

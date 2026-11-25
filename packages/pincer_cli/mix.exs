@@ -9,6 +9,7 @@ defmodule PincerCLI.MixProject do
       app: :pincer_cli,
       version: @version,
       elixir: "~> 1.14",
+      elixirc_options: [warnings_as_errors: true],
       start_permanent: false,
       deps: deps(),
       description: "CLI channel adapter for the Pincer AI agent framework",
