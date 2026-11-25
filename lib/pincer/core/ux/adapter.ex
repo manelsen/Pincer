@@ -1,12 +1,12 @@
 defmodule Pincer.Core.UX.Adapter do
   @moduledoc """
-  Implements `Pincer.Ports.UX` on top of `Pincer.Core.UX` and its menu modules.
+  Implements `PincerPorts.UX` on top of `Pincer.Core.UX` and its menu modules.
 
   This is the only place that knows which Core modules own the UX vocabulary,
   so channel packages can depend on the port alone.
   """
 
-  @behaviour Pincer.Ports.UX
+  @behaviour PincerPorts.UX
 
   alias Pincer.Core.UX
   alias Pincer.Core.UX.{MenuPolicy, ModelKeyboard}

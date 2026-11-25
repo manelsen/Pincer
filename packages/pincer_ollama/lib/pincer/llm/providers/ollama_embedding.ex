@@ -7,9 +7,9 @@ defmodule Pincer.LLM.Providers.OllamaEmbedding do
   - Payload: `{"model": "<model>", "prompt": "<text>"}`.
   - Returns `{:ok, [float()]}` with the raw embedding vector.
   - No API key required.
-  - All other `Pincer.LLM.Provider` callbacks delegate to `:not_implemented`.
+  - All other `PincerPorts.LLM.Provider` callbacks delegate to `:not_implemented`.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   require Logger
 

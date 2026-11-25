@@ -1,14 +1,14 @@
 defmodule Pincer.Channels.DiscordAttachmentsTest do
   use ExUnit.Case, async: false
 
-  alias Pincer.Core.Session.Context
+  alias PincerPorts.Session.Context
 
   @session_id "discord:attachment-test"
 
   # Discord routes inbound messages through the session port, so the whole
   # media path can be exercised without the Core session stack.
   defmodule SessionStub do
-    @behaviour Pincer.Ports.Session
+    @behaviour PincerPorts.Session
 
     @session_id "discord:attachment-test"
 

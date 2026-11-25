@@ -36,16 +36,16 @@ defmodule Pincer.LLM.Client do
   alias Pincer.Core.Models.Registry, as: ModelRegistry
   alias Pincer.Core.Policy
   alias Pincer.Core.RetryPolicy
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
   alias Pincer.Core.Telemetry, as: CoreTelemetry
   alias Pincer.LLM.CooldownRouting
   alias Pincer.LLM.RetrySettings
   alias Pincer.LLM.StreamFallback
   alias Pincer.Utils.ETSHelper
 
-  @type message :: Pincer.LLM.Provider.message()
-  @type tool :: Pincer.LLM.Provider.tool()
-  @type chat_result :: Pincer.LLM.Provider.chat_result()
+  @type message :: PincerPorts.LLM.Provider.message()
+  @type tool :: PincerPorts.LLM.Provider.tool()
+  @type chat_result :: PincerPorts.LLM.Provider.chat_result()
 
   @doc """
   Sends a chat completion request to the configured LLM provider.

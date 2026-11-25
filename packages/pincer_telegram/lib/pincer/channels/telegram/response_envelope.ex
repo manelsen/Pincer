@@ -6,7 +6,7 @@ defmodule Pincer.Channels.Telegram.ResponseEnvelope do
   `Pincer.Core`.
   """
 
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
 
   @doc """
   Builds final Telegram message text, optionally appending an HTML usage footer.

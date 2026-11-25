@@ -2,7 +2,7 @@ defmodule Pincer.Core.Session.PreferencesTest do
   use ExUnit.Case, async: true
 
   alias Pincer.Core.Session.Preferences
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
 
   setup do
     tmp =

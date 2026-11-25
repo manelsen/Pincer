@@ -7,7 +7,7 @@ defmodule Pincer.LLM.Providers.Qwen do
   - Supports `enable_thinking` field for Qwen3 and Qwen-Plus.
   - Supports specific `stream_options`.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   @impl true
   def chat_completion(messages, model, config, tools) do

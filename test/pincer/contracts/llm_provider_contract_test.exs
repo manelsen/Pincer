@@ -19,7 +19,7 @@ defmodule Pincer.Contracts.LLMProviderContractTest do
     Enum.each(@provider_modules, fn provider_module ->
       behaviours = provider_module.module_info(:attributes)[:behaviour] || []
 
-      assert Pincer.LLM.Provider in behaviours
+      assert PincerPorts.LLM.Provider in behaviours
       assert function_exported?(provider_module, :chat_completion, 4)
       assert function_exported?(provider_module, :stream_completion, 4)
     end)

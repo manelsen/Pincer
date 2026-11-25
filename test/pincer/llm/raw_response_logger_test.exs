@@ -4,7 +4,7 @@ defmodule Pincer.LLM.RawResponseLoggerTest do
 
   import ExUnit.CaptureLog
 
-  alias Pincer.LLM.RawResponseLogger
+  alias PincerPorts.LLM.RawResponseLogger
 
   setup do
     # RawResponseLogger uses Logger.debug; the default level is :info so we must

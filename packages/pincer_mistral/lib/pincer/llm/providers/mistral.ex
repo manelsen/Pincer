@@ -9,7 +9,7 @@ defmodule Pincer.LLM.Providers.Mistral do
   - `list_models/1` via `GET /v1/models`.
   - API key via `MISTRAL_API_KEY` environment variable.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   require Logger
 

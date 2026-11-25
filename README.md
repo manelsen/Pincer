@@ -245,7 +245,7 @@ The **Archivist** runs after each session turn and extracts structured knowledge
 
 ## Channels
 
-Each channel implements the `Pincer.Ports.Channel` behaviour and uses the injected `__using__` macro for PubSub-driven session callbacks. To add a new channel, implement the behaviour and override the callbacks you need (`on_agent_response`, `on_agent_partial`, `on_agent_error`, etc.) — the rest default to no-ops.
+Each channel implements the `PincerPorts.Channel` behaviour and uses the injected `__using__` macro for PubSub-driven session callbacks. To add a new channel, implement the behaviour and override the callbacks you need (`on_agent_response`, `on_agent_partial`, `on_agent_error`, etc.) — the rest default to no-ops.
 
 | Channel | Module | Notes |
 |---|---|---|
@@ -276,7 +276,7 @@ Each agent gets an isolated workspace at `workspaces/<agent_id>/.pincer/`. Dynam
 
 ## LLM Providers
 
-14 providers, all implementing the `Pincer.LLM.Provider` behaviour. The `LLM.Client` dispatches to the configured adapter and handles retry/failover transparently.
+14 providers, all implementing the `PincerPorts.LLM.Provider` behaviour. The `LLM.Client` dispatches to the configured adapter and handles retry/failover transparently.
 
 | Provider | Module | Notes |
 |---|---|---|

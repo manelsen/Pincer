@@ -1,4 +1,4 @@
-defmodule Pincer.Ports.Project do
+defmodule PincerPorts.Project do
   @moduledoc """
   Port for the project wizard as seen from a channel adapter.
 
@@ -9,7 +9,7 @@ defmodule Pincer.Ports.Project do
 
   ## Example
 
-      case Pincer.Ports.Project.continue_if_collecting(session_id, text) do
+      case PincerPorts.Project.continue_if_collecting(session_id, text) do
         {:handled, prompt} -> send_prompt(prompt)
         :not_handled -> route_to_agent(text)
       end

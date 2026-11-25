@@ -1,4 +1,4 @@
-defmodule Pincer.Ports.UX do
+defmodule PincerPorts.UX do
   @moduledoc """
   Port for the channel-facing user experience vocabulary.
 
@@ -9,7 +9,7 @@ defmodule Pincer.Ports.UX do
 
   ## Example
 
-      case Pincer.Ports.UX.resolve_shortcut("model") do
+      case PincerPorts.UX.resolve_shortcut("model") do
         {:ok, command} -> run(command)
         :error -> treat_as_message()
       end

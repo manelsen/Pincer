@@ -1,4 +1,4 @@
-defmodule Pincer.LLM.RawResponseLogger do
+defmodule PincerPorts.LLM.RawResponseLogger do
   @moduledoc """
   Centralized raw provider logging for LLM adapters.
 

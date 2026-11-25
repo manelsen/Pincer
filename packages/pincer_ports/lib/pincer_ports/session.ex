@@ -1,4 +1,4 @@
-defmodule Pincer.Ports.Session do
+defmodule PincerPorts.Session do
   @moduledoc """
   Port for driving agent sessions from a channel adapter.
 
@@ -14,7 +14,7 @@ defmodule Pincer.Ports.Session do
 
   ## Example
 
-      Pincer.Ports.Session.process_input(session_id, incoming_message)
+      PincerPorts.Session.process_input(session_id, incoming_message)
   """
 
   @typedoc "Opaque inbound payload, built by the channel."

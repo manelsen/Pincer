@@ -1,4 +1,4 @@
-defmodule Pincer.Ports.Channel do
+defmodule PincerPorts.Channel do
   @moduledoc """
   Behaviour defining the contract for communication channels in Pincer.
 
@@ -22,10 +22,10 @@ defmodule Pincer.Ports.Channel do
   callbacks you care about — the rest default to no-ops:
 
       defmodule Pincer.Channels.MyChannel.Session do
-        use Pincer.Ports.Channel
+        use PincerPorts.Channel
 
         # Required: send text to the external API
-        @impl Pincer.Ports.Channel
+        @impl PincerPorts.Channel
         def send_message(recipient_id, text) do
           MyAPI.send(recipient_id, text)
         end
@@ -189,7 +189,7 @@ defmodule Pincer.Ports.Channel do
   @doc false
   defmacro __using__(_opts) do
     quote do
-      @behaviour Pincer.Ports.Channel
+      @behaviour PincerPorts.Channel
       use GenServer
       require Logger
       # PubSub is provided by the host pincer project at runtime.

@@ -9,7 +9,7 @@ defmodule Pincer.LLM.Providers.MiniMax do
   - API key via `MINIMAX_API_KEY`, Group ID via `MINIMAX_GROUP_ID`.
   - Otherwise follows the OpenAI-compatible chat completion schema.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   require Logger
 

@@ -3,10 +3,10 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
   A generic adapter for any LLM provider that strictly adopts the OpenAI API format.
   Includes Groq, Together, vLLM, Ollama, etc.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   require Logger
-  alias Pincer.LLM.RawResponseLogger
+  alias PincerPorts.LLM.RawResponseLogger
 
   @timeout 300_000
   @default_context_window 131_072

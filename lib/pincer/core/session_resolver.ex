@@ -7,7 +7,7 @@ defmodule Pincer.Core.SessionResolver do
   """
 
   alias Pincer.Core.Bindings
-  alias Pincer.Core.Session.Context
+  alias PincerPorts.Session.Context
   alias Pincer.Core.Policy
   alias Pincer.Utils.MapHelpers
 

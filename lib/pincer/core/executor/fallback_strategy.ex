@@ -16,7 +16,7 @@ defmodule Pincer.Core.Executor.FallbackStrategy do
 
   alias Pincer.Core.Executor.Ctx
   alias Pincer.Core.Policy
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
 
   @type outcome ::
           {:ok, [map()], String.t(), Usage.t() | nil, Ctx.t()} | {:error, term(), Ctx.t()}

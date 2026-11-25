@@ -1,6 +1,6 @@
 defmodule Pincer.Channels.WhatsApp do
   @compile {:no_warn_undefined, [
-    Pincer.Ports.Session.registry(),
+    PincerPorts.Session.registry(),
     Pincer.Infra.PubSub,
     Pincer.Ports.LLM
   ]}
@@ -12,7 +12,7 @@ defmodule Pincer.Channels.WhatsApp do
   stdio. Incoming text is routed to sessions and core command handlers.
   """
 
-  use Pincer.Ports.Channel
+  use PincerPorts.Channel
   require Logger
 
   alias Pincer.Channels.Shared.Inbound
@@ -20,10 +20,10 @@ defmodule Pincer.Channels.WhatsApp do
   @default_bridge_module Pincer.Channels.WhatsApp.Bridge.Adapter
   @max_outbound_chunk_chars 3500
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def extra_child_specs, do: [Pincer.Channels.WhatsApp.SessionSupervisor]
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def start_link(config) do
     normalized = normalize_map(config)
 
@@ -77,7 +77,7 @@ defmodule Pincer.Channels.WhatsApp do
   @doc """
   Sends a message to a WhatsApp chat via bridge.
   """
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def send_message(chat_id, text, _opts \\ []) do
     try do
       GenServer.call(__MODULE__, {:send_message, to_string(chat_id), normalize_text(text)})
@@ -89,7 +89,7 @@ defmodule Pincer.Channels.WhatsApp do
   @doc """
   WhatsApp does not support message edits in this v1 adapter; falls back to send.
   """
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def update_message(chat_id, _message_id, text) do
     send_message(chat_id, text)
   end
@@ -185,8 +185,8 @@ defmodule Pincer.Channels.WhatsApp do
     }
 
     Inbound.dispatch(inbound,
-      resolve_shortcut: &Pincer.Ports.UX.resolve_shortcut/1,
-      continue_project: &Pincer.Ports.Project.continue_if_collecting/3
+      resolve_shortcut: &PincerPorts.UX.resolve_shortcut/1,
+      continue_project: &PincerPorts.Project.continue_if_collecting/3
     )
   end
 
@@ -229,7 +229,7 @@ defmodule Pincer.Channels.WhatsApp do
   end
 
   defp maybe_start_project_execution(chat_id, session_context, state) do
-    case Pincer.Ports.Project.kickoff(session_context.session_id) do
+    case PincerPorts.Project.kickoff(session_context.session_id) do
       {:ok, kickoff} ->
         with :ok <- ensure_session_started(state, session_context),
              :ok <-
@@ -271,23 +271,23 @@ defmodule Pincer.Channels.WhatsApp do
         deliver_message(state, chat_id, "Pong!")
 
       "/menu" ->
-        deliver_message(state, chat_id, Pincer.Ports.UX.help_text(:generic))
+        deliver_message(state, chat_id, PincerPorts.UX.help_text(:generic))
 
       "/help" ->
-        deliver_message(state, chat_id, Pincer.Ports.UX.help_text(:generic))
+        deliver_message(state, chat_id, PincerPorts.UX.help_text(:generic))
 
       "/commands" ->
-        deliver_message(state, chat_id, Pincer.Ports.UX.help_text(:generic))
+        deliver_message(state, chat_id, PincerPorts.UX.help_text(:generic))
 
       "/status" ->
         deliver_message(state, chat_id, build_status(state, session_id))
 
       "/kanban" ->
-        deliver_message(state, chat_id, Pincer.Ports.Project.kanban(session_id))
+        deliver_message(state, chat_id, PincerPorts.Project.kanban(session_id))
 
       "/project" ->
         seed = if args == "", do: nil, else: args
-        deliver_message(state, chat_id, Pincer.Ports.Project.project(session_id, seed))
+        deliver_message(state, chat_id, PincerPorts.Project.project(session_id, seed))
         maybe_start_project_execution(chat_id, session_context, state)
 
       "/models" ->
@@ -304,7 +304,7 @@ defmodule Pincer.Channels.WhatsApp do
         deliver_message(
           state,
           chat_id,
-          "Unknown command: #{command}\n#{Pincer.Ports.UX.unknown_command_hint()}"
+          "Unknown command: #{command}\n#{PincerPorts.UX.unknown_command_hint()}"
         )
     end
   end
@@ -342,7 +342,7 @@ defmodule Pincer.Channels.WhatsApp do
       true ->
         code = String.trim(args)
 
-        case Pincer.Ports.ChannelPolicy.approve_code(:whatsapp, sender_id, code) do
+        case PincerPorts.ChannelPolicy.approve_code(:whatsapp, sender_id, code) do
           :ok ->
             deliver_message(
               state,
@@ -491,14 +491,14 @@ defmodule Pincer.Channels.WhatsApp do
         true -> "unknown"
       end
 
-    case Pincer.Ports.ChannelPolicy.allow?(:dm_access, %{channel: :whatsapp, sender_id: candidate_id, config: config}) do
+    case PincerPorts.ChannelPolicy.allow?(:dm_access, %{channel: :whatsapp, sender_id: candidate_id, config: config}) do
       {:allow, _meta} -> :allow
       {:deny, %{user_message: message}} -> {:deny, message}
     end
   end
 
   defp resolve_session_context(chat_id, sender_id, is_group, config) do
-    Pincer.Ports.Session.resolve(
+    PincerPorts.Session.resolve(
       :whatsapp,
       %{
         chat_id: chat_id,
@@ -649,16 +649,16 @@ defmodule Pincer.Channels.WhatsApp do
 
   defp default_ensure_session_started(
          session_id,
-         %Pincer.Core.Session.Context{} = session_context
+         %PincerPorts.Session.Context{} = session_context
        ) do
     start_opts =
       session_context
-      |> Pincer.Core.Session.Context.to_start_opts()
+      |> PincerPorts.Session.Context.to_start_opts()
       |> Keyword.delete(:session_id)
 
-    case Registry.lookup(Pincer.Ports.Session.registry(), session_id) do
+    case Registry.lookup(PincerPorts.Session.registry(), session_id) do
       [] ->
-        case Pincer.Ports.Session.start_session(session_id, start_opts) do
+        case PincerPorts.Session.start_session(session_id, start_opts) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok
           {:error, reason} -> {:error, reason}
@@ -670,9 +670,9 @@ defmodule Pincer.Channels.WhatsApp do
   end
 
   defp default_ensure_session_started(session_id, _session_context) do
-    case Registry.lookup(Pincer.Ports.Session.registry(), session_id) do
+    case Registry.lookup(PincerPorts.Session.registry(), session_id) do
       [] ->
-        case Pincer.Ports.Session.start_session(session_id) do
+        case PincerPorts.Session.start_session(session_id) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok
           {:error, reason} -> {:error, reason}
@@ -691,7 +691,7 @@ defmodule Pincer.Channels.WhatsApp do
     end
   end
 
-  alias Pincer.Core.Structs.IncomingMessage
+  alias PincerPorts.Structs.IncomingMessage
 
   defp default_process_input(session_id, input) do
     incoming =
@@ -711,13 +711,13 @@ defmodule Pincer.Channels.WhatsApp do
           IncomingMessage.new(session_id, text: text, attachments: atts)
       end
 
-    Pincer.Ports.Session.process_input(session_id, incoming)
+    PincerPorts.Session.process_input(session_id, incoming)
   end
 
-  defp default_status(session_id), do: Pincer.Ports.Session.get_status(session_id)
+  defp default_status(session_id), do: PincerPorts.Session.get_status(session_id)
 
   defp default_set_model(session_id, provider, model) do
-    Pincer.Ports.Session.set_model(session_id, provider, model)
+    PincerPorts.Session.set_model(session_id, provider, model)
     :ok
   end
 

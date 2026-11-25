@@ -7,10 +7,10 @@ defmodule Pincer.LLM.Providers.Google do
   - Requires translating OpenAI `{role: "user", content: "..."}` to Gemini `{role: "user", parts: [{text: "..."}]}`.
   - System instruction is passed via a separate field.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   require Logger
-  alias Pincer.LLM.RawResponseLogger
+  alias PincerPorts.LLM.RawResponseLogger
 
   @timeout 300_000
 

@@ -1,13 +1,13 @@
 defmodule Pincer.Core.Session.Adapter do
   @moduledoc """
-  Implements `Pincer.Ports.Session` on top of `Pincer.Core.Session.*`.
+  Implements `PincerPorts.Session` on top of `Pincer.Core.Session.*`.
 
   Channel packages talk to sessions through the port, so this adapter is the
   one place that knows the concrete server, supervisor and registry names.
   Registered at boot via `config :pincer, :session_adapter, __MODULE__`.
   """
 
-  @behaviour Pincer.Ports.Session
+  @behaviour PincerPorts.Session
 
   alias Pincer.Core.Registry
   alias Pincer.Core.Session.{Server, Supervisor}

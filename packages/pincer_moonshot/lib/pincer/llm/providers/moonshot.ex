@@ -7,7 +7,7 @@ defmodule Pincer.LLM.Providers.Moonshot do
   - Limits `temperature` closely to `[0, 1]` rather than OpenAI's default.
   - Requires `chat_template_kwargs: {"thinking": False}` for Kimi K2.5 Instant Mode.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   @impl true
   def chat_completion(messages, model, config, tools) do

@@ -6,10 +6,10 @@ defmodule Pincer.Channels.Slack do
   Slack channel implementation using Slack (Socket Mode).
   """
   use Supervisor
-  @behaviour Pincer.Ports.Channel
+  @behaviour PincerPorts.Channel
   require Logger
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def start_link(config) do
     Supervisor.start_link(__MODULE__, config, name: __MODULE__)
   end
@@ -95,7 +95,7 @@ defmodule Pincer.Channels.Slack.Handler do
   """
   use Slack.Bot
   require Logger
-  alias Pincer.Core.Structs.IncomingMessage
+  alias PincerPorts.Structs.IncomingMessage
 
   @impl true
   def handle_event(
@@ -111,7 +111,7 @@ defmodule Pincer.Channels.Slack.Handler do
     Pincer.Channels.Slack.Session.ensure_started(channel_id)
 
     incoming = IncomingMessage.new(session_id, text)
-    Pincer.Ports.Session.process_input(session_id, incoming)
+    PincerPorts.Session.process_input(session_id, incoming)
     :ok
   end
 
@@ -121,7 +121,7 @@ defmodule Pincer.Channels.Slack.Handler do
   end
 
   defp ensure_session_started(session_id) do
-    case Pincer.Ports.Session.ensure_started(session_id, []) do
+    case PincerPorts.Session.ensure_started(session_id, []) do
       {:ok, _pid} ->
         Logger.info("[SLACK] Session ready: #{session_id}")
         :ok

@@ -25,8 +25,8 @@ defmodule Pincer.Core.Session.Server do
   alias Pincer.Core.Session.Blackboard, as: SessionBlackboard
   alias Pincer.Core.Session.History, as: SessionHistory
   alias Pincer.Core.Session.Preferences
-  alias Pincer.Core.Structs.IncomingMessage
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.IncomingMessage
+  alias PincerPorts.Structs.Usage
   alias Pincer.Core.Telemetry
   alias Pincer.Infra.PubSub
   alias Pincer.Ports.Storage

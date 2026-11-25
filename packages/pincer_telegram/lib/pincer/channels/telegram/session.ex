@@ -7,12 +7,12 @@ defmodule Pincer.Channels.Telegram.Session do
   Driven Adapter for Telegram.
   One process per active chat that listens to PubSub and sends to the Telegram API.
   """
-  use Pincer.Ports.Channel
+  use PincerPorts.Channel
   alias Pincer.Channels.Telegram.ResponseEnvelope
 
   @preview_suppress_threshold 500
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def start_link(%{chat_id: chat_id} = args) do
     GenServer.start_link(__MODULE__, args, name: via_tuple(chat_id))
   end
@@ -22,14 +22,14 @@ defmodule Pincer.Channels.Telegram.Session do
   end
 
   defp via_tuple(chat_id),
-    do: {:via, Registry, {Pincer.Ports.Session.registry(), "telegram_session_worker_#{chat_id}"}}
+    do: {:via, Registry, {PincerPorts.Session.registry(), "telegram_session_worker_#{chat_id}"}}
 
   def ensure_started(chat_id, session_id \\ nil)
 
   def ensure_started(chat_id, session_id) do
     session_id = normalize_session_id(chat_id, session_id)
 
-    case Registry.lookup(Pincer.Ports.Session.registry(), "telegram_session_worker_#{chat_id}") do
+    case Registry.lookup(PincerPorts.Session.registry(), "telegram_session_worker_#{chat_id}") do
       [] ->
         case Pincer.Channels.Telegram.SessionSupervisor.start_session(chat_id, session_id) do
           {:ok, pid} ->
@@ -65,11 +65,11 @@ defmodule Pincer.Channels.Telegram.Session do
     {:ok, state(chat_id, session_id)}
   end
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def handles_session?(id),
     do: id == "telegram_" <> to_string(id) or String.starts_with?(id, "telegram_")
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def resolve_recipient(id) do
     case String.split(id, "_", parts: 2) do
       ["telegram", chat_id] -> chat_id
@@ -77,7 +77,7 @@ defmodule Pincer.Channels.Telegram.Session do
     end
   end
 
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def send_message(chat_id, text) do
     Pincer.Channels.Telegram.send_message(chat_id, text)
   end
@@ -104,7 +104,7 @@ defmodule Pincer.Channels.Telegram.Session do
   def on_agent_partial(token, state) do
     session_status = session_status(state.session_id)
 
-    Pincer.Ports.Streaming.handle_partial(
+    PincerPorts.Streaming.handle_partial(
       state,
       token,
       System.system_time(:millisecond),
@@ -128,7 +128,7 @@ defmodule Pincer.Channels.Telegram.Session do
 
     if text_with_usage != "" do
       state =
-        Pincer.Ports.Streaming.handle_final(
+        PincerPorts.Streaming.handle_final(
           state,
           text_with_usage,
           stream_transport(state, session_status, skip_formatting: false)
@@ -145,7 +145,7 @@ defmodule Pincer.Channels.Telegram.Session do
   def on_agent_error(text, state) do
     Pincer.Channels.Telegram.send_message(
       state.chat_id,
-      Pincer.Ports.ChannelPolicy.error_message(:telegram, text)
+      PincerPorts.ChannelPolicy.error_message(:telegram, text)
     )
 
     maybe_recover_project_flow(state)
@@ -154,7 +154,7 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def on_agent_status(text, state) do
-    if Pincer.Ports.ChannelPolicy.status_kind(text) == :subagent,
+    if PincerPorts.ChannelPolicy.status_kind(text) == :subagent,
       do: state,
       else: deliver_status(state, text)
   end
@@ -167,8 +167,8 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def on_subagent_progress(event, state) do
-    tracker = Pincer.Ports.Streaming.progress_apply_event(state.subagent_progress_tracker, event)
-    dashboard = Pincer.Ports.Streaming.progress_render_dashboard(tracker)
+    tracker = PincerPorts.Streaming.progress_apply_event(state.subagent_progress_tracker, event)
+    dashboard = PincerPorts.Streaming.progress_render_dashboard(tracker)
 
     %{state | subagent_progress_tracker: tracker}
     |> deliver_subagent_dashboard(dashboard)
@@ -192,10 +192,10 @@ defmodule Pincer.Channels.Telegram.Session do
 
   @impl true
   def on_approval_ui(_call_id, command, state) do
-    text = Pincer.Ports.ChannelPolicy.approval_message(:telegram, command)
+    text = PincerPorts.ChannelPolicy.approval_message(:telegram, command)
 
     buttons =
-      Pincer.Ports.ChannelPolicy.approval_button_spec()
+      PincerPorts.ChannelPolicy.approval_button_spec()
       |> Enum.map(fn {label, payload} ->
         %Telegex.Type.InlineKeyboardButton{text: label, callback_data: payload}
       end)
@@ -213,7 +213,7 @@ defmodule Pincer.Channels.Telegram.Session do
 
   defp session_status(session_id) do
     try do
-      case Pincer.Ports.Session.get_status(session_id) do
+      case PincerPorts.Session.get_status(session_id) do
         {:ok, status} when is_map(status) -> status
         _ -> %{}
       end
@@ -250,7 +250,7 @@ defmodule Pincer.Channels.Telegram.Session do
     rendered = render_tool_window(state.orchestration_note, updated_calls)
 
     %{state | tool_calls: updated_calls}
-    |> Pincer.Ports.Streaming.deliver_status(
+    |> PincerPorts.Streaming.deliver_status(
       rendered,
       send: fn content -> Pincer.Channels.Telegram.send_message(state.chat_id, content) end,
       edit: fn message_id, content ->
@@ -265,7 +265,7 @@ defmodule Pincer.Channels.Telegram.Session do
     rendered = render_tool_window(note, updated.tool_calls)
 
     updated
-    |> Pincer.Ports.Streaming.deliver_status(
+    |> PincerPorts.Streaming.deliver_status(
       rendered,
       send: fn content -> Pincer.Channels.Telegram.send_message(state.chat_id, content) end,
       edit: fn message_id, content ->
@@ -317,13 +317,13 @@ defmodule Pincer.Channels.Telegram.Session do
     state
     |> Map.put(:tool_calls, [])
     |> Map.put(:orchestration_note, nil)
-    |> Map.merge(Pincer.Ports.Streaming.status_initial_state())
+    |> Map.merge(PincerPorts.Streaming.status_initial_state())
   end
 
   defp deliver_subagent_dashboard(state, nil), do: state
 
   defp deliver_subagent_dashboard(state, text) do
-    Pincer.Ports.Streaming.deliver_status(
+    PincerPorts.Streaming.deliver_status(
       state,
       text,
       send: fn content -> Pincer.Channels.Telegram.send_message(state.chat_id, content) end,
@@ -334,14 +334,14 @@ defmodule Pincer.Channels.Telegram.Session do
   end
 
   defp maybe_advance_project_flow(state) do
-    Pincer.Ports.Project.on_agent_response(
+    PincerPorts.Project.on_agent_response(
       state.session_id,
       send_message: fn text -> Pincer.Channels.Telegram.send_message(state.chat_id, text) end
     )
   end
 
   defp maybe_recover_project_flow(state) do
-    Pincer.Ports.Project.on_agent_error(
+    PincerPorts.Project.on_agent_error(
       state.session_id,
       send_message: fn text -> Pincer.Channels.Telegram.send_message(state.chat_id, text) end
     )
@@ -370,16 +370,16 @@ defmodule Pincer.Channels.Telegram.Session do
           tool_calls: [],
           orchestration_note: nil
         },
-        Pincer.Ports.Streaming.status_initial_state()
+        PincerPorts.Streaming.status_initial_state()
       ),
-      Pincer.Ports.Streaming.stream_initial_state()
+      PincerPorts.Streaming.stream_initial_state()
     )
   end
 
   defp suppress_preview?(%{preview_suppressed: true}, _token), do: true
 
   defp suppress_preview?(state, token) do
-    stream_state = Pincer.Ports.Streaming.stream_extract(state)
+    stream_state = PincerPorts.Streaming.stream_extract(state)
 
     is_nil(stream_state.message_id) and stream_state.buffer == "" and synthetic_partial?(token)
   end

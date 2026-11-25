@@ -11,10 +11,10 @@ defmodule Pincer.LLM.Providers.Ollama do
   - `list_models/1` via `GET /api/tags`.
   - No API key required.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   require Logger
-  alias Pincer.LLM.RawResponseLogger
+  alias PincerPorts.LLM.RawResponseLogger
 
   @default_base_url "http://localhost:11434"
   @timeout 300_000

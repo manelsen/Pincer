@@ -7,7 +7,7 @@ defmodule Pincer.LLM.Providers.Zhipu do
   - Supports `max_completion_tokens` instead of `max_tokens` (since GLM-4).
   - Supports thinking mode toggle.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   @impl true
   def chat_completion(messages, model, config, tools) do

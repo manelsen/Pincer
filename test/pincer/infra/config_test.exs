@@ -1,7 +1,7 @@
 defmodule Pincer.Infra.ConfigTest do
   use ExUnit.Case, async: false
 
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
   alias Pincer.Infra.Config
 
   setup do

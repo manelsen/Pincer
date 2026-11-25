@@ -6,7 +6,7 @@ defmodule Pincer.Channels.DingTalk do
   DingTalk robot channel adapter.
 
   A Supervisor that starts the DingTalk channel process tree. Implements the
-  `Pincer.Ports.Channel` behaviour for integration with Pincer's channel
+  `PincerPorts.Channel` behaviour for integration with Pincer's channel
   infrastructure.
 
   ## Architecture
@@ -43,7 +43,7 @@ defmodule Pincer.Channels.DingTalk do
   """
 
   use Supervisor
-  @behaviour Pincer.Ports.Channel
+  @behaviour PincerPorts.Channel
   require Logger
 
   @doc """
@@ -53,7 +53,7 @@ defmodule Pincer.Channels.DingTalk do
   `:ignore` to skip this channel.
   """
   @spec start_link(config :: map()) :: Supervisor.on_start()
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def start_link(config) do
     Application.put_env(:pincer, :dingtalk_channel_config, config)
     client_id_env = Map.get(config, "client_id_env", "DINGTALK_CLIENT_ID")
@@ -98,7 +98,7 @@ defmodule Pincer.Channels.DingTalk do
   """
   @spec send_message(chat_id :: String.t(), text :: String.t()) ::
           {:ok, map()} | {:error, term()}
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def send_message(chat_id, text) do
     msg_param = Jason.encode!(%{"content" => text})
 
@@ -121,7 +121,7 @@ defmodule Pincer.Channels.DingTalk do
           content :: String.t()
         ) ::
           {:ok, map()} | {:error, term()}
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def update_message(_recipient_id, message_id, content) do
     Pincer.Channels.DingTalk.API.update_card(message_id, content)
   end
@@ -130,7 +130,7 @@ defmodule Pincer.Channels.DingTalk do
   Checks if a session ID belongs to the DingTalk channel.
   """
   @spec handles_session?(session_id :: String.t()) :: boolean()
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def handles_session?(session_id) do
     String.starts_with?(session_id, "dingtalk_")
   end
@@ -141,7 +141,7 @@ defmodule Pincer.Channels.DingTalk do
   Strips the `"dingtalk_"` prefix to obtain the raw staffId.
   """
   @spec resolve_recipient(session_id :: String.t()) :: String.t()
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def resolve_recipient(session_id) do
     case String.split(session_id, "_", parts: 2) do
       ["dingtalk", staff_id] -> staff_id
@@ -209,7 +209,7 @@ defmodule Pincer.Channels.DingTalk do
     config = Application.get_env(:pincer, :dingtalk_channel_config, %{})
 
     context =
-      Pincer.Ports.Session.resolve(
+      PincerPorts.Session.resolve(
         :dingtalk,
         %{
           staff_id: Map.get(event, :staff_id),
@@ -227,9 +227,9 @@ defmodule Pincer.Channels.DingTalk do
 
     Pincer.Channels.DingTalk.Session.ensure_started(chat_id, context.session_id)
 
-    incoming = Pincer.Core.Structs.IncomingMessage.new(context.session_id, text)
+    incoming = PincerPorts.Structs.IncomingMessage.new(context.session_id, text)
 
-    case Pincer.Ports.Session.process_input(context.session_id, incoming) do
+    case PincerPorts.Session.process_input(context.session_id, incoming) do
       {:ok, _status} -> :ok
       {:error, reason} -> {:error, reason}
       _other -> :ok
@@ -239,14 +239,14 @@ defmodule Pincer.Channels.DingTalk do
   def handle_event(_event), do: :ok
 
   defp ensure_session_started(context) do
-    case Registry.lookup(Pincer.Ports.Session.registry(), context.session_id) do
+    case Registry.lookup(PincerPorts.Session.registry(), context.session_id) do
       [] ->
         start_opts =
           context
-          |> Pincer.Core.Session.Context.to_start_opts()
+          |> PincerPorts.Session.Context.to_start_opts()
           |> Keyword.delete(:session_id)
 
-        Pincer.Ports.Session.start_session(context.session_id, start_opts)
+        PincerPorts.Session.start_session(context.session_id, start_opts)
 
       [_] ->
         :ok

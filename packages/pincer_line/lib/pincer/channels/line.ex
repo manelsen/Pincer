@@ -6,7 +6,7 @@ defmodule Pincer.Channels.Line do
   LINE Messaging API channel adapter.
 
   A Supervisor that starts the LINE channel process tree. Implements the
-  `Pincer.Ports.Channel` behaviour for integration with Pincer's channel
+  `PincerPorts.Channel` behaviour for integration with Pincer's channel
   infrastructure.
 
   ## Architecture
@@ -51,7 +51,7 @@ defmodule Pincer.Channels.Line do
   """
 
   use Supervisor
-  @behaviour Pincer.Ports.Channel
+  @behaviour PincerPorts.Channel
   require Logger
 
   @doc """
@@ -61,7 +61,7 @@ defmodule Pincer.Channels.Line do
   this channel.
   """
   @spec start_link(config :: map()) :: Supervisor.on_start()
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def start_link(config) do
     Application.put_env(:pincer, :line_channel_config, config)
     token_env = Map.get(config, "token_env", "LINE_CHANNEL_ACCESS_TOKEN")
@@ -101,7 +101,7 @@ defmodule Pincer.Channels.Line do
   """
   @spec send_message(chat_id :: String.t(), text :: String.t()) ::
           {:ok, map()} | {:error, term()}
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def send_message(chat_id, text) do
     Pincer.Channels.Line.API.push_message(chat_id, [
       %{"type" => "text", "text" => text}
@@ -115,7 +115,7 @@ defmodule Pincer.Channels.Line do
   """
   @spec update_message(chat_id :: String.t(), message_id :: any(), text :: String.t()) ::
           {:ok, map()} | {:error, term()}
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def update_message(chat_id, _message_id, text) do
     send_message(chat_id, text)
   end
@@ -124,7 +124,7 @@ defmodule Pincer.Channels.Line do
   Checks if a session ID belongs to the LINE channel.
   """
   @spec handles_session?(session_id :: String.t()) :: boolean()
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def handles_session?(session_id) do
     String.starts_with?(session_id, "line_")
   end
@@ -135,7 +135,7 @@ defmodule Pincer.Channels.Line do
   Strips the `"line_"` prefix to obtain the raw userId.
   """
   @spec resolve_recipient(session_id :: String.t()) :: String.t()
-  @impl Pincer.Ports.Channel
+  @impl PincerPorts.Channel
   def resolve_recipient(session_id) do
     case String.split(session_id, "_", parts: 2) do
       ["line", user_id] -> user_id
@@ -204,7 +204,7 @@ defmodule Pincer.Channels.Line do
     config = Application.get_env(:pincer, :line_channel_config, %{})
 
     context =
-      Pincer.Ports.Session.resolve(
+      PincerPorts.Session.resolve(
         :line,
         %{
           user_id: Map.get(event, :user_id),
@@ -218,9 +218,9 @@ defmodule Pincer.Channels.Line do
     chat_id = Map.get(event, :chat_id) || Map.get(event, :user_id)
     Pincer.Channels.Line.Session.ensure_started(chat_id, context.session_id)
 
-    incoming = Pincer.Core.Structs.IncomingMessage.new(context.session_id, text)
+    incoming = PincerPorts.Structs.IncomingMessage.new(context.session_id, text)
 
-    case Pincer.Ports.Session.process_input(context.session_id, incoming) do
+    case PincerPorts.Session.process_input(context.session_id, incoming) do
       {:ok, _status} -> :ok
       {:error, reason} -> {:error, reason}
       _other -> :ok
@@ -230,14 +230,14 @@ defmodule Pincer.Channels.Line do
   def handle_event(_event), do: :ok
 
   defp ensure_session_started(context) do
-    case Registry.lookup(Pincer.Ports.Session.registry(), context.session_id) do
+    case Registry.lookup(PincerPorts.Session.registry(), context.session_id) do
       [] ->
         start_opts =
           context
-          |> Pincer.Core.Session.Context.to_start_opts()
+          |> PincerPorts.Session.Context.to_start_opts()
           |> Keyword.delete(:session_id)
 
-        Pincer.Ports.Session.start_session(context.session_id, start_opts)
+        PincerPorts.Session.start_session(context.session_id, start_opts)
 
       [_] ->
         :ok

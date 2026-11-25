@@ -1,12 +1,12 @@
 defmodule Pincer.Core.Project.Adapter do
   @moduledoc """
-  Implements `Pincer.Ports.Project` on top of the Core project modules.
+  Implements `PincerPorts.Project` on top of the Core project modules.
 
   Channel adapters ask the port for wizard routing, prompts and delivery so
   they never import `Pincer.Core.Project*` themselves.
   """
 
-  @behaviour Pincer.Ports.Project
+  @behaviour PincerPorts.Project
 
   alias Pincer.Core.{ProjectFlowDelivery, ProjectOrchestrator, ProjectRouter}
 

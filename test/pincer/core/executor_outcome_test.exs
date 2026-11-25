@@ -2,7 +2,7 @@ defmodule Pincer.Core.ExecutorOutcomeTest do
   use ExUnit.Case, async: true
 
   alias Pincer.Core.Executor
-  alias Pincer.Core.Structs.Usage
+  alias PincerPorts.Structs.Usage
 
   defmodule OkWithUsageLLM do
     @behaviour Pincer.Ports.LLM

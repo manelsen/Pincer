@@ -8,10 +8,10 @@ defmodule Pincer.LLM.Providers.Anthropic do
   - Requires `x-api-key` and `anthropic-version`.
   - Messages must alternate strictly between `user` and `assistant`.
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   require Logger
-  alias Pincer.LLM.RawResponseLogger
+  alias PincerPorts.LLM.RawResponseLogger
 
   @timeout 300_000
 

@@ -5,7 +5,7 @@ defmodule Pincer.LLM.Providers.OpencodeZen do
   Particularities:
   - Standard OpenAI-compatible implementation (`https://api.opencode.ai/v1/chat/completions`).
   """
-  @behaviour Pincer.LLM.Provider
+  @behaviour PincerPorts.LLM.Provider
 
   @impl true
   def chat_completion(messages, model, config, tools) do

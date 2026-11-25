@@ -1,6 +1,6 @@
 # pincer_ports
 
-Port behaviours and contracts for the Pincer AI agent framework — this is the foundational package that defines the `Behaviour` interfaces (LLM, Channel, Storage, Tool, Cron, etc.) that all other Pincer adapters implement.
+Shared contracts for Pincer's channels and LLM providers. The `PincerPorts` boundary exports these contracts and their shared data types under `PincerPorts.*`.
 
 Part of the [Pincer](https://github.com/manelsen/Pincer) AI agent framework.
 
@@ -20,7 +20,7 @@ end
 
 ```elixir
 defmodule MyLLM do
-  @behaviour Pincer.Ports.LLM
+  @behaviour PincerPorts.LLM.Provider
   # implement callbacks...
 end
 ```
