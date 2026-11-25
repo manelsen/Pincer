@@ -1,7 +1,7 @@
 defmodule Pincer.LLM do
   @moduledoc "LLM Adapters."
   use Boundary,
-    deps: [Pincer.Core, Pincer.Infra, Pincer.Ports, Pincer.Utils],
+    deps: [Pincer.Core, Pincer.Ports, Pincer.Utils],
     check: [
       apps: [
         :pincer_anthropic,

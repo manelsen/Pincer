@@ -4,14 +4,14 @@ defmodule Pincer.CLI do
   Can run locally (Standalone) or connect to a remote server.
   """
   use Boundary,
-    deps: [Pincer.Channels, Pincer.Core],
+    deps: [Pincer.Core, Pincer.Plugin],
     exports: []
 
   alias Pincer.CLI.History
+  alias Pincer.Plugin.Manifest
   require Logger
 
   @session_id "cli_user"
-  @backend_name Pincer.Channels.CLI
   @default_history_limit 10
 
   def main(args) do
@@ -62,7 +62,7 @@ defmodule Pincer.CLI do
 
   defp attach_to_backend(node) do
     try do
-      GenServer.call({@backend_name, node}, :attach)
+      GenServer.call({backend_name(), node}, :attach)
     catch
       :exit, _ ->
         IO.puts(
@@ -70,6 +70,26 @@ defmodule Pincer.CLI do
         )
 
         System.halt(1)
+    end
+  end
+
+  @doc false
+  @spec backend_name() :: module()
+  def backend_name do
+    case Application.get_env(:pincer, :cli_channel_adapter) do
+      nil ->
+        Manifest.discover()
+        |> Enum.find_value(fn
+          %Manifest{id: "cli", adapter: adapter} when not is_nil(adapter) -> adapter
+          _ -> nil
+        end)
+        |> case do
+          nil -> raise "CLI channel adapter not found in plugin manifests"
+          adapter -> adapter
+        end
+
+      adapter ->
+        adapter
     end
   end
 
@@ -124,7 +144,7 @@ defmodule Pincer.CLI do
 
   def send_message(node, msg) do
     # Sends to the Backend on the target node as user INPUT
-    target = if is_pid(node), do: node, else: {@backend_name, node}
+    target = if is_pid(node), do: node, else: {backend_name(), node}
     GenServer.cast(target, {:user_input, msg})
     :ok
   end

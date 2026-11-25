@@ -43,4 +43,30 @@ defmodule Pincer.CLI.Test do
       assert Pincer.CLI.send_message(session_pid, "Teste") == :ok
     end
   end
+
+  describe "backend_name/0" do
+    setup do
+      previous = Application.get_env(:pincer, :cli_channel_adapter)
+
+      on_exit(fn ->
+        if is_nil(previous) do
+          Application.delete_env(:pincer, :cli_channel_adapter)
+        else
+          Application.put_env(:pincer, :cli_channel_adapter, previous)
+        end
+      end)
+
+      :ok
+    end
+
+    test "resolves cli adapter from plugin manifest by default" do
+      Application.delete_env(:pincer, :cli_channel_adapter)
+      assert Pincer.CLI.backend_name() == Pincer.Channels.CLI
+    end
+
+    test "prefers :cli_channel_adapter application override when set" do
+      Application.put_env(:pincer, :cli_channel_adapter, Pincer.CLI.Test.FakeBackend)
+      assert Pincer.CLI.backend_name() == Pincer.CLI.Test.FakeBackend
+    end
+  end
 end
