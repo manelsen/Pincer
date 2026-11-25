@@ -1,6 +1,7 @@
 defmodule Pincer.Core.SessionResolverTest do
   use ExUnit.Case, async: false
 
+  alias Pincer.Core.AgentPaths
   alias Pincer.Core.Bindings
   alias Pincer.Core.Pairing
   alias Pincer.Core.SessionResolver
@@ -31,6 +32,7 @@ defmodule Pincer.Core.SessionResolverTest do
     assert context.conversation_ref == "telegram:dm:123"
     assert context.root_agent_id == "a1b2c3"
     assert context.root_agent_source == :binding
+    assert context.workspace_path == AgentPaths.workspace_root("a1b2c3")
   end
 
   test "telegram static agent_map overrides dynamic binding for root agent only" do
@@ -47,6 +49,7 @@ defmodule Pincer.Core.SessionResolverTest do
     assert context.session_id == "telegram_123"
     assert context.root_agent_id == "lucie"
     assert context.root_agent_source == :static_mapping
+    assert context.workspace_path == AgentPaths.workspace_root("lucie")
   end
 
   test "discord separates principal identity from dm conversation identity" do
@@ -77,6 +80,7 @@ defmodule Pincer.Core.SessionResolverTest do
     assert context.session_id == "whatsapp_551199000111"
     assert context.root_agent_id == "whatsapp_551199000111"
     assert context.root_agent_source == :session_scope
+    assert context.workspace_path == AgentPaths.workspace_root("whatsapp_551199000111")
   end
 
   test "feishu DM resolves the bound root agent from open_id" do
@@ -126,5 +130,12 @@ defmodule Pincer.Core.SessionResolverTest do
     assert context.principal_ref == "dingtalk:user:staff1"
     assert context.conversation_ref == "dingtalk:dm:staff1"
     assert context.root_agent_id == "dingtalk_agent"
+  end
+
+  test "unknown channel uses its fallback session for workspace resolution" do
+    context = SessionResolver.resolve(:unknown, %{chat_id: 123})
+
+    assert context.root_agent_id == "unknown_123"
+    assert context.workspace_path == AgentPaths.workspace_root("unknown_123")
   end
 end

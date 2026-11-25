@@ -6,11 +6,6 @@ defmodule PincerPorts.Session.Context do
   the Pincer core and channel adapter packages (pincer_telegram, pincer_cli, etc.).
   """
 
-  # AgentPaths lives in the host pincer project and is called at runtime only.
-  @compile {:no_warn_undefined, Pincer.Core.AgentPaths}
-
-  alias Pincer.Core.AgentPaths
-
   @enforce_keys [
     :session_id,
     :root_agent_id,
@@ -56,7 +51,9 @@ defmodule PincerPorts.Session.Context do
   end
 
   @doc """
-  Builds a new session context map.
+  Builds a session context from a session ID, root agent ID and resolved workspace path.
+
+  The caller must provide `:session_id`, `:root_agent_id` and `:workspace_path`.
   """
   @spec new(keyword()) :: t()
   def new(opts) when is_list(opts) do
@@ -69,8 +66,7 @@ defmodule PincerPorts.Session.Context do
       conversation_ref: Keyword.get(opts, :conversation_ref),
       root_agent_id: root_agent_id,
       root_agent_source: Keyword.get(opts, :root_agent_source, :session_scope),
-      workspace_path:
-        Keyword.get(opts, :workspace_path, AgentPaths.workspace_root(root_agent_id)),
+      workspace_path: Keyword.fetch!(opts, :workspace_path),
       blackboard_scope: Keyword.get(opts, :blackboard_scope, root_agent_id)
     }
   end

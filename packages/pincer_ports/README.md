@@ -25,6 +25,11 @@ defmodule MyLLM do
 end
 ```
 
+`PincerPorts.Session.Context.new/1` requires `:session_id`, `:root_agent_id` and
+`:workspace_path`. Supply the resolved workspace path when constructing a
+context. The Pincer core resolves the path from the root agent when routing
+channel messages.
+
 ## License
 
 MIT
