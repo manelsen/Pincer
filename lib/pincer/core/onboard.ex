@@ -11,6 +11,7 @@ defmodule Pincer.Core.Onboard do
   alias Pincer.Core.ConfigProbe
   alias Pincer.Core.Onboard.Defaults
   alias Pincer.Core.Onboard.Preflight
+  alias Pincer.Core.Posture
   alias Pincer.Utils.MapHelpers
 
   @typedoc "Onboarding file operation."
@@ -178,15 +179,11 @@ defmodule Pincer.Core.Onboard do
 
     checks =
       channel_token_checks(config, env_fetcher) ++
+        dm_policy_checks(config) ++
         provider_env_checks(config, llm_providers, env_fetcher) ++
         mcp_command_checks(config, command_checker)
 
-    status = if Enum.any?(checks, &(&1.severity == :warn)), do: :warn, else: :ok
-
-    %{
-      status: status,
-      checks: checks
-    }
+    Posture.assisted_report(checks)
   end
 
   @doc """
@@ -327,91 +324,92 @@ defmodule Pincer.Core.Onboard do
   end
 
   defp channel_token_checks(config, env_fetcher) do
-    config
-    |> ConfigProbe.enabled_channels()
-    |> Enum.flat_map(fn {channel_name, channel_cfg} ->
-      token_env = ConfigProbe.token_env(channel_cfg)
+    for check <- Posture.channel_token_checks(config, env_fetcher, :channel_token) do
+      hint =
+        case check do
+          %{severity: :ok} ->
+            "No action required."
 
-      cond do
-        token_env != nil and MapHelpers.present?(env_fetcher.(token_env)) ->
-          [
-            assisted_ok(
-              {:channel_token, channel_name},
-              "Token env #{token_env} is present for enabled channel #{channel_name}",
-              "No action required.",
-              %{channel: channel_name, token_env: token_env}
-            )
-          ]
+          %{meta: %{token_env: token_env}} ->
+            "Set #{token_env} in the target runtime environment before starting channels."
 
-        token_env != nil ->
-          [
-            assisted_warn(
-              {:channel_token, channel_name},
-              "Missing token env #{token_env} for enabled channel #{channel_name}",
-              "Set #{token_env} in the target runtime environment before starting channels.",
-              %{channel: channel_name, token_env: token_env}
-            )
-          ]
+          %{meta: %{channel: channel}} ->
+            "Add channels.#{channel}.token_env to config.yaml and provide that env var."
+        end
 
-        token_required_channel?(channel_name) ->
-          [
-            assisted_warn(
-              {:channel_token, channel_name},
-              "Enabled channel #{channel_name} requires token_env",
-              "Add channels.#{channel_name}.token_env to config.yaml and provide that env var.",
-              %{channel: channel_name}
-            )
-          ]
-
-        true ->
-          []
-      end
-    end)
+      Posture.assisted_check(check, hint)
+    end
   end
 
-  defp provider_env_checks(config, llm_providers, env_fetcher) do
-    provider =
-      config
-      |> get_in(["llm", "provider"])
-      |> normalize_string()
+  defp dm_policy_checks(config) do
+    for check <- Posture.dm_checks(config) do
+      hint =
+        case check do
+          %{severity: :ok} ->
+            "No action required."
 
-    if provider == nil do
-      []
-    else
-      provider_config = provider_registry_entry(llm_providers, provider)
-      env_key = provider_config |> read_map_field("env_key") |> normalize_string()
+          %{meta: %{channel: channel}} ->
+            "Set channels.#{channel}.dm_policy.mode to allowlist, pairing, or disabled."
+        end
 
-      cond do
-        env_key == nil ->
-          [
-            assisted_warn(
-              {:provider_env, provider},
-              "Provider #{provider} has no env_key metadata in registry",
-              "Define env_key for provider #{provider} under :pincer, :llm_providers.",
-              %{provider: provider}
-            )
-          ]
+      Posture.assisted_check(check, hint)
+    end
+  end
 
-        MapHelpers.present?(env_fetcher.(env_key)) ->
-          [
-            assisted_ok(
-              {:provider_env, provider},
-              "Provider env #{env_key} is present",
-              "No action required.",
-              %{provider: provider, env_key: env_key}
-            )
-          ]
+  defp provider_env_checks(config, registry, env_fetcher) do
+    case ConfigProbe.provider_env(config, registry, env_fetcher) do
+      nil ->
+        []
 
-        true ->
-          [
-            assisted_warn(
-              {:provider_env, provider},
-              "Missing provider env #{env_key} for selected provider #{provider}",
-              "Set #{env_key} in the target runtime environment.",
-              %{provider: provider, env_key: env_key}
-            )
-          ]
-      end
+      {provider, nil, :unregistered} ->
+        [
+          assisted_warn(
+            {:provider_env, provider},
+            "Provider #{provider} is not registered",
+            "Register the provider under :pincer, :llm_providers.",
+            %{provider: provider}
+          )
+        ]
+
+      {provider, nil, :not_required} ->
+        [
+          assisted_ok(
+            {:provider_env, provider},
+            "Provider #{provider} does not require an API key",
+            "No action required.",
+            %{provider: provider}
+          )
+        ]
+
+      {provider, nil, :invalid_auth_config} ->
+        [
+          assisted_warn(
+            {:provider_env, provider},
+            "Provider #{provider} declares an auth chain without a usable environment key",
+            "Set env_key or configure a named auth profile with an environment key.",
+            %{provider: provider}
+          )
+        ]
+
+      {provider, key, :present} ->
+        [
+          assisted_ok(
+            {:provider_env, provider},
+            "Provider env #{key} is present",
+            "No action required.",
+            %{provider: provider, env_key: key}
+          )
+        ]
+
+      {provider, key, :missing_value} ->
+        [
+          assisted_warn(
+            {:provider_env, provider},
+            "Missing provider env #{key} for selected provider #{provider}",
+            "Set #{key} in the target runtime environment.",
+            %{provider: provider, env_key: key}
+          )
+        ]
     end
   end
 
@@ -423,8 +421,7 @@ defmodule Pincer.Core.Onboard do
         servers
         |> Enum.map(fn {_server_name, server_cfg} ->
           server_cfg
-          |> normalize_map()
-          |> read_map_field("command")
+          |> MapHelpers.read_field(:command)
           |> normalize_string()
         end)
         |> Enum.reject(&is_nil/1)
@@ -531,30 +528,6 @@ defmodule Pincer.Core.Onboard do
     do: System.find_executable(command) != nil
 
   defp command_available?(_command), do: false
-
-  defp read_map_field(map, key) when is_map(map) do
-    key_text = to_string(key)
-
-    Enum.find_value(map, fn {entry_key, entry_value} ->
-      if to_string(entry_key) == key_text, do: entry_value, else: nil
-    end)
-  end
-
-  defp read_map_field(_other, _key), do: nil
-
-  defp provider_registry_entry(registry, provider_id) when is_map(registry) do
-    Enum.find_value(registry, %{}, fn {entry_key, entry_value} ->
-      if to_string(entry_key) == provider_id, do: normalize_map(entry_value), else: nil
-    end)
-  end
-
-  defp provider_registry_entry(_registry, _provider_id), do: %{}
-
-  defp normalize_map(map) when is_map(map), do: map
-  defp normalize_map(_other), do: %{}
-
-  defp token_required_channel?(channel_name),
-    do: ConfigProbe.token_required_channel?(channel_name)
 
   defp assisted_ok(id, message, hint, meta) do
     %{id: id, severity: :ok, message: message, hint: hint, meta: meta}

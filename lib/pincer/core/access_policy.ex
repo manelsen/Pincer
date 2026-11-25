@@ -7,6 +7,7 @@ defmodule Pincer.Core.AccessPolicy do
   """
 
   alias Pincer.Core.Pairing
+  alias Pincer.Core.ConfigProbe
   alias Pincer.Utils.MapHelpers
 
   @type channel ::
@@ -33,8 +34,8 @@ defmodule Pincer.Core.AccessPolicy do
   """
   @spec authorize_dm(channel(), String.t() | integer(), map()) :: result()
   def authorize_dm(channel, sender_id, config \\ %{}) when is_map(config) do
-    policy = dm_policy(config)
-    mode = normalize_mode(MapHelpers.read_field(policy, "mode"))
+    policy = MapHelpers.read_field(config, "dm_policy")
+    mode = ConfigProbe.effective_dm_mode(policy)
     sender = normalize_sender(sender_id)
 
     case mode do
@@ -76,32 +77,6 @@ defmodule Pincer.Core.AccessPolicy do
              user_message: pairing_message(channel)
            }}
         end
-    end
-  end
-
-  defp dm_policy(config) do
-    case MapHelpers.read_field(config, "dm_policy") do
-      map when is_map(map) -> map
-      _ -> %{}
-    end
-  end
-
-  defp normalize_mode(nil), do: :open
-  defp normalize_mode(""), do: :open
-
-  defp normalize_mode(mode) do
-    normalized =
-      mode
-      |> to_string()
-      |> String.trim()
-      |> String.downcase()
-
-    case normalized do
-      "open" -> :open
-      "allowlist" -> :allowlist
-      "disabled" -> :disabled
-      "pairing" -> :pairing
-      _ -> :open
     end
   end
 

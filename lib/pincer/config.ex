@@ -410,28 +410,12 @@ defmodule Pincer.Infra.Config do
           %{}
       end
 
-    selected =
-      first_non_empty([
-        System.get_env("PINCER_STORAGE"),
-        storage_config[:adapter],
-        "sqlite"
-      ])
-
-    normalized = selected |> String.trim() |> String.downcase()
-
-    if normalized in ["postgres", "postgresql", "pincer.storage.adapters.postgres"] do
-      raise ArgumentError,
-            "PostgreSQL storage is no longer supported; set storage.adapter to \"sqlite\""
-    end
-
-    unless normalized in [
-             "sqlite",
-             "sqlite3",
-             "pincer.adapters.storage.sqlite",
-             "pincer.storage.adapters.sqlite"
-           ] do
-      raise ArgumentError,
-            "Unsupported storage adapter #{inspect(selected)}; only \"sqlite\" is supported"
+    case Pincer.Infra.SQLite.resolve_storage_backend(
+           System.get_env("PINCER_STORAGE"),
+           storage_config[:adapter]
+         ) do
+      {:ok, :sqlite} -> :ok
+      {:error, {:unsupported_storage_backend, selected}} -> raise_storage_error(selected)
     end
 
     sqlite_path =
@@ -460,6 +444,24 @@ defmodule Pincer.Infra.Config do
         _ -> Logger.warning("Ignoring invalid SQLite vector dimension: #{inspect(dimensions)}")
       end
     end
+  end
+
+  defp raise_storage_error(selected) do
+    postgres? =
+      is_binary(selected) and
+        String.downcase(String.trim(selected)) in [
+          "postgres",
+          "postgresql",
+          "pincer.storage.adapters.postgres"
+        ]
+
+    if postgres? do
+      raise ArgumentError,
+            "PostgreSQL storage is no longer supported; set storage.adapter to \"sqlite\""
+    end
+
+    raise ArgumentError,
+          "Unsupported storage adapter #{inspect(selected)}; only \"sqlite\" is supported"
   end
 
   defp normalize_vec_setting(nil), do: :auto

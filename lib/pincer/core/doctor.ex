@@ -27,9 +27,11 @@ defmodule Pincer.Core.Doctor do
         }
 
   alias Pincer.Core.ConfigProbe
-  alias Pincer.Infra.Config
+  alias Pincer.Core.Posture
   alias Pincer.Infra.SQLite
   alias Pincer.Utils.MapHelpers
+
+  import Posture, only: [ok_check: 3, warn_check: 3, error_check: 3]
 
   @default_config_file "config.yaml"
   @default_sqlite_path "data/pincer.db"
@@ -53,41 +55,19 @@ defmodule Pincer.Core.Doctor do
     root = Keyword.get(opts, :root, File.cwd!())
     config_file = Keyword.get(opts, :config_file, @default_config_file)
     env_fetcher = Keyword.get(opts, :env_fetcher, &System.get_env/1)
-    config_path = resolve_config_path(root, config_file)
-
-    {config, checks} =
-      case load_config(config_path) do
-        {:ok, loaded_config, config_check} ->
-          {loaded_config, [config_check]}
-
-        {:error, config_check} ->
-          {%{}, [config_check]}
-      end
-
-    run_id = make_run_id("DOC")
+    {config_path, config, config_check} = Posture.read_config(root, config_file)
 
     checks =
-      checks ++
+      [config_check] ++
         storage_checks(config, root, env_fetcher) ++
-        channel_token_checks(config, env_fetcher) ++
-        dm_policy_checks(config) ++
+        Posture.channel_token_checks(config, env_fetcher, :channel_token) ++
+        Posture.dm_checks(config) ++
         llm_provider_checks(config, env_fetcher) ++
         native_binary_checks(config) ++
         runtime_cohesion_checks() ++
         alignment_integrity_checks()
 
-    linked_checks = Enum.map(checks, &link_check(&1, run_id))
-
-    counts = counts(linked_checks)
-    status = status_from_counts(counts)
-
-    %{
-      status: status,
-      counts: counts,
-      checks: linked_checks,
-      config_path: config_path,
-      run_id: run_id
-    }
+    Posture.report(checks, config_path, :doctor)
   end
 
   defp native_binary_checks(config) do
@@ -160,12 +140,15 @@ defmodule Pincer.Core.Doctor do
   end
 
   defp storage_checks(config, root, env_fetcher) do
-    case storage_backend(config, env_fetcher) do
-      :sqlite ->
+    case SQLite.resolve_storage_backend(
+           env_fetcher.("PINCER_STORAGE"),
+           read_sub(config["storage"], :adapter)
+         ) do
+      {:ok, :sqlite} ->
         [ok_check(:storage_backend, "Storage backend configured: sqlite", %{backend: :sqlite})] ++
           sqlite_storage_checks(config, root, env_fetcher) ++ sqlite_vec_checks(config)
 
-      {:unsupported, backend} ->
+      {:error, {:unsupported_storage_backend, backend}} ->
         [
           error_check(
             :storage_backend,
@@ -174,24 +157,6 @@ defmodule Pincer.Core.Doctor do
           )
         ]
     end
-  end
-
-  defp storage_backend(config, env_fetcher) do
-    storage_cfg = MapHelpers.read_field(config, :storage)
-    legacy_cfg = MapHelpers.read_field(config, :database)
-
-    [
-      env_fetcher.("PINCER_STORAGE"),
-      read_sub(storage_cfg, :adapter),
-      read_sub(legacy_cfg, :adapter)
-    ]
-    |> Enum.find_value(:sqlite, fn candidate ->
-      case SQLite.parse_storage_backend(candidate) do
-        {:ok, :sqlite} -> :sqlite
-        {:error, {:unsupported_storage_backend, backend}} -> {:unsupported, backend}
-        _ -> nil
-      end
-    end)
   end
 
   defp sqlite_storage_checks(config, root, env_fetcher) do
@@ -395,269 +360,60 @@ defmodule Pincer.Core.Doctor do
     end
   end
 
-  defp resolve_config_path(root, config_file) do
-    if Path.type(config_file) == :absolute do
-      config_file
-    else
-      Path.expand(config_file, root)
-    end
-  end
-
-  defp load_config(path) do
-    case Config.load_file(path) do
-      {:ok, config} ->
-        {:ok, config, ok_check(:config_yaml, "Config file loaded successfully", %{path: path})}
-
-      {:error, :enoent} ->
-        {:error,
-         error_check(
-           :config_yaml,
-           "Config file not found at #{path}",
-           %{path: path, reason: :enoent}
-         )}
-
-      {:error, :invalid_root} ->
-        {:error,
-         error_check(
-           :config_yaml,
-           "Config root must be a map/object",
-           %{path: path, reason: :invalid_root}
-         )}
-
-      {:error, {:yaml_error, reason}} ->
-        {:error,
-         error_check(
-           :config_yaml,
-           "Config file is invalid YAML",
-           %{path: path, reason: inspect(reason)}
-         )}
-    end
-  end
-
-  defp channel_token_checks(config, env_fetcher) do
-    channels(config)
-    |> Enum.filter(fn {_, channel_cfg} -> enabled?(channel_cfg) end)
-    |> Enum.flat_map(fn {channel_name, channel_cfg} ->
-      token_env = MapHelpers.read_field(channel_cfg, :token_env)
-
-      cond do
-        MapHelpers.present?(token_env) ->
-          env_value = env_fetcher.(token_env)
-
-          if MapHelpers.present?(env_value) do
-            [
-              ok_check(
-                {:channel_token, channel_name},
-                "Token env #{token_env} is present",
-                %{channel: channel_name, token_env: token_env}
-              )
-            ]
-          else
-            [
-              error_check(
-                {:channel_token, channel_name},
-                "Missing token env #{token_env} for enabled channel #{channel_name}",
-                %{channel: channel_name, token_env: token_env}
-              )
-            ]
-          end
-
-        token_required_channel?(channel_name) ->
-          [
-            error_check(
-              {:channel_token, channel_name},
-              "Enabled channel #{channel_name} requires token_env",
-              %{channel: channel_name}
-            )
-          ]
-
-        true ->
-          []
-      end
-    end)
-  end
-
   defp llm_provider_checks(config, env_fetcher) do
-    provider_id =
-      case MapHelpers.read_field(config, :llm) do
-        llm when is_map(llm) -> MapHelpers.read_field(llm, :provider)
-        _ -> nil
-      end
+    registry = Application.get_env(:pincer, :llm_providers)
 
-    do_llm_provider_checks(provider_id, env_fetcher)
-  end
-
-  defp do_llm_provider_checks(provider_id, env_fetcher)
-       when is_binary(provider_id) and provider_id != "" do
-    trimmed = String.trim(provider_id)
-    do_llm_provider_checks_trimmed(trimmed, env_fetcher)
-  end
-
-  defp do_llm_provider_checks(_provider_id, _env_fetcher), do: []
-
-  defp do_llm_provider_checks_trimmed("", _env_fetcher), do: []
-
-  defp do_llm_provider_checks_trimmed(provider_id, env_fetcher) do
-    # get_env only applies its default when the key is absent, so a nil value
-    # (left by a test or a failed reload) must be treated as "no registry".
-    provider_registry = Application.get_env(:pincer, :llm_providers) || %{}
-
-    case Map.get(provider_registry, provider_id) do
+    case ConfigProbe.provider_env(config, registry, env_fetcher) do
       nil ->
+        []
+
+      {provider, nil, :unregistered} ->
         [
           warn_check(
-            {:llm_provider, provider_id},
-            "Active LLM provider '#{provider_id}' is not registered in :llm_providers",
-            %{provider: provider_id}
+            {:llm_provider, provider},
+            "Active LLM provider '#{provider}' is not registered in :llm_providers",
+            %{provider: provider}
           )
         ]
 
-      provider_config ->
-        env_key = provider_config[:env_key]
+      {provider, nil, :not_required} ->
+        [
+          ok_check(
+            {:llm_provider, provider},
+            "Provider '#{provider}' does not require an API key",
+            %{provider: provider}
+          )
+        ]
 
-        cond do
-          is_nil(env_key) or env_key == "" ->
-            [
-              ok_check(
-                {:llm_provider, provider_id},
-                "Provider '#{provider_id}' does not require an API key",
-                %{provider: provider_id}
-              )
-            ]
+      {provider, nil, :invalid_auth_config} ->
+        [
+          error_check(
+            {:llm_provider, provider},
+            "Provider '#{provider}' declares an auth chain without a usable environment key",
+            %{provider: provider}
+          )
+        ]
 
-          env_fetcher.(env_key) |> MapHelpers.present?() ->
-            [
-              ok_check(
-                {:llm_provider, provider_id},
-                "Provider '#{provider_id}' configurado (#{env_key} presente)",
-                %{provider: provider_id, env_key: env_key}
-              )
-            ]
+      {provider, key, :present} ->
+        [
+          ok_check(
+            {:llm_provider, provider},
+            "Provider '#{provider}' configurado (#{key} presente)",
+            %{provider: provider, env_key: key}
+          )
+        ]
 
-          true ->
-            [
-              error_check(
-                {:llm_provider, provider_id},
-                "Provider '#{provider_id}' ativo mas #{env_key} nao esta definido",
-                %{provider: provider_id, env_key: env_key}
-              )
-            ]
-        end
+      {provider, key, :missing_value} ->
+        [
+          error_check(
+            {:llm_provider, provider},
+            "Provider '#{provider}' ativo mas #{key} nao esta definido",
+            %{provider: provider, env_key: key}
+          )
+        ]
     end
   end
 
-  defp dm_policy_checks(config) do
-    channels(config)
-    |> Enum.filter(fn {name, channel_cfg} ->
-      enabled?(channel_cfg) and dm_capable_channel?(name)
-    end)
-    |> Enum.map(fn {channel_name, channel_cfg} ->
-      dm_policy = MapHelpers.read_field(channel_cfg, :dm_policy)
-      mode = normalize_dm_mode(dm_policy)
-
-      case mode do
-        :allowlist ->
-          ok_check(
-            {:dm_policy, channel_name},
-            "DM policy uses allowlist mode",
-            %{channel: channel_name, mode: "allowlist"}
-          )
-
-        :disabled ->
-          ok_check(
-            {:dm_policy, channel_name},
-            "DM policy is disabled",
-            %{channel: channel_name, mode: "disabled"}
-          )
-
-        :pairing ->
-          ok_check(
-            {:dm_policy, channel_name},
-            "DM policy requires pairing",
-            %{channel: channel_name, mode: "pairing"}
-          )
-
-        :open ->
-          warn_check(
-            {:dm_policy, channel_name},
-            "DM policy is open (insecure for production)",
-            %{channel: channel_name, mode: "open"}
-          )
-
-        :missing ->
-          warn_check(
-            {:dm_policy, channel_name},
-            "DM policy missing (defaults to open behavior)",
-            %{channel: channel_name, mode: "missing"}
-          )
-
-        :invalid ->
-          warn_check(
-            {:dm_policy, channel_name},
-            "DM policy mode is invalid (falls back to open behavior)",
-            %{channel: channel_name, mode: "invalid"}
-          )
-      end
-    end)
-  end
-
   defp channels(config), do: ConfigProbe.channels(config)
-
-  defp token_required_channel?(channel_name),
-    do: ConfigProbe.token_required_channel?(channel_name)
-
-  defp dm_capable_channel?(channel_name), do: ConfigProbe.dm_capable_channel?(channel_name)
   defp enabled?(cfg), do: ConfigProbe.enabled?(cfg)
-  defp normalize_dm_mode(dm_policy), do: ConfigProbe.dm_mode(dm_policy)
-
-  defp counts(checks) do
-    %{ok: 0, warn: 0, error: 0}
-    |> put_count(:ok, checks)
-    |> put_count(:warn, checks)
-    |> put_count(:error, checks)
-  end
-
-  defp put_count(acc, severity, checks) do
-    Map.put(acc, severity, Enum.count(checks, &(&1.severity == severity)))
-  end
-
-  defp status_from_counts(%{error: errors}) when errors > 0, do: :error
-  defp status_from_counts(%{warn: warnings}) when warnings > 0, do: :warn
-  defp status_from_counts(_), do: :ok
-
-  defp ok_check(id, message, meta) do
-    %{id: id, severity: :ok, message: message, meta: meta}
-  end
-
-  defp warn_check(id, message, meta) do
-    %{id: id, severity: :warn, message: message, meta: meta}
-  end
-
-  defp error_check(id, message, meta) do
-    %{id: id, severity: :error, message: message, meta: meta}
-  end
-
-  defp link_check(check, run_id) do
-    meta =
-      check
-      |> Map.get(:meta, %{})
-      |> Map.put(:run_id, run_id)
-      |> Map.put(:selection, selection_reason(check.id))
-      |> Map.put(:recovery, recovery_hint(check.id, check.severity))
-
-    %{check | meta: meta}
-  end
-
-  defp selection_reason(id), do: "selected_by:#{format_id(id)}"
-
-  defp recovery_hint(_id, :ok), do: "none"
-  defp recovery_hint(id, :warn), do: "review #{format_id(id)} and harden configuration"
-  defp recovery_hint(id, :error), do: "fix #{format_id(id)} before production rollout"
-
-  defp format_id({left, right}), do: "#{left}:#{right}"
-  defp format_id(id), do: to_string(id)
-
-  defp make_run_id(prefix) do
-    "#{prefix}-#{System.system_time(:millisecond)}-#{System.unique_integer([:positive])}"
-  end
 end

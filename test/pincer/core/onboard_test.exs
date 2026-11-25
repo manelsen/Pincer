@@ -270,8 +270,13 @@ defmodule Pincer.Core.OnboardTest do
     end
 
     test "returns ok when environment dependencies are available" do
+      defaults =
+        Enum.reduce(["telegram", "discord"], Onboard.defaults(), fn channel, config ->
+          put_in(config, ["channels", channel, "dm_policy"], %{"mode" => "pairing"})
+        end)
+
       report =
-        Onboard.assisted_preflight(Onboard.defaults(),
+        Onboard.assisted_preflight(defaults,
           env_fetcher: fn _ -> "present" end,
           command_checker: fn _ -> true end,
           llm_providers: %{"z_ai" => %{env_key: "Z_AI_API_KEY"}}

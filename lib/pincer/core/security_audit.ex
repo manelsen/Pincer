@@ -11,8 +11,10 @@ defmodule Pincer.Core.SecurityAudit do
 
   alias Pincer.Core.LLM.SkillsSidecarPolicy
   alias Pincer.Core.ConfigProbe
-  alias Pincer.Infra.Config
+  alias Pincer.Core.Posture
   alias Pincer.Utils.MapHelpers
+
+  import Posture, only: [ok_check: 3, warn_check: 3, error_check: 3]
 
   @type severity :: :ok | :warn | :error
 
@@ -32,7 +34,6 @@ defmodule Pincer.Core.SecurityAudit do
         }
 
   @default_config_file "config.yaml"
-  @token_channels MapSet.new(["telegram", "discord", "slack", "webhook"])
   @risky_binds MapSet.new(["0.0.0.0", "::", "[::]"])
   @dangerous_flag_paths [
     {"gateway.control_ui.allow_insecure_auth", true,
@@ -50,172 +51,19 @@ defmodule Pincer.Core.SecurityAudit do
     root = Keyword.get(opts, :root, File.cwd!())
     config_file = Keyword.get(opts, :config_file, @default_config_file)
     env_fetcher = Keyword.get(opts, :env_fetcher, &System.get_env/1)
-    config_path = resolve_config_path(root, config_file)
-
-    {config, checks} =
-      case load_config(config_path) do
-        {:ok, config, config_check} ->
-          {config, [config_check]}
-
-        {:error, check} ->
-          {%{}, [check]}
-      end
-
-    run_id = make_run_id("AUD")
+    {config_path, config, config_check} = Posture.read_config(root, config_file)
 
     checks =
-      checks ++
-        channel_auth_checks(config, env_fetcher) ++
-        dm_policy_checks(config) ++
+      [config_check] ++
+        Posture.channel_token_checks(config, env_fetcher, :channel_auth) ++
+        Posture.dm_checks(config) ++
         gateway_bind_checks(config) ++
         webhook_bind_checks(config) ++
         dangerous_flag_checks(config) ++
         workspace_restriction_checks(config) ++
         sidecar_isolation_checks(config)
 
-    linked_checks = Enum.map(checks, &link_check(&1, run_id))
-    counts = counts(linked_checks)
-
-    %{
-      status: status_from_counts(counts),
-      counts: counts,
-      checks: linked_checks,
-      config_path: config_path,
-      run_id: run_id
-    }
-  end
-
-  defp resolve_config_path(root, config_file) do
-    if Path.type(config_file) == :absolute do
-      config_file
-    else
-      Path.expand(config_file, root)
-    end
-  end
-
-  defp load_config(path) do
-    case Config.load_file(path) do
-      {:ok, config} ->
-        {:ok, config, ok_check(:config_yaml, "Config file loaded successfully", %{path: path})}
-
-      {:error, :enoent} ->
-        {:error,
-         error_check(
-           :config_yaml,
-           "Config file not found at #{path}",
-           %{path: path, reason: :enoent}
-         )}
-
-      {:error, :invalid_root} ->
-        {:error,
-         error_check(
-           :config_yaml,
-           "Config root must be a map/object",
-           %{path: path, reason: :invalid_root}
-         )}
-
-      {:error, {:yaml_error, reason}} ->
-        {:error,
-         error_check(
-           :config_yaml,
-           "Config file is invalid YAML",
-           %{path: path, reason: inspect(reason)}
-         )}
-    end
-  end
-
-  defp channel_auth_checks(config, env_fetcher) do
-    channels(config)
-    |> Enum.filter(fn {_, cfg} -> enabled?(cfg) end)
-    |> Enum.flat_map(fn {channel_name, cfg} ->
-      token_env = MapHelpers.read_field(cfg, :token_env)
-
-      cond do
-        MapHelpers.present?(token_env) ->
-          if MapHelpers.present?(env_fetcher.(token_env)) do
-            [
-              ok_check(
-                {:channel_auth, channel_name},
-                "Token env #{token_env} is present",
-                %{channel: channel_name, token_env: token_env}
-              )
-            ]
-          else
-            [
-              error_check(
-                {:channel_auth, channel_name},
-                "Missing token env #{token_env} for enabled channel #{channel_name}",
-                %{channel: channel_name, token_env: token_env}
-              )
-            ]
-          end
-
-        token_required_channel?(channel_name) ->
-          [
-            error_check(
-              {:channel_auth, channel_name},
-              "Enabled channel #{channel_name} requires token_env",
-              %{channel: channel_name}
-            )
-          ]
-
-        true ->
-          []
-      end
-    end)
-  end
-
-  defp dm_policy_checks(config) do
-    channels(config)
-    |> Enum.filter(fn {name, cfg} -> enabled?(cfg) and dm_capable_channel?(name) end)
-    |> Enum.map(fn {channel_name, cfg} ->
-      dm_policy = MapHelpers.read_field(cfg, :dm_policy)
-      mode = normalize_dm_mode(dm_policy)
-
-      case mode do
-        :allowlist ->
-          ok_check(
-            {:dm_policy, channel_name},
-            "DM policy uses allowlist mode",
-            %{channel: channel_name, mode: "allowlist"}
-          )
-
-        :disabled ->
-          ok_check(
-            {:dm_policy, channel_name},
-            "DM policy is disabled",
-            %{channel: channel_name, mode: "disabled"}
-          )
-
-        :pairing ->
-          ok_check(
-            {:dm_policy, channel_name},
-            "DM policy requires pairing",
-            %{channel: channel_name, mode: "pairing"}
-          )
-
-        :open ->
-          warn_check(
-            {:dm_policy, channel_name},
-            "DM policy is open and exposes direct-message surface",
-            %{channel: channel_name, mode: "open"}
-          )
-
-        :missing ->
-          warn_check(
-            {:dm_policy, channel_name},
-            "DM policy missing (fallback is effectively open)",
-            %{channel: channel_name, mode: "missing"}
-          )
-
-        :invalid ->
-          warn_check(
-            {:dm_policy, channel_name},
-            "DM policy mode invalid (fallback is effectively open)",
-            %{channel: channel_name, mode: "invalid"}
-          )
-      end
-    end)
+    Posture.report(checks, config_path, :audit)
   end
 
   defp gateway_bind_checks(config) do
@@ -417,24 +265,7 @@ defmodule Pincer.Core.SecurityAudit do
 
   defp channels(config), do: ConfigProbe.channels(config)
 
-  # The audit additionally treats `webhook` as token-required.
-  defp token_required_channel?(name), do: MapSet.member?(@token_channels, name)
-
-  defp dm_capable_channel?(name), do: ConfigProbe.dm_capable_channel?(name)
-  defp normalize_dm_mode(dm_policy), do: ConfigProbe.dm_mode(dm_policy)
   defp enabled?(cfg), do: ConfigProbe.enabled?(cfg)
-
-  defp counts(checks) do
-    %{
-      ok: Enum.count(checks, &(&1.severity == :ok)),
-      warn: Enum.count(checks, &(&1.severity == :warn)),
-      error: Enum.count(checks, &(&1.severity == :error))
-    }
-  end
-
-  defp status_from_counts(%{error: errors}) when errors > 0, do: :error
-  defp status_from_counts(%{warn: warnings}) when warnings > 0, do: :warn
-  defp status_from_counts(_), do: :ok
 
   defp get_in_path(map, []), do: map
 
@@ -446,34 +277,4 @@ defmodule Pincer.Core.SecurityAudit do
   end
 
   defp get_in_path(_other, _path), do: nil
-
-  defp ok_check(id, message, meta), do: %{id: id, severity: :ok, message: message, meta: meta}
-  defp warn_check(id, message, meta), do: %{id: id, severity: :warn, message: message, meta: meta}
-
-  defp error_check(id, message, meta),
-    do: %{id: id, severity: :error, message: message, meta: meta}
-
-  defp link_check(check, run_id) do
-    meta =
-      check
-      |> Map.get(:meta, %{})
-      |> Map.put(:run_id, run_id)
-      |> Map.put(:selection, selection_reason(check.id))
-      |> Map.put(:recovery, recovery_hint(check.id, check.severity))
-
-    %{check | meta: meta}
-  end
-
-  defp selection_reason(id), do: "selected_by:#{format_id(id)}"
-
-  defp recovery_hint(_id, :ok), do: "none"
-  defp recovery_hint(id, :warn), do: "review #{format_id(id)} and apply hardening controls"
-  defp recovery_hint(id, :error), do: "fix #{format_id(id)} before enabling public surface"
-
-  defp format_id({left, right}), do: "#{left}:#{right}"
-  defp format_id(id), do: to_string(id)
-
-  defp make_run_id(prefix) do
-    "#{prefix}-#{System.system_time(:millisecond)}-#{System.unique_integer([:positive])}"
-  end
 end
