@@ -1,5 +1,5 @@
 defmodule Pincer.Core.Session.AdapterTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Pincer.Core.Session.Adapter
 

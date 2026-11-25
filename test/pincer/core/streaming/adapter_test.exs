@@ -1,5 +1,5 @@
 defmodule Pincer.Core.Streaming.AdapterTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Pincer.Core.Streaming.Adapter
 
