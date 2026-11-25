@@ -43,4 +43,22 @@ defmodule Pincer.Core.DeadLetterQueueTest do
     {:ok, updated} = DeadLetterQueue.increment_attempt(entry.id)
     assert updated.attempt_count == 2
   end
+
+  test "parallel retry results preserve every increment and the resolution" do
+    {:ok, entry} = DeadLetterQueue.enqueue("parallel", %{"id" => 1})
+    {:ok, _resolved} = DeadLetterQueue.resolve(entry.id, "handled")
+
+    attempts =
+      1..12
+      |> Task.async_stream(fn _ -> DeadLetterQueue.increment_attempt(entry.id) end,
+        max_concurrency: 6
+      )
+      |> Enum.map(fn {:ok, {:ok, updated}} ->
+        assert updated.resolution == "handled"
+        updated.attempt_count
+      end)
+
+    assert Enum.sort(attempts) == Enum.to_list(2..13)
+    assert DeadLetterQueue.pending("parallel") == []
+  end
 end

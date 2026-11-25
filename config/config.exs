@@ -5,6 +5,9 @@ config :telegex,
   caller_adapter: Finch
 
 config :pincer, :storage_adapter, Pincer.Adapters.Storage.SQLite
+config :pincer, :audit_log_adapter, Pincer.Adapters.Storage.AuditLog
+config :pincer, :dead_letter_queue_adapter, Pincer.Adapters.Storage.DeadLetterQueue
+config :pincer, :introspection_store_adapter, Pincer.Adapters.Storage.Introspection
 config :pincer, :sqlite_path, System.get_env("PINCER_SQLITE_PATH", "data/pincer.db")
 config :pincer, :sqlite_vec, :auto
 config :pincer, :sqlite_vec_dimensions, 1024

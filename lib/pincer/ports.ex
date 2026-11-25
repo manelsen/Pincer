@@ -34,6 +34,9 @@ defmodule Pincer.Ports do
       ]
     ],
     exports: [
+      AuditLog,
+      DeadLetterQueue,
+      IntrospectionStore,
       Messaging,
       Storage,
       LLM,

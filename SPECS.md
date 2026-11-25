@@ -300,6 +300,22 @@ branch provisioning and two read-only queries for the graph indexer.
 
 The host application no longer starts the proof-of-concept GitHub poller.
 
+### 12.7. Operational storage ports
+
+The host configures `Pincer.Ports.AuditLog`, `Pincer.Ports.DeadLetterQueue`,
+and `Pincer.Ports.IntrospectionStore` separately from the general storage port.
+The adapters under `Pincer.Adapters.Storage` own SQL, JSON serialization,
+database IDs, and row decoding. The ports exchange atom-keyed records with
+decoded values. Core keeps its structs, changeset validation, lesson scoring,
+and user-facing result conventions.
+
+- AuditLog inserts validated events and lists recent events, with an optional
+  actor or event-type filter.
+- DeadLetterQueue inserts validated entries, lists pending work, resolves entries,
+  and increments attempts.
+- IntrospectionStore reads and writes lesson records and per-agent self-state.
+  Lesson reads support active and confidence-ranked queries.
+
 ### 13. Channel-Owned Formatting (`Pincer.Channels.Telegram.ResponseEnvelope`)
 
 Telegram HTML usage-footer formatting and reasoning delivery options reside in

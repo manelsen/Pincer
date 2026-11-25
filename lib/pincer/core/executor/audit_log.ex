@@ -6,7 +6,7 @@ defmodule Pincer.Core.Executor.AuditLog do
   """
   import Pincer.Utils.Validation
 
-  alias Pincer.Infra.SQLite
+  alias Pincer.Ports.AuditLog, as: Store
 
   defstruct id: nil,
             event_type: nil,
@@ -41,8 +41,8 @@ defmodule Pincer.Core.Executor.AuditLog do
 
     changeset = changeset(%__MODULE__{}, params)
 
-    case sqlite_insert(changeset) do
-      {:ok, _} ->
+    case insert(changeset) do
+      :ok ->
         :ok
 
       {:error, reason} ->
@@ -54,91 +54,27 @@ defmodule Pincer.Core.Executor.AuditLog do
 
   @doc "Query recent audit events, newest first."
   def recent(limit \\ 100) do
-    sqlite_query("ORDER BY inserted_at DESC, rowid DESC LIMIT ?1", [limit])
+    list(:all, limit)
   end
 
   @doc "Query audit events by actor."
   def by_actor(actor, limit \\ 50) do
-    sqlite_query("WHERE actor = ?1 ORDER BY inserted_at DESC, rowid DESC LIMIT ?2", [
-      actor,
-      limit
-    ])
+    list({:actor, actor}, limit)
   end
 
   @doc "Query audit events by event type."
   def by_type(event_type, limit \\ 50) do
-    sqlite_query(
-      "WHERE event_type = ?1 ORDER BY inserted_at DESC, rowid DESC LIMIT ?2",
-      [event_type, limit]
-    )
+    list({:type, event_type}, limit)
   end
 
-  defp sqlite_insert(changeset) do
-    if changeset.valid? do
-      now = DateTime.utc_now()
-      a = %{apply_changes(changeset) | id: SQLite.uuid(), inserted_at: now}
-
-      case SQLite.execute(
-             SQLite.default_server(),
-             """
-             INSERT INTO audit_log
-               (id, event_type, actor, target, channel, session_id, outcome, metadata, inserted_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
-             """,
-             [
-               a.id,
-               a.event_type,
-               a.actor,
-               a.target,
-               a.channel,
-               a.session_id,
-               a.outcome,
-               Jason.encode!(a.metadata || %{}),
-               DateTime.to_iso8601(now)
-             ]
-           ) do
-        :ok -> {:ok, a}
-        error -> error
-      end
-    else
-      {:error, changeset}
-    end
+  defp list(filter, limit) do
+    Store.list(filter, limit)
+    |> Enum.map(&struct!(__MODULE__, &1))
   end
 
-  defp sqlite_query(clause, params) do
-    case SQLite.query(
-           SQLite.default_server(),
-           """
-           SELECT id, event_type, actor, target, channel, session_id, outcome, metadata, inserted_at
-           FROM audit_log
-           #{clause}
-           """,
-           params
-         ) do
-      {:ok, %{rows: rows}} ->
-        Enum.map(rows, fn [id, evt, actor, target, channel, sid, outcome, meta, ins] ->
-          %__MODULE__{
-            id: id,
-            event_type: evt,
-            actor: actor,
-            target: target,
-            channel: channel,
-            session_id: sid,
-            outcome: outcome,
-            metadata: decode_meta(meta),
-            inserted_at: SQLite.parse_datetime(ins)
-          }
-        end)
-
-      _ ->
-        []
-    end
+  defp insert(%{valid?: true} = changeset) do
+    changeset |> apply_changes() |> Map.from_struct() |> Store.insert()
   end
 
-  defp decode_meta(bin) do
-    case SQLite.decode_json(bin, %{}) do
-      map when is_map(map) -> map
-      _ -> %{}
-    end
-  end
+  defp insert(changeset), do: {:error, changeset}
 end

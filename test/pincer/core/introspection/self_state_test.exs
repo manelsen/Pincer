@@ -23,6 +23,15 @@ defmodule Pincer.Core.Introspection.SelfStateTest do
       {:ok, second} = SelfState.load_or_create("agent_test_2")
       assert first.id == second.id
     end
+
+    test "parallel initialization returns the same self-state" do
+      ids =
+        1..8
+        |> Task.async_stream(fn _ -> SelfState.load_or_create("agent_parallel") end)
+        |> Enum.map(fn {:ok, {:ok, state}} -> state.id end)
+
+      assert [_id] = Enum.uniq(ids)
+    end
   end
 
   describe "update/2" do
