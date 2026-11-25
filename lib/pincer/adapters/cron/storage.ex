@@ -46,6 +46,8 @@ defmodule Pincer.Adapters.Cron.Storage do
       # Delete permanently
       {:ok, _} = Pincer.Adapters.Cron.Storage.delete_job(job_id)
   """
+  @behaviour Pincer.Ports.Cron
+
   import Pincer.Utils.Validation, only: [apply_changes: 1]
   alias Pincer.Adapters.Cron.Job
   alias Pincer.Infra.SQLite
@@ -77,6 +79,7 @@ defmodule Pincer.Adapters.Cron.Storage do
       # No jobs due yet
       [] = Pincer.Adapters.Cron.Storage.list_due_jobs()
   """
+  @impl true
   @spec list_due_jobs(DateTime.t()) :: [Job.t()]
   def list_due_jobs(now \\ DateTime.utc_now()) do
     sqlite_list_jobs()
@@ -112,6 +115,7 @@ defmodule Pincer.Adapters.Cron.Storage do
       updated = Pincer.Adapters.Cron.Storage.update_next_run!(job)
       # => %Job{next_run_at: ~U[2024-01-16 09:00:00Z], ...}
   """
+  @impl true
   @spec update_next_run!(Job.t()) :: Job.t()
   def update_next_run!(%Job{} = job) do
     {:ok, expr} = Crontab.CronExpression.Parser.parse(job.cron_expression)
@@ -163,6 +167,7 @@ defmodule Pincer.Adapters.Cron.Storage do
       {:error, changeset} = Pincer.Adapters.Cron.Storage.create_job(%{name: "Bad"})
       # => {:error, %Pincer.Utils.Validation{errors: [cron_expression: {"can't be blank", ...}, ...]}}
   """
+  @impl true
   @spec create_job(map()) :: {:ok, Job.t()} | {:error, Pincer.Utils.Validation.t()}
   def create_job(attrs) do
     changeset = Job.changeset(%Job{}, attrs)
@@ -195,6 +200,7 @@ defmodule Pincer.Adapters.Cron.Storage do
 
       {:error, :not_found} = Pincer.Adapters.Cron.Storage.disable_job("nonexistent")
   """
+  @impl true
   @spec disable_job(binary()) :: {:ok, Job.t()} | {:error, :not_found}
   def disable_job(id) do
     case fetch_job(id) do
@@ -224,6 +230,7 @@ defmodule Pincer.Adapters.Cron.Storage do
       active = Enum.filter(jobs, & &1.enabled)
       disabled = Enum.reject(jobs, & &1.enabled)
   """
+  @impl true
   @spec list_jobs() :: [Job.t()]
   def list_jobs do
     sqlite_list_jobs()
@@ -250,6 +257,7 @@ defmodule Pincer.Adapters.Cron.Storage do
 
       {:error, :not_found} = Pincer.Adapters.Cron.Storage.delete_job("nonexistent")
   """
+  @impl true
   @spec delete_job(binary()) :: {:ok, Job.t()} | {:error, :not_found}
   def delete_job(id) do
     case fetch_job(id) do

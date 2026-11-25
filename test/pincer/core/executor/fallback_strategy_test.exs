@@ -26,6 +26,9 @@ defmodule Pincer.Core.Executor.FallbackStrategyTest do
     def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
 
     @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
+
+    @impl true
     def provider_config("fallback_probe"), do: %{context_window: 8_000}
 
     @impl true
@@ -49,6 +52,9 @@ defmodule Pincer.Core.Executor.FallbackStrategyTest do
 
     @impl true
     def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
 
     @impl true
     def provider_config(_provider_id), do: nil

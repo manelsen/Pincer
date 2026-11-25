@@ -24,6 +24,7 @@ defmodule PincerPorts.LLMTest do
     @impl LLM
     def transcribe_audio(_path, _opts), do: {:error, :file_not_found}
 
+    @impl LLM
     def generate_embedding(_text, _opts), do: {:ok, [1.0]}
   end
 
@@ -49,6 +50,11 @@ defmodule PincerPorts.LLMTest do
     assert LLM.stream_completion(history, provider: "test") == {:ok, history}
     assert LLM.generate_embedding("Hello") == {:ok, [1.0]}
     assert LLM.transcribe_audio("missing.ogg") == {:error, :file_not_found}
+  end
+
+  test "declares generate_embedding/2 as a required callback" do
+    assert {:generate_embedding, 2} in LLM.behaviour_info(:callbacks)
+    refute {:generate_embedding, 2} in LLM.behaviour_info(:optional_callbacks)
   end
 
   test "raises when the host has not configured an adapter" do

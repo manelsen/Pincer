@@ -13,6 +13,7 @@ defmodule PincerPorts.LLM do
               {:ok, Enumerable.t()} | {:ok, Enumerable.t(), usage() | nil} | {:error, term()}
   @callback list_providers() :: [%{id: String.t(), name: String.t()}]
   @callback list_models(String.t()) :: [String.t()]
+  @callback generate_embedding(String.t(), keyword()) :: {:ok, [float()]} | {:error, term()}
   @callback transcribe_audio(String.t(), keyword()) :: {:ok, String.t()} | {:error, term()}
   @callback provider_config(String.t()) :: map() | nil
 

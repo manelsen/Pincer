@@ -147,6 +147,8 @@ defmodule Pincer.Core.Session.ServerTest do
     @impl true
     def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
     @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
+    @impl true
     def provider_config(_provider_id), do: nil
   end
 
@@ -187,6 +189,8 @@ defmodule Pincer.Core.Session.ServerTest do
     def list_models(_provider_id), do: []
     @impl true
     def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+    @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
     @impl true
     def provider_config(_provider_id), do: nil
   end

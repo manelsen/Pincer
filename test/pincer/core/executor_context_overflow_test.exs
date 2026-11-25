@@ -16,6 +16,9 @@ defmodule Pincer.Core.ExecutorContextOverflowTest do
     def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
 
     @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
+
+    @impl true
     def provider_config("overflow_probe"), do: %{context_window: 10_000}
 
     @impl true

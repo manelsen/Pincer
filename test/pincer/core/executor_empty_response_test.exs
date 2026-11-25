@@ -24,6 +24,9 @@ defmodule Pincer.Core.ExecutorEmptyResponseTest do
     def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
 
     @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
+
+    @impl true
     def provider_config(_provider_id), do: nil
   end
 
@@ -49,6 +52,9 @@ defmodule Pincer.Core.ExecutorEmptyResponseTest do
 
     @impl true
     def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
 
     @impl true
     def provider_config(_provider_id), do: nil
@@ -81,6 +87,9 @@ defmodule Pincer.Core.ExecutorEmptyResponseTest do
     def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
 
     @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
+
+    @impl true
     def provider_config(_provider_id), do: nil
   end
 
@@ -106,6 +115,9 @@ defmodule Pincer.Core.ExecutorEmptyResponseTest do
 
     @impl true
     def transcribe_audio(_file_path, _opts), do: {:error, :not_implemented}
+
+    @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
 
     @impl true
     def provider_config(_provider_id), do: nil

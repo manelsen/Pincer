@@ -46,7 +46,7 @@ defmodule Pincer.Adapters.Cron.Scheduler do
   """
   use GenServer
   require Logger
-  alias Pincer.Adapters.Cron.Storage
+  alias Pincer.Ports.Cron
 
   @tick_interval :timer.seconds(60)
   @default_name __MODULE__
@@ -82,8 +82,8 @@ defmodule Pincer.Adapters.Cron.Scheduler do
 
     state = %{
       tick_interval: tick_interval,
-      due_jobs_fetcher: Keyword.get(opts, :due_jobs_fetcher, fn -> Storage.list_due_jobs() end),
-      next_run_updater: Keyword.get(opts, :next_run_updater, &Storage.update_next_run!/1),
+      due_jobs_fetcher: Keyword.get(opts, :due_jobs_fetcher, fn -> Cron.list_due_jobs() end),
+      next_run_updater: Keyword.get(opts, :next_run_updater, &Cron.update_next_run!/1),
       job_dispatcher: Keyword.get(opts, :job_dispatcher, &deploy_job/1),
       missing_table_warned?: false
     }
