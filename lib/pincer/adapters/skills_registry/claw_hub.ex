@@ -7,10 +7,13 @@ defmodule Pincer.Adapters.SkillsRegistry.ClawHub do
   - fetch endpoint: `%{"skill" => %{...}}` or a direct skill map
   """
 
-  @type skill :: map()
+  @behaviour PincerPorts.SkillsRegistry
+
+  @type skill :: PincerPorts.SkillsRegistry.skill()
   @default_base_url "https://api.clawhub.dev"
   @default_registry_path "/v1/skills"
 
+  @impl true
   @spec list_skills(keyword()) :: {:ok, [skill()]} | {:error, term()}
   def list_skills(opts \\ []) do
     url = build_url(opts, @default_registry_path)
@@ -25,6 +28,7 @@ defmodule Pincer.Adapters.SkillsRegistry.ClawHub do
     end
   end
 
+  @impl true
   @spec fetch_skill(String.t(), keyword()) :: {:ok, skill()} | {:error, term()}
   def fetch_skill(skill_id, opts \\ [])
 

@@ -44,6 +44,28 @@ defmodule Pincer.Core.SkillsTest do
     {:ok, %{tmp: tmp}}
   end
 
+  test "discover/1 uses the configured default and named registry adapters" do
+    previous = Application.fetch_env(:pincer, :skills_registry_adapters)
+
+    on_exit(fn ->
+      case previous do
+        {:ok, adapters} -> Application.put_env(:pincer, :skills_registry_adapters, adapters)
+        :error -> Application.delete_env(:pincer, :skills_registry_adapters)
+      end
+    end)
+
+    Application.put_env(:pincer, :skills_registry_adapters, %{
+      local: FakeRegistry,
+      clawhub: FakeRegistry
+    })
+
+    skills = [%{"id" => "injected-skill"}]
+    opts = [registry_opts: [skills: skills, http_client: ClawHubHttpStub]]
+
+    assert {:ok, ^skills} = Skills.discover(opts)
+    assert {:ok, ^skills} = Skills.discover(Keyword.put(opts, :registry, :clawhub))
+  end
+
   test "install/2 rejects untrusted source host", %{tmp: tmp} do
     skill = %{
       "id" => "skill-a",

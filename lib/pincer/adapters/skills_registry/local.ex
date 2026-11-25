@@ -7,8 +7,11 @@ defmodule Pincer.Adapters.SkillsRegistry.Local do
   - `Application.get_env(:pincer, :skills_registry, [])`
   """
 
-  @type skill :: map()
+  @behaviour PincerPorts.SkillsRegistry
 
+  @type skill :: PincerPorts.SkillsRegistry.skill()
+
+  @impl true
   @spec list_skills(keyword()) :: {:ok, [skill()]} | {:error, term()}
   def list_skills(opts \\ []) do
     registry =
@@ -19,7 +22,8 @@ defmodule Pincer.Adapters.SkillsRegistry.Local do
     normalize_registry(registry)
   end
 
-  @spec fetch_skill(String.t(), keyword()) :: {:ok, skill()} | {:error, :not_found | term()}
+  @impl true
+  @spec fetch_skill(String.t(), keyword()) :: {:ok, skill()} | {:error, term()}
   def fetch_skill(skill_id, opts \\ [])
 
   def fetch_skill(skill_id, opts) when is_binary(skill_id) do

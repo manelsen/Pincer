@@ -20,6 +20,7 @@ defmodule PincerPorts do
   - `PincerPorts.Project` — project wizard as seen from a channel
   - `PincerPorts.PubSub` — topic subscriptions and event delivery
   - `PincerPorts.Session` — driving agent sessions from a channel
+  - `PincerPorts.SkillsRegistry` — skill catalog discovery and lookup
   - `PincerPorts.Streaming` — streaming and status-presentation policies
   - `PincerPorts.UX` — channel-facing user experience vocabulary
   """
@@ -38,6 +39,7 @@ defmodule PincerPorts do
       Project,
       PubSub,
       Session,
+      SkillsRegistry,
       Streaming,
       UX
     ]
