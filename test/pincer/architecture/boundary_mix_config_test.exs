@@ -5,6 +5,13 @@ defmodule Pincer.Architecture.BoundaryMixConfigTest do
 
   use ExUnit.Case, async: true
 
+  test "enables the :boundary compiler in mix project" do
+    compilers = Pincer.MixProject.project()[:compilers] || []
+
+    assert :boundary in compilers,
+           "Expected :boundary compiler to be enabled in :compilers, got: #{inspect(compilers)}"
+  end
+
   test "does not configure dead :externals option under :boundary" do
     config = boundary_config()
 
