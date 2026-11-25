@@ -1,5 +1,5 @@
 defmodule Pincer.Channels.DingTalkTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Pincer.Channels.DingTalk
 
@@ -130,6 +130,128 @@ defmodule Pincer.Channels.DingTalkTest do
 
     test "returns session ID unchanged if no prefix match" do
       assert DingTalk.resolve_recipient("something_else") == "something_else"
+    end
+  end
+
+  describe "inbound routing via Shared.Inbound" do
+    defmodule SessionStub do
+      @behaviour PincerPorts.Session
+
+      @impl true
+      def resolve(:dingtalk, ctx, _cfg) do
+        %PincerPorts.Session.Context{
+          channel: :dingtalk,
+          session_id: "dingtalk_#{ctx.staff_id}",
+          root_agent_id: ctx.staff_id,
+          root_agent_source: :session_scope,
+          workspace_path: "/tmp",
+          blackboard_scope: "dingtalk_#{ctx.staff_id}"
+        }
+      end
+
+      @impl true
+      def process_input(sid, incoming) do
+        if pid = Application.get_env(:pincer, :dingtalk_test_pid),
+          do: send(pid, {:dingtalk_input, sid, incoming})
+
+        {:ok, :started}
+      end
+
+      @impl true
+      def ensure_started(_sid, _opts), do: {:ok, self()}
+      @impl true
+      def start_session(_sid, _opts), do: {:ok, self()}
+      @impl true
+      def stop_session(_sid), do: :ok
+      @impl true
+      def reset(_sid), do: :ok
+      @impl true
+      def get_status(_sid), do: {:ok, %{}}
+      @impl true
+      def set_model(_sid, _p, _m), do: :ok
+      @impl true
+      def set_thinking(_sid, _l), do: :ok
+      @impl true
+      def set_reasoning_visible(_sid, _v), do: :ok
+      @impl true
+      def set_verbose(_sid, _v), do: :ok
+      @impl true
+      def set_usage(_sid, _l), do: :ok
+      @impl true
+      def approve_all(_sid, _s), do: :ok
+    end
+
+    defmodule APIStub do
+      def send_dm(ids, msg_param, msg_key) do
+        if pid = Application.get_env(:pincer, :dingtalk_test_pid),
+          do: send(pid, {:dingtalk_dm, ids, msg_param, msg_key})
+
+        {:ok, %{}}
+      end
+    end
+
+    setup do
+      prev_session = Application.get_env(:pincer, :session_adapter)
+      prev_cfg = Application.get_env(:pincer, :dingtalk_channel_config)
+      prev_api = Application.get_env(:pincer, :dingtalk_api_module)
+
+      Application.put_env(:pincer, :session_adapter, SessionStub)
+      Application.put_env(:pincer, :dingtalk_api_module, APIStub)
+      Application.put_env(:pincer, :dingtalk_test_pid, self())
+
+      unless Process.whereis(Pincer.Channels.DingTalk.SessionSupervisor) do
+        start_supervised!(Pincer.Channels.DingTalk.SessionSupervisor)
+      end
+
+      on_exit(fn ->
+        if prev_session,
+          do: Application.put_env(:pincer, :session_adapter, prev_session),
+          else: Application.delete_env(:pincer, :session_adapter)
+
+        if prev_cfg,
+          do: Application.put_env(:pincer, :dingtalk_channel_config, prev_cfg),
+          else: Application.delete_env(:pincer, :dingtalk_channel_config)
+
+        if prev_api,
+          do: Application.put_env(:pincer, :dingtalk_api_module, prev_api),
+          else: Application.delete_env(:pincer, :dingtalk_api_module)
+
+        Application.delete_env(:pincer, :dingtalk_test_pid)
+      end)
+
+      :ok
+    end
+
+    test "routes plain text messages through session port" do
+      Application.put_env(:pincer, :dingtalk_channel_config, %{"dm_policy" => %{"mode" => "open"}})
+
+      assert :ok ==
+               DingTalk.handle_event(%{
+                 staff_id: "u123",
+                 conversation_id: "dm_conv",
+                 text: "Hello world",
+                 msg_type: "text"
+               })
+
+      assert_receive {:dingtalk_input, "dingtalk_u123", %{text: "Hello world"}}
+    end
+
+    test "blocks disabled DM access and replies via API" do
+      Application.put_env(:pincer, :dingtalk_channel_config, %{
+        "dm_policy" => %{"mode" => "disabled"}
+      })
+
+      assert :ok ==
+               DingTalk.handle_event(%{
+                 staff_id: "u123",
+                 conversation_id: "dm_conv",
+                 text: "Hello world",
+                 msg_type: "text"
+               })
+
+      assert_receive {:dingtalk_dm, ["u123"], payload, "sampleText"}
+      assert payload =~ "desativadas"
+      refute_receive {:dingtalk_input, _, _}, 50
     end
   end
 end
