@@ -151,23 +151,4 @@ defmodule Pincer.Ports.Storage do
 
   def list_pairing_states_by_channel(channel),
     do: adapter().list_pairing_states_by_channel(channel)
-
-  @doc """
-  Filters non-empty string prefixes and converts them into SQL `LIKE` patterns
-  escaped with `'!'` (`!`, `%`, `_`).
-  """
-  @spec like_prefix_patterns([String.t()]) :: [String.t()]
-  def like_prefix_patterns(prefixes) when is_list(prefixes) do
-    prefixes
-    |> Enum.filter(&(is_binary(&1) and &1 != ""))
-    |> Enum.map(fn prefix ->
-      escaped =
-        prefix
-        |> String.replace("!", "!!")
-        |> String.replace("%", "!%")
-        |> String.replace("_", "!_")
-
-      escaped <> "%"
-    end)
-  end
 end

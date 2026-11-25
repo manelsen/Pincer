@@ -12,8 +12,8 @@ defmodule Pincer.Utils.BoundedBody do
   halts as soon as the cap is exceeded.
   """
   @spec callback(non_neg_integer()) ::
-          ({:data, binary()}, {Req.Request.t(), Req.Response.t()} ->
-             {:cont | :halt, {Req.Request.t(), Req.Response.t()}})
+          ({:data, binary()}, {term(), map()} ->
+             {:cont | :halt, {term(), map()}})
   def callback(max_bytes) when is_integer(max_bytes) and max_bytes >= 0 do
     fn {:data, chunk}, {request, response} ->
       body = (response.body || "") <> chunk

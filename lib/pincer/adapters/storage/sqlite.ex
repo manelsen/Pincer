@@ -635,7 +635,7 @@ defmodule Pincer.Adapters.Storage.SQLite do
   @impl true
   @spec purge_invalid_documents([String.t()]) :: {:ok, non_neg_integer()} | {:error, term()}
   def purge_invalid_documents(prefixes \\ ["tmp/", "workspaces/"]) when is_list(prefixes) do
-    case Pincer.Ports.Storage.like_prefix_patterns(prefixes) do
+    case like_prefix_patterns(prefixes) do
       [] ->
         {:ok, 0}
 
@@ -657,6 +657,25 @@ defmodule Pincer.Adapters.Storage.SQLite do
           end
         end)
     end
+  end
+
+  @doc """
+  Filters non-empty string prefixes and converts them into SQL `LIKE` patterns
+  escaped with `'!'` (`!`, `%`, `_`).
+  """
+  @spec like_prefix_patterns([String.t()]) :: [String.t()]
+  def like_prefix_patterns(prefixes) when is_list(prefixes) do
+    prefixes
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.map(fn prefix ->
+      escaped =
+        prefix
+        |> String.replace("!", "!!")
+        |> String.replace("%", "!%")
+        |> String.replace("_", "!_")
+
+      escaped <> "%"
+    end)
   end
 
   defp delete_vec_nodes(_tx, []), do: :ok

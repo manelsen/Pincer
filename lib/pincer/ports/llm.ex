@@ -1,7 +1,7 @@
 defmodule Pincer.Ports.LLM do
   @moduledoc "Port for Large Language Model operations."
 
-  @type usage :: Pincer.Core.Structs.Usage.t()
+  @type usage :: map()
 
   @callback chat_completion(list(map()), keyword()) ::
               {:ok, map(), usage() | nil} | {:error, term()}
