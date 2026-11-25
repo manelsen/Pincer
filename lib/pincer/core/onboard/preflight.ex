@@ -1,10 +1,11 @@
 defmodule Pincer.Core.Onboard.Preflight do
-  @moduledoc false
+  @moduledoc "Validates local SQLite and model configuration before onboarding."
 
   require Logger
 
   alias Pincer.Core.Onboard.Defaults
   alias Pincer.Infra.SQLite
+  alias Pincer.Utils.MapHelpers
 
   @vec_extension_candidates [
     "priv/sqlite_vec/vec0.so",
@@ -18,6 +19,7 @@ defmodule Pincer.Core.Onboard.Preflight do
           hint: String.t()
         }
 
+  @doc "Checks that onboarding can proceed with the selected storage and model."
   @spec preflight(map()) :: :ok | {:error, [preflight_issue()]}
   def preflight(config) when is_map(config) do
     issues =
@@ -31,6 +33,27 @@ defmodule Pincer.Core.Onboard.Preflight do
   end
 
   defp maybe_add_storage_issue(issues, config) do
+    backend = config |> MapHelpers.read_field(:storage) |> MapHelpers.read_field(:adapter)
+
+    case SQLite.resolve_storage_backend(System.get_env("PINCER_STORAGE"), backend) do
+      {:ok, :sqlite} ->
+        check_sqlite_path(issues, config)
+
+      {:error, {:unsupported_storage_backend, backend}} ->
+        [
+          %{
+            id: :unsupported_storage_backend,
+            message:
+              "Unsupported storage backend: #{inspect(backend)}. Only embedded SQLite is supported.",
+            hint:
+              "Set storage.adapter to sqlite and remove any conflicting PINCER_STORAGE override."
+          }
+          | issues
+        ]
+    end
+  end
+
+  defp check_sqlite_path(issues, config) do
     sqlite_path = Defaults.sqlite_path(config)
 
     case SQLite.check_writable_path(sqlite_path) do

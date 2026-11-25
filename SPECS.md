@@ -332,6 +332,17 @@ errors into Core:
 - `Pincer.Core` blocks `:req` and `:exqlite` via Boundary `check: [apps: ...]`
   (inherited by Core sub-boundaries).
 
+### 12.9. Configuration posture
+
+Doctor, SecurityAudit, and assisted onboarding use the same token and DM
+checks for enabled channels. An enabled webhook requires `token_env`. Missing
+and invalid DM modes still default to open at runtime and produce warnings in
+reports. Doctor and SecurityAudit keep their existing check IDs. Assisted
+onboarding reports token errors as warnings and includes remediation hints.
+
+Doctor, onboarding preflight, and runtime configuration check `PINCER_STORAGE`
+before `storage.adapter`. With neither set, they select SQLite.
+
 ### 13. Channel-Owned Formatting (`Pincer.Channels.Telegram.ResponseEnvelope`)
 
 Telegram HTML usage-footer formatting and reasoning delivery options reside in

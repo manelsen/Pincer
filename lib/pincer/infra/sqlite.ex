@@ -271,6 +271,18 @@ defmodule Pincer.Infra.SQLite do
 
   def parse_storage_backend(other), do: {:error, {:unsupported_storage_backend, other}}
 
+  @doc "Selects the storage backend from the environment, then config, then the SQLite default."
+  @spec resolve_storage_backend(term(), term()) ::
+          {:ok, :sqlite} | {:error, {:unsupported_storage_backend, term()}}
+  def resolve_storage_backend(env_value, configured_backend) do
+    Enum.find_value([env_value, configured_backend], {:ok, :sqlite}, fn value ->
+      case parse_storage_backend(value) do
+        :unset -> nil
+        result -> result
+      end
+    end)
+  end
+
   @doc """
   Validates that `path` is safe (no `..` traversal) and its target/ancestor directory is writable.
   """

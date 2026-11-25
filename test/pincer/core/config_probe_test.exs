@@ -102,11 +102,11 @@ defmodule Pincer.Core.ConfigProbeTest do
   end
 
   describe "channel classification" do
-    test "token_required_channel? lists telegram, discord and slack only" do
+    test "requires a token for telegram, discord, slack and webhook" do
       assert ConfigProbe.token_required_channel?("telegram")
       assert ConfigProbe.token_required_channel?("discord")
       assert ConfigProbe.token_required_channel?("slack")
-      refute ConfigProbe.token_required_channel?("webhook")
+      assert ConfigProbe.token_required_channel?("webhook")
       refute ConfigProbe.token_required_channel?("cli")
     end
 

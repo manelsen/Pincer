@@ -12,7 +12,7 @@ defmodule Pincer.Core.ConfigProbe do
 
   alias Pincer.Utils.MapHelpers
 
-  @channels_requiring_token MapSet.new(["telegram", "discord", "slack"])
+  @channels_requiring_token MapSet.new(["telegram", "discord", "slack", "webhook"])
   @dm_capable_channels MapSet.new(["telegram", "discord", "whatsapp"])
 
   @type channel_name :: String.t()
@@ -20,12 +20,7 @@ defmodule Pincer.Core.ConfigProbe do
   @type dm_mode :: :open | :allowlist | :disabled | :pairing | :missing | :invalid
   @type token_state :: :present | :missing_value | :missing_env_key
 
-  @doc """
-  Channels that require a `token_env` entry to be considered configured.
-
-  Note `webhook` is intentionally absent: the security audit treats it as
-  token-required on its own, so callers pass their own set when needed.
-  """
+  @doc "True when a channel requires `token_env` to be configured."
   @spec token_required_channel?(channel_name()) :: boolean()
   def token_required_channel?(name), do: MapSet.member?(@channels_requiring_token, name)
 
@@ -86,12 +81,9 @@ defmodule Pincer.Core.ConfigProbe do
   """
   @spec token_state(channel_config(), (String.t() -> String.t() | nil)) :: token_state()
   def token_state(cfg, env_fetcher) when is_map(cfg) do
-    case MapHelpers.read_field(cfg, :token_env) do
-      token_env when is_binary(token_env) ->
-        if MapHelpers.present?(env_fetcher.(token_env)), do: :present, else: :missing_value
-
-      _ ->
-        :missing_env_key
+    case token_env(cfg) do
+      nil -> :missing_env_key
+      token_env -> env_state(token_env, env_fetcher)
     end
   end
 
@@ -99,9 +91,49 @@ defmodule Pincer.Core.ConfigProbe do
   @spec token_env(channel_config()) :: String.t() | nil
   def token_env(cfg) when is_map(cfg) do
     case MapHelpers.read_field(cfg, :token_env) do
-      value when is_binary(value) -> value
+      value when is_binary(value) -> if MapHelpers.present?(value), do: value
       _ -> nil
     end
+  end
+
+  @doc "Returns the token state and environment key for each applicable enabled channel."
+  @spec channel_tokens(map(), (String.t() -> String.t() | nil)) ::
+          [{channel_name(), String.t() | nil, token_state()}]
+  def channel_tokens(config, env_fetcher) do
+    for {channel, cfg} <- enabled_channels(config),
+        state = token_state(cfg, env_fetcher),
+        state != :missing_env_key or token_required_channel?(channel) do
+      {channel, token_env(cfg), state}
+    end
+  end
+
+  @doc "Returns the selected provider's credential state, or `nil` when no provider is selected."
+  @spec provider_env(map(), map(), (String.t() -> String.t() | nil)) ::
+          {String.t(), String.t() | nil,
+           :unregistered | :not_required | :present | :missing_value}
+          | nil
+  def provider_env(config, registry, env_fetcher) do
+    provider = config |> MapHelpers.read_field(:llm) |> MapHelpers.read_field(:provider)
+
+    if is_binary(provider) and String.trim(provider) != "" do
+      provider = String.trim(provider)
+
+      case MapHelpers.read_field(registry, provider) do
+        entry when is_map(entry) ->
+          key = MapHelpers.read_field(entry, :env_key)
+
+          if is_binary(key) and MapHelpers.present?(key),
+            do: {provider, key, env_state(key, env_fetcher)},
+            else: {provider, nil, :not_required}
+
+        _ ->
+          {provider, nil, :unregistered}
+      end
+    end
+  end
+
+  defp env_state(key, env_fetcher) do
+    if MapHelpers.present?(env_fetcher.(key)), do: :present, else: :missing_value
   end
 
   @doc "Normalises a DM mode from a `dm_policy` map."
@@ -121,13 +153,24 @@ defmodule Pincer.Core.ConfigProbe do
   def dm_mode_value(nil), do: :missing
   def dm_mode_value(""), do: :missing
 
-  def dm_mode_value(value) do
+  def dm_mode_value(value) when is_binary(value) or is_atom(value) do
     case value |> to_string() |> String.trim() |> String.downcase() do
       "open" -> :open
       "allowlist" -> :allowlist
       "disabled" -> :disabled
       "pairing" -> :pairing
       _ -> :invalid
+    end
+  end
+
+  def dm_mode_value(_), do: :invalid
+
+  @doc "Returns the runtime DM mode, with open behavior for missing and invalid modes."
+  @spec effective_dm_mode(term()) :: :open | :allowlist | :disabled | :pairing
+  def effective_dm_mode(policy) do
+    case dm_mode(policy) do
+      mode when mode in [:missing, :invalid] -> :open
+      mode -> mode
     end
   end
 
