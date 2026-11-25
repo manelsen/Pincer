@@ -375,6 +375,17 @@ Channel session workers and adapters delegate session lifecycle mechanics to
 `SessionBridge` while keeping transport-specific streaming, card updates, and
 project-flow delivery callbacks in each channel package.
 
+### 13.4. Shared channel project bridge
+
+`Pincer.Channels.Shared.ProjectBridge` centralizes project wizard continuation
+(`continue/3`), execution kickoff orchestration (`kickoff/2`), and session
+worker project callbacks (`on_agent_response/2`, `on_agent_error/2`) on top of
+`PincerPorts.Project` and `PincerPorts.Session`.
+
+Channel adapters pass transport callbacks (`ensure_session`, `ensure_worker`,
+`send_message`, and optional `dispatch`/`on_start_error`/`log_tag`) so Telegram,
+Discord, and WhatsApp share identical kickoff and error-recovery sequencing.
+
 ---
 
 ### 14. Sandbox Execution Port (`Pincer.Ports.Sandbox`)

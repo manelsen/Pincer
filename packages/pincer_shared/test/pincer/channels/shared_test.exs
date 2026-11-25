@@ -9,6 +9,13 @@ defmodule Pincer.Channels.SharedTest do
 
     assert opts[:deps] == [PincerPorts]
 
-    assert opts[:exports] == [Inbound, SessionBridge, Text, TokenCache, WebhookVerifier]
+    assert opts[:exports] == [
+             Inbound,
+             ProjectBridge,
+             SessionBridge,
+             Text,
+             TokenCache,
+             WebhookVerifier
+           ]
   end
 end

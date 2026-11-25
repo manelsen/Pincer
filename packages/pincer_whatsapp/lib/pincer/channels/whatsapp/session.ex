@@ -94,16 +94,14 @@ defmodule Pincer.Channels.WhatsApp.Session do
   # --- Private helpers ---
 
   defp maybe_advance_project_flow(state) do
-    PincerPorts.Project.on_agent_response(
-      state.session_id,
-      send_message: fn text -> Pincer.Channels.WhatsApp.send_message(state.chat_id, text) end
-    )
+    Pincer.Channels.Shared.ProjectBridge.on_agent_response(state.session_id, fn text ->
+      Pincer.Channels.WhatsApp.send_message(state.chat_id, text)
+    end)
   end
 
   defp maybe_recover_project_flow(state) do
-    PincerPorts.Project.on_agent_error(
-      state.session_id,
-      send_message: fn text -> Pincer.Channels.WhatsApp.send_message(state.chat_id, text) end
-    )
+    Pincer.Channels.Shared.ProjectBridge.on_agent_error(state.session_id, fn text ->
+      Pincer.Channels.WhatsApp.send_message(state.chat_id, text)
+    end)
   end
 end

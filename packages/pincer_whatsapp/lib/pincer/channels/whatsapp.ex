@@ -180,7 +180,7 @@ defmodule Pincer.Channels.WhatsApp do
 
     Inbound.dispatch(inbound,
       resolve_shortcut: &PincerPorts.UX.resolve_shortcut/1,
-      continue_project: &PincerPorts.Project.continue_if_collecting/3
+      continue_project: &Pincer.Channels.Shared.ProjectBridge.continue/3
     )
   end
 
@@ -223,37 +223,17 @@ defmodule Pincer.Channels.WhatsApp do
   end
 
   defp maybe_start_project_execution(chat_id, session_context, state) do
-    case PincerPorts.Project.kickoff(session_context.session_id) do
-      {:ok, kickoff} ->
-        with :ok <- ensure_session_started(state, session_context),
-             :ok <-
-               safe_apply(state.ensure_channel_session_fn, [chat_id, session_context.session_id]) do
-          deliver_message(state, chat_id, "Project Runner: #{kickoff.status_message}")
-
-          case safe_apply(state.process_input_fn, [session_context.session_id, kickoff.prompt]) do
-            {:ok, _status} ->
-              :ok
-
-            {:error, reason} ->
-              Logger.warning("[WHATSAPP] Failed to dispatch project task: #{inspect(reason)}")
-
-            other ->
-              Logger.debug("[WHATSAPP] Project task dispatch result: #{inspect(other)}")
-          end
-        else
-          {:error, reason} ->
-            Logger.warning("[WHATSAPP] Failed to start project execution: #{inspect(reason)}")
-        end
-
-      :not_ready ->
-        :ok
-
-      :already_started ->
-        :ok
-
-      :completed ->
-        :ok
-    end
+    Pincer.Channels.Shared.ProjectBridge.kickoff(session_context.session_id,
+      ensure_session: fn -> ensure_session_started(state, session_context) end,
+      ensure_worker: fn ->
+        safe_apply(state.ensure_channel_session_fn, [chat_id, session_context.session_id])
+      end,
+      send_message: fn text -> deliver_message(state, chat_id, text) end,
+      dispatch: fn prompt ->
+        safe_apply(state.process_input_fn, [session_context.session_id, prompt])
+      end,
+      log_tag: "WHATSAPP"
+    )
   end
 
   defp handle_command(chat_id, sender_id, session_context, command_text, is_group, state) do

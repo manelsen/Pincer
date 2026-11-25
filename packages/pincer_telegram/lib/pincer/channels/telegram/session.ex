@@ -306,17 +306,15 @@ defmodule Pincer.Channels.Telegram.Session do
   end
 
   defp maybe_advance_project_flow(state) do
-    PincerPorts.Project.on_agent_response(
-      state.session_id,
-      send_message: fn text -> Pincer.Channels.Telegram.send_message(state.chat_id, text) end
-    )
+    Pincer.Channels.Shared.ProjectBridge.on_agent_response(state.session_id, fn text ->
+      Pincer.Channels.Telegram.send_message(state.chat_id, text)
+    end)
   end
 
   defp maybe_recover_project_flow(state) do
-    PincerPorts.Project.on_agent_error(
-      state.session_id,
-      send_message: fn text -> Pincer.Channels.Telegram.send_message(state.chat_id, text) end
-    )
+    Pincer.Channels.Shared.ProjectBridge.on_agent_error(state.session_id, fn text ->
+      Pincer.Channels.Telegram.send_message(state.chat_id, text)
+    end)
   end
 
   defp state(chat_id, session_id) do

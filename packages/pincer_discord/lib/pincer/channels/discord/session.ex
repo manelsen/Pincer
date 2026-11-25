@@ -184,21 +184,15 @@ defmodule Pincer.Channels.Discord.Session do
   end
 
   defp maybe_advance_project_flow(state) do
-    PincerPorts.Project.on_agent_response(
-      state.session_id,
-      send_message: fn text ->
-        Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
-      end
-    )
+    Pincer.Channels.Shared.ProjectBridge.on_agent_response(state.session_id, fn text ->
+      Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
+    end)
   end
 
   defp maybe_recover_project_flow(state) do
-    PincerPorts.Project.on_agent_error(
-      state.session_id,
-      send_message: fn text ->
-        Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
-      end
-    )
+    Pincer.Channels.Shared.ProjectBridge.on_agent_error(state.session_id, fn text ->
+      Pincer.Channels.Discord.send_message("#{state.channel_id}", text)
+    end)
   end
 
   defp state(channel_id, session_id) do

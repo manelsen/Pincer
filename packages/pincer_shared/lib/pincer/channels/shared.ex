@@ -3,5 +3,5 @@ defmodule Pincer.Channels.Shared do
 
   use Boundary,
     deps: [PincerPorts],
-    exports: [Inbound, SessionBridge, Text, TokenCache, WebhookVerifier]
+    exports: [Inbound, ProjectBridge, SessionBridge, Text, TokenCache, WebhookVerifier]
 end
