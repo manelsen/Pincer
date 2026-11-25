@@ -12,12 +12,6 @@ defmodule Pincer.MixProject do
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       compilers: [:boundary] ++ Mix.compilers(),
-      boundary: [
-        externals: [
-          {:html_entities, Pincer.Utils}
-        ],
-        ignore_unknown: true
-      ],
       elixirc_options: [warnings_as_errors: true],
       deps: deps(),
       elixirc_paths: elixirc_paths(Mix.env()),
