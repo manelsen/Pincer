@@ -17,7 +17,7 @@ defmodule PincerShared.MixProject do
         {:boundary, "~> 0.12", runtime: false}
       ],
       description:
-        "Shared utilities for Pincer channel adapters (Inbound, ProjectBridge, SessionBridge, Text, TokenCache, WebhookVerifier)",
+        "Shared utilities for Pincer channel adapters (Attachments, Chunking, Formatting, Inbound, Pairing, ProjectBridge, SessionBridge, Text, TokenCache, WebhookVerifier)",
       package: package(),
       name: "PincerShared",
       source_url: @source_url

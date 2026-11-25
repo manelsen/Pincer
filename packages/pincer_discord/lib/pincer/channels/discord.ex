@@ -10,8 +10,7 @@ defmodule Pincer.Channels.Discord do
   @behaviour PincerPorts.Channel
   use Supervisor
   require Logger
-  alias PincerPorts.Structs.IncomingMessage
-  alias Pincer.Channels.Shared.Text
+  alias Pincer.Channels.Shared.{Attachments, Chunking, Formatting}
 
   @doc """
   Starts the Discord channel.
@@ -66,7 +65,7 @@ defmodule Pincer.Channels.Discord do
   @impl PincerPorts.Channel
   def send_message(channel_id, text, opts \\ []) do
     # 1. Handle auto-attachments (extract large code blocks)
-    {text, files} = auto_attach_files(text, opts[:files] || [])
+    {text, files} = Attachments.extract_large_code_blocks(text, opts[:files] || [])
 
     # 2. Split text into manageable chunks
     formatted_text = markdown_to_discord(text)
@@ -148,79 +147,15 @@ defmodule Pincer.Channels.Discord do
 
   defp do_send_chunks(_, [], [], _), do: :ok
 
-  def split_into_chunks("", _), do: []
-
   def split_into_chunks(text, max_len) do
-    if String.length(text) <= max_len do
-      [text]
-    else
-      # Try to split by double newline first, then newline, then space, then fallback
-      do_split(text, max_len)
-    end
-  end
-
-  defp do_split(text, max_len) do
-    if String.length(text) <= max_len do
-      [text]
-    else
-      chunk = String.slice(text, 0, max_len)
-
-      # Use Unicode-aware reverse search for newline
-      # String.split_at/2 or Regex might be more robust here
-      last_nl = find_last_newline_within(chunk, 500) || max_len
-
-      [String.slice(text, 0, last_nl) | do_split(String.slice(text, last_nl..-1//1), max_len)]
-    end
-  end
-
-  defp find_last_newline_within(text, search_range) do
-    len = String.length(text)
-    start_pos = max(0, len - search_range)
-
-    # We look for the last newline in the tail of the chunk
-    tail = String.slice(text, start_pos..-1//1)
-
-    case String.split(tail, "\n") do
-      # No newline found in search_range
-      [_] ->
-        nil
-
-      parts ->
-        # The sum of lengths of all parts except the last one, plus the number of newlines
-        last_part_len = parts |> List.last() |> String.length()
-        len - last_part_len
-    end
-  end
-
-  defp auto_attach_files(text, existing_files) do
-    # If text contains a large code block, convert it to a file
-    # We only do this if the block is significantly large to benefit from being a file
-    if String.length(text) > 1500 and String.contains?(text, "```") do
-      case Regex.run(~r/```(\w+)?\n([\s\S]*?)\n```/i, text) do
-        [full_block, lang, code] when byte_size(code) > 1000 ->
-          filename = "code_block.#{lang || "txt"}"
-          file = %{name: filename, body: code}
-
-          remaining_text =
-            String.replace(text, full_block, "\n📎 *[Content sent in attachment: #{filename}]*")
-
-          auto_attach_files(remaining_text, existing_files ++ [file])
-
-        _ ->
-          {text, existing_files}
-      end
-    else
-      {text, existing_files}
-    end
+    Chunking.split(text, max_len, strategy: :newline_window, search_range: 500)
   end
 
   @doc """
   Converts Pincer-standard Markdown to Discord-flavored Markdown.
   """
   def markdown_to_discord(text) do
-    text
-    |> Text.strip_reasoning()
-    |> String.trim()
+    Formatting.markdown_to_discord(text)
   end
 
   defmodule Consumer do
@@ -228,7 +163,7 @@ defmodule Pincer.Channels.Discord do
     Consumes Discord events and routes messages to Pincer sessions.
     """
     use Nostrum.Consumer
-    alias Pincer.Channels.Shared.Inbound
+    alias Pincer.Channels.Shared.{Attachments, Inbound, Pairing}
 
     @impl true
     def handle_event({:MESSAGE_CREATE, msg, _ws_state}) do
@@ -294,25 +229,13 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp dm_pair_command?(msg, trimmed) do
-      dm_event?(msg) and String.starts_with?(String.downcase(trimmed), "/pair")
+      dm_event?(msg) and Pairing.pair_command?(trimmed)
     end
 
     defp authorize_dm_if_needed(msg) do
-      if dm_event?(msg) do
-        sender_id = read_sender_id(msg.author)
-        policy_config = Application.get_env(:pincer, :discord_channel_config, %{})
-
-        case PincerPorts.ChannelPolicy.allow?(:dm_access, %{
-               channel: :discord,
-               sender_id: sender_id,
-               config: policy_config
-             }) do
-          {:allow, _meta} -> :allow
-          {:deny, %{user_message: message}} -> {:deny, message}
-        end
-      else
-        :allow
-      end
+      sender_id = read_sender_id(msg.author)
+      policy_config = Application.get_env(:pincer, :discord_channel_config, %{})
+      Pairing.authorize_dm(:discord, sender_id, policy_config, is_dm: dm_event?(msg))
     end
 
     defp dm_event?(msg), do: Map.get(msg, :guild_id) in [nil, ""]
@@ -322,48 +245,20 @@ defmodule Pincer.Channels.Discord do
 
       session_id = session_context.session_id
       {attachment_text, attachment_refs} = process_attachments(msg.attachments)
-      text_content = (trimmed <> "\n" <> attachment_text) |> String.trim()
 
-      # A plain string when there are no multimodal attachments, otherwise a
-      # list of parts whose lazy refs the Executor resolves.
-      full_content =
-        if Enum.empty?(attachment_refs) do
-          text_content
-        else
-          text_parts =
-            if text_content != "", do: [%{"type" => "text", "text" => text_content}], else: []
+      case Attachments.combine_content(trimmed, attachment_text, attachment_refs) do
+        :empty ->
+          Logger.debug("[DISCORD] Ignoring empty message without supported attachments.")
 
-          text_parts ++ attachment_refs
-        end
+        {:ok, full_content} ->
+          ensure_brain_session_started(session_context)
+          Pincer.Channels.Discord.Session.ensure_started(msg.channel_id, session_id)
 
-      if has_content?(full_content) do
-        ensure_brain_session_started(session_context)
-        Pincer.Channels.Discord.Session.ensure_started(msg.channel_id, session_id)
-
-        PincerPorts.Session.process_input(session_id, build_incoming(session_id, full_content))
-      else
-        Logger.debug("[DISCORD] Ignoring empty message without supported attachments.")
+          PincerPorts.Session.process_input(
+            session_id,
+            Attachments.to_incoming_message(session_id, full_content)
+          )
       end
-    end
-
-    defp has_content?(content) when is_binary(content), do: content != ""
-    defp has_content?(content) when is_list(content), do: content != []
-    defp has_content?(_), do: false
-
-    defp build_incoming(session_id, text) when is_binary(text) do
-      IncomingMessage.new(session_id, text)
-    end
-
-    defp build_incoming(session_id, parts) when is_list(parts) do
-      {text_parts, att_parts} = Enum.split_with(parts, fn p -> p["type"] == "text" end)
-      text = Enum.map_join(text_parts, "\n", & &1["text"])
-
-      # Attachment entries are the lazy reference maps themselves; there is no
-      # nested "attachment" key, so reading one produced `[nil]` and lost the
-      # URL and mime type the executor needs to resolve the file.
-      atts = Enum.filter(att_parts, &(&1["type"] == "attachment_ref"))
-
-      IncomingMessage.new(session_id, text: text, attachments: atts)
     end
 
     defp read_sender_id(author) when is_map(author) do
@@ -510,47 +405,11 @@ defmodule Pincer.Channels.Discord do
     end
 
     defp handle_command(msg, "/pair") do
-      Pincer.Channels.Discord.send_message(
-        "#{msg.channel_id}",
-        "Uso: /pair <codigo>. Solicite o codigo de pairing ao operador."
-      )
+      handle_pairing(msg, "")
     end
 
     defp handle_command(msg, "/pair " <> code_input) do
-      sender_id = read_sender_id(msg.author)
-      code = String.trim(code_input)
-
-      case PincerPorts.ChannelPolicy.approve_code(:discord, sender_id, code) do
-        :ok ->
-          Pincer.Channels.Discord.send_message(
-            "#{msg.channel_id}",
-            "Pairing concluido com sucesso. Agora sua DM esta autorizada."
-          )
-
-        {:error, :not_pending} ->
-          Pincer.Channels.Discord.send_message(
-            "#{msg.channel_id}",
-            "Nenhum pairing pendente para este usuario. Solicite um novo codigo ao operador."
-          )
-
-        {:error, :expired} ->
-          Pincer.Channels.Discord.send_message(
-            "#{msg.channel_id}",
-            "Codigo de pairing expirado. Solicite um novo codigo ao operador."
-          )
-
-        {:error, :invalid_code} ->
-          Pincer.Channels.Discord.send_message(
-            "#{msg.channel_id}",
-            "Codigo de pairing invalido. Revise o codigo e tente novamente."
-          )
-
-        {:error, :attempts_exceeded} ->
-          Pincer.Channels.Discord.send_message(
-            "#{msg.channel_id}",
-            "Tentativas excedidas para este codigo. Solicite um novo codigo ao operador."
-          )
-      end
+      handle_pairing(msg, code_input)
     end
 
     defp handle_command(msg, "/new") do
@@ -697,6 +556,18 @@ defmodule Pincer.Channels.Discord do
         "#{msg.channel_id}",
         "❓ Unknown command: `#{cmd}`\n#{PincerPorts.UX.unknown_command_hint()}"
       )
+    end
+
+    defp handle_pairing(msg, code_input) do
+      sender_id = read_sender_id(msg.author)
+
+      message =
+        case Pairing.approve(:discord, sender_id, code_input) do
+          {:ok, text} -> text
+          {:error, _reason, text} -> text
+        end
+
+      Pincer.Channels.Discord.send_message("#{msg.channel_id}", message)
     end
 
     defp handle_menu_command(interaction) do
@@ -1096,51 +967,12 @@ defmodule Pincer.Channels.Discord do
 
     defp normalize_interaction_token(_), do: {:error, :invalid_interaction_token}
 
-    # Extensions whose content is extracted inline as text (small, structured files).
-    @text_extensions ~w(.md .txt .ex .exs .json .yaml .yml .py .js .ts .csv .xml .toml)
-
-    # Extensions handled as lazy multimodal references — the Executor decides
-    # whether to inline them (base64) or just describe them based on the active
-    # provider's capabilities.
-    @multimodal_mime %{
-      ".pdf" => "application/pdf",
-      ".png" => "image/png",
-      ".jpg" => "image/jpeg",
-      ".jpeg" => "image/jpeg",
-      ".webp" => "image/webp",
-      ".gif" => "image/gif"
-    }
-
     # Returns {inline_text :: String.t(), attachment_refs :: [map()]}
     # inline_text  — text extracted immediately from plain-text attachments
     # attachment_refs — lazy maps for binary/multimodal files (resolved later by the Executor)
     defp process_attachments(attachments) when is_list(attachments) and attachments != [] do
       Logger.info("[DISCORD] Processing #{length(attachments)} attachments.")
-
-      Enum.reduce(attachments, {"", []}, fn attachment, {texts, refs} ->
-        ext = Path.extname(attachment.filename) |> String.downcase()
-        meta = "[Attachment: #{attachment.filename} (#{attachment.size} bytes)]"
-
-        cond do
-          ext in @text_extensions ->
-            content = download_attachment(attachment)
-            {texts <> "\n\n" <> meta <> "\n" <> content, refs}
-
-          Map.has_key?(@multimodal_mime, ext) ->
-            ref = %{
-              "type" => "attachment_ref",
-              "url" => attachment.url,
-              "mime_type" => @multimodal_mime[ext],
-              "filename" => attachment.filename,
-              "size" => attachment.size
-            }
-
-            {texts, refs ++ [ref]}
-
-          true ->
-            {texts <> "\n\n" <> meta <> " (unsupported format)", refs}
-        end
-      end)
+      Attachments.process_list(attachments, download_text: &download_attachment/1)
     end
 
     defp process_attachments(_), do: {"", []}
@@ -1153,77 +985,65 @@ defmodule Pincer.Channels.Discord do
       Logger.info("[DISCORD] Reading text from attachment: #{attachment.filename}")
 
       # Reject before download if the declared size already exceeds the limit.
-      if attachment.size > @max_attachment_size do
-        Logger.warning(
-          "[DISCORD] Attachment too large (#{attachment.size} bytes): #{attachment.filename}"
-        )
+      case Attachments.validate_size(attachment.size, @max_attachment_size) do
+        {:error, :too_large} ->
+          Logger.warning(
+            "[DISCORD] Attachment too large (#{attachment.size} bytes): #{attachment.filename}"
+          )
 
-        "(Error: File too large — #{attachment.size} bytes exceeds the #{@max_attachment_size}-byte limit)"
-      else
-        case Req.get(attachment.url,
-               decode_body: false,
-               receive_timeout: 30_000,
-               connect_options: [timeout: 10_000],
-               into: fn {:data, chunk}, {request, response} ->
-                 body = (response.body || "") <> chunk
-                 response = %{response | body: body}
+          "(Error: File too large — #{attachment.size} bytes exceeds the #{@max_attachment_size}-byte limit)"
 
-                 if byte_size(body) > @max_attachment_size do
-                   {:halt, {request, response}}
-                 else
-                   {:cont, {request, response}}
+        :ok ->
+          case Req.get(attachment.url,
+                 decode_body: false,
+                 receive_timeout: 30_000,
+                 connect_options: [timeout: 10_000],
+                 into: fn {:data, chunk}, {request, response} ->
+                   body = (response.body || "") <> chunk
+                   response = %{response | body: body}
+
+                   if byte_size(body) > @max_attachment_size do
+                     {:halt, {request, response}}
+                   else
+                     {:cont, {request, response}}
+                   end
                  end
-               end
-             ) do
-          {:ok, %{status: 200, body: content, headers: headers}}
-          when is_binary(content) and byte_size(content) <= @max_attachment_size ->
-            content_type =
-              case Req.Response.get_header(
-                     %Req.Response{headers: headers, status: 200, body: content},
-                     "content-type"
-                   ) do
-                [ct | _] -> ct
-                _ -> ""
+               ) do
+            {:ok, %{status: 200, body: content, headers: headers}}
+            when is_binary(content) and byte_size(content) <= @max_attachment_size ->
+              content_type =
+                case Req.Response.get_header(
+                       %Req.Response{headers: headers, status: 200, body: content},
+                       "content-type"
+                     ) do
+                  [ct | _] -> ct
+                  _ -> ""
+                end
+
+              if Attachments.valid_text_content_type?(content_type) do
+                Attachments.format_inline_file(attachment.filename, content)
+              else
+                Logger.warning("[DISCORD] Rejected attachment with content-type: #{content_type}")
+
+                "(Error: Unsupported content type '#{content_type}')"
               end
 
-            if valid_text_content_type?(content_type) do
-              safe_name = sanitize_filename(attachment.filename)
-              "--- Content of #{safe_name} ---\n#{content}\n--- End of File ---"
-            else
-              Logger.warning("[DISCORD] Rejected attachment with content-type: #{content_type}")
-              "(Error: Unsupported content type '#{content_type}')"
-            end
+            {:ok, %{status: 200}} ->
+              Logger.warning("[DISCORD] Attachment too large: #{attachment.filename}")
+              "(Error: File too large — download exceeded the limit)"
 
-          {:ok, %{status: 200}} ->
-            Logger.warning("[DISCORD] Attachment too large: #{attachment.filename}")
-            "(Error: File too large — download exceeded the limit)"
+            {:ok, %{status: status}} ->
+              Logger.error("[DISCORD] Failed to download #{attachment.filename}: HTTP #{status}")
+              "(Error: Could not download file content)"
 
-          {:ok, %{status: status}} ->
-            Logger.error("[DISCORD] Failed to download #{attachment.filename}: HTTP #{status}")
-            "(Error: Could not download file content)"
+            {:error, reason} ->
+              Logger.error(
+                "[DISCORD] Error downloading #{attachment.filename}: #{inspect(reason)}"
+              )
 
-          {:error, reason} ->
-            Logger.error("[DISCORD] Error downloading #{attachment.filename}: #{inspect(reason)}")
-            "(Error: Connection failed during download)"
-        end
+              "(Error: Connection failed during download)"
+          end
       end
-    end
-
-    @allowed_content_type_prefixes [
-      "text/",
-      "application/json",
-      "application/x-yaml",
-      "application/yaml"
-    ]
-
-    defp valid_text_content_type?(ct) do
-      ct = String.downcase(ct)
-      Enum.any?(@allowed_content_type_prefixes, &String.starts_with?(ct, &1))
-    end
-
-    defp sanitize_filename(filename) do
-      # Strip characters that could be used for injection or display tricks.
-      String.replace(filename, ~r/[<>&"'\x00-\x1F]/, "_")
     end
   end
 

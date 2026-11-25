@@ -24,11 +24,8 @@ defmodule Pincer.Channels.Line.Session do
   """
 
   use PincerPorts.Channel
-  alias Pincer.Channels.Shared.SessionBridge
+  alias Pincer.Channels.Shared.{Chunking, SessionBridge}
   @chunk_size 500
-
-  # Sentence-ending punctuation followed by whitespace or end-of-string
-  @sentence_boundary ~r/[.!?](\s|$)/
 
   @impl PincerPorts.Channel
   def start_link(%{chat_id: chat_id} = args) do
@@ -72,13 +69,13 @@ defmodule Pincer.Channels.Line.Session do
 
   @impl true
   def on_agent_partial(token, state) do
-    chunk = to_string(token)
-    new_buffer = state.buffer <> chunk
+    case Chunking.append_stream_buffer(state.buffer, token, max_bytes: @chunk_size) do
+      {:flush, payload, empty_buffer} ->
+        state = flush_buffer(state, payload)
+        %{state | buffer: empty_buffer}
 
-    if should_flush?(new_buffer) do
-      flush_buffer(state, new_buffer)
-    else
-      %{state | buffer: new_buffer}
+      {:buffer, new_buffer} ->
+        %{state | buffer: new_buffer}
     end
   end
 
@@ -109,10 +106,6 @@ defmodule Pincer.Channels.Line.Session do
   end
 
   # --- Private helpers ---
-
-  defp should_flush?(buffer) do
-    byte_size(buffer) > @chunk_size or Regex.match?(@sentence_boundary, buffer)
-  end
 
   defp flush_buffer(state, buffer) do
     line_api().push_message(state.chat_id, [

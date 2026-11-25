@@ -5,6 +5,7 @@ defmodule Pincer.Channels.Slack do
   use Supervisor
   @behaviour PincerPorts.Channel
   require Logger
+  alias Pincer.Channels.Shared.Formatting
 
   @impl PincerPorts.Channel
   def start_link(config) do
@@ -76,13 +77,7 @@ defmodule Pincer.Channels.Slack do
 
   # Basic Markdown to Slack mrkdwn conversion
   def markdown_to_mrkdwn(text) do
-    text
-    # Bold: **text** -> *text*
-    |> String.replace(~r/\*\*(.*?)\*\*/, "*\\1*")
-    # Underline/Italic: __text__ -> _text_
-    |> String.replace(~r/__(.*?)__/, "_\\1_")
-    # Slack links: [label](url) -> <url|label>
-    |> String.replace(~r/\[(.*?)\]\((.*?)\)/, "<\\2|\\1>")
+    Formatting.markdown_to_mrkdwn(text)
   end
 end
 

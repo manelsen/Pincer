@@ -386,6 +386,36 @@ Channel adapters pass transport callbacks (`ensure_session`, `ensure_worker`,
 `send_message`, and optional `dispatch`/`on_start_error`/`log_tag`) so Telegram,
 Discord, and WhatsApp share identical kickoff and error-recovery sequencing.
 
+### 13.5. Shared channel helpers (Chunking, Formatting, Attachments, Pairing)
+
+- `Pincer.Channels.Shared.Chunking` provides outbound message splitting
+  (`split/3` supporting `:lines`, `:newline_window`, and `:graphemes` strategies)
+  and incremental stream-buffer flushing (`should_flush_stream?/2`,
+  `append_stream_buffer/3`).
+- `Pincer.Channels.Shared.Formatting` owns reasoning stripping and HTML formatting
+  (`strip_reasoning/1`, `format_reasoning_html/1`, `format_reasoning/2`, preserved
+  under `Pincer.Channels.Shared.Text` via delegation), HTML fencing/unfencing and
+  Markdown-to-HTML orchestration with an injected renderer callback (`fence_html/2`,
+  `unfence_html/2`, `markdown_to_html/2`), file-reference wrapping
+  (`wrap_file_references/2`), HTML-to-plain-text fallback (`html_to_plain_text/1`),
+  Discord Markdown normalization (`markdown_to_discord/1`), and Slack `mrkdwn`
+  conversion (`markdown_to_mrkdwn/1`).
+- `Pincer.Channels.Shared.Attachments` centralizes filename sanitization
+  (`sanitize_filename/1`), size normalization/validation (`normalize_size/1`,
+  `validate_size/2`), extension and MIME classification (`text_extension?/1`,
+  `valid_text_content_type?/1`, `multimodal_mime/2`, `multimodal_extension?/3`,
+  `resolve_mime/3`), attachment/workspace reference construction (`build_ref/5`),
+  metadata formatting (`format_meta/3`, `append_meta/5`, `format_inline_file/2`),
+  photo selection (`largest_photo/1`), inbound content and `IncomingMessage`
+  assembly (`combine_content/3`, `to_incoming_message/3`), list processing with
+  an injected downloader callback (`process_list/2`), and outbound large code-block
+  extraction (`extract_large_code_blocks/3`).
+- `Pincer.Channels.Shared.Pairing` unifies DM access authorization
+  (`authorize_dm/4`), `/pair` command detection and code extraction
+  (`pair_command?/1`, `extract_code/1`), and `/pair` code approval (`approve/4`,
+  `error_message/1`) on top of `PincerPorts.ChannelPolicy`, supporting
+  channel-specific DM-only messages, bound-agent formatting, and post-approval hooks.
+
 ---
 
 ### 14. Sandbox Execution Port (`Pincer.Ports.Sandbox`)
