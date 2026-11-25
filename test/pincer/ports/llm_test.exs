@@ -14,6 +14,11 @@ defmodule Pincer.Ports.LLMTest do
 
     assert Pincer.Ports.LLM.behaviour_info(:callbacks) ==
              PincerPorts.LLM.behaviour_info(:callbacks)
+
+    assert {:generate_embedding, 2} in Pincer.Ports.LLM.behaviour_info(:callbacks)
+    assert {:generate_embedding, 2} in PincerPorts.LLM.behaviour_info(:callbacks)
+    refute {:generate_embedding, 2} in Pincer.Ports.LLM.behaviour_info(:optional_callbacks)
+    refute {:generate_embedding, 2} in PincerPorts.LLM.behaviour_info(:optional_callbacks)
   end
 
   test "the legacy port dispatches with the completion defaults" do

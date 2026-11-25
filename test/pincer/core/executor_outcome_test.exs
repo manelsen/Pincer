@@ -23,6 +23,8 @@ defmodule Pincer.Core.ExecutorOutcomeTest do
     @impl true
     def transcribe_audio(_path, _opts), do: {:error, :not_implemented}
     @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
+    @impl true
     def provider_config(_id), do: nil
   end
 
@@ -41,6 +43,8 @@ defmodule Pincer.Core.ExecutorOutcomeTest do
     def list_models(_id), do: []
     @impl true
     def transcribe_audio(_path, _opts), do: {:error, :not_implemented}
+    @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
     @impl true
     def provider_config(_id), do: nil
   end

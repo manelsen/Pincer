@@ -53,6 +53,7 @@ defmodule Pincer.LLM.Client do
   When the retry budget is exhausted, `Pincer.LLM.FailoverDispatch` either
   re-enters here on another route or returns the final error.
   """
+  @impl true
   @spec chat_completion([message()], keyword()) :: chat_result()
   def chat_completion(messages, opts \\ []) do
     dispatch(:chat_completion, messages, opts)
@@ -65,6 +66,7 @@ defmodule Pincer.LLM.Client do
   - `:id` - The string identifier used in `chat_completion/2` options
   - `:name` - A capitalized human-readable description of the provider
   """
+  @impl true
   @spec list_providers() :: [%{id: String.t(), name: String.t()}]
   def list_providers do
     ModelRegistry.list_providers(model_selection_registry())
@@ -73,6 +75,7 @@ defmodule Pincer.LLM.Client do
   @doc """
   Returns the raw configuration map for a given provider.
   """
+  @impl true
   @spec provider_config(String.t()) :: map() | nil
   def provider_config(provider_id) do
     registry = CooldownRouting.provider_registry()
@@ -86,6 +89,7 @@ defmodule Pincer.LLM.Client do
 
   Attempts dynamic discovery from provider API with 1-hour cache.
   """
+  @impl true
   @spec list_models(String.t()) :: [String.t()]
   def list_models(provider_id) do
     cache_key = {:models, provider_id, models_config_fingerprint(provider_id)}
@@ -178,11 +182,13 @@ defmodule Pincer.LLM.Client do
   Sends a streaming chat completion request to the configured LLM provider.
   Returns an Enumerable of message chunks.
   """
+  @impl true
   @spec stream_completion([message()], keyword()) :: {:ok, Enumerable.t()} | {:error, any()}
   def stream_completion(messages, opts \\ []) do
     dispatch(:stream_completion, messages, opts)
   end
 
+  @impl true
   def transcribe_audio(file_path, opts \\ []) do
     registry = CooldownRouting.provider_registry()
     provider_id = Keyword.get(opts, :provider, "groq_whisper")
@@ -208,6 +214,7 @@ defmodule Pincer.LLM.Client do
     end
   end
 
+  @impl true
   def generate_embedding(text, opts \\ []) do
     registry = CooldownRouting.provider_registry()
     provider_id = Keyword.get(opts, :provider, "openrouter")
