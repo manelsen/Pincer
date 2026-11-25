@@ -1,12 +1,6 @@
 defmodule Pincer.Channels.Telegram do
   # All modules below live in the host pincer project and are available at
   # runtime but not at pincer_telegram compile time.
-  @compile {:no_warn_undefined,
-            [
-              EarmarkParser,
-              Req
-            ]}
-
   @moduledoc """
   Telegram bot channel implementation using the Telegex library.
 
@@ -568,11 +562,6 @@ defmodule Pincer.Channels.Telegram do
 end
 
 defmodule Pincer.Channels.Telegram.UpdatesProvider do
-  @compile {:no_warn_undefined,
-            [
-              Req
-            ]}
-
   alias Pincer.Channels.Shared.Inbound
 
   @moduledoc """

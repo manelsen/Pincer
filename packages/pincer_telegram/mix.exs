@@ -9,6 +9,7 @@ defmodule PincerTelegram.MixProject do
       app: :pincer_telegram,
       version: @version,
       elixir: "~> 1.14",
+      elixirc_options: [warnings_as_errors: true],
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
@@ -33,6 +34,9 @@ defmodule PincerTelegram.MixProject do
       {:pincer_ports, "~> 0.1"},
       {:pincer_shared, "~> 0.1"},
       {:telegex, "~> 1.8"},
+      {:plug, "~> 1.15"},
+      {:earmark_parser, "~> 1.4"},
+      {:req, "~> 0.7"},
       {:mox, "~> 1.0", only: :test}
     ]
   end

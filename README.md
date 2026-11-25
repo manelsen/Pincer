@@ -368,6 +368,8 @@ mix test                          # all tests (excludes opt-in :docker, :bwrap, 
 mix test.quick                    # stale tests only
 mix test --only docker            # opt-in real Docker container sandbox E2E
 mix test test/pincer/core/executor_test.exs   # single file
+elixir scripts/check_packages.exs           # all packages in isolation (requires Go for WhatsApp)
+elixir scripts/check_packages.exs pincer_telegram   # one isolated package
 ```
 
 The full suite runs on embedded SQLite with `PINCER_SQLITE_PATH=:memory:` (set in `config/test.exs`); no database service, Compose stack, or migration step is needed. `sqlite-vec` is optional for tests — when the extension is absent, storage tests use the cosine-similarity fallback.
