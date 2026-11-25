@@ -1,8 +1,4 @@
 defmodule Pincer.Channels.DingTalk.Session do
-  @compile {:no_warn_undefined,
-            [
-              Pincer.Infra.PubSub
-            ]}
   @moduledoc """
   DingTalk channel session GenServer.
 
@@ -150,11 +146,11 @@ defmodule Pincer.Channels.DingTalk.Session do
   defp worker_key(chat_id), do: "dingtalk_session_worker_#{chat_id}"
 
   defp subscribe_session(session_id) do
-    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+    PincerPorts.PubSub.subscribe("session:#{session_id}")
   end
 
   defp unsubscribe_session(session_id) do
-    Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
+    PincerPorts.PubSub.unsubscribe("session:#{session_id}")
   end
 
   defp initial_state(chat_id, session_id) do

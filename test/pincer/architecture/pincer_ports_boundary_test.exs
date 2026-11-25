@@ -14,6 +14,7 @@ defmodule Pincer.Architecture.PincerPortsBoundaryTest do
     "Channel",
     "ChannelPolicy",
     "Project",
+    "PubSub",
     "Session",
     "Streaming",
     "UX"
@@ -60,7 +61,7 @@ defmodule Pincer.Architecture.PincerPortsBoundaryTest do
 
     for rel <- ~w(
           structs/usage structs/incoming_message session/context llm llm/provider
-          llm/raw_response_logger channel channel_policy project session streaming ux
+          llm/raw_response_logger channel channel_policy project pubsub session streaming ux
         ) do
       assert File.exists?("packages/pincer_ports/lib/pincer_ports/#{rel}.ex"),
              "missing packages/pincer_ports/lib/pincer_ports/#{rel}.ex"
@@ -79,6 +80,15 @@ defmodule Pincer.Architecture.PincerPortsBoundaryTest do
     end
   end
 
+  test "package source and tests use the port for PubSub" do
+    offenders =
+      "packages/*/{lib,test}/**/*.{ex,exs}"
+      |> Path.wildcard()
+      |> Enum.filter(&(File.read!(&1) =~ "Pincer.Infra.PubSub"))
+
+    assert offenders == []
+  end
+
   test "Pincer.Ports re-exports transition modules with relative aliases" do
     exports =
       "lib/pincer/ports.ex"
@@ -86,7 +96,7 @@ defmodule Pincer.Architecture.PincerPortsBoundaryTest do
       |> Keyword.get(:exports, [])
       |> Enum.map(&Macro.to_string/1)
 
-    for expected <- ~w(Channel ChannelPolicy LLM Project Session Streaming UX) do
+    for expected <- ~w(Channel ChannelPolicy LLM Project PubSub Session Streaming UX) do
       assert expected in exports
     end
   end

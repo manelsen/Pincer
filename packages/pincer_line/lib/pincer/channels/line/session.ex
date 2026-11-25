@@ -1,8 +1,4 @@
 defmodule Pincer.Channels.Line.Session do
-  @compile {:no_warn_undefined,
-            [
-              Pincer.Infra.PubSub
-            ]}
   @moduledoc """
   LINE channel session GenServer.
 
@@ -158,11 +154,11 @@ defmodule Pincer.Channels.Line.Session do
   defp worker_key(chat_id), do: "line_session_worker_#{chat_id}"
 
   defp subscribe_session(session_id) do
-    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+    PincerPorts.PubSub.subscribe("session:#{session_id}")
   end
 
   defp unsubscribe_session(session_id) do
-    Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
+    PincerPorts.PubSub.unsubscribe("session:#{session_id}")
   end
 
   defp initial_state(chat_id, session_id) do

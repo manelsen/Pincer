@@ -18,6 +18,7 @@ defmodule PincerPorts do
   - `PincerPorts.Channel` — contract for bidirectional channel adapters
   - `PincerPorts.ChannelPolicy` — access and approval rules for channels
   - `PincerPorts.Project` — project wizard as seen from a channel
+  - `PincerPorts.PubSub` — topic subscriptions and event delivery
   - `PincerPorts.Session` — driving agent sessions from a channel
   - `PincerPorts.Streaming` — streaming and status-presentation policies
   - `PincerPorts.UX` — channel-facing user experience vocabulary
@@ -35,6 +36,7 @@ defmodule PincerPorts do
       Channel,
       ChannelPolicy,
       Project,
+      PubSub,
       Session,
       Streaming,
       UX

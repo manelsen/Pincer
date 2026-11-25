@@ -24,6 +24,7 @@ config :pincer, :ux_adapter, Pincer.Core.UX.Adapter
 config :pincer, :project_adapter, Pincer.Core.Project.Adapter
 config :pincer, :channel_policy_adapter, Pincer.Core.ChannelPolicy.Adapter
 config :pincer, :streaming_adapter, Pincer.Core.Streaming.Adapter
+config :pincer, :pubsub_adapter, Pincer.Infra.PubSub
 
 config :pincer, :llm_providers, %{
   "google" => %{

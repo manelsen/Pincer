@@ -1,8 +1,4 @@
 defmodule Pincer.Channels.Telegram.Session do
-  @compile {:no_warn_undefined, [
-    Pincer.Infra.PubSub
-  ]}
-
   @moduledoc """
   Driven Adapter for Telegram.
   One process per active chat that listens to PubSub and sends to the Telegram API.
@@ -354,10 +350,10 @@ defmodule Pincer.Channels.Telegram.Session do
 
   defp normalize_session_id(chat_id, _), do: default_session_id(chat_id)
 
-  defp subscribe_session(session_id), do: Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+  defp subscribe_session(session_id), do: PincerPorts.PubSub.subscribe("session:#{session_id}")
 
   defp unsubscribe_session(session_id),
-    do: Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
+    do: PincerPorts.PubSub.unsubscribe("session:#{session_id}")
 
   defp state(chat_id, session_id) do
     Map.merge(

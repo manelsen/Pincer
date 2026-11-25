@@ -30,6 +30,10 @@ end
 context. The Pincer core resolves the path from the root agent when routing
 channel messages.
 
+Channel hosts configure `config :pincer, :pubsub_adapter, MyPubSub`. The adapter
+implements `PincerPorts.PubSub` and delivers topic messages to subscribers.
+The Pincer application supplies its Registry-backed adapter by default.
+
 ## License
 
 MIT

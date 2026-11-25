@@ -1,6 +1,7 @@
 defmodule Pincer.Infra do
   @moduledoc "Infrastructure layer."
   use Boundary,
+    deps: [PincerPorts],
     check: [
       aliases: true,
       apps: [

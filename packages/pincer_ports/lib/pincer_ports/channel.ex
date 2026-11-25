@@ -192,15 +192,12 @@ defmodule PincerPorts.Channel do
       @behaviour PincerPorts.Channel
       use GenServer
       require Logger
-      # PubSub is provided by the host pincer project at runtime.
-      # Suppress compile-time "undefined module" warning in standalone packages.
-      @compile {:no_warn_undefined, Pincer.Infra.PubSub}
-      alias Pincer.Infra.PubSub
 
       def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
+      @impl GenServer
       def init(state) do
-        PubSub.subscribe("system:delivery")
+        PincerPorts.PubSub.subscribe("system:delivery")
         {:ok, state}
       end
 

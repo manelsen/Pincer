@@ -1,9 +1,4 @@
 defmodule Pincer.Channels.Webhook do
-  @compile {:no_warn_undefined,
-            [
-              Pincer.Infra.PubSub
-            ]}
-
   @moduledoc """
   Universal receive-only webhook channel.
 

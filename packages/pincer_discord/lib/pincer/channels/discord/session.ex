@@ -1,6 +1,4 @@
 defmodule Pincer.Channels.Discord.Session do
-  @compile {:no_warn_undefined, Pincer.Infra.PubSub}
-
   @moduledoc """
   Driven Adapter for Discord.
   One process per active Discord channel that listens to PubSub and sends messages via Nostrum.
@@ -238,10 +236,10 @@ defmodule Pincer.Channels.Discord.Session do
 
   defp normalize_session_id(channel_id, _), do: default_session_id(channel_id)
 
-  defp subscribe_session(session_id), do: Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+  defp subscribe_session(session_id), do: PincerPorts.PubSub.subscribe("session:#{session_id}")
 
   defp unsubscribe_session(session_id),
-    do: Pincer.Infra.PubSub.unsubscribe("session:#{session_id}")
+    do: PincerPorts.PubSub.unsubscribe("session:#{session_id}")
 
   defp state(channel_id, session_id) do
     Map.merge(
