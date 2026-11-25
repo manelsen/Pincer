@@ -29,6 +29,7 @@ defmodule Pincer.Adapters.Tools.Media do
   """
   @behaviour Pincer.Ports.Tool
 
+  alias Pincer.Adapters.Tools.Args
   alias Pincer.Core.WorkspaceGuard
 
   @vision_prompt "Describe this image in detail. Include all text visible in the image."
@@ -94,8 +95,7 @@ defmodule Pincer.Adapters.Tools.Media do
 
   @impl true
   def execute(%{"action" => action} = args, context \\ %{}) do
-    workspace =
-      Map.get(context, "workspace_path") || Map.get(context, :workspace_path) || File.cwd!()
+    workspace = Args.workspace_root(context)
 
     llm_client = Application.get_env(:pincer, :media_llm_client, PincerPorts.LLM)
     run_action(action, args, workspace, llm_client)

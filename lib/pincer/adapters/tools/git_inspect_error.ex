@@ -17,12 +17,12 @@ defmodule Pincer.Adapters.Tools.GitInspectError do
       String.contains?(trimmed, "not a git repository") ->
         "Path is not a Git repository."
 
-      Regex.match?(~r/pathspec '([^']+)' did not match any file/i, trimmed) ->
-        [_, path] = Regex.run(~r/pathspec '([^']+)' did not match any file/i, trimmed)
+      match = Regex.run(~r/pathspec '([^']+)' did not match any file/i, trimmed) ->
+        [_, path] = match
         "Git path not found: #{path}"
 
-      Regex.match?(~r/ambiguous argument '([^']+)'/i, trimmed) ->
-        [_, ref] = Regex.run(~r/ambiguous argument '([^']+)'/i, trimmed)
+      match = Regex.run(~r/ambiguous argument '([^']+)'/i, trimmed) ->
+        [_, ref] = match
         "Git reference or path not found: #{ref}"
 
       true ->

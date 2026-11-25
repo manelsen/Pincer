@@ -566,15 +566,8 @@ defmodule Pincer.Core.Orchestration.SubAgent do
       :ok
   end
 
-  defp truncate(value, max_chars) do
-    text = to_string(value)
-
-    if String.length(text) > max_chars do
-      String.slice(text, 0, max_chars) <> "...[truncated]"
-    else
-      text
-    end
-  end
+  defp truncate(value, max_chars),
+    do: value |> to_string() |> Pincer.Utils.Text.truncate(max_chars, "...[truncated]")
 
   defp maybe_put_opt(opts, _key, nil), do: opts
   defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)

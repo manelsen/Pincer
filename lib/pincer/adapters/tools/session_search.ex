@@ -18,6 +18,8 @@ defmodule Pincer.Adapters.Tools.SessionSearch do
 
   @behaviour Pincer.Ports.Tool
 
+  alias Pincer.Adapters.Tools.Args
+  alias Pincer.Utils.Text
   alias Pincer.Ports.Storage
 
   @discover_default 5
@@ -225,31 +227,22 @@ defmodule Pincer.Adapters.Tools.SessionSearch do
   end
 
   defp session_id_arg(args) do
-    case Map.get(args, "session_id") do
-      session_id when is_binary(session_id) ->
-        case String.trim(session_id) do
-          "" -> {:error, "Missing required argument: session_id"}
-          trimmed -> {:ok, trimmed}
-        end
+    case Args.string(Map.get(args, "session_id"), :trimmed) do
+      {:ok, session_id} ->
+        {:ok, session_id}
 
-      nil ->
+      {:error, reason} when reason in [:missing, :empty] ->
         {:error, "Missing required argument: session_id"}
 
-      _other ->
+      {:error, :invalid} ->
         {:error, "Invalid argument: session_id must be a non-empty string"}
     end
   end
 
   defp session_id_of(hit) do
     Map.get(hit, :session_id) || Map.get(hit, "session_id") ||
-      extract_session_id(Map.get(hit, :source) || Map.get(hit, "source"))
+      Text.session_source_id(Map.get(hit, :source) || Map.get(hit, "source")) || "unknown"
   end
-
-  defp extract_session_id("session:" <> rest) do
-    rest |> String.split(":", parts: 3) |> hd()
-  end
-
-  defp extract_session_id(_source), do: "unknown"
 
   defp field(map, key) when is_map(map) do
     Map.get(map, key) || Map.get(map, Atom.to_string(key))

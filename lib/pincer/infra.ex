@@ -50,6 +50,7 @@ defmodule Pincer.Infra do
     exports: [
       PubSub,
       Config,
+      Http,
       SQLite,
       UUID
     ]

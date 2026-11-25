@@ -6,6 +6,7 @@ defmodule Pincer.Core.Session.Preferences do
   so they survive restarts. Stored as JSON in the workspace `.pincer/` directory.
   """
 
+  alias Pincer.Utils.ModelOverride
   alias PincerPorts.Structs.Usage
 
   @filename "preferences.json"
@@ -80,17 +81,12 @@ defmodule Pincer.Core.Session.Preferences do
     }
   end
 
-  defp normalize_model_override(%{provider: provider, model: model})
-       when is_binary(provider) and provider != "" and is_binary(model) and model != "" do
-    %{provider: provider, model: model}
+  defp normalize_model_override(override) do
+    case ModelOverride.normalize(override) do
+      nil -> nil
+      normalized -> Map.take(normalized, [:provider, :model])
+    end
   end
-
-  defp normalize_model_override(%{"provider" => provider, "model" => model})
-       when is_binary(provider) and provider != "" and is_binary(model) and model != "" do
-    %{provider: provider, model: model}
-  end
-
-  defp normalize_model_override(_), do: nil
 
   defp path(workspace_path) do
     Path.join([workspace_path, ".pincer", @filename])

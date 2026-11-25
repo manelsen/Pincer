@@ -53,6 +53,7 @@ defmodule Pincer.Utils do
       ETSHelper,
       ETSTableHeir,
       MapHelpers,
+      ModelOverride,
       BoundedBody,
       NetworkGuard,
       Time,

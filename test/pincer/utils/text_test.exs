@@ -3,6 +3,19 @@ defmodule Pincer.Utils.TextTest do
 
   alias Pincer.Utils.Text
 
+  test "text helpers preserve graphemes, blank part separators, and source identifiers" do
+    assert Text.truncate("ábc", 2, "…") == "áb…"
+    assert Text.truncate("áb", 2, "…") == "áb"
+    assert Text.first_line("first\nsecond") == "first"
+    assert Text.trimmed_string(" \n ") == nil
+
+    assert Text.content_to_text([%{"text" => "first"}, %{"type" => "image"}, %{"text" => "last"}]) ==
+             "first  last"
+
+    assert Text.session_source_id("session:telegram_42:2026-11-25") == "telegram_42"
+    assert Text.session_source_id("memory:notes") == nil
+  end
+
   test "strip_internal_scaffolding removes reasoning blocks, not only their tags" do
     input = "<thinking>segredo interno</thinking>\n\nResposta final"
 

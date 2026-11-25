@@ -6,6 +6,7 @@ defmodule Pincer.Core.Session.History do
 
   require Logger
 
+  alias Pincer.Utils.Text
   alias Pincer.Core.{Memory, WorkspaceGuard}
   alias Pincer.Core.Session.Logger, as: SessionLogger
   alias PincerPorts.Structs.IncomingMessage
@@ -147,16 +148,7 @@ defmodule Pincer.Core.Session.History do
   """
   @spec content_to_text(term()) :: String.t()
   def content_to_text(%IncomingMessage{text: text}), do: text || ""
-  def content_to_text(content) when is_binary(content), do: content
-
-  def content_to_text(parts) when is_list(parts) do
-    Enum.map_join(parts, " ", fn
-      %{"text" => text} -> text
-      _ -> ""
-    end)
-  end
-
-  def content_to_text(_other), do: ""
+  defdelegate content_to_text(content), to: Text
 
   defp resolve_workspace_file_refs(%IncomingMessage{attachments: []} = input, _ws, _downloader),
     do: {input, []}

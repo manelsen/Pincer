@@ -11,6 +11,7 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
   @behaviour Pincer.Ports.Tool
 
   require Logger
+  alias Pincer.Adapters.Tools.Args
   alias Pincer.Core.Bindings
   alias Pincer.Core.Session.Server
   alias Pincer.Core.WorkspaceGuard
@@ -149,7 +150,7 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
 
   defp resolve_destination(%{"channel" => channel, "recipient" => recipient}, _context) do
     with {:ok, normalized_channel} <- normalize_channel(channel),
-         {:ok, normalized_recipient} <- fetch_non_empty(recipient) do
+         {:ok, normalized_recipient} <- Args.string(recipient, :trimmed) do
       {:ok, {normalized_channel, normalized_recipient}}
     else
       {:error, _reason} -> {:error, "Could not resolve destination from channel and recipient."}
@@ -157,7 +158,7 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
   end
 
   defp resolve_destination(_args, context) do
-    session_id = Map.get(context, "session_id") || Map.get(context, :session_id)
+    session_id = Args.session_id(context)
 
     if is_binary(session_id) do
       with {:ok, state} <- session_server().get_status(session_id),
@@ -212,21 +213,12 @@ defmodule Pincer.Adapters.Tools.ChannelActions do
   defp fetch_required_string(args, key) do
     args
     |> Map.get(key)
-    |> fetch_non_empty()
+    |> Args.string(:trimmed)
     |> case do
       {:ok, value} -> {:ok, value}
       {:error, _reason} -> {:error, "Missing or invalid '#{key}'."}
     end
   end
-
-  defp fetch_non_empty(value) when is_binary(value) do
-    case String.trim(value) do
-      "" -> {:error, :empty}
-      text -> {:ok, text}
-    end
-  end
-
-  defp fetch_non_empty(_), do: {:error, :invalid}
 
   defp session_server do
     Application.get_env(:pincer, :channel_actions_session_server, Server)

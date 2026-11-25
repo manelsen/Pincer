@@ -3,6 +3,8 @@ defmodule Pincer.Adapters.Tools.GitHubError do
   Pure formatter for GitHub API and transport failures.
   """
 
+  alias Pincer.Infra.Http
+
   @doc """
   Formats a non-2xx GitHub API response into a short user-facing message.
   """
@@ -33,10 +35,13 @@ defmodule Pincer.Adapters.Tools.GitHubError do
   Formats a transport-layer failure into a short user-facing message.
   """
   @spec format_transport(term()) :: String.t()
-  def format_transport(%Req.TransportError{reason: :timeout}), do: "GitHub request timed out."
-
-  def format_transport(%Req.TransportError{reason: :connect_timeout}),
-    do: "GitHub connection timed out."
+  def format_transport(%Req.TransportError{reason: reason} = error) do
+    case Http.transport_kind(reason) do
+      :request_timeout -> "GitHub request timed out."
+      :connect_timeout -> "GitHub connection timed out."
+      _ -> "GitHub request failed: #{inspect(error)}"
+    end
+  end
 
   def format_transport(reason), do: "GitHub request failed: #{inspect(reason)}"
 end

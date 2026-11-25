@@ -9,6 +9,7 @@ defmodule Pincer.Adapters.Tools.GitInspect do
 
   @behaviour Pincer.Ports.Tool
 
+  alias Pincer.Adapters.Tools.Args
   alias Pincer.Adapters.Tools.GitInspectError
   alias Pincer.Core.WorkspaceGuard
 
@@ -48,7 +49,9 @@ defmodule Pincer.Adapters.Tools.GitInspect do
 
   @impl true
   def execute(args, context \\ %{}) do
-    workspace_root = Map.get(context, "workspace_path", File.cwd!())
+    workspace_root =
+      Map.get_lazy(context, "workspace_path", fn -> Args.workspace_root(context) end)
+
     repo_path = Map.get(args, "repo_path", ".")
 
     with {:ok, safe_repo_path} <- confine_path(repo_path, workspace_root),

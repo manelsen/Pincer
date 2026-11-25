@@ -30,6 +30,7 @@ defmodule Pincer.Adapters.Tools.GitHub do
 
   @behaviour Pincer.Ports.Tool
 
+  alias Pincer.Utils.Text
   alias Pincer.Adapters.Tools.GitHubError
   require Logger
 
@@ -420,8 +421,7 @@ defmodule Pincer.Adapters.Tools.GitHub do
     """
   end
 
-  defp first_line(nil), do: ""
-  defp first_line(text), do: text |> String.split("\n") |> List.first() |> String.slice(0, 80)
+  defp first_line(text), do: text |> Text.first_line() |> String.slice(0, 80)
 
   defp clamp_per_page(n) when is_integer(n), do: min(max(n, 1), 100)
   defp clamp_per_page(_), do: @default_per_page
