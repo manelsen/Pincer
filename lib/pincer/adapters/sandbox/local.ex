@@ -18,6 +18,7 @@ defmodule Pincer.Adapters.Sandbox.Local do
   @behaviour Pincer.Ports.Sandbox
 
   alias Pincer.Adapters.Sandbox.Bwrap
+  alias Pincer.Adapters.Sandbox.Runtime
   alias Pincer.Core.WorkspaceGuard
   alias Pincer.Ports.Sandbox
 
@@ -40,7 +41,7 @@ defmodule Pincer.Adapters.Sandbox.Local do
   @impl true
   @spec available?() :: boolean()
   def available? do
-    config = Sandbox.backend_config(:local)
+    config = Runtime.backend_config(:local)
 
     case transport_mode(config) do
       :bwrap ->
@@ -58,7 +59,7 @@ defmodule Pincer.Adapters.Sandbox.Local do
   @impl true
   @spec probe() :: :ok | {:error, term()}
   def probe do
-    config = Sandbox.backend_config(:local)
+    config = Runtime.backend_config(:local)
 
     case transport_mode(config) do
       :bwrap ->
@@ -77,9 +78,9 @@ defmodule Pincer.Adapters.Sandbox.Local do
   @impl true
   @spec run(String.t(), keyword()) :: {:ok, Sandbox.run_result()} | {:error, term()}
   def run(command, opts \\ []) when is_binary(command) and is_list(opts) do
-    merged_opts = Keyword.merge(Sandbox.backend_config(:local), opts)
+    merged_opts = Keyword.merge(Runtime.backend_config(:local), opts)
 
-    with {:ok, env} <- Sandbox.validate_env(Keyword.get(merged_opts, :env)),
+    with {:ok, env} <- Runtime.validate_env(Keyword.get(merged_opts, :env)),
          {:ok, cwd} <- resolve_cwd(merged_opts) do
       case transport_mode(merged_opts) do
         :bwrap -> run_bwrap(command, cwd, env, merged_opts)
@@ -153,7 +154,7 @@ defmodule Pincer.Adapters.Sandbox.Local do
       runner = Keyword.get(opts, :bwrap_runner, &default_bwrap_runner/3)
       timeout_ms = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
 
-      case Sandbox.run_with_timeout(
+      case Runtime.run_with_timeout(
              fn -> runner.(exe, args, stderr_to_stdout: true) end,
              timeout_ms
            ) do
@@ -299,7 +300,7 @@ defmodule Pincer.Adapters.Sandbox.Local do
         |> then(fn acc -> if cwd, do: Keyword.put(acc, :cd, cwd), else: acc end)
         |> then(fn acc -> if env != [], do: Keyword.put(acc, :env, env), else: acc end)
 
-      case Sandbox.run_with_timeout(fn -> runner.(command, cmd_opts) end, timeout_ms) do
+      case Runtime.run_with_timeout(fn -> runner.(command, cmd_opts) end, timeout_ms) do
         {:ok, {output, exit_code}} when is_integer(exit_code) ->
           {:ok,
            %{

@@ -11,6 +11,7 @@ defmodule Pincer.Adapters.Sandbox.SSH do
 
   @behaviour Pincer.Ports.Sandbox
 
+  alias Pincer.Adapters.Sandbox.Runtime
   alias Pincer.Core.WorkspaceGuard
   alias Pincer.Ports.Sandbox
 
@@ -37,12 +38,12 @@ defmodule Pincer.Adapters.Sandbox.SSH do
   """
   @spec build_args(String.t(), keyword()) :: {:ok, [String.t()]} | {:error, term()}
   def build_args(command, opts \\ []) when is_binary(command) and is_list(opts) do
-    merged = Keyword.merge(Sandbox.backend_config(:ssh), opts)
+    merged = Keyword.merge(Runtime.backend_config(:ssh), opts)
 
     with {:ok, host} <- validate_host(Keyword.get(merged, :host)),
          {:ok, user} <- validate_user(Keyword.get(merged, :user)),
          {:ok, port} <- validate_port(Keyword.get(merged, :port, @default_port)),
-         {:ok, env} <- Sandbox.validate_env(Keyword.get(merged, :env)),
+         {:ok, env} <- Runtime.validate_env(Keyword.get(merged, :env)),
          {:ok, remote_workspace} <- validate_remote_workspace(merged),
          :ok <- validate_local_cwd(merged),
          :ok <- validate_remote_command(command, merged) do
@@ -94,7 +95,7 @@ defmodule Pincer.Adapters.Sandbox.SSH do
   @impl true
   @spec run(String.t(), keyword()) :: {:ok, Sandbox.run_result()} | {:error, term()}
   def run(command, opts \\ []) when is_binary(command) and is_list(opts) do
-    merged = Keyword.merge(Sandbox.backend_config(:ssh), opts)
+    merged = Keyword.merge(Runtime.backend_config(:ssh), opts)
 
     case find_ssh(merged) do
       nil ->
@@ -106,7 +107,7 @@ defmodule Pincer.Adapters.Sandbox.SSH do
           timeout_ms = Keyword.get(merged, :timeout_ms, @default_timeout_ms)
           target = format_target(Keyword.get(merged, :user), Keyword.get(merged, :host))
 
-          case Sandbox.run_with_timeout(
+          case Runtime.run_with_timeout(
                  fn -> runner.(exe, args, stderr_to_stdout: true) end,
                  timeout_ms
                ) do
@@ -132,7 +133,7 @@ defmodule Pincer.Adapters.Sandbox.SSH do
   @impl true
   @spec cleanup(String.t(), keyword()) :: :ok
   def cleanup(scope_id, opts \\ []) when is_binary(scope_id) and is_list(opts) do
-    merged = Keyword.merge(Sandbox.backend_config(:ssh), opts)
+    merged = Keyword.merge(Runtime.backend_config(:ssh), opts)
     control_path = Keyword.get(merged, :control_path)
     host = Keyword.get(merged, :host)
 
@@ -157,7 +158,7 @@ defmodule Pincer.Adapters.Sandbox.SSH do
   # --- Private ---
 
   defp find_ssh(opts) do
-    merged = Keyword.merge(Sandbox.backend_config(:ssh), opts)
+    merged = Keyword.merge(Runtime.backend_config(:ssh), opts)
 
     case Keyword.fetch(merged, :executable) do
       {:ok, nil} -> nil

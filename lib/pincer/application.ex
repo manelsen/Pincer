@@ -147,6 +147,21 @@ defmodule Pincer.Application do
       "Enabled channels whitelist: #{inspect(Application.get_env(:pincer, :enabled_channels))}"
     )
 
+    children = child_specs()
+    opts = [strategy: :one_for_one, name: Pincer.Supervisor]
+    Supervisor.start_link(children, opts)
+  end
+
+  @doc false
+  @spec child_specs(keyword()) :: [Supervisor.child_spec() | {module(), term()} | module()]
+  def child_specs(opts \\ []) when is_list(opts) do
+    enable_browser =
+      Keyword.get_lazy(opts, :enable_browser, fn ->
+        Application.get_env(:pincer, :enable_browser, false)
+      end)
+
+    env = Keyword.get_lazy(opts, :env, fn -> Mix.env() end)
+
     children = [
       Pincer.Utils.ETSTableHeir,
       {Cluster.Supervisor, [Pincer.Core.Cluster.topologies(), [name: Pincer.ClusterSupervisor]]},
@@ -191,23 +206,18 @@ defmodule Pincer.Application do
        port: Application.get_env(:pincer, :health_port, 4001)}
     ]
 
-    # Only start Code Reloader in dev env
     children =
-      if Application.get_env(:pincer, :enable_browser, false) do
+      if enable_browser do
         children ++ [Pincer.Adapters.Browser.Pool]
       else
         children
       end
 
-    children =
-      if Mix.env() == :dev do
-        children ++ [Pincer.Core.Reloader]
-      else
-        children
-      end
-
-    opts = [strategy: :one_for_one, name: Pincer.Supervisor]
-    Supervisor.start_link(children, opts)
+    if env == :dev do
+      children ++ [Pincer.Core.Reloader]
+    else
+      children
+    end
   end
 
   defp storage_child do

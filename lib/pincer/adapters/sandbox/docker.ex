@@ -14,6 +14,7 @@ defmodule Pincer.Adapters.Sandbox.Docker do
 
   @behaviour Pincer.Ports.Sandbox
 
+  alias Pincer.Adapters.Sandbox.Runtime
   alias Pincer.Core.WorkspaceGuard
   alias Pincer.Ports.Sandbox
 
@@ -43,7 +44,7 @@ defmodule Pincer.Adapters.Sandbox.Docker do
   """
   @spec find_runtime(keyword()) :: String.t() | nil
   def find_runtime(opts \\ []) do
-    merged = Keyword.merge(Sandbox.backend_config(:docker), opts)
+    merged = Keyword.merge(Runtime.backend_config(:docker), opts)
 
     case Keyword.fetch(merged, :executable) do
       {:ok, nil} ->
@@ -79,9 +80,9 @@ defmodule Pincer.Adapters.Sandbox.Docker do
   """
   @spec build_args(String.t(), keyword()) :: {:ok, [String.t()]} | {:error, term()}
   def build_args(command, opts \\ []) when is_binary(command) and is_list(opts) do
-    merged = Keyword.merge(Sandbox.backend_config(:docker), opts)
+    merged = Keyword.merge(Runtime.backend_config(:docker), opts)
 
-    with {:ok, env} <- Sandbox.validate_env(Keyword.get(merged, :env)),
+    with {:ok, env} <- Runtime.validate_env(Keyword.get(merged, :env)),
          {:ok, host_ws, container_cwd} <- resolve_workspace(merged),
          {:ok, user_args} <- resolve_user_args(host_ws, merged),
          {:ok, image} <- validate_image(Keyword.get(merged, :image, @default_image)) do
@@ -137,7 +138,7 @@ defmodule Pincer.Adapters.Sandbox.Docker do
   @impl true
   @spec run(String.t(), keyword()) :: {:ok, Sandbox.run_result()} | {:error, term()}
   def run(command, opts \\ []) when is_binary(command) and is_list(opts) do
-    merged = Keyword.merge(Sandbox.backend_config(:docker), opts)
+    merged = Keyword.merge(Runtime.backend_config(:docker), opts)
 
     case find_runtime(merged) do
       nil ->
@@ -149,7 +150,7 @@ defmodule Pincer.Adapters.Sandbox.Docker do
           timeout_ms = Keyword.get(merged, :timeout_ms, @default_timeout_ms)
           image = Keyword.get(merged, :image, @default_image)
 
-          case Sandbox.run_with_timeout(
+          case Runtime.run_with_timeout(
                  fn -> runner.(exe, args, stderr_to_stdout: true) end,
                  timeout_ms
                ) do
@@ -175,7 +176,7 @@ defmodule Pincer.Adapters.Sandbox.Docker do
   @impl true
   @spec cleanup(String.t(), keyword()) :: :ok
   def cleanup(scope_id, opts \\ []) when is_binary(scope_id) and is_list(opts) do
-    merged = Keyword.merge(Sandbox.backend_config(:docker), opts)
+    merged = Keyword.merge(Runtime.backend_config(:docker), opts)
 
     case find_runtime(merged) do
       nil ->
