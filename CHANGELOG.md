@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Channel packages access the host LLM adapter through `PincerPorts.LLM`. The `Pincer.Ports.LLM` facade forwards existing calls during the migration.
 
 ### Added
+- Custom channels can implement `PincerPorts.Channel.extra_child_specs/1` to start sibling processes with the channel's runtime configuration. `pincer_webhook` uses it to start its HTTP listener.
 - Channel hosts can supply a PubSub adapter through `:pubsub_adapter`. Channel packages use `PincerPorts.PubSub`, and Pincer wires the existing Registry-backed bus.
 - Optional `sqlite-vec` semantic search, loaded from `priv/sqlite_vec/vec0.so` (built by `./scripts/build_sqlite_vec.sh`, version pinned in the script). Configure with `storage.vec` / `storage.vec_path` / `storage.vec_dimensions` or `PINCER_SQLITE_VEC*`; when the extension is absent or disabled, search falls back to in-process cosine similarity.
 - The local sandbox adapter can run commands over a Linux-only bubblewrap transport (`transport: "bwrap"` or `bwrap: true`): a minimal read-only root, workspace bind, network `none`/`host`, `prlimit`-based memory/CPU/PID/file limits, a capability probe cached per executable, and fail-closed startup via `StartupGuard.check_sandbox/0`.

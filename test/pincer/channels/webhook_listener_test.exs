@@ -1,7 +1,7 @@
 defmodule Pincer.Channels.WebhookListenerTest do
   use ExUnit.Case, async: false
 
-  alias Pincer.Channels.Webhook
+  alias Pincer.Channels.{Factory, Webhook}
   alias Pincer.Channels.Webhook.Listener
 
   @token_env "PINCER_WEBHOOK_LISTENER_TEST_TOKEN"
@@ -33,18 +33,17 @@ defmodule Pincer.Channels.WebhookListenerTest do
     {:ok, parent: parent, channel_config: channel_config}
   end
 
-  test "accepts a signed POST end to end and processes the message exactly once", %{
+  test "accepts a signed POST exactly once through the listener started by the factory", %{
     channel_config: channel_config
   } do
-    start_channel!(channel_config)
     port = free_port()
 
-    start_listener!(%{
-      "token_env" => @token_env,
-      "port" => port,
-      "bind" => "127.0.0.1",
-      "path" => @path
-    })
+    start_webhook_from_factory!(
+      Map.merge(channel_config, %{
+        "port" => port,
+        "path" => "/custom-webhook"
+      })
+    )
 
     payload = %{
       "event_id" => "evt-http-1",
@@ -54,7 +53,10 @@ defmodule Pincer.Channels.WebhookListenerTest do
     }
 
     response =
-      Req.post!(url(port), json: payload, headers: [{"x-pincer-token", @token}])
+      Req.post!("http://127.0.0.1:#{port}/custom-webhook",
+        json: payload,
+        headers: [{"x-pincer-token", @token}]
+      )
 
     assert response.status == 202
     assert %{"status" => "accepted", "session_id" => "webhook_github_42"} = response.body
@@ -83,18 +85,13 @@ defmodule Pincer.Channels.WebhookListenerTest do
     refute_receive {:process_input, _, _}, 50
   end
 
-  test "returns :ignore when the token environment variable is not configured" do
+  test "the factory starts neither the channel nor the listener when the token is missing" do
     missing_env = "PINCER_WEBHOOK_LISTENER_MISSING_TOKEN"
     System.delete_env(missing_env)
 
-    config = %{
-      "token_env" => missing_env,
-      "port" => free_port(),
-      "bind" => "127.0.0.1",
-      "path" => @path
-    }
+    supervisor = start_webhook_from_factory!(%{"token_env" => missing_env, "port" => 0})
 
-    assert Listener.start_link(config) == :ignore
+    assert %{specs: 2, active: 0} = Supervisor.count_children(supervisor)
   end
 
   test "starts the rate limiter before Bandit and limits signed requests", %{
@@ -200,6 +197,22 @@ defmodule Pincer.Channels.WebhookListenerTest do
   end
 
   defp url(port), do: "http://127.0.0.1:#{port}#{@path}"
+
+  defp start_webhook_from_factory!(config) do
+    config =
+      Map.merge(config, %{
+        "adapter" => "Pincer.Channels.Webhook",
+        "enabled" => true,
+        "bind" => "127.0.0.1"
+      })
+
+    specs = Factory.create_channel_specs(%{"webhook" => config}, [])
+
+    start_supervised!(%{
+      id: :webhook_channel_supervisor,
+      start: {Supervisor, :start_link, [specs, [strategy: :one_for_one]]}
+    })
+  end
 
   defp free_port do
     {:ok, socket} = :gen_tcp.listen(0, [])

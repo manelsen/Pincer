@@ -168,6 +168,15 @@ defmodule PincerPorts.Channel do
   """
   @callback extra_child_specs() :: [Supervisor.child_spec() | module()]
 
+  @doc """
+  Returns additional child specs using the channel's runtime configuration.
+
+  The factory prefers this callback when a channel implements both arities.
+  """
+  @callback extra_child_specs(config :: map()) :: [
+              Supervisor.child_spec() | {module(), term()} | module()
+            ]
+
   @optional_callbacks send_message: 2,
                       update_message: 3,
                       handles_session?: 1,
@@ -180,7 +189,8 @@ defmodule PincerPorts.Channel do
                       on_subagent_progress: 2,
                       on_approval_ui: 3,
                       on_agent_file: 3,
-                      extra_child_specs: 0
+                      extra_child_specs: 0,
+                      extra_child_specs: 1
 
   # ---------------------------------------------------------------------------
   # __using__ macro

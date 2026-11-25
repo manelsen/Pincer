@@ -24,6 +24,14 @@ defmodule Pincer.Channels.Webhook do
           {:ok, %{status: ingest_status(), session_id: String.t()}} | {:error, atom()}
 
   @doc """
+  Returns the sibling HTTP listener child spec configured with `config`.
+  """
+  @impl PincerPorts.Channel
+  def extra_child_specs(config) when is_map(config) do
+    [{Pincer.Channels.Webhook.Listener, config}]
+  end
+
+  @doc """
   Starts the webhook channel.
 
   `token_env` is mandatory. If it is missing or empty, startup is ignored to

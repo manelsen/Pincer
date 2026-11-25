@@ -54,8 +54,11 @@ Rate limiting is applied per client IP with an in-memory fixed window per node.
 It bounds unauthenticated ingress but is not a substitute for a reverse-proxy
 or edge rate limiter.
 
-The listener fails closed: if `token_env` is unset or empty, neither the
-channel nor its HTTP listener starts, and no port is bound.
+The listener is owned by `pincer_webhook` (`Pincer.Channels.Webhook.Listener`,
+`Pincer.Channels.Webhook.Plug`, `Pincer.Channels.Webhook.RateLimiter`) and
+started alongside the channel via `Pincer.Channels.Webhook.extra_child_specs/1`.
+It fails closed: if `token_env` is unset or empty, neither the channel nor its
+HTTP listener starts, and no port is bound.
 
 ## License
 
