@@ -8,7 +8,17 @@ config :pincer, :storage_adapter, Pincer.Adapters.Storage.SQLite
 config :pincer, :sqlite_path, System.get_env("PINCER_SQLITE_PATH", "data/pincer.db")
 config :pincer, :sqlite_vec, :auto
 config :pincer, :sqlite_vec_dimensions, 1024
+config :pincer, :llm_adapter, Pincer.LLM.Client
+config :pincer, :cron_adapter, Pincer.Adapters.Cron.Storage
 config :pincer, :sandbox_adapter, Pincer.Adapters.Sandbox.Local
+
+config :pincer, :sandbox_adapters, %{
+  local: Pincer.Adapters.Sandbox.Local,
+  docker: Pincer.Adapters.Sandbox.Docker,
+  ssh: Pincer.Adapters.Sandbox.SSH
+}
+
+config :pincer, :session_registry, Pincer.Core.Session.Registry
 config :pincer, :session_adapter, Pincer.Core.Session.Adapter
 config :pincer, :ux_adapter, Pincer.Core.UX.Adapter
 config :pincer, :project_adapter, Pincer.Core.Project.Adapter

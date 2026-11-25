@@ -30,7 +30,18 @@ defmodule Pincer.Ports.Project do
 
   @doc false
   def adapter do
-    Application.get_env(:pincer, :project_adapter, Pincer.Core.Project.Adapter)
+    case Application.fetch_env(:pincer, :project_adapter) do
+      {:ok, mod} when is_atom(mod) and not is_nil(mod) and not is_boolean(mod) ->
+        mod
+
+      {:ok, invalid} ->
+        raise ArgumentError,
+              "invalid :project_adapter configuration for :pincer: #{inspect(invalid)}"
+
+      :error ->
+        raise ArgumentError,
+              "missing :project_adapter configuration for :pincer (configure config :pincer, :project_adapter, ...)"
+    end
   end
 
   def handle_command(command, args, session_id),

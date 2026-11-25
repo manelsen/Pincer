@@ -26,12 +26,29 @@ defmodule Pincer.Ports.UX do
   @callback unknown_interaction_hint() :: String.t()
   @callback resolve_shortcut(String.t() | term()) :: {:ok, command()} | :error
   @callback registerable_commands(channel(), [command()]) :: [command()]
-  @callback build_keyboard(channel(), String.t(), [String.t()], non_neg_integer(), String.t() | nil) ::
+  @callback build_keyboard(
+              channel(),
+              String.t(),
+              [String.t()],
+              non_neg_integer(),
+              String.t() | nil
+            ) ::
               keyboard()
 
   @doc false
   def adapter do
-    Application.get_env(:pincer, :ux_adapter, Pincer.Core.UX.Adapter)
+    case Application.fetch_env(:pincer, :ux_adapter) do
+      {:ok, mod} when is_atom(mod) and not is_nil(mod) and not is_boolean(mod) ->
+        mod
+
+      {:ok, invalid} ->
+        raise ArgumentError,
+              "invalid :ux_adapter configuration for :pincer: #{inspect(invalid)}"
+
+      :error ->
+        raise ArgumentError,
+              "missing :ux_adapter configuration for :pincer (configure config :pincer, :ux_adapter, ...)"
+    end
   end
 
   @spec commands() :: [command()]
@@ -42,7 +59,9 @@ defmodule Pincer.Ports.UX do
   def unknown_command_hint, do: adapter().unknown_command_hint()
   def unknown_interaction_hint, do: adapter().unknown_interaction_hint()
   def resolve_shortcut(input), do: adapter().resolve_shortcut(input)
-  def registerable_commands(channel, commands), do: adapter().registerable_commands(channel, commands)
+
+  def registerable_commands(channel, commands),
+    do: adapter().registerable_commands(channel, commands)
 
   def build_keyboard(channel, provider_id, models, page, current_model),
     do: adapter().build_keyboard(channel, provider_id, models, page, current_model)

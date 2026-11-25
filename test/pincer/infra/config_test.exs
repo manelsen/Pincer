@@ -233,7 +233,7 @@ defmodule Pincer.Infra.ConfigTest do
   end
 
   describe "sqlite storage config" do
-    test "configures Pincer.Adapters.Storage.SQLite via storage.adapter and storage.path" do
+    test "preserves configured storage adapter and sets sqlite_path via storage.adapter and storage.path" do
       yaml =
         write_yaml!("""
         storage:
@@ -247,6 +247,23 @@ defmodule Pincer.Infra.ConfigTest do
 
       assert Application.get_env(:pincer, :storage_adapter) == Pincer.Adapters.Storage.SQLite
       assert Application.get_env(:pincer, :sqlite_path) == "tmp/test_zero_infra.db"
+    end
+
+    test "does not set :storage_adapter when validating storage config" do
+      yaml =
+        write_yaml!("""
+        storage:
+          adapter: "sqlite"
+          path: "tmp/test_no_adapter_write.db"
+        """)
+
+      System.delete_env("PINCER_STORAGE")
+      System.delete_env("PINCER_SQLITE_PATH")
+      Application.delete_env(:pincer, :storage_adapter)
+
+      assert :ok = Config.load(config_file: yaml, load_dotenv: false)
+      assert Application.get_env(:pincer, :storage_adapter) == nil
+      assert Application.get_env(:pincer, :sqlite_path) == "tmp/test_no_adapter_write.db"
     end
 
     test "supports PINCER_STORAGE / PINCER_SQLITE_PATH overrides" do

@@ -66,7 +66,18 @@ defmodule Pincer.Ports.Storage do
   # --- Dispatcher ---
 
   defp adapter do
-    Application.get_env(:pincer, :storage_adapter, Pincer.Adapters.Storage.SQLite)
+    case Application.fetch_env(:pincer, :storage_adapter) do
+      {:ok, mod} when is_atom(mod) and not is_nil(mod) and not is_boolean(mod) ->
+        mod
+
+      {:ok, invalid} ->
+        raise ArgumentError,
+              "invalid :storage_adapter configuration for :pincer: #{inspect(invalid)}"
+
+      :error ->
+        raise ArgumentError,
+              "missing :storage_adapter configuration for :pincer (configure config :pincer, :storage_adapter, ...)"
+    end
   end
 
   def get_messages(session_id), do: adapter().get_messages(session_id)

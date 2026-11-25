@@ -33,7 +33,18 @@ defmodule Pincer.Ports.Streaming do
 
   @doc false
   def adapter do
-    Application.get_env(:pincer, :streaming_adapter, Pincer.Core.Streaming.Adapter)
+    case Application.fetch_env(:pincer, :streaming_adapter) do
+      {:ok, mod} when is_atom(mod) and not is_nil(mod) and not is_boolean(mod) ->
+        mod
+
+      {:ok, invalid} ->
+        raise ArgumentError,
+              "invalid :streaming_adapter configuration for :pincer: #{inspect(invalid)}"
+
+      :error ->
+        raise ArgumentError,
+              "missing :streaming_adapter configuration for :pincer (configure config :pincer, :streaming_adapter, ...)"
+    end
   end
 
   def stream_initial_state, do: adapter().stream_initial_state()

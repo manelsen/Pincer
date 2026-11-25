@@ -36,7 +36,18 @@ defmodule Pincer.Ports.ChannelPolicy do
 
   @doc false
   def adapter do
-    Application.get_env(:pincer, :channel_policy_adapter, Pincer.Core.ChannelPolicy.Adapter)
+    case Application.fetch_env(:pincer, :channel_policy_adapter) do
+      {:ok, mod} when is_atom(mod) and not is_nil(mod) and not is_boolean(mod) ->
+        mod
+
+      {:ok, invalid} ->
+        raise ArgumentError,
+              "invalid :channel_policy_adapter configuration for :pincer: #{inspect(invalid)}"
+
+      :error ->
+        raise ArgumentError,
+              "missing :channel_policy_adapter configuration for :pincer (configure config :pincer, :channel_policy_adapter, ...)"
+    end
   end
 
   def allow?(kind, attrs), do: adapter().allow?(kind, attrs)

@@ -94,6 +94,11 @@ defmodule Pincer.Infra.Config do
 
   @config_file "config.yaml"
   @sandbox_transports ~w(os tool_registry bwrap)
+  @sandbox_short_names %{
+    "local" => :local,
+    "docker" => :docker,
+    "ssh" => :ssh
+  }
 
   @allowed_top_level_keys %{
     "agents" => :agents,
@@ -367,11 +372,21 @@ defmodule Pincer.Infra.Config do
   defp apply_sandbox_transport_override(_config), do: nil
 
   defp resolve_sandbox_module(spec) when is_binary(spec) do
-    case String.downcase(String.trim(spec)) do
-      "local" -> Module.concat(["Pincer", "Adapters", "Sandbox", "Local"])
-      "docker" -> Module.concat(["Pincer", "Adapters", "Sandbox", "Docker"])
-      "ssh" -> Module.concat(["Pincer", "Adapters", "Sandbox", "SSH"])
-      _ -> safe_existing_module(spec)
+    trimmed = String.trim(spec)
+    normalized = String.downcase(trimmed)
+
+    case Map.fetch(@sandbox_short_names, normalized) do
+      {:ok, key} ->
+        adapters = Application.get_env(:pincer, :sandbox_adapters, %{})
+
+        cond do
+          is_map(adapters) -> Map.get(adapters, key) || Map.get(adapters, normalized)
+          Keyword.keyword?(adapters) -> Keyword.get(adapters, key)
+          true -> nil
+        end
+
+      :error ->
+        safe_existing_module(trimmed)
     end
   end
 
@@ -419,8 +434,6 @@ defmodule Pincer.Infra.Config do
       raise ArgumentError,
             "Unsupported storage adapter #{inspect(selected)}; only \"sqlite\" is supported"
     end
-
-    Application.put_env(:pincer, :storage_adapter, Pincer.Adapters.Storage.SQLite)
 
     sqlite_path =
       first_non_empty([

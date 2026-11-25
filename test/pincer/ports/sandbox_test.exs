@@ -125,10 +125,29 @@ defmodule Pincer.Ports.SandboxTest do
     end
 
     test "rejects unknown adapter specs" do
+      assert {:error, {:unknown_sandbox_adapter, nil}} = Sandbox.resolve_adapter(nil)
+
       assert {:error, {:unknown_sandbox_adapter, "kubernetes"}} =
                Sandbox.resolve_adapter("kubernetes")
 
       assert {:error, {:unknown_sandbox_adapter, 123}} = Sandbox.resolve_adapter(123)
+    end
+
+    test "resolves short names via :sandbox_adapters application config" do
+      previous = Application.fetch_env(:pincer, :sandbox_adapters)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, val} -> Application.put_env(:pincer, :sandbox_adapters, val)
+          :error -> Application.delete_env(:pincer, :sandbox_adapters)
+        end
+      end)
+
+      Application.put_env(:pincer, :sandbox_adapters, %{local: FakeSandboxAdapter})
+      assert {:ok, FakeSandboxAdapter} = Sandbox.resolve_adapter(:local)
+      assert {:ok, FakeSandboxAdapter} = Sandbox.resolve_adapter("local")
+      assert {:error, {:unknown_sandbox_adapter, :docker}} = Sandbox.resolve_adapter(:docker)
+      assert {:error, {:unknown_sandbox_adapter, "ssh"}} = Sandbox.resolve_adapter("ssh")
     end
   end
 
@@ -150,6 +169,17 @@ defmodule Pincer.Ports.SandboxTest do
       assert_received {:fake_sandbox_cleanup, "scope-123"}
     after
       Process.delete(:fake_sandbox_notify_pid)
+    end
+
+    test "adapter/0 raises ArgumentError when configured sandbox adapter is missing or invalid" do
+      Application.delete_env(:pincer, :sandbox_adapter)
+      assert_raise ArgumentError, ~r/sandbox_adapter/, fn -> Sandbox.adapter() end
+
+      Application.put_env(:pincer, :sandbox_adapter, nil)
+      assert_raise ArgumentError, ~r/sandbox_adapter/, fn -> Sandbox.adapter() end
+
+      Application.put_env(:pincer, :sandbox_adapter, "kubernetes")
+      assert_raise ArgumentError, ~r/sandbox_adapter/, fn -> Sandbox.adapter() end
     end
   end
 
