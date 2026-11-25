@@ -53,6 +53,11 @@ defmodule Pincer.BoundaryExportsTest do
     refute source =~ "defmodule HtmlEntities do"
   end
 
+  test "retired media contracts are absent" do
+    refute Code.ensure_loaded?(Pincer.Ports.MediaUnderstanding)
+    refute Code.ensure_loaded?(Pincer.Adapters.MediaDispatcher)
+  end
+
   test "core modules do not depend directly on concrete adapters" do
     core_files = Path.wildcard("lib/pincer/core/**/*.ex")
     assert core_files != []

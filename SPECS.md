@@ -292,6 +292,12 @@ Telegram HTML usage-footer formatting and reasoning delivery options reside in
 `Pincer.Channels.Telegram.ResponseEnvelope` inside `packages/pincer_telegram`,
 keeping `Pincer.Core` transport-agnostic (plain text + structured `%Usage{}`).
 
+### 13.1. Media tool dispatch
+
+The media tool uses `PincerPorts.LLM` directly for image description, OCR, and
+audio transcription. Attachment resolution has a separate contract for obtaining
+bytes from stored references.
+
 ---
 
 ### 14. Sandbox Execution Port (`Pincer.Ports.Sandbox`)
