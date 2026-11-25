@@ -103,7 +103,7 @@ defmodule Pincer.Channels.Factory do
       [{Pincer.Channels.CLI, %{"enabled" => true, "adapter" => "Pincer.Channels.CLI"}}]
   """
   @spec create_channel_specs(config :: map() | nil, manifests :: [Manifest.t()] | :auto) ::
-          [{module(), map()}]
+          [Supervisor.child_spec() | Supervisor.module_spec()]
   def create_channel_specs(config \\ nil, manifests \\ :auto) do
     config =
       case config do

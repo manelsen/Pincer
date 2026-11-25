@@ -16,8 +16,6 @@ defmodule Pincer.Architecture.WebhookPackageTest do
 
     refute factory_source =~ "Pincer.Channels.Webhook"
     assert factory_source =~ "extra_child_specs"
-    assert function_exported?(Pincer.Channels.Webhook, :extra_child_specs, 1)
-
     cfg = %{"enabled" => true, "token_env" => "TEST_TOKEN"}
 
     assert Pincer.Channels.Webhook.extra_child_specs(cfg) == [

@@ -38,6 +38,7 @@ defmodule Pincer.Channels.Factory.Test do
     @behaviour PincerPorts.Channel
     def start_link(_), do: {:ok, self()}
     def send_message(_, _), do: :ok
+    def extra_child_specs, do: [MockExtraChild]
     def extra_child_specs(cfg), do: [{MockExtraChild, cfg}]
   end
 
@@ -141,7 +142,7 @@ defmodule Pincer.Channels.Factory.Test do
       assert [MockExtraChild] == rest
     end
 
-    test "inclui extra_child_specs/1 passando a configuração do canal" do
+    test "prefere extra_child_specs/1 e passa a configuração do canal" do
       cfg = %{
         "enabled" => true,
         "adapter" => "Pincer.Channels.Factory.Test.MockChannelWithConfigExtras",

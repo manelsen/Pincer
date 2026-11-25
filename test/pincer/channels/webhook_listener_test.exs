@@ -1,7 +1,7 @@
 defmodule Pincer.Channels.WebhookListenerTest do
   use ExUnit.Case, async: false
 
-  alias Pincer.Channels.Webhook
+  alias Pincer.Channels.{Factory, Webhook}
   alias Pincer.Channels.Webhook.Listener
 
   @token_env "PINCER_WEBHOOK_LISTENER_TEST_TOKEN"
@@ -33,17 +33,25 @@ defmodule Pincer.Channels.WebhookListenerTest do
     {:ok, parent: parent, channel_config: channel_config}
   end
 
-  test "accepts a signed POST end to end and processes the message exactly once", %{
+  test "accepts a signed POST exactly once through the listener started by the factory", %{
     channel_config: channel_config
   } do
-    start_channel!(channel_config)
     port = free_port()
 
-    start_listener!(%{
-      "token_env" => @token_env,
-      "port" => port,
-      "bind" => "127.0.0.1",
-      "path" => @path
+    config =
+      Map.merge(channel_config, %{
+        "adapter" => "Pincer.Channels.Webhook",
+        "enabled" => true,
+        "port" => port,
+        "bind" => "127.0.0.1",
+        "path" => "/custom-webhook"
+      })
+
+    specs = Factory.create_channel_specs(%{"webhook" => config}, [])
+
+    start_supervised!(%{
+      id: :webhook_channel_supervisor,
+      start: {Supervisor, :start_link, [specs, [strategy: :one_for_one]]}
     })
 
     payload = %{
@@ -54,7 +62,10 @@ defmodule Pincer.Channels.WebhookListenerTest do
     }
 
     response =
-      Req.post!(url(port), json: payload, headers: [{"x-pincer-token", @token}])
+      Req.post!("http://127.0.0.1:#{port}/custom-webhook",
+        json: payload,
+        headers: [{"x-pincer-token", @token}]
+      )
 
     assert response.status == 202
     assert %{"status" => "accepted", "session_id" => "webhook_github_42"} = response.body
