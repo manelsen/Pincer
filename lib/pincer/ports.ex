@@ -37,7 +37,6 @@ defmodule Pincer.Ports do
       Messaging,
       Storage,
       LLM,
-      MediaUnderstanding,
       ToolRegistry,
       CapabilityDiscovery,
       Onboarding,
