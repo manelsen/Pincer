@@ -8,6 +8,7 @@ defmodule Pincer.Infra.ConfigTest do
     keys = [
       :sandbox,
       :sandbox_adapter,
+      :sandbox_adapters,
       :storage_adapter,
       :sqlite_path,
       :storage,
@@ -168,6 +169,15 @@ defmodule Pincer.Infra.ConfigTest do
   end
 
   describe "sandbox config" do
+    test "loads a fully qualified sandbox adapter without the short-name registry" do
+      Application.delete_env(:pincer, :sandbox_adapters)
+      System.delete_env("PINCER_SANDBOX_ADAPTER")
+      path = write_yaml!("sandbox:\n  adapter: Pincer.Adapters.Sandbox.Docker\n")
+
+      assert :ok = Config.load(config_file: path, load_dotenv: false)
+      assert Application.fetch_env!(:pincer, :sandbox_adapter) == Pincer.Adapters.Sandbox.Docker
+    end
+
     test "loads sandbox backend and per-backend options from config yaml" do
       yaml =
         write_yaml!("""
