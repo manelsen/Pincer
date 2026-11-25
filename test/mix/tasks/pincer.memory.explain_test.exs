@@ -4,7 +4,7 @@ defmodule Mix.Tasks.Pincer.MemoryExplainTest do
 
   alias Pincer.Core.AgentPaths
   alias Pincer.Infra.SQLite
-  alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
+  alias Pincer.Adapters.Storage.SQLite, as: SQLiteStorage
 
   @task "pincer.memory.explain"
 

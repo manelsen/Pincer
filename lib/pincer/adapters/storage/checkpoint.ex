@@ -1,4 +1,4 @@
-defmodule Pincer.Storage.Checkpoint do
+defmodule Pincer.Adapters.Storage.Checkpoint do
   @moduledoc """
   Plain struct for task checkpoints.
 
@@ -34,8 +34,8 @@ defmodule Pincer.Storage.Checkpoint do
 
   ## Examples
 
-      iex> Pincer.Storage.Checkpoint.changeset(
-      ...>   %Pincer.Storage.Checkpoint{},
+      iex> Pincer.Adapters.Storage.Checkpoint.changeset(
+      ...>   %Pincer.Adapters.Storage.Checkpoint{},
       ...>   %{
       ...>     session_id: "sess-1",
       ...>     status: "running",
@@ -95,8 +95,8 @@ defmodule Pincer.Storage.Checkpoint do
 
   ## Examples
 
-      iex> Pincer.Storage.Checkpoint.changeset(
-      ...>   %Pincer.Storage.Checkpoint{},
+      iex> Pincer.Adapters.Storage.Checkpoint.changeset(
+      ...>   %Pincer.Adapters.Storage.Checkpoint{},
       ...>   %{session_id: "s1", status: "invalid", history_snapshot: <<>>}
       ...> )
       %Pincer.Utils.Validation{valid?: false, errors: [status: {"is invalid", ...}]}

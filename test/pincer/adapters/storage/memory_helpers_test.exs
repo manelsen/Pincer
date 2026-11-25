@@ -1,7 +1,7 @@
-defmodule Pincer.Storage.MemoryHelpersTest do
+defmodule Pincer.Adapters.Storage.MemoryHelpersTest do
   use ExUnit.Case, async: true
 
-  alias Pincer.Storage.MemoryHelpers
+  alias Pincer.Adapters.Storage.MemoryHelpers
 
   defmodule FakeNode do
     defstruct [:data]

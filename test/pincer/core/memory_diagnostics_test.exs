@@ -6,7 +6,7 @@ defmodule Pincer.Core.MemoryDiagnosticsTest do
   alias Pincer.Core.MemoryObservability
   alias Pincer.Core.Telemetry
   alias Pincer.Infra.SQLite
-  alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
+  alias Pincer.Adapters.Storage.SQLite, as: SQLiteStorage
 
   setup do
     Application.ensure_all_started(:pincer)

@@ -5,7 +5,7 @@ defmodule Mix.Tasks.Pincer.MemoryReportTest do
   alias Pincer.Core.MemoryObservability
   alias Pincer.Core.Telemetry
   alias Pincer.Infra.SQLite
-  alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
+  alias Pincer.Adapters.Storage.SQLite, as: SQLiteStorage
 
   @task "pincer.memory.report"
 

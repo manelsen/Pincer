@@ -48,7 +48,7 @@ defmodule Pincer.Adapters.Tools.GraphMemory do
   ## Integration
 
   This tool integrates with:
-  - `Pincer.Storage.Adapters.Graph` - The underlying graph storage
+  - `Pincer.Ports.Storage` - The underlying storage port (implemented by `Pincer.Adapters.Storage.SQLite`)
   - Session management for automatic learning
   - Error tracking systems for automated population
 
@@ -60,7 +60,7 @@ defmodule Pincer.Adapters.Tools.GraphMemory do
 
   ## See Also
 
-  - `Pincer.Storage.Adapters.Graph` - Graph storage adapter
+  - `Pincer.Adapters.Storage.SQLite` - SQLite and knowledge graph storage adapter
   - `Pincer.Ports.Tool` - Tool behaviour specification
   """
 

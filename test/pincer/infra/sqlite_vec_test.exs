@@ -2,7 +2,7 @@ defmodule Pincer.Infra.SQLiteVecTest do
   use ExUnit.Case, async: false
 
   alias Pincer.Infra.SQLite
-  alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
+  alias Pincer.Adapters.Storage.SQLite, as: SQLiteStorage
 
   setup do
     path =

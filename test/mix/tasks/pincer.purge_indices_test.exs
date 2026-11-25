@@ -5,7 +5,7 @@ defmodule Mix.Tasks.Pincer.PurgeIndicesTest do
 
   alias Mix.Tasks.Pincer.PurgeIndices
   alias Pincer.Infra.SQLite
-  alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
+  alias Pincer.Adapters.Storage.SQLite, as: SQLiteStorage
 
   setup do
     prev_server = Application.get_env(:pincer, :sqlite_server)

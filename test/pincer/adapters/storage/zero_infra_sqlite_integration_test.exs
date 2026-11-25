@@ -1,4 +1,4 @@
-defmodule Pincer.Storage.ZeroInfraSQLiteIntegrationTest do
+defmodule Pincer.Adapters.Storage.ZeroInfraSQLiteIntegrationTest do
   use ExUnit.Case, async: false
 
   alias Pincer.Adapters.Cron.Job
@@ -40,7 +40,7 @@ defmodule Pincer.Storage.ZeroInfraSQLiteIntegrationTest do
       |> MapSet.new()
 
     db_pid = start_supervised!({SQLite, name: nil, db_path: ":memory:"})
-    Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
+    Application.put_env(:pincer, :storage_adapter, Pincer.Adapters.Storage.SQLite)
     Application.put_env(:pincer, :sqlite_server, db_pid)
     Application.put_env(:pincer, :sqlite_path, ":memory:")
 

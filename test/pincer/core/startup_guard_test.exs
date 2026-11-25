@@ -168,7 +168,7 @@ defmodule Pincer.Core.StartupGuardTest do
 
       Application.put_env(:pincer, :config_path, path)
       Application.put_env(:pincer, :skip_startup_guard, false)
-      Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
+      Application.put_env(:pincer, :storage_adapter, Pincer.Adapters.Storage.SQLite)
       Application.put_env(:pincer, :sqlite_path, db_path)
 
       assert StartupGuard.run() == :ok
@@ -180,7 +180,7 @@ defmodule Pincer.Core.StartupGuardTest do
 
       Application.put_env(:pincer, :config_path, path)
       Application.put_env(:pincer, :skip_startup_guard, false)
-      Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
+      Application.put_env(:pincer, :storage_adapter, Pincer.Adapters.Storage.SQLite)
       Application.put_env(:pincer, :sqlite_path, ":memory:")
 
       assert StartupGuard.run() == :ok
@@ -193,7 +193,7 @@ defmodule Pincer.Core.StartupGuardTest do
       File.write!(blocker, "not-a-directory")
       on_exit(fn -> File.rm_rf(blocker) end)
 
-      Application.put_env(:pincer, :storage_adapter, Pincer.Storage.Adapters.SQLite)
+      Application.put_env(:pincer, :storage_adapter, Pincer.Adapters.Storage.SQLite)
       Application.put_env(:pincer, :sqlite_path, Path.join(blocker, "pincer.db"))
 
       assert {:error, :sqlite_unwritable, _msg} = StartupGuard.check_sqlite()

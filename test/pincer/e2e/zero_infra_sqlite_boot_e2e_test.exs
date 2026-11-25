@@ -5,7 +5,7 @@ defmodule Pincer.E2E.ZeroInfraSQLiteBootE2ETest do
   alias Pincer.Core.StartupGuard
   alias Pincer.Infra.SQLite
   alias Pincer.Ports.Storage
-  alias Pincer.Storage.Adapters.SQLite, as: SQLiteStorage
+  alias Pincer.Adapters.Storage.SQLite, as: SQLiteStorage
 
   setup do
     keys = [

@@ -27,6 +27,7 @@ defmodule Pincer.Infra.SQLite do
                     "sqlite",
                     "sqlite3",
                     "ecto.adapters.sqlite3",
+                    "pincer.adapters.storage.sqlite",
                     "pincer.storage.adapters.sqlite"
                   ])
   @schema_sql """

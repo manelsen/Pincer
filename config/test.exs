@@ -4,7 +4,7 @@ System.put_env("PINCER_STORAGE", "sqlite")
 System.put_env("PINCER_SQLITE_PATH", System.get_env("PINCER_SQLITE_PATH", ":memory:"))
 
 config :pincer,
-  storage_adapter: Pincer.Storage.Adapters.SQLite,
+  storage_adapter: Pincer.Adapters.Storage.SQLite,
   sqlite_path: System.get_env("PINCER_SQLITE_PATH", ":memory:"),
   sqlite_vec: :auto,
   sqlite_vec_dimensions: 1024

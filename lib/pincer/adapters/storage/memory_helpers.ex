@@ -1,4 +1,4 @@
-defmodule Pincer.Storage.MemoryHelpers do
+defmodule Pincer.Adapters.Storage.MemoryHelpers do
   @moduledoc """
   Pure helpers shared by the SQLite storage adapter.
 

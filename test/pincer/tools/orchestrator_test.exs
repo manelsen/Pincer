@@ -13,7 +13,7 @@ defmodule Pincer.Adapters.Tools.OrchestratorTest do
       send(Application.fetch_env!(:pincer, :orchestrator_run_info_pid), {:load, session_id, opts})
 
       {:ok,
-       %Pincer.Storage.Checkpoint{
+       %Pincer.Adapters.Storage.Checkpoint{
          id: Pincer.Infra.UUID.generate(),
          session_id: session_id,
          status: "finished",

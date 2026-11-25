@@ -1,4 +1,4 @@
-defmodule Pincer.Storage.Adapters.SQLite do
+defmodule Pincer.Adapters.Storage.SQLite do
   @moduledoc """
   Unified zero-infrastructure SQLite storage adapter implementing `Pincer.Ports.Storage`.
 
@@ -17,9 +17,9 @@ defmodule Pincer.Storage.Adapters.SQLite do
 
   require Logger
 
-  alias Pincer.Storage.MemoryHelpers
+  alias Pincer.Adapters.Storage.MemoryHelpers
   alias Pincer.Infra.SQLite
-  alias Pincer.Storage.Checkpoint
+  alias Pincer.Adapters.Storage.Checkpoint
 
   @project_statuses ~w(planning awaiting_approval running paused error completed stopped)
 
