@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Storage is SQLite-only: PostgreSQL/pgvector support, Ecto, `Ecto.Repo`, migrations, `mix ecto.*` setup, `PINCER_DB_*` overrides, and the Postgres test path are removed. Models are plain structs validated by `Pincer.Utils.Validation`; `storage.adapter` accepts only `"sqlite"` (PostgreSQL is rejected at boot) and the full test suite runs on in-memory SQLite with no external database service.
 - `.env.example` documents the `PINCER_SQLITE_*` knobs instead of `PINCER_DB_*`, and the `priv/profiles/*.yaml` templates now ship a `storage:` block with a per-profile SQLite file instead of the old database URL block.
+- SQLite owns LIKE-prefix escaping for index purges. The helper moved from `Pincer.Ports.Storage` to `Pincer.Adapters.Storage.SQLite`.
 - Require Elixir 1.20.5 / OTP 27 across `mix.exs`, mise/asdf, the Docker image, and CI. Remove compiler warnings surfaced by 1.20 (unused `require Logger` and unreachable/redundant clauses) so `warnings_as_errors` stays clean.
 
 ### Added
