@@ -91,9 +91,10 @@ defmodule Pincer.Core.Introspection.Reflection do
 
       _classification ->
         client = Keyword.get(opts, :introspection_client, IntrospectionClient)
+        client_opts = Keyword.take(opts, [:session_model_override])
         messages = build_reflection_prompt(trace_metadata, self_state)
 
-        case client.chat_completion(messages, []) do
+        case client.chat_completion(messages, client_opts) do
           {:ok, %{"content" => content}, _usage} ->
             {:ok, parse_reflection_response(content)}
 

@@ -130,6 +130,16 @@ defmodule Pincer.CLI.Test do
       assert formatted =~ "Session: cli_user"
       assert formatted =~ "Agent: architect"
       assert formatted =~ "Model: openrouter:anthropic/claude-3.5-sonnet"
+      assert formatted =~ "Introspection:"
+
+      local_state = %{
+        session_id: "cli_user",
+        root_agent_id: "architect",
+        status: :idle,
+        model_override: %{provider: "ollama", model: "llama3.2"}
+      }
+
+      assert Pincer.CLI.format_status(local_state) =~ "Introspection: ollama:llama3.2 (local)"
     end
 
     test "formats error and badrpc responses gracefully without crashing" do

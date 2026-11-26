@@ -63,6 +63,7 @@ defmodule Pincer.Core.Doctor do
         Posture.channel_token_checks(config, env_fetcher, :channel_token) ++
         Posture.dm_checks(config) ++
         llm_provider_checks(config, env_fetcher) ++
+        introspection_provider_checks(config, env_fetcher) ++
         native_binary_checks(config) ++
         runtime_cohesion_checks() ++
         alignment_integrity_checks()
@@ -363,56 +364,104 @@ defmodule Pincer.Core.Doctor do
   defp llm_provider_checks(config, env_fetcher) do
     registry = Application.get_env(:pincer, :llm_providers)
 
-    case ConfigProbe.provider_env(config, registry, env_fetcher) do
-      nil ->
-        []
+    check_configured_provider(
+      :llm_provider,
+      ConfigProbe.provider_env(config, registry, env_fetcher)
+    )
+  end
 
-      {provider, nil, :unregistered} ->
-        [
-          warn_check(
-            {:llm_provider, provider},
-            "Active LLM provider '#{provider}' is not registered in :llm_providers",
-            %{provider: provider}
-          )
-        ]
+  defp introspection_provider_checks(config, env_fetcher) do
+    intro_cfg = MapHelpers.read_field(config, :introspection)
+    provider = read_sub(intro_cfg, :provider)
+    model = read_sub(intro_cfg, :model)
+    locality = read_sub(intro_cfg, :locality)
 
-      {provider, nil, :not_required} ->
-        [
-          ok_check(
-            {:llm_provider, provider},
-            "Provider '#{provider}' does not require an API key",
-            %{provider: provider}
-          )
-        ]
-
-      {provider, nil, :invalid_auth_config} ->
-        [
-          error_check(
-            {:llm_provider, provider},
-            "Provider '#{provider}' declares an auth chain without a usable environment key",
-            %{provider: provider}
-          )
-        ]
-
-      {provider, key, :present} ->
+    cond do
+      not MapHelpers.present?(provider) ->
         [
           ok_check(
-            {:llm_provider, provider},
-            "Provider '#{provider}' configurado (#{key} presente)",
-            %{provider: provider, env_key: key}
+            :introspection_provider,
+            "Introspection inherits active session or default LLM provider",
+            %{provider: :inherited, locality: locality || "default"}
           )
         ]
 
-      {provider, key, :missing_value} ->
+      Pincer.Core.Introspection.Client.local_provider?(provider, intro_cfg) ->
         [
-          error_check(
-            {:llm_provider, provider},
-            "Provider '#{provider}' ativo mas #{key} nao esta definido",
-            %{provider: provider, env_key: key}
+          ok_check(
+            {:introspection_provider, to_string(provider)},
+            "Introspection provider '#{provider}' runs locally (model: #{model || "default"})",
+            %{provider: provider, model: model, locality: :local}
           )
         ]
+
+      true ->
+        registry = Application.get_env(:pincer, :llm_providers)
+        synthetic_cfg = %{"llm" => %{"provider" => provider}}
+
+        check_configured_provider(
+          :introspection_provider,
+          ConfigProbe.provider_env(synthetic_cfg, registry, env_fetcher),
+          %{model: model, locality: locality || "default"}
+        )
     end
   end
+
+  defp check_configured_provider(id_tag, result, extra_meta \\ %{})
+  defp check_configured_provider(_id_tag, nil, _extra_meta), do: []
+
+  defp check_configured_provider(id_tag, {provider, nil, :unregistered}, extra_meta) do
+    [
+      warn_check(
+        {id_tag, provider},
+        "Active #{provider_label(id_tag)} provider '#{provider}' is not registered in :llm_providers",
+        Map.put(extra_meta, :provider, provider)
+      )
+    ]
+  end
+
+  defp check_configured_provider(id_tag, {provider, nil, :not_required}, extra_meta) do
+    [
+      ok_check(
+        {id_tag, provider},
+        "Provider '#{provider}' does not require an API key",
+        Map.put(extra_meta, :provider, provider)
+      )
+    ]
+  end
+
+  defp check_configured_provider(id_tag, {provider, nil, :invalid_auth_config}, extra_meta) do
+    [
+      error_check(
+        {id_tag, provider},
+        "Provider '#{provider}' declares an auth chain without a usable environment key",
+        Map.put(extra_meta, :provider, provider)
+      )
+    ]
+  end
+
+  defp check_configured_provider(id_tag, {provider, key, :present}, extra_meta) do
+    [
+      ok_check(
+        {id_tag, provider},
+        "Provider '#{provider}' configurado (#{key} presente)",
+        Map.merge(extra_meta, %{provider: provider, env_key: key})
+      )
+    ]
+  end
+
+  defp check_configured_provider(id_tag, {provider, key, :missing_value}, extra_meta) do
+    [
+      error_check(
+        {id_tag, provider},
+        "Provider '#{provider}' ativo mas #{key} nao esta definido",
+        Map.merge(extra_meta, %{provider: provider, env_key: key})
+      )
+    ]
+  end
+
+  defp provider_label(:introspection_provider), do: "introspection"
+  defp provider_label(_), do: "LLM"
 
   defp channels(config), do: ConfigProbe.channels(config)
   defp enabled?(cfg), do: ConfigProbe.enabled?(cfg)

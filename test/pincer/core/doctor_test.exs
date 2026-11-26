@@ -261,6 +261,78 @@ defmodule Pincer.Core.DoctorTest do
     end
   end
 
+  describe "introspection_provider_checks" do
+    setup do
+      LLMHelpers.put_providers!(%{
+        "openrouter" => %{
+          adapter: Pincer.LLM.Providers.OpenAICompat,
+          env_key: "OPENROUTER_API_KEY",
+          default_model: "some-model"
+        },
+        "ollama" => %{
+          adapter: Pincer.LLM.Providers.Ollama,
+          env_key: nil,
+          default_model: "llama3.2"
+        }
+      })
+
+      :ok
+    end
+
+    test "surfaces configured vs local introspection provider targets" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        llm:
+          provider: "openrouter"
+        introspection:
+          provider: "openrouter"
+          model: "meta-llama/llama-3.1-8b"
+        """
+      )
+
+      report_ok =
+        Doctor.run(
+          root: tmp,
+          env_fetcher: fn
+            "OPENROUTER_API_KEY" -> "sk-test-key"
+            _ -> nil
+          end
+        )
+
+      assert Enum.any?(report_ok.checks, fn check ->
+               check.id == {:introspection_provider, "openrouter"} and check.severity == :ok
+             end)
+
+      write_config!(
+        tmp,
+        """
+        llm:
+          provider: "openrouter"
+        introspection:
+          provider: "ollama"
+          model: "llama3.2"
+        """
+      )
+
+      report_local =
+        Doctor.run(
+          root: tmp,
+          env_fetcher: fn
+            "OPENROUTER_API_KEY" -> "sk-test-key"
+            _ -> nil
+          end
+        )
+
+      assert Enum.any?(report_local.checks, fn check ->
+               check.id == {:introspection_provider, "ollama"} and check.severity == :ok and
+                 check.message =~ "locally"
+             end)
+    end
+  end
+
   describe "storage_checks" do
     test "reports :storage_backend, writable :sqlite_path, and :sqlite_engine ok in sqlite mode" do
       tmp = tmp_dir!()
