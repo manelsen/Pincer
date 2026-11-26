@@ -1,283 +1,128 @@
-# Auditoria de code smells, idiomas e SRP — Pincer
+# Auditoria de qualidade de código, arquitetura e SRP — Pincer
 
-Escopo: `lib/` (247 arquivos, ~46,6k LOC) + `packages/` (74 arquivos, ~11,2k LOC) + `test/` (264 `.exs`).
+Escopo verificado no repositório: `lib/` (269 arquivos `.ex`, ~47,3k LOC) + `packages/` (25 pacotes, 104 arquivos `.ex`, ~14,1k LOC) + `test/` (327 arquivos `.exs`, sendo 323 `*_test.exs`, incluindo 26 testes arquiteturais em `test/pincer/architecture/`).
 
-**Achados de alta confiança foram verificados manualmente** — os que se mostraram falsos positivos estão listados no §8, para não induzir refatoração desnecessária.
+Arquitetura atual:
+- Persistência **exclusivamente em SQLite embarcado** via `Pincer.Infra.SQLite` (`lib/pincer/infra/sqlite.ex`) e `Pincer.Adapters.Storage.SQLite` (`lib/pincer/adapters/storage/sqlite.ex`), com FTS5 e `sqlite-vec` opcional (fallback para similaridade por cosseno em Elixir).
+- Canais e provedores LLM organizados como pacotes isolados em `packages/`, compartilhando contratos via `packages/pincer_ports/` e helpers transversais via `packages/pincer_shared/`. `lib/pincer/channels/` contém apenas `lib/pincer/channels/supervisor.ex` e `lib/pincer/channels/factory.ex`.
+- Fronteiras arquiteturais verificadas em tempo de compilação pelo compilador `:boundary` (`mix.exs` com `warnings_as_errors: true`) e em tempo de teste por `test/pincer/boundary_exports_test.exs` e `test/pincer/architecture/`.
 
 ---
 
-## 0. Status das correções (rodada 1)
+## 0. Status das correções verificadas
 
-Já corrigido neste mesmo PR; o restante segue como backlog priorizado no §9.
-
-| Achado | Status | O que mudou |
+| Achado original | Status | Evidência atual no repositório |
 |---|---|---|
-| §1.1 aprovação de `safe_shell` pulava validação | **corrigido** | `execute/2` revalida o comando exato com `approved_command_allowed?/2` antes de executar; `approved_command_allowed?/2` deixou de ser no-op quando `restrict_to_workspace: false`. Testes em `safe_shell_test.exs`. |
-| §1.2 transporte `:os` sem guarda | **corrigido** | `Sandbox.Local.run_os/4` passa por `WorkspaceGuard.command_allowed?/2`; comando fora do allowlist retorna `{:error, {:command_not_allowed, _}}`. |
-| §1.3 dois motores de política de shell | parcial | `:os` e aprovação já usam `WorkspaceGuard`; `SafeShell.parse_and_validate/2` ainda é próprio (operação separada, mesmo veredito). |
-| §1.4 SSRF no `browser` | **corrigido** | `Web.validate_url/1` virou público; `browser.navigate` rejeita hosts internos e esquemas não-http sem tocar no pool. |
-| §1.5 SSH sem validação de path remoto | **corrigido** | `remote_workspace` rejeita `..`, NUL e metacaracteres; comando remoto honra `restrict_to_workspace`. |
-| §1.6 HTTP sem timeout | **corrigido** | `receive_timeout`/`connect_timeout` em LINE, Feishu (incl. token) e DingTalk. |
-| §1.7 Audit trail inexistente | **corrigido** | `AuditLog.record/3` é chamado nas três transições de aprovação de tool; `RBAC` barra aprovação quando o papel configurado não tem `:approve_tools` (sessões sem papel configurado continuam livres). |
-| §2.4 `write_yaml/2` descartava seções | **corrigido** | Edição cirúrgica só das chaves `llm.*`; `set_model/2` não recarrega `.env` nem reescreve config alheia. 6 testes em `config_set_model_test.exs`. |
-| §4 módulos mortos | **corrigido** | Removidos `model_router`, `project_board`, `contract_engine`, `capabilities`, `command_queue`, `release_validation`, `storage/port`, `core/sub_agent`, árvore `channels/matrix` e o shim `Pincer.hello/0` (com os testes correspondentes). `RBAC`/`AuditLog` foram ligados em vez de removidos. |
-| §7 arquivos soltos de teste | **corrigido** | 10 scripts manuais movidos para `scripts/manual/`; `security_audit_test.exs` e `storage_smoke_test.exs` movidos para `test/pincer/` (este último agora respeita `PINCER_DB_*`); `pincer_kimi_test.exs` removido. |
+| Aprovação de `safe_shell` pulava validação | **corrigido** | `lib/pincer/adapters/tools/safe_shell.ex` revalida comandos pré-aprovados via `approved_command_allowed?/2` delegando a `Pincer.Core.WorkspaceGuard` (`lib/pincer/core/workspace_guard.ex`). |
+| Política duplicada entre `SafeShell` e `WorkspaceGuard` | **corrigido** | `lib/pincer/adapters/tools/safe_shell.ex` delega `validate_command/2` e `command_allowed?/2` para `lib/pincer/core/workspace_guard.ex`. |
+| Transporte local e SSH sem validação suficiente | **corrigido** | `lib/pincer/adapters/sandbox/local.ex` e `lib/pincer/adapters/sandbox/ssh.ex` aplicam `WorkspaceGuard`; `ssh.ex` valida `remote_workspace` contra `..`, NUL e metacaracteres. |
+| SSRF no `browser` e `web` | **corrigido** | `lib/pincer/adapters/tools/web.ex` e `lib/pincer/adapters/tools/browser.ex` delegam validação de URL para `Pincer.Utils.NetworkGuard.validate_url/1` (`lib/pincer/utils/network_guard.ex`). |
+| Chamadas HTTP sem timeout nos canais | **corrigido** | `packages/pincer_line/lib/pincer/channels/line/api.ex`, `packages/pincer_feishu/lib/pincer/channels/feishu/api.ex` e `packages/pincer_dingtalk/lib/pincer/channels/dingtalk/api.ex` definem `@receive_timeout 30_000`. |
+| `AuditLog` e `RBAC` desconectados | **corrigido** | `lib/pincer/core/executor/tool_runner.ex` chama `AuditLog.record/3` (`lib/pincer/core/executor/audit_log.ex`) e `RBAC.authorize/2` (`lib/pincer/core/executor/rbac.ex`) no fluxo de aprovação. |
+| `write_yaml/3` descartava seções de `config.yaml` | **corrigido** | `lib/pincer/config.ex` (`Pincer.Infra.Config`) edita chaves escalares de `llm.*` cirurgicamente via `put_scalar/3`, preservando demais seções. |
+| Módulos mortos em Core (`CLEAN-001`) | **corrigido** | Removidos 7 módulos mortos (`ModelRouter`, `CommandQueue`, `ContractEngine`, `ReleaseValidation`, `ProjectBoard`, `Capabilities`, `Orchestration.Scheduler`), `core/sub_agent` e a antiga árvore `storage/`, verificados por `test/pincer/architecture/dead_core_modules_removed_test.exs`. |
+| Duplicação entre `doctor`, `security_audit` e `onboard` | **corrigido** | `lib/pincer/core/doctor.ex`, `lib/pincer/core/security_audit.ex` e `lib/pincer/core/onboard.ex` compartilham `lib/pincer/core/posture.ex` e `lib/pincer/core/config_probe.ex`. |
+| Pipeline compartilhado em `pincer_shared` | **corrigido** | `packages/pincer_shared/lib/pincer/channels/shared.ex` provê `Inbound`, `SessionBridge`, `ProjectBridge`, `Pairing`, `Chunking`, `Formatting`, `Attachments`, `Text`, `TokenCache` e `WebhookVerifier`, adotados pelos adaptadores em `packages/`. |
+| Helpers puros de memória e despacho LLM | **corrigido** | Extraídos `lib/pincer/adapters/storage/memory_helpers.ex`, `lib/pincer/adapters/tools/args.ex`, `lib/pincer/infra/http.ex`, `lib/pincer/utils/text.ex` e `lib/pincer/llm/retry_engine.ex`. |
+| Acumulações quadráticas (`CLEAN-005`) | **corrigido** | Corrigidas em chunking/onboard/plugins/failover e guardadas por `test/pincer/architecture/no_quadratic_accumulations_test.exs`. |
+| Arquivos soltos na raiz de `test/` | **corrigido** | 10 scripts manuais movidos para `scripts/manual/`; testes de postura e fumaça organizados em `test/pincer/security_audit_test.exs` e `test/pincer/adapters/storage/storage_smoke_test.exs`. |
 
 ---
 
-## Resumo executivo
+## 1. Arquitetura de armazenamento e pacotes (estado atual)
 
-| # | Problema | Onde | Impacto |
+### 1.1 Persistência SQLite embarcada
+
+Toda a camada de persistência converge para um único backend:
+- Infraestrutura de conexão, pool/GenServer, health check e suporte opcional a `sqlite-vec`: `lib/pincer/infra/sqlite.ex` (694 LOC).
+- Implementação dos callbacks de `Pincer.Ports.Storage` (`lib/pincer/ports/storage.ex`): `lib/pincer/adapters/storage/sqlite.ex` (1.929 LOC), combinando mensagens, FTS5, grafo de conhecimento, checkpoints (`lib/pincer/adapters/storage/checkpoint.ex`), estado de pairing, projetos e busca vetorial (`vec_nodes` ou fallback de cosseno).
+- Helpers puros sem I/O de banco isolados em `lib/pincer/adapters/storage/memory_helpers.ex` (178 LOC) e cobertos por `test/pincer/adapters/storage/memory_helpers_test.exs`.
+
+### 1.2 Layout monorepo em `packages/`
+
+Os 25 pacotes locais funcionam como dependências `path:` em `mix.exs` e pacotes Hex independentes (verificados por `scripts/check_packages.exs` e `test/pincer/architecture/package_isolation_test.exs`):
+- Contratos e utilitários de canais (2): `packages/pincer_ports/`, `packages/pincer_shared/`.
+- Canais (9): `packages/pincer_cli/`, `packages/pincer_dingtalk/`, `packages/pincer_discord/`, `packages/pincer_feishu/`, `packages/pincer_line/`, `packages/pincer_slack/`, `packages/pincer_telegram/`, `packages/pincer_webhook/`, `packages/pincer_whatsapp/`.
+- Provedores LLM e base compatível OpenAI (14): `packages/pincer_openai_compat/`, `packages/pincer_anthropic/`, `packages/pincer_deepseek/`, `packages/pincer_google/`, `packages/pincer_groq/`, `packages/pincer_minimax/`, `packages/pincer_mistral/`, `packages/pincer_moonshot/`, `packages/pincer_ollama/`, `packages/pincer_openai/`, `packages/pincer_opencode_zen/`, `packages/pincer_openrouter/`, `packages/pincer_qwen/`, `packages/pincer_zhipu/`.
+
+No aplicativo raiz, `lib/pincer/channels/supervisor.ex` e `lib/pincer/channels/factory.ex` apenas inicializam e conectam os adaptadores configurados em `config.yaml` via `PincerPorts.Channel` (`packages/pincer_ports/lib/pincer_ports/channel.ex`).
+
+---
+
+## 2. Violações de SRP restantes (god modules)
+
+Módulos grandes medidos diretamente em `lib/` e `packages/` que ainda concentram múltiplas responsabilidades:
+
+| Módulo | LOC | Responsabilidades acumuladas | Split sugerido |
 |---|---|---|---|
-| 1 | `safe_shell` com aprovação **pula toda validação** de comando | `adapters/tools/safe_shell.ex:157` | Segurança |
-| 2 | `Matrix.Session` não existe; supervisor referencia módulo fantasma | `channels/matrix/session_supervisor.ex:24` | Crash em runtime |
-| 3 | 3 canais reimplementam o mesmo pipeline de entrada (DM gate, pairing, sessão, chunking) | telegram/discord/whatsapp | ~1.500 LOC duplicadas |
-| 4 | `doctor` / `security_audit` / `onboard` são 3 cópias do mesmo pipeline de auditoria | `core/doctor.ex`, `security_audit.ex`, `onboard.ex` | ~250 LOC duplicadas, relatórios divergentes |
-| 5 | `postgres.ex` ↔ `sqlite.ex`: ~400 LOC de copy-paste + **drift de comportamento** | `storage/adapters/*` | Bugs por backend |
-| 6 | 8 módulos "mortos" (só testes os chamam) | ver §4 | Manutenção |
-| 7 | `write_yaml/2` reconstroi o config.yaml a partir de heredoc e descarta seções | `config.ex:635` | Perda de config |
+| `lib/pincer/adapters/storage/sqlite.ex` | 1.929 | Queries de mensagens, FTS5, grafo, memória semântica, checkpoints, projetos e pairing no mesmo arquivo | Quebrar por agregado (`SQLite.Messages`, `SQLite.Graph`, `SQLite.Memory`, `SQLite.Checkpoints`, `SQLite.Projects`, `SQLite.Pairing`) |
+| `lib/pincer/adapters/tools/file_system.ex` | 1.654 | Confinamento de path, 16 ações, arquivo/zip-slip, edição ancorada/hashline, trash e listagem recursiva | Extrair `.Edit`, `.Archive`, `.Transfer` e `.Walk` |
+| `packages/pincer_telegram/lib/pincer/channels/telegram.ex` | 1.614 | Polling/offset, parse de updates, comandos, menus/callbacks, mídia/transcrição e formatação | Extrair `.Poller`, `.Update`, `.Commands`, `.Menu`, `.Media` |
+| `packages/pincer_discord/lib/pincer/channels/discord.ex` | 1.069 | Consumer Nostrum, slash commands, interações de menu, anexos e envio em chunks | Extrair `.Commands`, `.Interactions`, `.Attachments` |
+| `lib/pincer/core/project_orchestrator.ex` | 943 | Wizard conversacional, dono da tabela ETS, sincronização com `ProjectFSM`, criação de branch git e renderização kanban | Separar `Project.Wizard`, `Project.BoardRenderer` e `Project.Store` |
+| `lib/pincer/core/pairing.ex` | 913 | Geração/hash de códigos, ETS + DETS (`sessions/pairing_store.dets`), persistência SQLite e notificação PubSub | Separar `Pairing.Code`, `Pairing.Store` e `Pairing.Notifier` |
+| `lib/pincer/core/session/server.ex` | 863 | Ciclo GenServer, correlação de tasks, ingestão de blackboard, debounce de input, comandos, PubSub e alinhamento | Extrair `Session.InputBuffer`, `Session.CommandDispatcher` e `Session.TaskCoordinator` |
+| `lib/pincer/config.ex` | 831 | Load de `.env` + YAML, allowlist em `Application`, detecção de sandbox/storage e edição escalar de YAML | Separar `Config.Loader`, `Config.Applier` e `Config.YamlWriter` |
+| `lib/pincer/adapters/connectors/mcp/manager.ex` | 743 | Ciclo de vida dos servidores MCP, descoberta, filtragem e despacho de ferramentas | Extrair registro/descoberta de ciclo de supervisão |
+| `lib/pincer/core/llm/skills_sidecar_policy.ex` | 722 | Validação de flags `docker run`, mounts, envs e digest para sidecar de skills | Mover/renomear foco de argv Docker para política dedicada de sandbox |
+| `lib/pincer/infra/sqlite.ex` | 694 | GenServer de conexão Exqlite, DDL/migração de schema, carregamento `sqlite-vec` e helpers de resolução de backend | Separar `SQLite.Schema` e `SQLite.VecLoader` |
+| `packages/pincer_whatsapp/lib/pincer/channels/whatsapp.ex` | 659 | Bridge Go/Erlang, comandos, mídia e envio | Extrair handlers de comando e mídia |
+| `lib/mix/tasks/pincer.onboard.ex` | 618 | Flags CLI, prompts interativos, escrita de `.env`, preflight e renderização de plano | Extrair prompter interativo e escritor de `.env` |
+| `lib/pincer/core/onboard.ex` | 596 | Planejamento local/remoto, aplicação de plano, deep merge e serialização | Separar `.Plan`, `.Apply` e `.RemotePlan` |
+| `lib/pincer/core/executor.ex` | 501 | Loop principal já enxuto via `Ctx`/`FallbackStrategy`, mas `run_stream/8`, `recover_empty_response/5` e `resolve_text_outcome/9` ainda carregam aridade alta | Extrair `Executor.StreamRunner` e encapsular argumentos no `Ctx` |
+
+Outros módulos ainda acima de 400 LOC que merecem acompanhamento gradual: `lib/pincer/core/orchestration/archivist.ex` (600), `lib/pincer/core/memory/memory_recall.ex` (588), `lib/pincer/core/orchestration/sub_agent.ex` (586), `lib/pincer/core/introspection/kernel.ex` (557), `lib/pincer/adapters/tools/orchestrator.ex` (554), `lib/pincer/core/doctor.ex` (419), `lib/pincer/core/executor/tool_runner.ex` (418) e `lib/pincer/llm/client.ex` (415).
 
 ---
 
-## 1. Segurança (prioridade máxima)
+## 3. Code smells, inconsistências e higiene restante
 
-### 1.1 Aprovação de `safe_shell` desliga a validação
+### 3.1 Código não-idiomático e tratamento de erros
 
-`lib/pincer/adapters/tools/safe_shell.ex:157`
+- **Blocos `rescue` amplos** (78 ocorrências em `lib/` e `packages/`):
+  - `lib/pincer/core/executor/tool_runner.ex` (`run_tool/7`) captura qualquer exceção em `rescue e ->` e devolve status `:ok`, impedindo que crashes de tools contem como falhas consecutivas.
+  - `lib/pincer/adapters/tools/workflow.ex` converte falhas internas em strings genéricas em múltiplos catch-alls.
+  - `lib/pincer/core/executor.ex` envolve todo o consumo do stream em `rescue error in Protocol.UndefinedError`.
+- **Fontes de verdade ainda duplicadas**:
+  - `lib/pincer/core/ux.ex` mantém `@commands` (11 comandos), `@shortcut_routes` e `help_text/1` separados; `help_text/1` lista apenas 7 comandos, omitindo `/model`, `/reset`, `/think` e `/reasoning`.
+  - `lib/pincer/core/project_orchestrator.ex` (`@type phase` com 5 estados) coexiste com `lib/pincer/core/project_fsm.ex`, exigindo sincronização manual entre ambos.
+  - `lib/pincer/cli.ex` (214 LOC) ainda usa `System.halt/1` diretamente em fluxo de CLI, exigindo cuidado quando invocado a partir de tasks Mix.
 
-```elixir
-cond do
-  approval_granted ->
-    Logger.info("[SAFE-SHELL] Pre-approved command: #{command}")
-    execute_in_sandbox(command, ...)
-```
+### 3.2 Higiene de pacotes e manifests
 
-O fluxo de aprovação funciona (`tool_runner.ex:216` → `ToolRuntime.execute(..., approval_granted: true)` → injeta `"approval_granted"` no contexto), mas ao chegar com aprovação o comando vai direto para o sandbox **sem passar por** `@dangerous_chars`, `@multiline_or_line_continuation` nem pelo whitelist de `parse_and_validate/1`. `SafeShell.approved_command_allowed?/2` — a função que deveria revalidar o comando aprovado — **não tem nenhum chamador em `lib/`** (só testes).
-
-Correção: ao receber `approval_granted`, revalidar o comando exato que o usuário viu via `approved_command_allowed?/2`; sem isso a aprovação vira execução arbitrária.
-
-### 1.2 Transporte `:os` do sandbox local executa `sh -c` sem guarda
-
-`lib/pincer/adapters/sandbox/local.ex:118` — `System.cmd("sh", ["-c", command])`, sem `WorkspaceGuard.command_allowed?/2`. O moduledoc afirma confinamento, mas ele cobre apenas o `cwd`. Gate a rota `:os` ou rejeite-a fora de `restrict_to_workspace`.
-
-### 1.3 Dois motores de política de shell
-
-`safe_shell.ex:69-82,101-127` duplica constantes e reimplementa `command_allowed?/2` de `core/workspace_guard.ex:14-16,138-160` com **tokenização diferente** (SafeShell aceita `du`/`find`, WorkspaceGuard não). Um comando pode passar num e falhar no outro. Consolide em `WorkspaceGuard`.
-
-### 1.4 SSRF parcial
-
-`tools/web.ex:109` valida apenas `web_fetch`; `tools/browser.ex:128` aceita `url` sem `Web.validate_url/1`. Além disso `resolves_to_private_ip?/1` resolve o DNS e `Req` resolve de novo na conexão (janela de rebinding). Torne `validate_url/1` público, reutilize em `browser`/`media` e fixe o IP validado.
-
-### 1.5 SSH sem validação de caminho remoto
-
-`adapters/sandbox/ssh.ex:214-231` valida só o `cwd` **local**; `remote_workspace` com `../..` escapa sem erro.
-
-### 1.6 HTTP sem timeout
-
-`pincer_line/.../api.ex`, `pincer_feishu/.../api.ex:233`, `pincer_dingtalk/.../api.ex:41` fazem `Req.post/get` sem `receive_timeout` — um endpoint travado bloqueia o processo chamador indefinidamente. Crie um wrapper HTTP único com timeout + retry (hoje existem 3 sites de mapeamento de erro independentes: `web.ex`, `github.ex`, `media.ex`).
-
-### 1.7 Audit trail inexistente
-
-`core/audit_log.ex:38` (`AuditLog.record/3`) e `core/rbac.ex` não têm **nenhum** chamador em `lib/`. Eventos sensíveis (aprovação de shell, pairing, escrita em config) não são persistidos, embora o moduledoc de `AuditLog` afirme o contrário.
+- **Manifests de plugin divergentes**: há diferenças entre cópias em `priv/plugins/` e nos pacotes correspondentes (`packages/pincer_dingtalk/priv/pincer_plugin.yaml`, `packages/pincer_discord/priv/pincer_plugin.yaml`, `packages/pincer_feishu/priv/pincer_plugin.yaml`, `packages/pincer_line/priv/pincer_plugin.yaml` e `packages/pincer_slack/priv/pincer_plugin.yaml`). Um check automatizado de paridade evita drift.
+- **Metadados repetidos nos pacotes**: os 25 `mix.exs` em `packages/` repetem versão, licença, links e estrutura; provedores baseados em `packages/pincer_openai_compat/lib/pincer/llm/providers/openai_compat.ex` ainda acumulam 31 retornos `:not_implemented` explícitos para capacidades opcionais (`transcribe_audio`/`generate_embedding`).
 
 ---
 
-## 2. Duplicação (maior custo de manutenção)
+## 4. Suíte de testes e governança arquitetural
 
-### 2.1 Pipeline de entrada dos canais — 3 cópias (+2 parciais)
+Métricas observadas em `test/` (327 arquivos `.exs`, 323 `*_test.exs`):
 
-| Preocupação | Hoje em | Deveria viver em |
-|---|---|---|
-| Loop de entrada (gate → comando → shortcut → project collect → `process_input`) | `telegram.ex:852-967`, `discord.ex:273-371`, `whatsapp.ex:179-242` | `pincer_shared`: `Inbound.dispatch/2` |
-| Gate DM (```Policy.allow?(:dm_access, ...)```) | `telegram.ex:1742`, `discord.ex:392`, `whatsapp.ex:499` | `Shared.DmPolicy` |
-| Fluxo `/pair` + textos de erro | `telegram.ex:1693`, `discord.ex:555`, `whatsapp.ex:347` | `Shared.Pairing` |
-| Resolver + garantir sessão | 5 adaptadores (inclui `slack.ex:132`, `webhook.ex:351`) | `Shared.SessionBridge` |
-| Chunking de mensagem | `telegram.ex:539` (4000), `discord.ex:169` (1900), `whatsapp.ex:635` (3500) | `Shared.Chunker` |
-| Kickoff de projeto | `telegram.ex:1808`, `discord.ex:1027`, `whatsapp.ex:244` | `Shared.ProjectBridge` |
-| Anexos (mime, sanitize_filename, attachment_ref) | `telegram.ex:1156-1349`, `discord.ex:1156-1263` | `Shared.Attachments` |
-| Formatação markdown/HTML | `telegram.ex:400-466`, `discord.ex:238`, `slack.ex:84` | `Shared.Format` |
-
-`pincer_shared` hoje contém apenas `TokenCache` e `WebhookVerifier` — está subutilizado exatamente onde deveria concentrar código.
-
-### 2.2 LLM client: dois caminhos idênticos
-
-`lib/pincer/llm/client.ex` — `chat_completion/2` (`:62-141`) e `stream_completion/2` (`:261-340`) são o mesmo bloco de 18 linhas de resolução de provider + `cond` + `AuthProfiles.resolve` copiado; e `maybe_handle_terminal_failure/13` aparece **verbatim duas vezes** (`:718-836` e `:836-954`), mudando só o literal `:stream_completion`/`:chat_completion`. Um `dispatch(action, messages, opts)` resolve ambos.
-
-### 2.3 Storage adapters — ~400 LOC idênticas
-
-`sqlite.ex` (1644) e `postgres.ex` (1330) implementam os mesmos 31 callbacks; são cópias literais com dialeto trocado:
-
-`maybe_put/3`, `stringify_keys/1`, `build_memory_metadata/4`, `document_matches_opts?/2`, `match_workspace?/2`, `memory_forgotten?/1`, `incident_query?/1`, `build_citation/1`, `extract_session_id/1`, `build_structured_id/2`, `build_pattern_key/2`, `search_tokens/1`, `document_result/2`, além dos blocos de dedupe de `save_learning`/`save_tool_error`.
-
-Extraia `Storage.MemoryScoring` + `Storage.SearchUtils` (puros, testáveis sem DB) e deixe em cada adapter só o SQL.
-
-**Drift verificado entre backends** (candidatos a bug real):
-
-| Callback | Postgres | SQLite |
-|---|---|---|
-| `index_document/4` metadata | encaminha todas as chaves | allowlist de 12 cláusulas descarta `skeleton_hash`/`indexed_at` → `needs_indexing?/2` re-embeda o arquivo a cada sync |
-| `upsert_pairing_state/4` | guarda `sender_id` cru | `to_string(sender_id)` → lookup por inteiro falha só no SQLite |
-| `save_message/3` | `{:ok, %Message{}}` | `{:ok, %{...,inserted_at: "iso-string"}}` |
-| `get_messages/1` erro | propaga | engole e devolve `[]` |
-| `touch_memory_access/1` | atualiza colunas | só dentro do JSON `data` |
-| `search_messages/2` | sem chave `:score` | `score: 0.5` |
-| `memory_report/1` | 3 agregados SQL | carrega todos os documentos em memória |
-| `search_documents_fts/3` | filtra em SQL | busca `limit*4` e filtra em Elixir |
-
-### 2.4 Modo duplo/triplo de config e auditoria
-
-- `doctor.ex:320-576` × `security_audit.ex:33-217` × `onboard.ex:310-362`: normalização de DM mode, checagem de token, load de config, `counts/1`, `status_from_counts/1`, `link_check/2`, `make_run_id/1` — cópias com strings diferentes. Os relatórios **divergem**: `doctor.ex:34` não inclui `"webhook"` entre os canais com token, `security_audit.ex:33` inclui.
-- `access_policy.ex:91` tem uma **terceira** normalização de DM mode.
-- `config.ex:432-481` reimplementa `detect_storage_backend/2` de `infra/sqlite.ex:259` (mesmas listas de alias, mesmo `first_non_empty`).
-
-### 2.5 Utilitários repetidos (cross-cutting)
-
-| Helper | Ocorrências |
+| Métrica | Valor observado |
 |---|---|
-| `normalize_session_id` | 6 (`memory.ex:222`, telegram/discord/whatsapp session, webhook) |
-| `normalize_text` (nil → `""`) | 9+ |
-| `via_tuple` de sessão | 6 adaptadores |
-| `truncate` (corta + `"..."`/`"…"`) | 4 (`tool_runner.ex:256,292`, `tool_call.ex:139`, `memory_recall.ex:598`) |
-| `content_to_text/1` | 2 com **semânticas diferentes** (`history.ex:151` × `memory_recall.ex:552`) |
-| `fetch_required_string/2` | 2 (`channel_actions.ex:254`, `file_system.ex:762`) |
-| `workspace_path` lookup | 3 (`media.ex:99`, `code_skeleton.ex:34`, `channel_actions.ex:103`) |
-| `first_line/1` | 2 (`github.ex:423`, `tool_result_summary.ex:211`) |
-| formatadores de erro HTTP | 3 (`github_error.ex`, `web_fetch_error.ex`, `git_inspect_error.ex`) |
-| `normalize_model_override/1` | 2 byte-a-byte (`executor/ctx.ex:190`, `session/preferences.ex`) |
+| Arquivos `*_test.exs` em `test/` | 323 |
+| Testes arquiteturais em `test/pincer/architecture/` | 26 |
+| Arquivos com `async: true` / `async: false` | 172 / 142 |
+| Arquivos com `Process.sleep` | 30 |
+| Arquivos com `Application.ensure_all_started(:pincer)` | 16 |
 
-Crie `Pincer.Utils.Text`, `Pincer.Adapters.Tools.Args` e `Pincer.Infra.Http`.
+Pontos de melhoria na suíte:
+- Reduzir gradualmente chamadas a `Process.sleep` (30 arquivos) substituindo por sincronização explícita via `receive`, monitores ou mensagens determinísticas.
+- Manter novos testes unitários isolados com `async: true` e sem boot completo da aplicação (`--no-start` / injeção de dependências), preservando o tempo rápido de `mix qa`.
 
 ---
 
-## 3. Violações de SRP (god modules)
+## 5. Verificado e descartado como falso positivo
 
-| Módulo | LOC | Responsabilidades observadas | Split sugerido |
-|---|---|---|---|
-| `pincer_telegram/.../telegram.ex` | 1898 | transporte, poller/offset, parse de update, comandos, callbacks/menu, DM/pairing, mídia + transcrição ffmpeg, formatação | `.Transport`, `.Poller`, `.Update`, `.Commands`, `.Menu`, `.Media`, `.Formatter` |
-| `adapters/tools/file_system.ex` | 1678 | confinamento de path, 16 ações, zip-slip, edit ancorado, hashline, trash, copy/move, render JSON, **3 walkers recursivos quase idênticos** | `.Walk`, `.Edit`, `.Archive`, `.Transfer` |
-| `storage/adapters/sqlite.ex` | 1644 | ver §2.3 | query-only + `MemoryScoring` |
-| `storage/adapters/postgres.ex` | 1330 | idem | idem |
-| `llm/client.ex` | 1295 | roteamento, auth profiles, retry engine (205 LOC, 12 args), failover ×2, stream→chat, cache ETS, transcrição, embeddings | `RetryEngine`, `Failover`, `ModelCache`, `Capabilities` |
-| `pincer_discord/.../discord.ex` | 1288 | transporte, consumer, slash commands, interações, anexos, chunking | `.Consumer`, `.Commands`, `.Interactions`, `.Attachments` |
-| `core/pairing.ex` | 910 | geração/hash de código, schema ETS, store DETS (abre/fecha por chamada), persistência SQL, notificação CLI/PubSub, criação de agente | `Pairing.Code`, `.Store`, `.Notifier` |
-| `core/project_orchestrator.ex` | 878 | wizard, driver FSM, git branch, render markdown/kanban, retry, dono da tabela ETS | `Project.Wizard`, `.Plan`, `.Renderer`, `.Store` |
-| `core/session/server.ex` | 863 | ciclo de vida GenServer, correlação de tasks, ingestão Blackboard, buffer/debounce de input, roteamento de comandos, PubSub, preferências, alignment, graph watcher | `Session.TaskCoordinator`, `.BlackboardIngestor`, `.InputBuffer`, `.CommandDispatcher` |
-| `core/config.ex` | 729 | load `.env`+YAML, allowlist, escrita de ~20 chaves em `Application`, detecção de backend, **write-back de YAML** | `Config.Loader`, `.Applier`, `.Writer` |
-| `core/llm/skills_sidecar_policy.ex` | 722 | na prática é um validador de argv do `docker run` (nome enganoso) | renomear → `Sandbox.DockerArgsPolicy` |
-| `mix/tasks/pincer.onboard.ex` | 673 | 16 flags, prompts interativos, mutação de config, escrita de `.env`, preflight, plano, re-run do Doctor, 3 renderers | `CLI.Onboard.Prompter`, `.EnvFile`, `Report` |
-| `core/doctor.ex` / `security_audit.ex` | 638 / 487 | ver §2.4 | `Doctor.Checks.*` + `Audit.Report` |
-| `core/onboard.ex` | 630 | plano/apply, preflight, SSH remoto com quoting, **serializador YAML manual**, deep merge | `Onboard.Plan/.Apply/.RemotePlan` + `YamlElixir` |
-| `core/memory_recall.ex` | 605 | monta bloco de prompt, sanitiza, consulta 4 backends, merge/rerank, lê `USER.md`, telemetria | `Recall.Fetcher`, `.Ranker`, `.Prompter` |
-| `core/executor.ex` | 557 | loop, fallback de provider, empty-response recovery, preparo de prompt, pós-processamento de mensagem, texto de fallback | `Executor.FallbackStrategy` (linhas 270-392) |
+- **Criação dinâmica de átomos a partir de entrada não confiável**: não ocorre em `packages/`; as chamadas restantes em `lib/` operam sobre listas configuradas ou usam `String.to_existing_atom/1` (por exemplo em `lib/pincer/adapters/tools/args.ex`).
+- **Uso de `Process.sleep` no loop principal do Executor**: `lib/pincer/core/executor.ex` não bloqueia com `Process.sleep`; o temporizador de ferramentas usa `Process.send_after/3` em `lib/pincer/adapters/tools/timer_server.ex`.
 
 ---
 
-## 4. Código morto / não-conectado (verificado por grep)
+## 6. Próximos passos priorizados
 
-Só testes os referenciam; nenhum chamador em `lib/` ou `packages/`:
-
-| Módulo | Nota |
-|---|---|
-| `core/llm/model_router.ex` | `route/2` sem chamadores apesar de `config.yaml` carregar `model_router`; usaria `Map.fetch!` num tier possivelmente ausente |
-| `core/rbac.ex` | `RBAC.authorize/2` nunca chamado; `AuditLog` afirma depender dele |
-| `core/release_validation.ex` | defaults sempre retornam `:error` |
-| `session/command_queue.ex` | `Session.Server` usa seu próprio `input_buffer`; o módulo é órfão |
-| `core/heartbeat/contract_engine.ex` | fora da árvore de supervisão |
-| `core/project_board.ex` | segundo renderer de kanban; o vivo é `project_orchestrator.board/2` |
-| `core/capabilities.ex` | catálogo morto; o vivo é `capability_discovery.ex` |
-| `core/sub_agent.ex` | o vivo é `orchestration/sub_agent.ex` |
-| `storage/port.ex` | contrato de 3 callbacks que ninguém implementa (adapters usam `Pincer.Ports.Storage`) |
-| `channels/matrix/{api,session_supervisor}.ex` | **`Pincer.Channels.Matrix.Session` não existe** — o `DynamicSupervisor` referencia módulo inexistente |
-
-Menores: `executor.ex:77` (`resolve_attachment_url/2`, `default_file_fetch/1` sem chamadores), `memory_recall.ex:101` (`explain/2` só em teste), `bindings.ex:27` (`conversation_ref/3` idêntico a `principal_ref/3`).
-
----
-
-## 5. Código não-idiomático
-
-**Rescue genérico escondendo bug** (77 `rescue` no total, 20 com `Exception.message`):
-- `tool_runner.ex:183` — `rescue e ->` devolve `:ok`, então tool que crasha **nunca** conta em `consecutive_errors`.
-- `workflow.ex:144,166,195,214,225,354` — 6 catch-alls convertem erro em string amigável; `load_tasks/1` transforma JSON corrompido em `[]` e sobrescreve o arquivo.
-- `pairing.ex:293,714,875,905`, `circuit_breaker.ex:224-257`, `prompt_assembly.ex:317-338` (`rescue _ -> ""`), `memory_recall.ex:316`, `kernel.ex:352`, `feishu.ex:146`, `discord.ex:1007`, `telegram.ex:1895`, `intelligence`. 
-- `executor.ex:231` — `rescue Protocol.UndefinedError` envolve o stream inteiro: qualquer erro de protocolo em normalização de tool call vira "payload inválido".
-
-**Recursão/lista quadrática** (`acc ++ [x]` em loop):
-- `file_system.ex:863,1005,1096,1327,1357,1411,1449`
-- `telegram.ex:539-582` (`current <> line`), `discord.ex:180-211` (`String.length`+`String.slice` por passo, O(n²) em 128 KB)
-- `plugins.ex:276` (7 sítios), `onboard.ex:648`, `failover_policy.ex:165`
-
-**GenServer que só existe para criar ETS** (`init` = `%{}`, todo o trabalho via `:ets` de qualquer processo, transições não serializadas): `circuit_breaker.ex:18-49`, `rate_limiter.ex:1-82`, `pairing.ex` (DETS abre/sincroniza/fecha **por chamada**).
-
-**`if`/`cond` que deveriam ser cláusulas com guard**:
-- `session/server.ex:576-603` (3 níveis + `handle_call/3` chamando `handle_call/3` de novo), `:644-670` (`if`→`if`→`if`)
-- `pairing.ex:130-178` (`case`→`cond`→`case`→`if`, 48 linhas), `project_orchestrator.ex:342-410` (68 linhas), `discord.ex:866-1000` (134 linhas de `case` sobre prefixo de callback)
-- `tool_parser.ex:97-121` (`cond` + `Map.has_key?` onde cabe pattern matching), `file_system.ex:200-233` (`infer_action/1` adivinha a ação e reinterpreta chamada malformada em silêncio)
-
-**Aridade cega:**
-- `llm/client.ex:440` `do_request_with_retry/12`
-- `executor.ex:171-252` `run_stream/8` (cinco argumentos correlatos soltos)
-- `maybe_handle_terminal_failure/13` ×2
-
-**Bang/raise em caminho que promete `{:error, _}`:** `attachments.ex:96` (`Base.decode64!`), `history.ex:222` (`:ok = File.mkdir_p`), `file_system.ex:573,1172,1569` (`File.mkdir_p`, `File.ls!`, `File.rm_rf`), `logger.ex:136`.
-
-**Fontes de verdade triplicadas:**
-- `core/ux.ex` — `@commands`, `@shortcut_routes` e `help_text/1` listam os mesmos 11 comandos (o help já omite `/think` e `/reasoning`).
-- `file_system.ex` — lista de 16 ações em `spec/0`, em `validate_action_path/3` e nas cláusulas de `perform_action`.
-- ANSI hardcoded: 17× em `pincer.server.ex`, 15× em `cli.ex`, mais um conjunto próprio em `logger_formatter.ex`.
-- `ProjectOrchestrator.phase` (5 valores) × `ProjectFSM` (6 fases) — dois state machines que podem divergir, e `transition_fsm/3` engole o erro com `Logger.debug`.
-- `config.yaml` com defaults de provider hardcoded também em `onboard.ex:484` (`"z_ai"`/`"glm-4.7"`) e `client.ex:344,367,411` (`"groq_whisper"`, `"openrouter"`, `"baai/bge-m3"`).
-
-**`write_yaml/2` (`config.ex:635-671`)** reconstroi o arquivo inteiro a partir de um heredoc que indexa 11 chaves fixas: `KeyError` se faltar alguma e **descarte silencioso** de `memory`, `tools`, `channels`, `sandbox`.
-
-**`String.halt` no CLI:** `cli.ex:68,85` dentro de Mix task salta supervisores e limpeza.
-
----
-
-## 6. Higiene de pacotes e config
-
-- **Manifests divergentes**: `priv/plugins/line/pincer_plugin.yaml` diz `secret_env.required: true`, o do pacote diz `false`; `slack` troca `token_env` por `app_token_env`/`bot_token_env`; `feishu`/`discord`/`dingtalk` divergem também. Uma cópia + check de `diff` no CI.
-- **`mix.exs` de pacotes inconsistentes**: `pincer_discord`/`pincer_slack` sem helpers `deps()`/`package()`, sem `maintainers`, com vírgula final suspeita (`discord/mix.exs:13`); versão/descrição/licença repetidas em 26 arquivos.
-- **Mocks de provedor**: 10 módulos delegam a `OpenAICompat` mudando só `base_url`, e `transcribe_audio`/`generate_embedding` `:not_implemented` aparecem **15×** e **11×** respeitivamente. Um macro/behaviour com defaults elimina a maior parte desses pacotes.
-
----
-
-## 7. Suíte de testes
-
-| Métrica | Valor |
-|---|---|
-| Arquivos `*_test.exs` | 250 |
-| `async: true` / `async: false` / sem declaração | 141 / 99 / 25 |
-| Sem `describe` | 143 (61%) |
-| Com ≤2 testes | 61 (23 com ≤1) |
-| `Application.ensure_all_started(:pincer)` sem tag | 24 arquivos (paga boot completo em `mix test`) |
-| `Process.sleep` | 78 chamadas em 31 arquivos (inclui `sleep(10_000)` hardcoded) |
-| Assertions em log | 20 em 7 arquivos |
-| Bloco `put_env(:llm_providers)` + `on_exit` duplicado | 41× em ~18 arquivos |
-
-Arquivos soltos na raiz de `test/`: `pincer_kimi_test.exs` (template `mix new`, `Pincer.hello() == :world`), `test_10_skills.exs` (script de `docker run`, 0 testes, roda no `mix test`), `test_filesystem_mcp.exs` (0 testes, `sleep(10_000)`), `storage_smoke_test.exs`, `security_audit_test.exs` (suíte real, só mal posicionada).
-
-Faltam helpers em `test/support/`: `LLMHelpers.put_providers!/1`, `StorageHelpers.checkout!/0`.
-
----
-
-## 8. O que foi verificado e **não** é problema
-
-Evitar refatorações baseadas nestes supostos achados:
-
-- **Embedding não persistido no Postgres** — falso: `lib/pincer/storage/graph/node.ex:134` já faz `cast(..., [:type, :data, :embedding, ...])`.
-- **Score semântico invertido entre Postgres e SQLite** — falso: `postgres.ex:399` usa `1.0 - distance`, equivalente à similaridade do SQLite.
-- **Criação de átomos a partir de input não confiável** — não existe: `String.to_atom` aparece em 22 sítios, todos sobre constantes ou com `to_existing_atom`/`Module.safe_concat`; `packages/` não tem nenhum.
-- **`System.halt` em Mix tasks** — não há; só em `lib/pincer/cli.ex`.
-- **`Process.sleep` em código de produção de `lib/pincer/core`** — não há (só em tasks e testes).
-
----
-
-## 9. Ordem de ataque sugerida
-
-1. **Segurança** (§1.1–1.3): revalidar comando aprovado, eliminar o segundo motor de política, gatear o transporte `:os`. Depois 1.4/1.5/1.6.
-2. **Correções baratas de alto valor**: remover/consertar `Matrix.Session`, `model_router`, `write_yaml/2`, os 8 módulos mortos, os arquivos soltos de `test/`.
-3. **Unificar auditoria de config** (§2.4) — elimina ~250 LOC e a divergência de relatórios.
-4. **`pincer_shared`** (§2.1) — o maior ganho único de duplicação.
-5. **Storage** (§2.3) — extrair helpers puros e alinhar o drift entre backends.
-6. **SRP dos god modules** (§3) — começar por `Session.Server`, `Executor` e `LLM.Client`, que já têm seams naturais (policies, `Ctx`, `Attempt`).
-7. **Higiene** (§6) e **suíte** (§7) — incrementais, sem bloquear o resto.
+1. **Quebrar os maiores módulos SRP** (§2): iniciar por `lib/pincer/adapters/storage/sqlite.ex`, `lib/pincer/adapters/tools/file_system.ex`, `packages/pincer_telegram/lib/pincer/channels/telegram.ex` e `lib/pincer/core/session/server.ex`.
+2. **Enxugar `lib/pincer/config.ex` e `lib/pincer/core/executor.ex`** (§2): separar carregamento/aplicação/escrita YAML em `Config` e mover o stream runner do `Executor` usando `Ctx`.
+3. **Alinhar `lib/pincer/core/ux.ex` e estreitar `rescue` em `tool_runner.ex`** (§3.1): gerar `help_text/1` a partir de `@commands` e contabilizar exceções de ferramentas como erro de execução.
+4. **Higiene de pacotes e testes** (§3.2, §4): garantir paridade entre `priv/plugins/` e `packages/`, reduzir stubs `:not_implemented` e substituir `Process.sleep` nos testes restantes.
