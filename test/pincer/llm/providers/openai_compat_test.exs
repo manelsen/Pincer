@@ -144,7 +144,21 @@ defmodule Pincer.LLM.Providers.OpenAICompatTest do
                "<thinking>\nVou responder em portugues.\n</thinking>\n\n"
     end
 
-    test "logs raw provider payload before normalization" do
+    test "logs raw provider payload before normalization when opted in" do
+      original_flag = Application.get_env(:pincer, :log_raw_llm_payloads, :__unset__)
+      original_level = Logger.level()
+      Application.put_env(:pincer, :log_raw_llm_payloads, true)
+      Logger.configure(level: :debug)
+
+      on_exit(fn ->
+        Logger.configure(level: original_level)
+
+        case original_flag do
+          :__unset__ -> Application.delete_env(:pincer, :log_raw_llm_payloads)
+          val -> Application.put_env(:pincer, :log_raw_llm_payloads, val)
+        end
+      end)
+
       response = %Response{
         status: 200,
         body: %{"choices" => [%{"message" => %{"content" => "oi"}}]}

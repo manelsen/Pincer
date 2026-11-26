@@ -86,12 +86,19 @@ defmodule Pincer.Adapters.NativeToolRegistry do
 
     cond do
       native_match ->
-        Logger.info("[TOOL] Executing native: #{name} with args: #{inspect(args)}")
+        started_at_ms = System.monotonic_time(:millisecond)
+        Logger.info("[TOOL] Executing native: #{name} #{format_arg_metadata(args)}")
         result = execute_native(native_match, name, args, context)
+        duration_ms = elapsed_ms(started_at_ms)
 
         case result do
-          {:ok, _} -> Logger.info("[TOOL] SUCCESS: #{name}")
-          {:error, reason} -> Logger.error("[TOOL] ERROR: #{name} -> #{inspect(reason)}")
+          {:ok, _} ->
+            Logger.info("[TOOL] SUCCESS: #{name} duration_ms=#{duration_ms}")
+
+          {:error, reason} ->
+            Logger.error(
+              "[TOOL] ERROR: #{name} duration_ms=#{duration_ms} -> #{inspect(reason, limit: 20, printable_limit: 256)}"
+            )
         end
 
         result
@@ -102,23 +109,54 @@ defmodule Pincer.Adapters.NativeToolRegistry do
         {:error, "Tool #{name} is blocked for direct MCP execution; use safe_shell."}
 
       true ->
-        Logger.info("[TOOL] Executing MCP: #{name} with args: #{inspect(args)}")
+        started_at_ms = System.monotonic_time(:millisecond)
+        Logger.info("[TOOL] Executing MCP: #{name} #{format_arg_metadata(args)}")
 
         case mcp_manager().execute_tool(name, args) do
           {:ok, c} ->
-            Logger.info("[TOOL] SUCCESS: #{name}")
+            Logger.info("[TOOL] SUCCESS: #{name} duration_ms=#{elapsed_ms(started_at_ms)}")
             {:ok, c}
 
           {:error, :tool_not_found} ->
-            Logger.error("[TOOL] NOT FOUND: #{name}")
+            Logger.error("[TOOL] NOT FOUND: #{name} duration_ms=#{elapsed_ms(started_at_ms)}")
             {:error, "Tool #{name} not found."}
 
           {:error, r} ->
-            Logger.error("[TOOL] ERROR: #{name} -> #{inspect(r)}")
+            Logger.error(
+              "[TOOL] ERROR: #{name} duration_ms=#{elapsed_ms(started_at_ms)} -> #{inspect(r, limit: 20, printable_limit: 256)}"
+            )
+
             {:error, "Error: #{inspect(r)}"}
         end
     end
   end
+
+  defp elapsed_ms(started_at_ms),
+    do: max(System.monotonic_time(:millisecond) - started_at_ms, 0)
+
+  defp format_arg_metadata(args) when is_map(args) do
+    keys =
+      args
+      |> Map.keys()
+      |> Enum.map(&to_string/1)
+      |> Enum.reject(&(&1 == "tool_name"))
+      |> Enum.sort()
+      |> Enum.join(",")
+
+    action = Map.get(args, "action") || Map.get(args, :action)
+
+    action_prefix =
+      if is_binary(action) and byte_size(action) <= 64 and
+           Regex.match?(~r/^[a-zA-Z0-9_.:-]+$/, action) do
+        "action=#{action} "
+      else
+        ""
+      end
+
+    "#{action_prefix}keys=[#{keys}]"
+  end
+
+  defp format_arg_metadata(_args), do: "keys=[]"
 
   defp execute_native(module, name, args, context) do
     # In native tools, we often inject the tool_name into args for convenience
