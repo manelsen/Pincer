@@ -253,6 +253,82 @@ defmodule Pincer.Core.ProjectOrchestratorTest do
     end
   end
 
+  describe "unified ProjectFSM authoritative state & SRP split" do
+    defmodule FailingFSMStorage do
+      @moduledoc false
+      def save_checkpoint(_session_id, _checkpoint), do: {:error, :checkpoint_unavailable}
+    end
+
+    test "derives phase from fsm_state without storing a separate phase field" do
+      session_id = unique_session_id()
+      on_exit(fn -> ProjectOrchestrator.reset(session_id) end)
+
+      assert ProjectOrchestrator.phase(session_id) == :unknown
+      _ = ProjectOrchestrator.start(session_id)
+      assert ProjectOrchestrator.phase(session_id) == :await_objective
+
+      [{^session_id, raw_state}] = :ets.lookup(ProjectOrchestrator, session_id)
+      refute Map.has_key?(raw_state, :phase)
+      assert raw_state.fsm_state.phase == :objective
+
+      {:handled, _} = ProjectOrchestrator.continue(session_id, "Objetivo unico")
+      assert ProjectOrchestrator.phase(session_id) == :await_kind
+      [{^session_id, s1}] = :ets.lookup(ProjectOrchestrator, session_id)
+      assert s1.fsm_state.phase == :scope
+
+      {:handled, _} = ProjectOrchestrator.continue(session_id, "software")
+      assert ProjectOrchestrator.phase(session_id) == :await_scope
+
+      {:handled, _} = ProjectOrchestrator.continue(session_id, "Core")
+      assert ProjectOrchestrator.phase(session_id) == :await_success
+      [{^session_id, s3}] = :ets.lookup(ProjectOrchestrator, session_id)
+      assert s3.fsm_state.phase == :plan
+
+      {:handled, _} = ProjectOrchestrator.continue(session_id, "Testes verdes")
+      assert ProjectOrchestrator.phase(session_id) == :ready
+      [{^session_id, s4}] = :ets.lookup(ProjectOrchestrator, session_id)
+      refute Map.has_key?(s4, :phase)
+      assert s4.fsm_state.phase == :plan
+
+      assert {:ok, _} = ProjectOrchestrator.kickoff(session_id)
+      [{^session_id, s5}] = :ets.lookup(ProjectOrchestrator, session_id)
+      assert s5.fsm_state.phase == :execution
+    end
+
+    test "does not drift phase ahead of fsm_state when FSM checkpoint fails" do
+      session_id = unique_session_id()
+      previous_storage = Application.get_env(:pincer, :project_fsm_storage)
+      Application.put_env(:pincer, :project_fsm_storage, FailingFSMStorage)
+
+      on_exit(fn ->
+        case previous_storage do
+          nil -> Application.delete_env(:pincer, :project_fsm_storage)
+          mod -> Application.put_env(:pincer, :project_fsm_storage, mod)
+        end
+
+        ProjectOrchestrator.reset(session_id)
+      end)
+
+      _ = ProjectOrchestrator.start(session_id)
+      assert ProjectOrchestrator.phase(session_id) == :await_objective
+
+      {:handled, _} = ProjectOrchestrator.continue(session_id, "Objetivo bloqueado")
+      assert ProjectOrchestrator.phase(session_id) == :await_objective
+      [{^session_id, raw_state}] = :ets.lookup(ProjectOrchestrator, session_id)
+      assert raw_state.fsm_state.phase == :objective
+    end
+
+    test "project_orchestrator.ex remains a focused coordinator under 350 LOC" do
+      lines =
+        "lib/pincer/core/project_orchestrator.ex"
+        |> File.read!()
+        |> String.split("\n")
+        |> length()
+
+      assert lines < 350
+    end
+  end
+
   defp unique_session_id do
     "project_orch_#{System.unique_integer([:positive])}"
   end

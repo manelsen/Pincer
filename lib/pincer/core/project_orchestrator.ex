@@ -1,32 +1,28 @@
 defmodule Pincer.Core.ProjectOrchestrator do
   @moduledoc """
-  Session-scoped project orchestration flow used by `/project` and `/kanban`.
+  Session-scoped project orchestration coordinator used by `/project` and `/kanban`.
 
-  This module keeps lightweight per-session project state in ETS and exposes
-  a deterministic API for collection, board rendering, and execution recovery.
+  Delegates wizard prompts/steps to `Pincer.Core.Project.Wizard`, plan & task
+  transitions to `Pincer.Core.Project.Plan`, board/markdown rendering to
+  `Pincer.Core.Project.Renderer`, and ETS + durable persistence to
+  `Pincer.Core.Project.Store`, while driving all lifecycle transitions through
+  the single authoritative `Pincer.Core.ProjectFSM`.
   """
+
   require Logger
-  alias Pincer.Core.Project.Store
+
+  alias Pincer.Core.Project.{Plan, Renderer, Store, Wizard}
   alias Pincer.Core.ProjectFSM
-  alias Pincer.Ports.Git
-  alias Pincer.Utils.ETSHelper
 
-  @table __MODULE__
-  @store_kind "orchestrator"
-  @default_max_items 6
-  @default_retry_limit 0
-
-  @type phase :: :await_objective | :await_kind | :await_scope | :await_success | :ready
-  @type project_kind :: :software | :non_software
-  @type item_status :: :pending | :in_progress | :done
-
-  @type item :: %{status: item_status(), text: String.t()}
+  @type phase :: Wizard.wizard_phase()
+  @type project_kind :: Wizard.project_kind()
+  @type item_status :: Plan.item_status()
+  @type item :: Plan.item()
 
   @type state :: %{
           session_id: String.t(),
           project_id: String.t(),
-          phase: phase(),
-          fsm_state: Pincer.Core.ProjectFSM.state(),
+          fsm_state: ProjectFSM.state(),
           objective: String.t() | nil,
           kind: project_kind() | nil,
           scope: String.t() | nil,
@@ -38,6 +34,11 @@ defmodule Pincer.Core.ProjectOrchestrator do
           git_branch_status: :created | :existing | {:error, any()} | nil
         }
 
+  defmodule NoopFSMStorage do
+    @moduledoc false
+    def save_checkpoint(_session_id, _checkpoint), do: :ok
+  end
+
   @doc """
   Starts (or resumes) the project wizard for a session.
 
@@ -45,21 +46,18 @@ defmodule Pincer.Core.ProjectOrchestrator do
   """
   @spec start(String.t(), String.t() | nil) :: String.t()
   def start(session_id, seed_input \\ nil) when is_binary(session_id) do
-    ensure_table()
+    Store.ensure_orchestrator_table()
 
-    case normalize_text(seed_input) do
+    case Wizard.normalize_text(seed_input) do
       "reset" ->
         reset(session_id)
-        prompt_for_phase(new_state(session_id))
+        session_id |> get_or_create_state() |> Wizard.prompt()
+
+      seed when seed in [nil, ""] ->
+        session_id |> get_or_create_state() |> Wizard.prompt()
 
       seed ->
-        state = get_or_create_state(session_id)
-
-        if seed in [nil, ""] do
-          prompt_for_phase(state)
-        else
-          advance(state, seed)
-        end
+        session_id |> get_or_create_state() |> advance(seed)
     end
   end
 
@@ -70,267 +68,154 @@ defmodule Pincer.Core.ProjectOrchestrator do
   """
   @spec continue(String.t(), String.t()) :: {:handled, String.t()} | :not_active
   def continue(session_id, user_message) when is_binary(session_id) and is_binary(user_message) do
-    ensure_table()
-
-    case get_state(session_id) do
-      %{phase: phase} = state
-      when phase in [:await_objective, :await_kind, :await_scope, :await_success] ->
-        {:handled, advance(state, user_message)}
-
-      _ ->
+    case Store.get_orchestrator_state(session_id) do
+      nil ->
         :not_active
+
+      state ->
+        if Wizard.collecting?(state),
+          do: {:handled, advance(state, user_message)},
+          else: :not_active
     end
   end
 
-  @doc """
-  Returns `true` when the project wizard is currently collecting information.
-  """
+  @doc "Returns `true` when the project wizard is currently collecting information."
   @spec collecting?(String.t()) :: boolean()
   def collecting?(session_id) when is_binary(session_id) do
-    ensure_table()
-
-    case get_state(session_id) do
-      %{phase: phase}
-      when phase in [:await_objective, :await_kind, :await_scope, :await_success] ->
-        true
-
-      _ ->
-        false
+    case Store.get_orchestrator_state(session_id) do
+      nil -> false
+      state -> Wizard.collecting?(state)
     end
   end
 
-  @doc """
-  Returns current collection/plan phase for UI integrations.
-  """
+  @doc "Returns current collection/plan phase derived from `fsm_state`."
   @spec phase(String.t()) :: phase() | :unknown
   def phase(session_id) when is_binary(session_id) do
-    ensure_table()
-
-    case get_state(session_id) do
-      %{phase: value} -> value
+    case Store.get_orchestrator_state(session_id) do
+      %{fsm_state: fsm_state} -> ProjectFSM.wizard_phase(fsm_state)
       _ -> :unknown
     end
   end
 
-  @doc """
-  Renders a kanban board from the session project state when available.
-  """
+  @doc "Renders a kanban board from the session project state when available."
   @spec board(String.t(), keyword()) :: {:ok, String.t()} | :not_found
-  def board(session_id, opts \\ []) when is_binary(session_id) do
-    ensure_table()
-    max_items = opts |> Keyword.get(:max_items, @default_max_items) |> normalize_max_items()
-
-    case get_state(session_id) do
-      %{phase: :ready} = state ->
-        {:ok, render_board(state, max_items)}
+  def board(session_id, opts \\ []) when is_binary(session_id) and is_list(opts) do
+    case Store.get_orchestrator_state(session_id) do
+      %{fsm_state: fsm_state} = state ->
+        if ProjectFSM.wizard_phase(fsm_state) == :ready,
+          do: {:ok, Renderer.render_board(state, opts)},
+          else: :not_found
 
       _ ->
         :not_found
     end
   end
 
-  @doc """
-  Starts (or resumes) project task execution for the current session plan.
-  """
+  @doc "Starts (or resumes) project task execution for the current session plan."
   @spec kickoff(String.t()) :: :not_ready | :already_started | :completed | {:ok, map()}
   def kickoff(session_id) when is_binary(session_id) do
-    ensure_table()
-
-    case get_state(session_id) do
-      %{phase: :ready} = state ->
-        cond do
-          Enum.any?(state.items, &(&1.status == :in_progress)) ->
-            :already_started
-
-          Enum.any?(state.items, &(&1.status == :pending)) ->
-            {state, task} = mark_first_pending_in_progress(state)
-            put_state(%{state | retry_count: 0})
-
-            {:ok,
-             %{
-               task: task,
-               prompt: build_task_prompt(state, task),
-               status_message: "Project Runner: Task started",
-               phase: state.fsm_state.phase,
-               project_id: state.project_id
-             }}
-
-          true ->
-            :completed
-        end
-
-      _ ->
-        :not_ready
+    with %{} = state <- Store.get_orchestrator_state(session_id),
+         {:ok, fsm_ready_state} <- ensure_execution_fsm(state),
+         {:started, next_state, task} <- Plan.start_next_task(fsm_ready_state) do
+      Store.put_orchestrator_state(next_state)
+      {:ok, Renderer.task_progress(:started, next_state, %{task: task})}
+    else
+      nil -> :not_ready
+      {:error, _reason} -> :not_ready
+      other -> other
     end
   end
 
-  @doc """
-  Marks execution progress after a successful agent response.
-  """
+  @doc "Marks execution progress after a successful agent response."
   @spec on_agent_response(String.t()) :: :noop | {:next, map()} | {:completed, map()}
   def on_agent_response(session_id) when is_binary(session_id) do
-    ensure_table()
+    with %{} = state <- Store.get_orchestrator_state(session_id) do
+      case Plan.complete_current_task(state) do
+        {:next, next_state, completed_task, next_task} ->
+          Store.put_orchestrator_state(next_state)
 
-    case get_state(session_id) do
-      %{phase: :ready} = state ->
-        case complete_in_progress_item(state) do
-          {:ok, updated, completed_task} ->
-            if Enum.any?(updated.items, &(&1.status == :pending)) do
-              {next_state, next_task} = mark_first_pending_in_progress(updated)
-              put_state(%{next_state | retry_count: 0})
+          {:next,
+           Renderer.task_progress(:next, next_state, %{completed: completed_task, task: next_task})}
 
-              {:next,
-               %{
-                 completed: completed_task,
-                 task: next_task,
-                 prompt: build_task_prompt(next_state, next_task),
-                 status_message: "Project Runner: Next task started",
-                 phase: next_state.fsm_state.phase,
-                 project_id: next_state.project_id
-               }}
-            else
-              completed_state =
-                updated
-                |> transition_fsm(:review, %{
-                  execution: %{completed_task: completed_task, retries: updated.retry_count}
-                })
-                |> transition_fsm(:delivery, %{
-                  review: %{approved: true, completed_task: completed_task}
-                })
-                |> Map.put(:retry_count, 0)
+        {:all_done, finished_state, completed_task} ->
+          complete_fsm_delivery(finished_state, completed_task)
 
-              put_state(completed_state)
-
-              {:completed,
-               %{
-                 completed: completed_task,
-                 status_message: "Project Runner: All tasks completed",
-                 phase: completed_state.fsm_state.phase,
-                 project_id: completed_state.project_id
-               }}
-            end
-
-          :noop ->
-            :noop
-        end
-
-      _ ->
-        :noop
+        :noop ->
+          :noop
+      end
+    else
+      nil -> :noop
     end
   end
 
-  @doc """
-  Applies retry policy when an agent task fails.
-  """
+  @doc "Applies retry policy when an agent task fails."
   @spec on_agent_error(String.t()) :: :noop | {:retry, map()} | {:paused, map()}
   def on_agent_error(session_id) when is_binary(session_id) do
-    ensure_table()
+    with %{} = state <- Store.get_orchestrator_state(session_id) do
+      case Plan.fail_current_task(state) do
+        {:retry, updated, task, next_retry} ->
+          Store.put_orchestrator_state(updated)
+          {:retry, Renderer.task_progress(:retry, updated, %{task: task, attempt: next_retry})}
 
-    case get_state(session_id) do
-      %{phase: :ready} = state ->
-        case current_in_progress_task(state.items) do
-          nil ->
-            :noop
+        {:paused, paused, task} ->
+          Store.put_orchestrator_state(paused)
+          {:paused, Renderer.task_progress(:paused, paused, %{task: task})}
 
-          task ->
-            if state.retry_count < state.retry_limit do
-              next_retry = state.retry_count + 1
-              updated = %{state | retry_count: next_retry}
-              put_state(updated)
-
-              {:retry,
-               %{
-                 task: task,
-                 prompt: build_task_prompt(state, task),
-                 status_message:
-                   "Project Runner: Task retrying (#{next_retry}/#{state.retry_limit})",
-                 phase: state.fsm_state.phase,
-                 project_id: state.project_id
-               }}
-            else
-              paused = pause_in_progress_item(state)
-              put_state(%{paused | retry_count: state.retry_limit})
-
-              {:paused,
-               %{
-                 task: task,
-                 status_message:
-                   "Project Runner: Task paused after #{state.retry_limit} retries. Use /project para retomar.",
-                 phase: state.fsm_state.phase,
-                 project_id: state.project_id
-               }}
-            end
-        end
-
-      _ ->
-        :noop
+        :noop ->
+          :noop
+      end
+    else
+      nil -> :noop
     end
   end
 
-  @doc """
-  Clears project orchestration state for a single session.
-  """
+  @doc "Clears project orchestration state for a single session."
   @spec reset(String.t()) :: :ok
-  def reset(session_id) when is_binary(session_id) do
-    ensure_table()
-    :ets.delete(@table, session_id)
-    _ = Store.delete(build_project_id(session_id))
-    :ok
-  end
+  def reset(session_id) when is_binary(session_id),
+    do: Store.delete_orchestrator_state(session_id)
 
   @doc false
   @spec reset_all() :: :ok
-  def reset_all do
-    ensure_table()
-    :ets.delete_all_objects(@table)
-    _ = Store.delete_kind(@store_kind)
-    :ok
-  end
+  def reset_all, do: Store.reset_orchestrator_states()
 
   @doc false
   @spec list_projects(String.t()) :: [{String.t(), map()}]
   def list_projects(session_id) when is_binary(session_id) do
-    ensure_table()
-
-    case get_state(session_id) do
+    case Store.get_orchestrator_state(session_id) do
       nil -> []
-      state -> [{session_id, %{session_id: session_id, status: map_phase_to_status(state)}}]
+      state -> [{session_id, %{session_id: session_id, status: Store.orchestrator_status(state)}}]
     end
   end
 
-  defp map_phase_to_status(%{phase: :ready, items: items}) do
-    cond do
-      Enum.any?(items, &(&1.status == :in_progress)) -> :running
-      Enum.all?(items, &(&1.status == :done)) and items != [] -> :completed
-      true -> :pending_approval
+  defp complete_fsm_delivery(finished_state, completed_task) do
+    exec_attrs = %{
+      execution: %{completed_task: completed_task, retries: finished_state.retry_count}
+    }
+
+    review_attrs = %{review: %{approved: true, completed_task: completed_task}}
+
+    with {:ok, review_state} <- transition_fsm(finished_state, :review, exec_attrs),
+         {:ok, completed_state} <- transition_fsm(review_state, :delivery, review_attrs) do
+      Store.put_orchestrator_state(completed_state)
+
+      {:completed,
+       Renderer.task_progress(:completed, completed_state, %{completed: completed_task})}
+    else
+      {:error, _reason} -> :noop
     end
   end
-
-  defp map_phase_to_status(%{phase: phase})
-       when phase in [:await_objective, :await_kind, :await_scope, :await_success],
-       do: :collecting
-
-  defp map_phase_to_status(_), do: :unknown
 
   defp get_or_create_state(session_id) do
-    case get_state(session_id) do
-      nil ->
-        state = new_state(session_id)
-        put_state(state)
-        state
-
-      state ->
-        state
-    end
+    Store.get_orchestrator_state(session_id) ||
+      session_id |> new_state() |> Store.put_orchestrator_state()
   end
 
   defp new_state(session_id) do
-    project_id = build_project_id(session_id)
+    project_id = Store.build_project_id(session_id)
 
     %{
       session_id: session_id,
       project_id: project_id,
-      phase: :await_objective,
       fsm_state: ProjectFSM.new(project_id, session_id),
       objective: nil,
       kind: nil,
@@ -338,606 +223,65 @@ defmodule Pincer.Core.ProjectOrchestrator do
       success_criteria: nil,
       items: [],
       retry_count: 0,
-      retry_limit: retry_limit(),
+      retry_limit: Plan.retry_limit(),
       git_branch: nil,
       git_branch_status: nil
     }
   end
 
   defp advance(state, input) do
-    message = normalize_text(input)
+    case Wizard.step(state, input) do
+      {:transition, to_phase, attrs, prompt} ->
+        apply_step(transition_fsm(state, to_phase, attrs), state, attrs, prompt)
 
-    case state.phase do
-      :await_objective ->
-        objective = fallback_text(message, "Projeto sem objetivo definido")
-
-        next_state =
-          state
-          |> Map.put(:phase, :await_kind)
-          |> Map.put(:objective, objective)
-          |> transition_fsm(:scope, %{objective: objective})
-
-        put_state(next_state)
-
-        """
-        📌 **Project Manager**
-        Objetivo registrado: #{objective}
-
-        Qual e o tipo do projeto?
-        - `software`
-        - `nao-software`
-        """
-        |> String.trim()
-
-      :await_kind ->
-        case parse_kind(message) do
-          {:ok, kind} ->
-            next_state = %{state | phase: :await_scope, kind: kind}
-            put_state(next_state)
-            build_scope_prompt(kind)
-
-          :error ->
-            """
-            Preciso classificar o projeto para montar o fluxo correto.
-            Responda com `software` ou `nao-software`.
-            """
-            |> String.trim()
+      {:set_kind, kind, prompt} ->
+        with {:ok, next_fsm} <- ProjectFSM.set_kind(state.fsm_state, kind) do
+          %{state | fsm_state: next_fsm, kind: kind} |> Store.put_orchestrator_state()
+          prompt
+        else
+          {:error, _reason} -> Wizard.prompt(state)
         end
 
-      :await_scope ->
-        scope = fallback_text(message, "Sem escopo declarado")
+      {:finalize_plan, success_criteria} ->
+        {prepared, plan_payload} = Plan.prepare(state, success_criteria)
 
-        next_state =
-          state
-          |> Map.put(:phase, :await_success)
-          |> Map.put(:scope, scope)
-          |> transition_fsm(:plan, %{scope: scope})
+        with {:ok, next_fsm} <-
+               ProjectFSM.attach_plan(prepared.fsm_state, success_criteria, plan_payload) do
+          ready_state = %{prepared | fsm_state: next_fsm}
+          Store.put_orchestrator_state(ready_state)
+          Renderer.render_ready_message(ready_state)
+        else
+          {:error, _reason} -> Wizard.prompt(state)
+        end
 
-        put_state(next_state)
-        build_success_prompt(state.kind)
-
-      :await_success ->
-        success_criteria = fallback_text(message, "Sem criterio de sucesso declarado")
-
-        ready_state =
-          state
-          |> Map.put(:success_criteria, success_criteria)
-          |> Map.put(:phase, :ready)
-          |> finalize_state()
-          |> transition_fsm(:execution, %{plan: %{kind: state.kind, items: state.items}})
-
-        put_state(ready_state)
-        render_ready_message(ready_state)
-
-      :ready ->
-        render_ready_message(state)
+      {:noop, _state, prompt} ->
+        prompt
     end
   end
 
-  defp finalize_state(state) do
-    state
-    |> Map.put(:items, build_items(state))
-    |> ensure_project_branch()
-    |> Map.put(:retry_count, 0)
-    |> Map.put(:retry_limit, retry_limit())
+  defp apply_step({:ok, next_state}, _prev, attrs, prompt) do
+    next_state |> Map.merge(attrs) |> Store.put_orchestrator_state()
+    prompt
   end
 
-  defp build_items(%{kind: :software, objective: objective, scope: scope}) do
-    [
-      pending("Architect: definir linguagem ubiqua e limites de dominio para '#{objective}'"),
-      pending("Architect: consolidar contrato inicial no SPECS.md com escopo '#{scope}'"),
-      pending("Coder: Red - escrever teste que falha para o primeiro incremento"),
-      pending("Coder: Green - implementar o minimo para o teste passar"),
-      pending("Coder: Refactor - simplificar mantendo testes verdes"),
-      pending("Reviewer: validar cobertura (caminho feliz + erro) e criterio de aceite")
-    ]
-  end
+  defp apply_step({:error, _reason}, prev, _attrs, _prompt), do: Wizard.prompt(prev)
 
-  defp build_items(%{kind: :non_software, objective: objective, scope: scope}) do
-    [
-      pending("Architect: definir criterio objetivo para '#{objective}'"),
-      pending("Coder: pesquisar opcoes reais dentro do escopo '#{scope}'"),
-      pending("Coder: comparar custo-beneficio, disponibilidade e riscos"),
-      pending("Reviewer: validar fonte e data de cada evidencia"),
-      pending("Reviewer: propor recomendacao final com trade-offs")
-    ]
-  end
+  defp ensure_execution_fsm(%{fsm_state: %{phase: :plan, plan: plan}} = state)
+       when is_map(plan) and map_size(plan) > 0,
+       do: transition_fsm(state, :execution, %{plan: plan})
 
-  defp build_items(_state), do: []
-
-  defp pending(text), do: %{status: :pending, text: text}
-
-  defp render_ready_message(state) do
-    coder_preview =
-      state.items
-      |> Enum.take(3)
-      |> Enum.map_join("\n", fn item -> "- #{item.text}" end)
-
-    reviewer_line =
-      case state.kind do
-        :software ->
-          "Reviewer: aprovar somente com DDD/TDD explicito, testes verdes e contrato consistente."
-
-        :non_software ->
-          "Reviewer: aprovar somente com evidencias verificaveis e recomendacao comparativa clara."
-
-        _ ->
-          "Reviewer: validar coerencia do plano antes de execucao."
-      end
-
-    flow_line =
-      case state.kind do
-        :software -> "Flow: Architect -> Coder -> Reviewer (DDD/TDD ativo)"
-        :non_software -> "Flow: Architect -> Coder -> Reviewer (Research/Validation)"
-        _ -> "Flow: Architect -> Coder -> Reviewer"
-      end
-
-    """
-    ✅ **Project plan initialized**
-    Objective: #{state.objective}
-    Type: #{kind_label(state.kind)}
-    Scope: #{state.scope}
-    Success: #{state.success_criteria}
-
-    **Architect**
-    - Escopo e contrato inicial definidos para execucao.
-
-    **Coder**
-    #{coder_preview}
-
-    **Reviewer**
-    - #{reviewer_line}
-
-    #{git_summary(state)}
-
-    #{flow_line}
-    Use `/kanban` para visualizar o board desta sessao.
-    """
-    |> String.trim()
-  end
-
-  defp render_board(state, max_items) do
-    done = Enum.filter(state.items, &(&1.status == :done))
-    in_progress = Enum.filter(state.items, &(&1.status == :in_progress))
-    pending = Enum.filter(state.items, &(&1.status == :pending))
-
-    flow =
-      case state.kind do
-        :software ->
-          "Flow DDD/TDD\nSpec -> Contract -> Red -> Green -> Refactor -> Review -> Done"
-
-        :non_software ->
-          "Flow Research/Validation\nBrief -> Research -> Compare -> Validate -> Decide"
-
-        _ ->
-          "Flow\nArchitect -> Coder -> Reviewer"
-      end
-
-    [
-      "Kanban Board",
-      "Project: #{state.objective}",
-      "Done: #{length(done)} | In Progress: #{length(in_progress)} | Pending: #{length(pending)}",
-      "",
-      "In Progress",
-      format_items(in_progress, max_items),
-      "",
-      "Pending (Top #{max_items})",
-      format_items(pending, max_items),
-      "",
-      "Done (Recent #{max_items})",
-      format_items(Enum.reverse(done), max_items),
-      "",
-      flow
-    ]
-    |> Enum.join("\n")
-    |> String.trim()
-  end
-
-  defp format_items(items, max_items) do
-    items
-    |> Enum.take(max_items)
-    |> case do
-      [] ->
-        "- (none)"
-
-      selected ->
-        selected
-        |> Enum.map_join("\n", fn item -> "- #{item.text}" end)
-    end
-  end
-
-  defp build_scope_prompt(:software) do
-    """
-    Descreva o contexto e escopo funcional.
-    Exemplo: canais afetados, modulo alvo, restricoes de arquitetura.
-    """
-    |> String.trim()
-  end
-
-  defp build_scope_prompt(:non_software) do
-    """
-    Descreva o contexto e escopo da pesquisa.
-    Exemplo: cidade, faixa de preco, marcas preferidas, restricoes.
-    """
-    |> String.trim()
-  end
-
-  defp build_scope_prompt(_kind), do: "Descreva o contexto e escopo do projeto."
-
-  defp build_success_prompt(:software) do
-    """
-    Qual e o criterio de sucesso?
-    Exemplo: testes passando, endpoint entregue, comportamento validado em canal.
-    """
-    |> String.trim()
-  end
-
-  defp build_success_prompt(:non_software) do
-    """
-    Qual e o criterio de sucesso?
-    Exemplo: ranking final com evidencias e recomendacao de compra objetiva.
-    """
-    |> String.trim()
-  end
-
-  defp build_success_prompt(_kind), do: "Qual e o criterio de sucesso deste projeto?"
-
-  defp prompt_for_phase(%{phase: :await_objective}) do
-    """
-    📌 **Project Manager**
-    Vamos estruturar seu projeto com fluxo multi-agente (`Architect`, `Coder`, `Reviewer`).
-
-    Qual e o objetivo principal?
-    """
-    |> String.trim()
-  end
-
-  defp prompt_for_phase(%{phase: :await_kind, objective: objective}) do
-    """
-    📌 **Project Manager**
-    Objetivo atual: #{objective}
-
-    Qual e o tipo do projeto?
-    - `software`
-    - `nao-software`
-    """
-    |> String.trim()
-  end
-
-  defp prompt_for_phase(%{phase: :await_scope, kind: kind}), do: build_scope_prompt(kind)
-  defp prompt_for_phase(%{phase: :await_success, kind: kind}), do: build_success_prompt(kind)
-  defp prompt_for_phase(%{phase: :ready} = state), do: render_ready_message(state)
-  defp prompt_for_phase(_state), do: "Project Manager indisponivel para esta sessao."
-
-  defp parse_kind(text) when is_binary(text) do
-    normalized = normalize_text(text) |> to_string() |> String.downcase()
-
-    cond do
-      normalized == "" ->
-        :error
-
-      Regex.match?(
-        ~r/\b(nao[- ]?software|não[- ]?software|pesquisa|compra|comprar|mercado|operacao)\b/u,
-        normalized
-      ) ->
-        {:ok, :non_software}
-
-      Regex.match?(
-        ~r/\b(software|app|aplicacao|aplicação|sistema|codigo|código|code|api|backend|frontend)\b/u,
-        normalized
-      ) ->
-        {:ok, :software}
-
-      true ->
-        :error
-    end
-  end
-
-  defp parse_kind(_), do: :error
-
-  defp kind_label(:software), do: "software"
-  defp kind_label(:non_software), do: "nao-software"
-  defp kind_label(_), do: "indefinido"
-
-  defp normalize_text(text) when is_binary(text), do: String.trim(text)
-  defp normalize_text(_), do: nil
-
-  defp fallback_text(nil, fallback), do: fallback
-  defp fallback_text("", fallback), do: fallback
-  defp fallback_text(text, _fallback), do: text
-
-  defp ensure_project_branch(%{git_branch: branch} = state)
-       when is_binary(branch) and branch != "" do
-    state
-  end
-
-  defp ensure_project_branch(state) do
-    branch_name = build_branch_name(state)
-
-    case git_adapter().ensure_branch(branch_name) do
-      {:ok, %{status: status}} when status in [:created, :existing] ->
-        %{state | git_branch: branch_name, git_branch_status: status}
-
-      {:ok, :created} ->
-        %{state | git_branch: branch_name, git_branch_status: :created}
-
-      {:ok, :existing} ->
-        %{state | git_branch: branch_name, git_branch_status: :existing}
-
-      {:error, reason} ->
-        %{state | git_branch: branch_name, git_branch_status: {:error, reason}}
-    end
-  end
-
-  defp git_summary(%{git_branch: branch, git_branch_status: status})
-       when is_binary(branch) and status in [:created, :existing] do
-    status_label = if status == :created, do: "criada", else: "ja existente"
-
-    """
-    **Git Branch**
-    - `#{branch}` (#{status_label}, sem checkout automatico)
-    - Proximo passo: `git checkout #{branch}`
-    """
-    |> String.trim()
-  end
-
-  defp git_summary(%{
-         git_branch: branch,
-         git_branch_status: {:error, {:not_a_repository, _detail}}
-       })
-       when is_binary(branch) do
-    """
-    **Git Branch**
-    - Ambiente atual nao e um repositorio Git.
-    - Inicialize com: `git init`
-    - Depois crie manualmente: `git branch #{branch}`
-    """
-    |> String.trim()
-  end
-
-  defp git_summary(%{git_branch: branch, git_branch_status: {:error, reason}})
-       when is_binary(branch) do
-    """
-    **Git Branch**
-    - Falha ao preparar branch automaticamente: #{format_branch_error(reason)}
-    - Sugestao manual: `git branch #{branch}`
-    """
-    |> String.trim()
-  end
-
-  defp git_summary(_state) do
-    """
-    **Git Branch**
-    - Branch nao preparada automaticamente.
-    """
-    |> String.trim()
-  end
-
-  defp build_branch_name(state) do
-    objective_slug =
-      state.objective
-      |> fallback_text("project")
-      |> slugify(36)
-
-    session_hint =
-      state.session_id
-      |> fallback_text("session")
-      |> slugify(12)
-
-    "project/#{objective_slug}-#{session_hint}"
-  end
-
-  defp slugify(text, max_len) when is_binary(text) and is_integer(max_len) and max_len > 0 do
-    text
-    |> String.downcase()
-    |> String.replace(~r/[^a-z0-9]+/u, "-")
-    |> String.trim("-")
-    |> case do
-      "" -> "project"
-      value -> String.slice(value, 0, max_len)
-    end
-  end
-
-  defp format_branch_error({:branch_create_failed, detail}) when is_binary(detail), do: detail
-  defp format_branch_error({:git_unavailable, detail}) when is_binary(detail), do: detail
-  defp format_branch_error(other), do: inspect(other)
-
-  defp retry_limit do
-    case Application.get_env(:pincer, :project_task_retry_limit, @default_retry_limit) do
-      value when is_integer(value) and value >= 0 -> value
-      _ -> @default_retry_limit
-    end
-  end
-
-  defp current_in_progress_task(items) do
-    items
-    |> Enum.find(fn item -> item.status == :in_progress end)
-    |> case do
-      nil -> nil
-      item -> item.text
-    end
-  end
-
-  defp mark_first_pending_in_progress(state) do
-    {items, task} = shift_first_item(state.items, :pending, :in_progress)
-    {%{state | items: items}, task}
-  end
-
-  defp complete_in_progress_item(state) do
-    case shift_first_item(state.items, :in_progress, :done) do
-      {_items, nil} -> :noop
-      {items, task} -> {:ok, %{state | items: items, retry_count: 0}, task}
-    end
-  end
-
-  defp pause_in_progress_item(state) do
-    {items, _task} = shift_first_item(state.items, :in_progress, :pending)
-    %{state | items: items}
-  end
-
-  defp shift_first_item(items, from_status, to_status) when is_list(items) do
-    Enum.reduce(items, {[], nil, false}, fn item, {acc, task, shifted?} ->
-      cond do
-        shifted? ->
-          {[item | acc], task, true}
-
-        item.status == from_status ->
-          updated = %{item | status: to_status}
-          {[updated | acc], item.text, true}
-
-        true ->
-          {[item | acc], task, false}
-      end
-    end)
-    |> then(fn {reversed, task, _shifted} -> {Enum.reverse(reversed), task} end)
-  end
-
-  defp build_task_prompt(state, task) when is_map(state) and is_binary(task) do
-    """
-    PROJECT TASK
-    Project ID: #{state.project_id}
-    Phase: #{state.fsm_state.phase}
-    Objective: #{state.objective}
-    Task: #{task}
-    """
-    |> String.trim()
-  end
-
-  defp build_task_prompt(state, _task) do
-    """
-    PROJECT TASK
-    Project ID: #{state.project_id}
-    Phase: #{state.fsm_state.phase}
-    Objective: #{state.objective}
-    """
-    |> String.trim()
-  end
+  defp ensure_execution_fsm(state), do: {:ok, state}
 
   defp transition_fsm(%{fsm_state: fsm_state} = state, to_phase, attrs) do
     case ProjectFSM.transition(fsm_state, to_phase, attrs, storage: fsm_storage()) do
       {:ok, next_fsm} ->
-        %{state | fsm_state: next_fsm}
+        {:ok, %{state | fsm_state: next_fsm}}
 
       {:error, reason} ->
         Logger.debug("[PROJECT] FSM transition skipped: #{inspect(reason)}")
-        state
+        {:error, reason}
     end
   end
 
-  defp fsm_storage do
-    Application.get_env(:pincer, :project_fsm_storage, __MODULE__.NoopFSMStorage)
-  end
-
-  defmodule NoopFSMStorage do
-    @moduledoc false
-    def save_checkpoint(_session_id, _checkpoint), do: :ok
-  end
-
-  defp build_project_id(session_id) do
-    "project-" <> slugify(session_id, 24)
-  end
-
-  defp git_adapter do
-    Application.get_env(:pincer, :project_git, Git)
-  end
-
-  defp get_state(session_id) do
-    ensure_table()
-
-    case ets_lookup(session_id) do
-      nil -> load_state(session_id)
-      state -> state
-    end
-  end
-
-  defp put_state(%{session_id: session_id} = state) do
-    ensure_table()
-    :ets.insert(@table, {session_id, state})
-    persist_state(state)
-    state
-  rescue
-    ArgumentError ->
-      ensure_table()
-      :ets.insert(@table, {session_id, state})
-      persist_state(state)
-      state
-  end
-
-  defp ets_lookup(session_id) do
-    case :ets.lookup(@table, session_id) do
-      [{^session_id, state}] -> state
-      _ -> nil
-    end
-  rescue
-    ArgumentError -> nil
-  end
-
-  defp load_state(session_id) do
-    with {:ok, project} <- Store.load(build_project_id(session_id)),
-         @store_kind <- project.kind,
-         ^session_id <- project.session_id,
-         state when is_map(state) <- project.payload do
-      state = normalize_loaded_state(state, session_id)
-      :ets.insert(@table, {session_id, state})
-      state
-    else
-      _ -> nil
-    end
-  end
-
-  defp normalize_loaded_state(state, session_id) do
-    state
-    |> Map.put(:session_id, session_id)
-    |> Map.update(:items, [], fn items ->
-      Enum.map(items, fn
-        %{status: :in_progress} = item -> %{item | status: :pending}
-        item -> item
-      end)
-    end)
-  end
-
-  defp persist_state(%{session_id: session_id, project_id: project_id} = state) do
-    project = %{
-      id: project_id,
-      session_id: session_id,
-      kind: @store_kind,
-      status: store_status(state),
-      payload: state
-    }
-
-    case Store.save(project) do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        Logger.warning("[PROJECT] Orchestrator persistence failed: #{inspect(reason)}")
-        :error
-    end
-  end
-
-  defp store_status(%{phase: :ready, items: items}) do
-    cond do
-      Enum.any?(items, &(&1.status == :in_progress)) -> :running
-      Enum.all?(items, &(&1.status == :done)) and items != [] -> :completed
-      true -> :awaiting_approval
-    end
-  end
-
-  defp store_status(%{phase: phase})
-       when phase in [:await_objective, :await_kind, :await_scope, :await_success],
-       do: :planning
-
-  defp store_status(_), do: :planning
-
-  defp normalize_max_items(value) when is_integer(value) and value > 0, do: value
-  defp normalize_max_items(_), do: @default_max_items
-
-  defp ensure_table do
-    _ =
-      ETSHelper.ensure_named_table(@table,
-        options: [:set, :named_table, :public, read_concurrency: true]
-      )
-
-    :ok
-  end
+  defp fsm_storage, do: Application.get_env(:pincer, :project_fsm_storage, NoopFSMStorage)
 end
