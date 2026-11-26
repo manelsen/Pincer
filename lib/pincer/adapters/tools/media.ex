@@ -31,11 +31,10 @@ defmodule Pincer.Adapters.Tools.Media do
 
   alias Pincer.Adapters.Tools.Args
   alias Pincer.Core.WorkspaceGuard
+  alias Pincer.Ports.{Sandbox, TTS}
 
   @vision_prompt "Describe this image in detail. Include all text visible in the image."
   @ocr_prompt "Extract ALL text from this image exactly as it appears. Output only the raw text, preserving line breaks."
-  @tts_url "https://api.openai.com/v1/audio/speech"
-  @tts_default_model "tts-1"
   @tts_default_voice "alloy"
 
   @impl true
@@ -164,11 +163,17 @@ defmodule Pincer.Adapters.Tools.Media do
 
   defp run_action("pdf_extract", %{"path" => rel_path} = args, workspace, _client) do
     with {:ok, abs_path} <- resolve_path(rel_path, workspace) do
-      unless File.exists?(abs_path) do
-        {:error, "File not found: #{rel_path}"}
-      else
-        page_range = Map.get(args, "page_range")
-        extract_pdf_text(abs_path, page_range)
+      cond do
+        not File.exists?(abs_path) ->
+          {:error, "File not found: #{rel_path}"}
+
+        File.dir?(abs_path) ->
+          {:error, "Path is a directory: #{rel_path}"}
+
+        true ->
+          page_range = Map.get(args, "page_range")
+          safe_rel = Path.relative_to(abs_path, Path.expand(workspace))
+          extract_pdf_text(safe_rel, workspace, page_range)
       end
     end
   end
@@ -184,22 +189,17 @@ defmodule Pincer.Adapters.Tools.Media do
     rel_out = Map.get(args, "output_path", "media/speech.mp3")
     voice = Map.get(args, "voice", @tts_default_voice)
     provider_key = Map.get(args, "provider") || tts_provider()
+    tts_client = Application.get_env(:pincer, :media_tts_client, TTS)
 
     with {:ok, abs_out} <- resolve_path(rel_out, workspace),
          :ok <- File.mkdir_p(Path.dirname(abs_out)),
-         {:ok, api_key, base_url, model} <- resolve_tts_config(provider_key),
-         body = %{"model" => model, "input" => text, "voice" => voice},
-         {:ok, %{status: 200, body: audio}} when is_binary(audio) <-
-           Req.post(tts_endpoint(base_url),
-             json: body,
-             auth: {:bearer, api_key},
-             receive_timeout: 60_000
-           ),
+         {:ok, audio} when is_binary(audio) <-
+           tts_client.synthesize_speech(text, voice: voice, provider: provider_key),
          :ok <- File.write(abs_out, audio) do
       {:ok, "Audio saved to #{rel_out} (#{byte_size(audio)} bytes)"}
     else
-      {:ok, %{status: status, body: body}} ->
-        {:error, "TTS request failed: #{status} — #{inspect(body)}"}
+      {:ok, unexpected} ->
+        {:error, "TTS error: unexpected response #{inspect(unexpected)}"}
 
       {:error, reason} when is_binary(reason) ->
         {:error, reason}
@@ -267,19 +267,25 @@ defmodule Pincer.Adapters.Tools.Media do
   defp mime_from_extension(".tif"), do: "image/tiff"
   defp mime_from_extension(_), do: "image/jpeg"
 
-  defp extract_pdf_text(abs_path, page_range) do
-    pdftotext = System.find_executable("pdftotext")
+  defp extract_pdf_text(rel_path, workspace, page_range) do
+    sandbox_client = Application.get_env(:pincer, :media_sandbox_client, Sandbox)
+    expanded_ws = Path.expand(workspace)
 
-    if is_nil(pdftotext) do
-      {:error,
-       "pdftotext not found. Install poppler-utils: apt install poppler-utils (Debian/Ubuntu) or brew install poppler (macOS)"}
-    else
-      extra_args = build_page_args(page_range)
-      args = extra_args ++ [abs_path, "-"]
+    with {:ok, page_args} <- build_page_args(page_range),
+         :ok <- validate_pdf_rel_path(rel_path) do
+      cmd = Enum.join(["pdftotext"] ++ page_args ++ [rel_path, "-"], " ")
 
-      case System.cmd(pdftotext, args, stderr_to_stdout: true) do
-        {text, 0} ->
-          trimmed = String.trim(text)
+      sandbox_opts = [
+        workspace: workspace,
+        workspace_path: expanded_ws,
+        cwd: expanded_ws,
+        restrict_to_workspace: true,
+        transport: :os
+      ]
+
+      case sandbox_client.run(cmd, sandbox_opts) do
+        {:ok, %{output: text, exit_code: 0}} ->
+          trimmed = String.trim(to_string(text))
 
           if trimmed == "" do
             {:ok,
@@ -288,59 +294,78 @@ defmodule Pincer.Adapters.Tools.Media do
             {:ok, trimmed}
           end
 
-        {output, exit_code} ->
-          {:error, "pdftotext exited with #{exit_code}: #{String.slice(output, 0, 200)}"}
+        {:ok, %{output: output, exit_code: exit_code}} ->
+          if missing_pdftotext_output?(output) do
+            {:error, pdftotext_missing_error()}
+          else
+            {:error,
+             "pdftotext exited with #{exit_code}: #{String.slice(to_string(output), 0, 200)}"}
+          end
+
+        {:error, reason} when reason in [:enoent, :pdftotext_not_found] ->
+          {:error, pdftotext_missing_error()}
+
+        {:error, {:enoent, _}} ->
+          {:error, pdftotext_missing_error()}
+
+        {:error, {:command_not_allowed, reason}} ->
+          {:error, "PDF extraction blocked: #{reason}"}
+
+        {:error, reason} when is_binary(reason) ->
+          {:error, reason}
+
+        {:error, reason} ->
+          {:error, "PDF extraction failed: #{inspect(reason)}"}
       end
     end
   end
 
-  defp build_page_args(nil), do: []
-  defp build_page_args(""), do: []
+  defp build_page_args(nil), do: {:ok, []}
+  defp build_page_args(""), do: {:ok, []}
 
   defp build_page_args(range) when is_binary(range) do
-    case String.split(range, "-") do
-      [first, last] ->
-        ["-f", String.trim(first), "-l", String.trim(last)]
-
-      [page] ->
-        p = String.trim(page)
-        ["-f", p, "-l", p]
-
-      _ ->
-        []
+    case String.trim(range) do
+      "" -> {:ok, []}
+      trimmed -> parse_page_range(String.split(trimmed, "-"), range)
     end
   end
 
-  defp resolve_tts_config(provider_key) do
-    registry = Application.get_env(:pincer, :llm_providers, %{}) || %{}
+  defp build_page_args(other),
+    do: {:error, "Invalid page_range: #{inspect(other)}. Expected 'N' or 'N-M'."}
 
-    case Map.get(registry, provider_key) do
-      nil ->
-        # Try OpenAI directly from env
-        case System.get_env("OPENAI_API_KEY") do
-          nil ->
-            {:error, "TTS provider '#{provider_key}' not configured and OPENAI_API_KEY not set"}
+  defp parse_page_range([page], raw_range), do: build_page_range(page, page, raw_range)
+  defp parse_page_range([first, last], raw_range), do: build_page_range(first, last, raw_range)
 
-          key ->
-            {:ok, key, @tts_url, @tts_default_model}
-        end
+  defp parse_page_range(_parts, raw_range),
+    do: {:error, "Invalid page_range: #{inspect(raw_range)}. Expected 'N' or 'N-M'."}
 
-      config ->
-        api_key = config[:api_key] || System.get_env(config[:env_key] || "OPENAI_API_KEY") || ""
-        base_url = config[:tts_base_url] || config[:base_url] || @tts_url
-        model = config[:tts_model] || @tts_default_model
-        {:ok, api_key, base_url, model}
-    end
-  end
+  defp build_page_range(first, last, raw_range) do
+    f = String.trim(first)
+    l = String.trim(last)
 
-  defp tts_endpoint(base_url) do
-    if String.ends_with?(base_url, "/audio/speech") do
-      base_url
+    if Regex.match?(~r/^\d+$/, f) and Regex.match?(~r/^\d+$/, l) do
+      {:ok, ["-f", f, "-l", l]}
     else
-      # strip trailing path and append TTS endpoint
-      base = base_url |> String.trim_trailing("/") |> String.replace(~r{/chat/completions$}, "")
-      "#{base}/audio/speech"
+      {:error, "Invalid page_range: #{inspect(raw_range)}. Expected 'N' or 'N-M'."}
     end
+  end
+
+  defp validate_pdf_rel_path(rel_path) do
+    if String.match?(rel_path, ~r/\s/) do
+      {:error, "Invalid PDF path: whitespace is not allowed"}
+    else
+      :ok
+    end
+  end
+
+  defp missing_pdftotext_output?(output) when is_binary(output) do
+    Regex.match?(~r/pdftotext.*not found/i, output)
+  end
+
+  defp missing_pdftotext_output?(_), do: false
+
+  defp pdftotext_missing_error do
+    "pdftotext not found. Install poppler-utils: apt install poppler-utils (Debian/Ubuntu) or brew install poppler (macOS)"
   end
 
   defp resolve_path(rel_path, workspace) do

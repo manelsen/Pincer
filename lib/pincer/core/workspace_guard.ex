@@ -222,6 +222,16 @@ defmodule Pincer.Core.WorkspaceGuard do
           opts
         )
 
+      ["pdftotext", path, "-"] ->
+        validate_pdftotext_command(path, [], opts)
+
+      ["pdftotext", "-f", first, "-l", last, path, "-"] ->
+        if Regex.match?(~r/^\d+$/, first) and Regex.match?(~r/^\d+$/, last) do
+          validate_pdftotext_command(path, ["-f", first, "-l", last], opts)
+        else
+          {:error, "Invalid pdftotext page range"}
+        end
+
       # Grep is too complex to validate easily
       ["grep" | _] ->
         {:error, "Grep requires approval"}
@@ -292,6 +302,19 @@ defmodule Pincer.Core.WorkspaceGuard do
       {:error, "Unsafe path argument"}
     else
       {:ok, "#{cmd} #{path}"}
+    end
+  end
+
+  defp validate_pdftotext_command(path, page_args, opts) do
+    trimmed = String.trim(path)
+
+    if String.starts_with?(trimmed, "-") do
+      {:error, "Unsafe path argument"}
+    else
+      case validate_path_arg("pdftotext", trimmed, opts) do
+        {:ok, _} -> {:ok, format_command("pdftotext", page_args ++ [trimmed, "-"])}
+        {:error, _} = error -> error
+      end
     end
   end
 

@@ -12,6 +12,7 @@ config :pincer, :sqlite_path, System.get_env("PINCER_SQLITE_PATH", "data/pincer.
 config :pincer, :sqlite_vec, :auto
 config :pincer, :sqlite_vec_dimensions, 1024
 config :pincer, :llm_adapter, Pincer.LLM.Client
+config :pincer, :tts_adapter, Pincer.LLM.TTS
 config :pincer, :cron_adapter, Pincer.Adapters.Cron.Storage
 config :pincer, :git_adapter, Pincer.Adapters.Git
 config :pincer, :sandbox_adapter, Pincer.Adapters.Sandbox.Local

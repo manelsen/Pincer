@@ -204,4 +204,64 @@ defmodule Pincer.Core.WorkspaceGuardTest do
                WorkspaceGuard.validate_command("npm run lint /etc/passwd", workspace_root: root)
     end
   end
+
+  describe "pdftotext command validation" do
+    test "allows pdftotext to stdout with relative path and numeric page ranges" do
+      root = Path.join("trash", "ws_guard_pdf_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "docs"))
+      File.write!(Path.join(root, "docs/sample.pdf"), "%PDF-1.4")
+
+      on_exit(fn -> File.rm_rf(root) end)
+
+      assert {:ok, "pdftotext docs/sample.pdf -"} =
+               WorkspaceGuard.validate_command("pdftotext docs/sample.pdf -",
+                 workspace_root: root
+               )
+
+      assert :ok =
+               WorkspaceGuard.command_allowed?("pdftotext docs/sample.pdf -",
+                 workspace_root: root
+               )
+
+      assert {:ok, "pdftotext -f 1 -l 5 docs/sample.pdf -"} =
+               WorkspaceGuard.validate_command("pdftotext -f 1 -l 5 docs/sample.pdf -",
+                 workspace_root: root
+               )
+
+      assert :ok =
+               WorkspaceGuard.command_allowed?("pdftotext -f 3 -l 3 docs/sample.pdf -",
+                 workspace_root: root
+               )
+    end
+
+    test "blocks pdftotext without trailing stdout dash, with non-numeric ranges, or unsafe paths" do
+      root = Path.join("trash", "ws_guard_pdf_bad_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      :ok = File.ln_s("/etc/passwd", Path.join(root, "escaping.pdf"))
+
+      on_exit(fn -> File.rm_rf(root) end)
+
+      for bad_cmd <- [
+            "pdftotext docs/sample.pdf",
+            "pdftotext docs/sample.pdf out.txt",
+            "pdftotext -f 1 -l 5 docs/sample.pdf out.txt",
+            "pdftotext -f 1 docs/sample.pdf -",
+            "pdftotext -f abc -l 5 docs/sample.pdf -",
+            "pdftotext -f 1 -l 5x docs/sample.pdf -",
+            "pdftotext -f -1 -l 5 docs/sample.pdf -",
+            "pdftotext -raw docs/sample.pdf -",
+            "pdftotext -raw -",
+            "pdftotext - -",
+            "pdftotext ../outside.pdf -",
+            "pdftotext /etc/passwd -",
+            "pdftotext ~/secret.pdf -",
+            "pdftotext escaping.pdf -",
+            "pdftotext docs/sample.pdf -; id"
+          ] do
+        assert {:error, _reason} =
+                 WorkspaceGuard.validate_command(bad_cmd, workspace_root: root),
+               "Expected #{inspect(bad_cmd)} to be rejected"
+      end
+    end
+  end
 end

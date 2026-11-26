@@ -26,17 +26,82 @@ defmodule Pincer.Adapters.Tools.MediaTest do
     end
   end
 
+  defmodule StubTTS do
+    @behaviour Pincer.Ports.TTS
+
+    @pt_key :media_test_stub_tts_config
+
+    def configure(pid, result), do: :persistent_term.put(@pt_key, {pid, result})
+    def clear, do: :persistent_term.erase(@pt_key)
+
+    @impl true
+    def synthesize_speech(text, opts) do
+      case :persistent_term.get(@pt_key, nil) do
+        {pid, result} ->
+          send(pid, {:tts_synthesize, text, opts})
+          result
+
+        nil ->
+          {:ok, "DEFAULT_STUB_AUDIO"}
+      end
+    end
+  end
+
+  defmodule StubSandbox do
+    @behaviour Pincer.Ports.Sandbox
+
+    @pt_key :media_test_stub_sandbox_config
+
+    def configure(pid, result), do: :persistent_term.put(@pt_key, {pid, result})
+    def clear, do: :persistent_term.erase(@pt_key)
+
+    @impl true
+    def backend_name, do: :stub
+
+    @impl true
+    def available?, do: true
+
+    @impl true
+    def run(command, opts) do
+      case :persistent_term.get(@pt_key, nil) do
+        {pid, result} ->
+          send(pid, {:sandbox_run, command, opts})
+          result
+
+        nil ->
+          {:ok, %{output: "stub pdf text", exit_code: 0, backend: :stub, metadata: %{}}}
+      end
+    end
+
+    @impl true
+    def cleanup(_scope_id), do: :ok
+  end
+
   setup do
     StubLLM.register(self())
     prev_client = Application.get_env(:pincer, :media_llm_client)
+    prev_tts_client = Application.fetch_env(:pincer, :media_tts_client)
+    prev_sandbox_client = Application.fetch_env(:pincer, :media_sandbox_client)
     Application.put_env(:pincer, :media_llm_client, StubLLM)
 
     on_exit(fn ->
       StubLLM.unregister()
+      StubTTS.clear()
+      StubSandbox.clear()
 
       case prev_client do
         nil -> Application.delete_env(:pincer, :media_llm_client)
         v -> Application.put_env(:pincer, :media_llm_client, v)
+      end
+
+      case prev_tts_client do
+        {:ok, v} -> Application.put_env(:pincer, :media_tts_client, v)
+        :error -> Application.delete_env(:pincer, :media_tts_client)
+      end
+
+      case prev_sandbox_client do
+        {:ok, v} -> Application.put_env(:pincer, :media_sandbox_client, v)
+        :error -> Application.delete_env(:pincer, :media_sandbox_client)
       end
     end)
 
@@ -389,6 +454,234 @@ defmodule Pincer.Adapters.Tools.MediaTest do
 
       assert reason2 =~ "traversal" or reason2 =~ "Access denied"
       refute File.exists?(Path.join(outside, "evil.mp3"))
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Port routing & architectural boundary hygiene
+  # ---------------------------------------------------------------------------
+
+  describe "port routing and boundary hygiene" do
+    test "media.ex has no direct Req.post, System.cmd, System.find_executable, llm_providers, or hardcoded OpenAI TTS URL" do
+      source =
+        Path.expand("../../../lib/pincer/adapters/tools/media.ex", __DIR__)
+        |> File.read!()
+
+      refute source =~ "Req.post"
+      refute source =~ "System.cmd"
+      refute source =~ "System.find_executable"
+      refute source =~ "https://api.openai.com"
+      refute source =~ "Application.get_env(:pincer, :llm_providers)"
+    end
+
+    test "tts delegates to configured TTS client and writes audio inside workspace" do
+      ws = Path.join(@tmp_dir, "pincer_media_tts_ws_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(ws)
+      on_exit(fn -> File.rm_rf!(ws) end)
+
+      StubTTS.configure(self(), {:ok, "ID3FAKEAUDIO"})
+      Application.put_env(:pincer, :media_tts_client, StubTTS)
+
+      assert {:ok, msg} =
+               Media.execute(
+                 %{
+                   "action" => "tts",
+                   "text" => "Hello Pincer",
+                   "voice" => "nova",
+                   "provider" => "custom_tts",
+                   "output_path" => "audio/greeting.mp3"
+                 },
+                 %{"workspace_path" => ws}
+               )
+
+      assert msg == "Audio saved to audio/greeting.mp3 (12 bytes)"
+      assert File.read!(Path.join(ws, "audio/greeting.mp3")) == "ID3FAKEAUDIO"
+
+      assert_received {:tts_synthesize, "Hello Pincer", opts}
+      assert Keyword.get(opts, :voice) == "nova"
+      assert Keyword.get(opts, :provider) == "custom_tts"
+    end
+
+    test "tts uses Pincer.Ports.TTS by default when media_tts_client is unset" do
+      ws = Path.join(@tmp_dir, "pincer_media_tts_port_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(ws)
+
+      prev_adapter = Application.fetch_env(:pincer, :tts_adapter)
+      Application.delete_env(:pincer, :media_tts_client)
+      Application.put_env(:pincer, :tts_adapter, StubTTS)
+      StubTTS.configure(self(), {:ok, "PORTAUDIO"})
+
+      on_exit(fn ->
+        File.rm_rf!(ws)
+
+        case prev_adapter do
+          {:ok, mod} -> Application.put_env(:pincer, :tts_adapter, mod)
+          :error -> Application.delete_env(:pincer, :tts_adapter)
+        end
+      end)
+
+      assert {:ok, "Audio saved to media/speech.mp3 (9 bytes)"} =
+               Media.execute(%{"action" => "tts", "text" => "via port"}, %{
+                 "workspace_path" => ws
+               })
+
+      assert_received {:tts_synthesize, "via port", opts}
+      assert Keyword.get(opts, :voice) == "alloy"
+    end
+
+    test "tts formats error cleanly when TTS client returns error" do
+      ws = Path.join(@tmp_dir, "pincer_media_tts_err_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(ws)
+      on_exit(fn -> File.rm_rf!(ws) end)
+
+      StubTTS.configure(self(), {:error, :rate_limited})
+      Application.put_env(:pincer, :media_tts_client, StubTTS)
+
+      assert {:error, "TTS error: :rate_limited"} =
+               Media.execute(%{"action" => "tts", "text" => "oops"}, %{"workspace_path" => ws})
+
+      refute File.exists?(Path.join(ws, "media/speech.mp3"))
+    end
+
+    test "pdf_extract delegates to sandbox client with relative path and transport: :os" do
+      ws = Path.join(@tmp_dir, "pincer_media_pdf_ws_#{System.unique_integer([:positive])}")
+      sub = Path.join(ws, "docs")
+      File.mkdir_p!(sub)
+      pdf = Path.join(sub, "report.pdf")
+      File.write!(pdf, "%PDF-1.4 dummy")
+      on_exit(fn -> File.rm_rf!(ws) end)
+
+      StubSandbox.configure(
+        self(),
+        {:ok,
+         %{output: "  Extracted report content \n", exit_code: 0, backend: :stub, metadata: %{}}}
+      )
+
+      Application.put_env(:pincer, :media_sandbox_client, StubSandbox)
+
+      assert {:ok, "Extracted report content"} =
+               Media.execute(
+                 %{"action" => "pdf_extract", "path" => pdf, "page_range" => "1-5"},
+                 %{"workspace_path" => ws}
+               )
+
+      assert_received {:sandbox_run, "pdftotext -f 1 -l 5 docs/report.pdf -", opts}
+      assert Keyword.get(opts, :transport) == :os
+      assert Keyword.get(opts, :workspace) == ws
+    end
+
+    test "pdf_extract uses Pincer.Ports.Sandbox by default when media_sandbox_client is unset" do
+      ws = Path.join(@tmp_dir, "pincer_media_pdf_port_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(ws)
+      pdf = Path.join(ws, "single.pdf")
+      File.write!(pdf, "%PDF-1.4 dummy")
+
+      prev_adapter = Application.fetch_env(:pincer, :sandbox_adapter)
+      Application.delete_env(:pincer, :media_sandbox_client)
+      Application.put_env(:pincer, :sandbox_adapter, StubSandbox)
+
+      StubSandbox.configure(
+        self(),
+        {:ok, %{output: "Page 3 text", exit_code: 0, backend: :stub, metadata: %{}}}
+      )
+
+      on_exit(fn ->
+        File.rm_rf!(ws)
+
+        case prev_adapter do
+          {:ok, mod} -> Application.put_env(:pincer, :sandbox_adapter, mod)
+          :error -> Application.delete_env(:pincer, :sandbox_adapter)
+        end
+      end)
+
+      assert {:ok, "Page 3 text"} =
+               Media.execute(
+                 %{"action" => "pdf_extract", "path" => "single.pdf", "page_range" => "3"},
+                 %{"workspace_path" => ws}
+               )
+
+      assert_received {:sandbox_run, "pdftotext -f 3 -l 3 single.pdf -", opts}
+      assert Keyword.get(opts, :transport) == :os
+    end
+
+    test "pdf_extract rejects invalid or injection page_range without invoking sandbox" do
+      ws = Path.join(@tmp_dir, "pincer_media_pdf_inj_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(ws)
+      pdf = Path.join(ws, "doc.pdf")
+      File.write!(pdf, "%PDF-1.4 dummy")
+      on_exit(fn -> File.rm_rf!(ws) end)
+
+      StubSandbox.configure(
+        self(),
+        {:ok, %{output: "should not run", exit_code: 0, backend: :stub, metadata: %{}}}
+      )
+
+      Application.put_env(:pincer, :media_sandbox_client, StubSandbox)
+
+      for bad_range <- ["1-5; rm -rf /", "abc", "1-abc", "-1", "1-2-3", 42] do
+        assert {:error, msg} =
+                 Media.execute(
+                   %{"action" => "pdf_extract", "path" => "doc.pdf", "page_range" => bad_range},
+                   %{"workspace_path" => ws}
+                 )
+
+        assert msg =~ "page_range"
+      end
+
+      refute_received {:sandbox_run, _, _}
+    end
+
+    test "pdf_extract maps empty output, missing pdftotext binary, and non-zero exit codes cleanly" do
+      ws = Path.join(@tmp_dir, "pincer_media_pdf_map_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(ws)
+      pdf = Path.join(ws, "doc.pdf")
+      File.write!(pdf, "%PDF-1.4 dummy")
+      on_exit(fn -> File.rm_rf!(ws) end)
+
+      Application.put_env(:pincer, :media_sandbox_client, StubSandbox)
+
+      StubSandbox.configure(
+        self(),
+        {:ok, %{output: "   \n\t ", exit_code: 0, backend: :stub, metadata: %{}}}
+      )
+
+      assert {:ok, msg} =
+               Media.execute(%{"action" => "pdf_extract", "path" => "doc.pdf"}, %{
+                 "workspace_path" => ws
+               })
+
+      assert msg =~ "no extractable text"
+
+      StubSandbox.configure(
+        self(),
+        {:ok,
+         %{output: "sh: 1: pdftotext: not found\n", exit_code: 127, backend: :stub, metadata: %{}}}
+      )
+
+      assert {:error, msg_missing} =
+               Media.execute(%{"action" => "pdf_extract", "path" => "doc.pdf"}, %{
+                 "workspace_path" => ws
+               })
+
+      assert msg_missing =~ "pdftotext not found"
+
+      StubSandbox.configure(
+        self(),
+        {:ok,
+         %{
+           output: "Syntax Error: Couldn't find trailer",
+           exit_code: 1,
+           backend: :stub,
+           metadata: %{}
+         }}
+      )
+
+      assert {:error, msg_fail} =
+               Media.execute(%{"action" => "pdf_extract", "path" => "doc.pdf"}, %{
+                 "workspace_path" => ws
+               })
+
+      assert msg_fail =~ "pdftotext exited with 1: Syntax Error"
     end
   end
 end
