@@ -696,4 +696,191 @@ defmodule Pincer.Adapters.Tools.FileSystemTest do
       refute File.exists?(Path.expand(Path.join(root, "../evil_win.txt")))
     end
   end
+
+  describe "additional submodule coverage and security invariants" do
+    test "zip creates archive confined to workspace and rejects traversal destination", %{
+      root: root,
+      context: context
+    } do
+      File.mkdir_p!(Path.join(root, "bundle/sub"))
+      File.write!(Path.join(root, "bundle/a.txt"), "alpha")
+      File.write!(Path.join(root, "bundle/sub/b.txt"), "beta")
+
+      assert {:error, reason} =
+               FileSystem.execute(
+                 %{"action" => "zip", "path" => "bundle", "destination" => "../../escape.zip"},
+                 context
+               )
+
+      assert reason =~ "traversal" or reason =~ "Access denied"
+
+      assert {:ok, msg} =
+               FileSystem.execute(
+                 %{"action" => "zip", "path" => "bundle", "destination" => "archives/out"},
+                 context
+               )
+
+      assert msg =~ "archives/out.zip"
+      assert msg =~ "2 file(s)"
+      assert File.exists?(Path.join(root, "archives/out.zip"))
+    end
+
+    test "send_to_channel validates session context and broadcasts regular files", %{
+      root: root,
+      context: context
+    } do
+      File.mkdir_p!(Path.join(root, "outbox"))
+      File.write!(Path.join(root, "outbox/report.txt"), "summary")
+
+      assert {:error, no_session_msg} =
+               FileSystem.execute(
+                 %{"action" => "send_to_channel", "path" => "outbox/report.txt"},
+                 context
+               )
+
+      assert no_session_msg =~ "session context"
+
+      session_id = "test_fs_send_#{System.unique_integer([:positive])}"
+      Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+
+      assert {:error, dir_msg} =
+               FileSystem.execute(
+                 %{"action" => "send_to_channel", "path" => "outbox"},
+                 Map.put(context, "session_id", session_id)
+               )
+
+      assert dir_msg =~ "Cannot send a directory"
+
+      assert {:ok, sent_msg} =
+               FileSystem.execute(
+                 %{
+                   "action" => "send_to_channel",
+                   "path" => "outbox/report.txt",
+                   "caption" => "Here is the report"
+                 },
+                 Map.put(context, "session_id", session_id)
+               )
+
+      assert sent_msg =~ "Sending 'outbox/report.txt'"
+
+      expected_path = Path.join(root, "outbox/report.txt")
+      assert_receive {:agent_file, ^expected_path, %{caption: "Here is the report"}}
+    end
+
+    test "anchored_edit supports range replace with end_anchor, insert_before, and LINE# prefix",
+         %{
+           root: root,
+           context: context
+         } do
+      path = Path.join(root, "src/multi.ex")
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, "one\ntwo\nthree\nfour\n")
+
+      assert {:ok, read_output} =
+               FileSystem.execute(
+                 %{"action" => "read", "path" => "src/multi.ex", "hashline" => true},
+                 context
+               )
+
+      a1 = anchor_for_line(read_output, 1)
+      a2 = anchor_for_line(read_output, 2)
+      a3 = anchor_for_line(read_output, 3)
+
+      assert {:ok, msg} =
+               FileSystem.execute(
+                 %{
+                   "action" => "anchored_edit",
+                   "path" => "src/multi.ex",
+                   "edits" => [
+                     %{"op" => "insert_before", "anchor" => "LINE#" <> a1, "content" => "zero"},
+                     %{
+                       "op" => "replace",
+                       "anchor" => a2,
+                       "end_anchor" => a3,
+                       "content" => "two-and-three"
+                     }
+                   ]
+                 },
+                 context
+               )
+
+      assert msg =~ "Applied 2 anchored edit"
+      assert File.read!(path) == "zero\none\ntwo-and-three\nfour\n"
+    end
+
+    test "delete_to_trash rejects items already inside .trash and copy/move block null bytes in destination",
+         %{
+           root: root,
+           context: context
+         } do
+      File.write!(Path.join(root, "item.txt"), "x")
+
+      assert {:ok, _} =
+               FileSystem.execute(
+                 %{"action" => "delete_to_trash", "path" => "item.txt"},
+                 context
+               )
+
+      [trashed] = File.ls!(Path.join(root, ".trash"))
+
+      assert {:error, trash_err} =
+               FileSystem.execute(
+                 %{"action" => "delete_to_trash", "path" => ".trash/#{trashed}"},
+                 context
+               )
+
+      assert trash_err =~ "already inside the workspace trash"
+
+      File.write!(Path.join(root, "src.txt"), "data")
+
+      for action <- ["copy", "move"] do
+        assert {:error, null_err} =
+                 FileSystem.execute(
+                   %{"action" => action, "path" => "src.txt", "destination" => "bad\0dest.txt"},
+                   context
+                 )
+
+        assert null_err =~ "null"
+      end
+    end
+
+    test "find and search preserve traversal order when truncated by max_results", %{
+      root: root,
+      context: context
+    } do
+      File.mkdir_p!(Path.join(root, "ordered"))
+      File.write!(Path.join(root, "ordered/a.txt"), "match 1\nmatch 2\n")
+      File.write!(Path.join(root, "ordered/b.txt"), "match 3\n")
+      File.write!(Path.join(root, "ordered/c.txt"), "match 4\n")
+
+      assert {:ok, find_json} =
+               FileSystem.execute(
+                 %{"action" => "find", "path" => "ordered", "type" => "file", "max_results" => 2},
+                 context
+               )
+
+      find_decoded = Jason.decode!(find_json)
+      assert find_decoded["truncated"] == true
+      assert find_decoded["entries"] == ["ordered/a.txt", "ordered/b.txt"]
+
+      assert {:ok, search_json} =
+               FileSystem.execute(
+                 %{
+                   "action" => "search",
+                   "path" => "ordered",
+                   "query" => "match",
+                   "max_results" => 2
+                 },
+                 context
+               )
+
+      search_decoded = Jason.decode!(search_json)
+      assert search_decoded["truncated"] == true
+
+      assert Enum.map(search_decoded["matches"], &{&1["path"], &1["line"]}) == [
+               {"ordered/a.txt", 1},
+               {"ordered/a.txt", 2}
+             ]
+    end
+  end
 end
