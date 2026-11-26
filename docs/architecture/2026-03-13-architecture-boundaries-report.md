@@ -2,14 +2,17 @@
 
 Date: 2026-03-13
 
+> [!NOTE]
+> This document is a historical baseline written on `2026-03-13` before the `0.2.0` architectural work landed. For the current strict `Boundary` `0.12` layer map, SQLite-only persistence, and extracted `packages/` layout, see [README.md](../../README.md) and [AUDIT-code-quality.md](../AUDIT-code-quality.md).
+
 ## Scope
 
-This report covers the current architectural state of `Pincer`, the desired target state, the main runtime flows, and a proposed technical roadmap for boundaries.
+This report covers the historical architectural state of `Pincer`, the desired target state, the main runtime flows, and a proposed technical roadmap for boundaries.
 
-This report bundle includes two generated appendices:
+This report bundle originally referenced two generated appendices (not checked into git):
 
-- [Pincer API Appendix](./pincer_api_appendix.md)
-- [Pincer Lib Skeleton Appendix](./pincer_lib_skeletons.md)
+- `docs/architecture/pincer_api_appendix.md`
+- `docs/architecture/pincer_lib_skeletons.md`
 
 The first appendix catalogs compiled module/function docs for the public surface. The second appendix catalogs structural source skeletons from `lib/**/*.ex`, including private functions where present.
 
@@ -59,13 +62,13 @@ Implemented on `2026-03-13` after the report:
 
 New core policy modules introduced as part of that sequence:
 
-- [Pincer.Core.StatusMessagePolicy](../../lib/pincer/core/status_message_policy.ex)
-- [Pincer.Core.StreamDelivery](../../lib/pincer/core/stream_delivery.ex)
-- [Pincer.Core.ResponseEnvelope](../../lib/pincer/core/response_envelope.ex)
-- [Pincer.Core.StatusDelivery](../../lib/pincer/core/status_delivery.ex)
-- [Pincer.Core.ProjectFlowDelivery](../../lib/pincer/core/project_flow_delivery.ex)
-- [Pincer.Core.ContextOverflowRecovery](../../lib/pincer/core/context_overflow_recovery.ex)
-- [Pincer.Core.TurnOutcomePolicy](../../lib/pincer/core/turn_outcome_policy.ex)
+- `Pincer.Core.StatusMessagePolicy`
+- `Pincer.Core.StreamDelivery`
+- `Pincer.Core.ResponseEnvelope`
+- `Pincer.Core.StatusDelivery`
+- `Pincer.Core.ProjectFlowDelivery`
+- `Pincer.Core.ContextOverflowRecovery`
+- `Pincer.Core.TurnOutcomePolicy`
 
 Operationally, this means:
 
@@ -157,7 +160,7 @@ The control plane is effectively concentrated in:
 - [Pincer.Core.Executor](../../lib/pincer/core/executor.ex)
 - [Pincer.LLM.Client](../../lib/pincer/llm/client.ex)
 - [Pincer.Adapters.NativeToolRegistry](../../lib/pincer/adapters/native_tool_registry.ex)
-- [Pincer.Storage.Adapters.Postgres](../../lib/pincer/storage/adapters/postgres.ex)
+- `lib/pincer/storage/adapters/postgres.ex` (removed in the `0.2.0` SQLite-only migration)
 
 The transport/data plane is spread through:
 
@@ -287,8 +290,8 @@ Observations:
 - There are already examples of a clean port-dispatcher pair:
   - [Pincer.Ports.Hook](../../lib/pincer/ports/hook.ex)
   - [Pincer.Core.HookDispatcher](../../lib/pincer/core/hook_dispatcher.ex)
-  - [Pincer.Ports.MediaUnderstanding](../../lib/pincer/ports/media_understanding.ex)
-  - [Pincer.Adapters.MediaDispatcher](../../lib/pincer/adapters/media_dispatcher.ex)
+  - `Pincer.Ports.MediaUnderstanding` (removed in `0.2.0` via `PORT-001`)
+  - `Pincer.Adapters.MediaDispatcher` (removed in `0.2.0` via `PORT-001`)
 
 ### What Is Not Mature Yet
 
@@ -403,9 +406,9 @@ Desired:
 
 The full function skeleton mapping requested for this report is included as:
 
-- [Pincer API Appendix](./pincer_api_appendix.md)
+- `docs/architecture/pincer_api_appendix.md` (not checked into git)
   - compiled public surface with extracted docs
-- [Pincer Lib Skeleton Appendix](./pincer_lib_skeletons.md)
+- `docs/architecture/pincer_lib_skeletons.md` (not checked into git)
   - source-level structural skeleton across `lib/**/*.ex`, including private definitions where present
 
 Together they provide:
@@ -438,18 +441,18 @@ Status:
 
 Completed slices:
 
-- preview/final delivery fallback moved into [Pincer.Core.StreamDelivery](../../lib/pincer/core/stream_delivery.ex)
-- response envelope formation moved into [Pincer.Core.ResponseEnvelope](../../lib/pincer/core/response_envelope.ex)
-- status upsert/delivery policy moved into [Pincer.Core.StatusMessagePolicy](../../lib/pincer/core/status_message_policy.ex) and [Pincer.Core.StatusDelivery](../../lib/pincer/core/status_delivery.ex)
-- project flow delivery moved into [Pincer.Core.ProjectFlowDelivery](../../lib/pincer/core/project_flow_delivery.ex)
-- turn outcome classification moved into [Pincer.Core.TurnOutcomePolicy](../../lib/pincer/core/turn_outcome_policy.ex)
-- tool-only degraded-response formatting moved into [Pincer.Core.ToolOnlyOutcomeFormatter](../../lib/pincer/core/tool_only_outcome_formatter.ex)
-- lightweight web capability split into explicit `web_search` and `web_fetch` tool interfaces in [Pincer.Adapters.Tools.Web](../../lib/pincer/tools/web.ex)
+- preview/final delivery fallback moved into `Pincer.Core.StreamDelivery`
+- response envelope formation moved into `Pincer.Core.ResponseEnvelope`
+- status upsert/delivery policy moved into `Pincer.Core.StatusMessagePolicy` and `Pincer.Core.StatusDelivery`
+- project flow delivery moved into `Pincer.Core.ProjectFlowDelivery`
+- turn outcome classification moved into `Pincer.Core.TurnOutcomePolicy`
+- tool-only degraded-response formatting moved into `Pincer.Core.ToolOnlyOutcomeFormatter`
+- lightweight web capability split into explicit `web_search` and `web_fetch` tool interfaces in [Pincer.Adapters.Tools.Web](../../lib/pincer/adapters/tools/web.ex)
 - browser capability is now hidden from the registry when browser infra is disabled, keeping simple URL reads on lightweight web tools
 - first-turn `empty_response` now attempts a lightweight chat recovery before surfacing provider-empty UX
 - prompt pruning and system-context assembly moved out of the executor loop into a dedicated core prompt-assembly seam
-- channel status/error classification moved into [Pincer.Core.ChannelEventPolicy](../../lib/pincer/core/channel_event_policy.ex)
-- WhatsApp session flow now reuses [Pincer.Core.ProjectFlowDelivery](../../lib/pincer/core/project_flow_delivery.ex) instead of owning `ProjectRouter` replay logic directly
+- channel status/error classification moved into `Pincer.Core.ChannelEventPolicy`
+- WhatsApp session flow now reuses `ProjectBridge` in `packages/pincer_shared/` instead of owning `ProjectRouter` replay logic directly
 
 Operational impact observed after these slices:
 

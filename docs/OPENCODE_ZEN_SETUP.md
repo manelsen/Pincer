@@ -1,6 +1,6 @@
 # Configurando o Opencode Zen
 
-O Pincer agora suporta múltiplos provedores LLM através do Unified Client. O provedor padrão é o **Opencode Zen**.
+O Pincer suporta múltiplos provedores LLM através do `Pincer.LLM.Client` (`config/config.exs` define `"openrouter"` como fallback em tempo de compilação e o `config.yaml` padrão usa `"groq"` em runtime). Siga os passos abaixo para ativar o **Opencode Zen**.
 
 ## Configuração
 
@@ -14,19 +14,16 @@ OPENCODE_ZEN_API_KEY=sua_chave_aqui
 
 ### 2. Configuração YAML
 
-O arquivo `config.yaml` já está configurado:
+Ajuste `llm.provider` e o bloco do provedor no `config.yaml`:
 
 ```yaml
 llm:
-  provider: "opencode_zen"  # ou "openrouter"
+  provider: "opencode_zen"  # ou "groq" / "openrouter"
   opencode_zen:
-    api_key: ""  # A chave é carregada do .env
-    base_url: "https://api.opencode.zen/v1/chat/completions"
-    default_model: "moonshot-v1-8k"
+    default_model: "kimi-k2.5-free"
   openrouter:
-    api_key: ""  # A chave é carregada do .env
     base_url: "https://openrouter.ai/api/v1/chat/completions"
-    default_model: "stepfun/step-3.5-flash:free"
+    default_model: "google/gemini-2.0-flash-exp:free"
 ```
 
 ### 3. Alternando Provedores
