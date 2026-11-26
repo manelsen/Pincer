@@ -41,6 +41,7 @@ defmodule Pincer.Core do
       ProjectOrchestrator,
       Cron,
       Pairing,
+      Pairing.Store,
       Bindings,
       AgentRegistry,
       Policy,
