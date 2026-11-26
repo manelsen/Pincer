@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 380" width="1100" height="380" role="img" aria-label="Pincer agentic turn lifecycle and closed-loop skill promotion">
+  <defs>
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#0b1020"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#3b82f6"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="380" rx="14" fill="#090d16" stroke="#1e293b" stroke-width="1.5"/>
+
+  <text x="32" y="38" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#f1f5f9">Agentic Turn Lifecycle &amp; Skill Promotion</text>
+  <text x="1068" y="38" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="12" fill="#64748b">closed-loop execution -&gt; reflection -&gt; guarded skill</text>
+
+  <!-- Stage 1 -->
+  <rect x="32" y="62" width="234" height="152" rx="10" fill="url(#cardBg)" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="50" y="90" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#38bdf8">1. Context Recall</text>
+  <text x="50" y="113" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">PromptAssembly</text>
+  <text x="50" y="142" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Combines SOUL, HISTORY.md,</text>
+  <text x="50" y="161" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">MEMORY.md, FTS5 &amp; vec0.</text>
+  <text x="50" y="196" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">sanitized per-agent state</text>
+
+  <line x1="272" y1="138" x2="296" y2="138" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Stage 2 -->
+  <rect x="302" y="62" width="234" height="152" rx="10" fill="url(#cardBg)" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="320" y="90" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#c084fc">2. Reason &amp; Act Loop</text>
+  <text x="320" y="113" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Executor + ToolRunner</text>
+  <text x="320" y="142" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Streams LLM responses and</text>
+  <text x="320" y="161" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">runs guarded tool calls.</text>
+  <text x="320" y="196" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">max recursion depth: 100</text>
+
+  <line x1="542" y1="138" x2="566" y2="138" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Stage 3 -->
+  <rect x="572" y="62" width="234" height="152" rx="10" fill="url(#cardBg)" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="590" y="90" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#4ade80">3. Stream &amp; Reply</text>
+  <text x="590" y="113" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">PubSub -&gt; Channel</text>
+  <text x="590" y="142" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Delivers live token deltas</text>
+  <text x="590" y="161" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">and formatted final reply.</text>
+  <text x="590" y="196" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">non-blocking stream</text>
+
+  <line x1="812" y1="138" x2="836" y2="138" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Stage 4 -->
+  <rect x="842" y="62" width="226" height="152" rx="10" fill="url(#cardBg)" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="860" y="90" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#fbbf24">4. Reflect &amp; Archive</text>
+  <text x="860" y="113" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Archivist + Kernel</text>
+  <text x="860" y="142" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Consolidates facts and</text>
+  <text x="860" y="161" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">lessons off the hot path.</text>
+  <text x="860" y="196" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">post-turn background</text>
+
+  <!-- Downward arrow from Stage 4 to Closed-Loop Promotion -->
+  <line x1="955" y1="214" x2="955" y2="245" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowBlue)"/>
+
+  <!-- Stage 5: Closed-Loop Skill Promotion Bar -->
+  <rect x="196" y="250" width="872" height="106" rx="10" fill="#172554" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="218" y="280" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#93c5fd">5. Closed-Loop Skill Promotion</text>
+  <text x="218" y="304" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Introspection.Kernel -&gt; Skills.Generator -&gt; Skills.Guard (fail-closed) -&gt; SKILL.md</text>
+  <text x="218" y="330" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#cbd5e1">Vetted lessons promote into skills and broadcast {:kernel_skills_updated, skill} for future turns.</text>
+
+  <!-- Feedback L-arrow back to Stage 1 Context Recall -->
+  <path d="M 196 303 L 116 303 L 116 221" fill="none" stroke="#3b82f6" stroke-width="2" marker-end="url(#arrowBlue)"/>
+  <text x="128" y="242" font-family="ui-monospace, monospace" font-size="11" fill="#60a5fa">next turn</text>
+</svg>

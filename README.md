@@ -72,117 +72,39 @@ mix pincer.security_audit --strict
 
 ## Architecture
 
-Pincer follows a compile-time enforced Hexagonal Architecture. Dependencies point inward toward `Pincer.Core`, `Pincer.Ports`, and `PincerPorts`.
+Pincer follows a compile-time enforced Hexagonal Architecture on the BEAM. For module-level Mermaid dependency graphs, sequence flows, and exact supervision specs, see the [Technical Architecture Reference](docs/architecture/overview.md).
 
 ### End-to-end runtime pipeline
 
-```mermaid
-flowchart LR
-  CH["Channel Packages (9 Adapters)"] --> SH["Pincer.Channels.Shared (Inbound, SessionBridge, ProjectBridge, Pairing)"]
-  SH --> SS["Pincer.Core.Session.Server (InputBuffer, CommandDispatcher, TaskCoordinator)"]
-  SS --> EX["Pincer.Core.Executor (PromptAssembly, MemoryRecall, ToolRunner)"]
-  EX --> LLM["PincerPorts.LLM (Failover, RetryEngine, 14 Providers)"]
-  EX --> TR["Pincer.Ports.ToolRegistry (19 Native Tools and MCP)"]
-  TR --> SB["Pincer.Ports.Sandbox (Local, bwrap, Docker, SSH)"]
-  TR --> TTS["Pincer.Ports.TTS (Pincer.LLM.TTS)"]
-  EX --> AR["Orchestration.Archivist and Introspection.Kernel"]
-  AR --> DB["Pincer.Infra.SQLite (FTS5, Graph, and sqlite-vec)"]
-  EX -. streaming tokens .-> SS
-```
+<p align="center">
+  <img src="docs/assets/pincer-runtime-pipeline.svg" alt="Pincer end-to-end runtime pipeline from chat channels through isolated session, turn executor, LLM failover, guarded tools, and memory consolidation" width="100%">
+</p>
 
-### Compile-time `Boundary` `0.12` dependency map
+Inbound chat events pass through `Pincer.Channels.Shared` into an isolated per-user `Session.Server`, where `Core.Executor` orchestrates streaming LLM turns, sandboxed tools, media processing, and background memory consolidation.
 
-Every architectural layer declares explicit `use Boundary` exports and `deps`. Compiler warnings fail the build via `elixirc_options: [warnings_as_errors: true]`.
+### Hexagonal layers and compile-time boundaries
 
-```mermaid
-flowchart TD
-  APP["Pincer.Application"] --> CH["Pincer.Channels"]
-  APP --> AD["Pincer.Adapters (strict)"]
-  APP --> CO["Pincer.Core"]
-  APP --> IN["Pincer.Infra"]
-  APP --> TE["Pincer.Telemetry"]
-  APP --> UT["Pincer.Utils"]
+<p align="center">
+  <img src="docs/assets/pincer-hexagonal-layers.svg" alt="Pincer hexagonal layers showing dependencies pointing inward toward Domain Core, Pure Ports, and Shared Infrastructure" width="100%">
+</p>
 
-  CLI["Pincer.CLI"] --> PL["Pincer.Plugin"]
-  CLI --> CO
-  CLI --> UT
-
-  CH --> IN
-  CH --> PL
-  CH --> PP["PincerPorts (packages/pincer_ports)"]
-
-  AD --> CO
-  AD --> PO["Pincer.Ports (strict)"]
-  AD --> IN
-  AD --> UT
-  AD --> PP
-
-  LLM["Pincer.LLM"] --> CO
-  LLM --> PO
-  LLM --> UT
-
-  CO --> PO
-  CO --> IN
-  CO --> UT
-
-  PO --> PP
-```
-
-Inside `Pincer.Core`, 9 internal slices enforce inbound and outbound checks via `CoreSubBoundariesTest`: `Session`, `Project`, `Executor`, `Memory`, `Orchestration`, `Introspection`, `Skills`, `LLM`, and `Graph`. `Pincer.Ports` depends only on `PincerPorts`, never on `Pincer.Infra`.
+Every layer declares explicit `use Boundary` exports and `deps` checked at compile time (`Boundary 0.12` + `warnings_as_errors: true`). Inside `Pincer.Core`, 9 isolated domain slices depend only on `Pincer.Ports` contracts (`PincerPorts`) rather than concrete adapters.
 
 ### Agentic turn and closed-loop skill promotion
 
-```mermaid
-sequenceDiagram
-  actor User
-  participant Channel as Channel Adapter
-  participant Session as Session.Server
-  participant Executor as Core.Executor
-  participant Memory as MemoryRecall & SQLite
-  participant LLM as LLM.Client & Provider
-  participant Tools as ToolRunner & Sandbox
-  participant Kernel as Introspection.Kernel
+<p align="center">
+  <img src="docs/assets/pincer-agentic-turn.svg" alt="Pincer closed-loop agentic turn lifecycle from context recall through tool reasoning, live streaming, reflection, and guarded SKILL.md promotion" width="100%">
+</p>
 
-  User->>Channel: Send message
-  Channel->>Session: Inbound route / SessionBridge
-  Session->>Executor: Run turn in supervised Task
-  Executor->>Memory: Recall HISTORY, MEMORY, FTS5 graph, vec0
-  Memory-->>Executor: Sanitized context
-  loop Up to max recursion depth 100
-    Executor->>LLM: Stream chat completion with failover
-    LLM-->>Executor: Tokens or tool calls
-    opt Tool calls requested
-      Executor->>Tools: WorkspaceGuard / RBAC / Sandbox check
-      Tools-->>Executor: Bounded tool outputs
-    end
-  end
-  Executor-->>Channel: Final response via PubSub
-  Executor->>Kernel: Archivist consolidation and lesson capture
-  opt Lesson promoted to SKILL.md
-    Kernel->>Kernel: Skills.Generator then fail-closed Skills.Guard
-    Kernel-->>Session: Broadcast {:kernel_skills_updated, skill}
-  end
-```
+After streaming the final answer, `Orchestration.Archivist` and `Introspection.Kernel` extract durable facts and workflow lessons off the hot path. Promoted lessons pass through a fail-closed `Skills.Guard` before broadcasting new `SKILL.md` capabilities to active sessions.
 
-### OTP supervision tree
+### BEAM / OTP supervision tree
 
-`Pincer.Application` starts a `one_for_one` supervision tree (`lib/pincer/application.ex`) with Horde clustering support, ETS heir recovery, and isolated per-session and per-project workers:
+<p align="center">
+  <img src="docs/assets/pincer-supervision-tree.svg" alt="Pincer OTP one_for_one supervision tree organized into State and Storage, Agent Workers, Safety and MCP, and Ingress and Timers" width="100%">
+</p>
 
-```mermaid
-flowchart TD
-  SUP["Pincer.Supervisor (one_for_one)"] --> HEIR["Pincer.Utils.ETSTableHeir"]
-  SUP --> CLUS["Cluster.Supervisor & NodeObserver"]
-  SUP --> OBS["PromEx, PubSub, Memory & Conversation Observability"]
-  SUP --> SQL["Pincer.Infra.SQLite & Finch Pool"]
-  SUP --> HB["Pincer.Core.Heartbeat & Task Supervisors"]
-  SUP --> MCP["Pincer.MCP.Supervisor & MCP.Manager"]
-  SUP --> KRN["Introspection.Kernel.Supervisor & Kernel.Registry"]
-  SUP --> SES["Session.Registry, HordeSupervisor & Session.Supervisor"]
-  SUP --> PRJ["Project.Registry, HordeSupervisor, Supervisor & Recovery"]
-  SUP --> GUARD["CircuitBreaker, RateLimiter, Pairing.Store & HookDispatcher"]
-  SUP --> SCHED["Cron.Scheduler, TimerServer & Channels.Supervisor"]
-  SUP --> HTTP["Bandit HTTP (/health)"]
-```
+`Pincer.Application` isolates storage, agent sessions, external MCP processes, and channel adapters under a `:one_for_one` root supervisor, so a failing tool or session never takes down unrelated users.
 
 ### Three-layer memory and Archivist
 
