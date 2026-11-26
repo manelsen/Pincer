@@ -143,7 +143,7 @@ defmodule Pincer.Adapters.Tools.Workflow do
        "Active sessions (#{length(sessions)}):\n" <> Enum.map_join(sessions, "\n", &"- #{&1}")}
     end
   rescue
-    e -> {:error, "Could not list sessions: #{Exception.message(e)}"}
+    e in [ArgumentError] -> {:error, "Could not list sessions: #{Exception.message(e)}"}
   end
 
   defp run_action("get_session", args, current_sid, _ws, deps) do
@@ -165,36 +165,40 @@ defmodule Pincer.Adapters.Tools.Workflow do
         {:error, "Session '#{target}' not found: #{inspect(reason)}"}
     end
   rescue
-    e -> {:error, "Could not get session: #{Exception.message(e)}"}
+    e in [ArgumentError] -> {:error, "Could not get session: #{Exception.message(e)}"}
+  catch
+    :exit, reason -> {:error, "Could not get session: #{inspect(reason)}"}
   end
 
   defp run_action("list_agents", _args, _sid, _ws, _deps) do
     workspaces_dir = "workspaces"
 
     if File.dir?(workspaces_dir) do
-      agents =
-        File.ls!(workspaces_dir)
-        |> Enum.filter(fn name ->
-          File.dir?(Path.join(workspaces_dir, name))
-        end)
-        |> Enum.sort()
+      case File.ls(workspaces_dir) do
+        {:ok, entries} ->
+          agents =
+            entries
+            |> Enum.filter(&File.dir?(Path.join(workspaces_dir, &1)))
+            |> Enum.sort()
 
-      if agents == [] do
-        {:ok, "No agent workspaces found."}
-      else
-        registered =
-          Enum.map(agents, fn id ->
-            mark = if AgentRegistry.exists?(id), do: " [active]", else: ""
-            "- #{id}#{mark}"
-          end)
+          if agents == [] do
+            {:ok, "No agent workspaces found."}
+          else
+            registered =
+              Enum.map(agents, fn id ->
+                mark = if AgentRegistry.exists?(id), do: " [active]", else: ""
+                "- #{id}#{mark}"
+              end)
 
-        {:ok, "Agent workspaces (#{length(agents)}):\n" <> Enum.join(registered, "\n")}
+            {:ok, "Agent workspaces (#{length(agents)}):\n" <> Enum.join(registered, "\n")}
+          end
+
+        {:error, reason} ->
+          {:error, "Could not list agents: #{:file.format_error(reason)}"}
       end
     else
       {:ok, "No workspaces directory found."}
     end
-  rescue
-    e -> {:error, "Could not list agents: #{Exception.message(e)}"}
   end
 
   defp run_action("list_projects", args, current_sid, _ws, deps) do
@@ -213,7 +217,9 @@ defmodule Pincer.Adapters.Tools.Workflow do
       {:ok, "Projects for '#{target}' (#{length(projects)}):\n" <> Enum.join(lines, "\n")}
     end
   rescue
-    e -> {:error, "Could not list projects: #{Exception.message(e)}"}
+    e in [ArgumentError] -> {:error, "Could not list projects: #{Exception.message(e)}"}
+  catch
+    :exit, reason -> {:error, "Could not list projects: #{inspect(reason)}"}
   end
 
   defp run_action("get_board", args, current_sid, _ws, deps) do
@@ -224,7 +230,9 @@ defmodule Pincer.Adapters.Tools.Workflow do
       :not_found -> {:error, "No active project board for session '#{target}'."}
     end
   rescue
-    e -> {:error, "Could not get board: #{Exception.message(e)}"}
+    e in [ArgumentError] -> {:error, "Could not get board: #{Exception.message(e)}"}
+  catch
+    :exit, reason -> {:error, "Could not get board: #{inspect(reason)}"}
   end
 
   # ---------------------------------------------------------------------------
@@ -233,69 +241,73 @@ defmodule Pincer.Adapters.Tools.Workflow do
 
   defp run_action("list_tasks", args, _sid, workspace, _deps) do
     filter = Map.get(args, "filter")
-    tasks = load_tasks(workspace)
 
-    filtered =
-      if filter do
-        Enum.filter(tasks, &(&1["status"] == filter))
+    with {:ok, tasks} <- load_tasks(workspace) do
+      filtered =
+        if filter do
+          Enum.filter(tasks, &(&1["status"] == filter))
+        else
+          tasks
+        end
+
+      if filtered == [] do
+        {:ok, "No tasks" <> if(filter, do: " with status '#{filter}'", else: "") <> "."}
       else
-        tasks
+        lines =
+          Enum.map(filtered, fn t ->
+            "[#{t["id"]}] **#{t["title"]}** — #{t["status"]}" <>
+              if(t["description"] && t["description"] != "",
+                do: "\n  #{t["description"]}",
+                else: ""
+              )
+          end)
+
+        {:ok, "Tasks (#{length(filtered)}):\n\n" <> Enum.join(lines, "\n")}
       end
-
-    if filtered == [] do
-      {:ok, "No tasks" <> if(filter, do: " with status '#{filter}'", else: "") <> "."}
-    else
-      lines =
-        Enum.map(filtered, fn t ->
-          "[#{t["id"]}] **#{t["title"]}** — #{t["status"]}" <>
-            if(t["description"] && t["description"] != "",
-              do: "\n  #{t["description"]}",
-              else: ""
-            )
-        end)
-
-      {:ok, "Tasks (#{length(filtered)}):\n\n" <> Enum.join(lines, "\n")}
     end
   end
 
   defp run_action("create_task", %{"title" => title} = args, _sid, workspace, _deps) do
-    id = reserve_task_id(workspace, next_task_id(load_tasks(workspace)))
-    now = DateTime.utc_now() |> DateTime.to_iso8601()
+    with {:ok, tasks} <- load_tasks(workspace) do
+      id = reserve_task_id(workspace, next_task_id(tasks))
+      now = DateTime.utc_now() |> DateTime.to_iso8601()
 
-    task = %{
-      "id" => id,
-      "title" => title,
-      "description" => Map.get(args, "description", ""),
-      "status" => "pending",
-      "created_at" => now,
-      "updated_at" => now
-    }
+      task = %{
+        "id" => id,
+        "title" => title,
+        "description" => Map.get(args, "description", ""),
+        "status" => "pending",
+        "created_at" => now,
+        "updated_at" => now
+      }
 
-    save_tasks(workspace, [task | load_tasks(workspace)])
-    {:ok, "Task #{id} created: #{title}"}
+      with :ok <- save_tasks(workspace, [task | tasks]) do
+        {:ok, "Task #{id} created: #{title}"}
+      end
+    end
   end
 
   defp run_action("create_task", _args, _sid, _ws, _deps),
     do: {:error, "Missing required parameter: title"}
 
   defp run_action("get_task", %{"task_id" => task_id}, _sid, workspace, _deps) do
-    tasks = load_tasks(workspace)
+    with {:ok, tasks} <- load_tasks(workspace) do
+      case Enum.find(tasks, &(&1["id"] == task_id)) do
+        nil ->
+          {:error, "Task '#{task_id}' not found."}
 
-    case Enum.find(tasks, &(&1["id"] == task_id)) do
-      nil ->
-        {:error, "Task '#{task_id}' not found."}
+        task ->
+          lines = [
+            "ID: #{task["id"]}",
+            "Title: #{task["title"]}",
+            "Status: #{task["status"]}",
+            "Description: #{task["description"] || "(none)"}",
+            "Created: #{task["created_at"]}",
+            "Updated: #{task["updated_at"]}"
+          ]
 
-      task ->
-        lines = [
-          "ID: #{task["id"]}",
-          "Title: #{task["title"]}",
-          "Status: #{task["status"]}",
-          "Description: #{task["description"] || "(none)"}",
-          "Created: #{task["created_at"]}",
-          "Updated: #{task["updated_at"]}"
-        ]
-
-        {:ok, Enum.join(lines, "\n")}
+          {:ok, Enum.join(lines, "\n")}
+      end
     end
   end
 
@@ -303,25 +315,26 @@ defmodule Pincer.Adapters.Tools.Workflow do
     do: {:error, "Missing required parameter: task_id"}
 
   defp run_action("update_task", %{"task_id" => task_id} = args, _sid, workspace, _deps) do
-    tasks = load_tasks(workspace)
+    with {:ok, tasks} <- load_tasks(workspace) do
+      case Enum.find_index(tasks, &(&1["id"] == task_id)) do
+        nil ->
+          {:error, "Task '#{task_id}' not found."}
 
-    case Enum.find_index(tasks, &(&1["id"] == task_id)) do
-      nil ->
-        {:error, "Task '#{task_id}' not found."}
+        idx ->
+          task = Enum.at(tasks, idx)
+          now = DateTime.utc_now() |> DateTime.to_iso8601()
 
-      idx ->
-        task = Enum.at(tasks, idx)
-        now = DateTime.utc_now() |> DateTime.to_iso8601()
+          updated =
+            task
+            |> maybe_update("status", Map.get(args, "status"))
+            |> maybe_update("title", Map.get(args, "title"))
+            |> maybe_update("description", Map.get(args, "description"))
+            |> Map.put("updated_at", now)
 
-        updated =
-          task
-          |> maybe_update("status", Map.get(args, "status"))
-          |> maybe_update("title", Map.get(args, "title"))
-          |> maybe_update("description", Map.get(args, "description"))
-          |> Map.put("updated_at", now)
-
-        save_tasks(workspace, List.replace_at(tasks, idx, updated))
-        {:ok, "Task #{task_id} updated. Status: #{updated["status"]}"}
+          with :ok <- save_tasks(workspace, List.replace_at(tasks, idx, updated)) do
+            {:ok, "Task #{task_id} updated. Status: #{updated["status"]}"}
+          end
+      end
     end
   end
 
@@ -342,16 +355,25 @@ defmodule Pincer.Adapters.Tools.Workflow do
   defp load_tasks(workspace) do
     path = tasks_path(workspace)
 
-    if File.exists?(path) do
-      case Jason.decode(File.read!(path)) do
-        {:ok, list} when is_list(list) -> list
-        _ -> []
-      end
-    else
-      []
+    case File.read(path) do
+      {:ok, raw} ->
+        case Jason.decode(raw) do
+          {:ok, list} when is_list(list) ->
+            {:ok, list}
+
+          {:ok, other} ->
+            {:error, "Corrupt tasks JSON at #{path}: expected a JSON list, got #{inspect(other)}"}
+
+          {:error, %Jason.DecodeError{} = err} ->
+            {:error, "Corrupt tasks JSON at #{path}: #{Exception.message(err)}"}
+        end
+
+      {:error, :enoent} ->
+        {:ok, []}
+
+      {:error, reason} ->
+        {:error, "Could not read tasks file at #{path}: #{:file.format_error(reason)}"}
     end
-  rescue
-    _ -> []
   end
 
   # Reserving the id with an exclusively created file is the one operation that
@@ -388,8 +410,9 @@ defmodule Pincer.Adapters.Tools.Workflow do
       :ok
     else
       {:error, reason} ->
+        File.rm(tmp)
         Logger.warning("[WORKFLOW] Failed to persist tasks: #{inspect(reason)}")
-        :ok
+        {:error, "Failed to persist tasks: #{inspect(reason)}"}
     end
   end
 

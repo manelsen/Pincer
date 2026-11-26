@@ -57,6 +57,56 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     def provider_config(_provider_id), do: nil
   end
 
+  defmodule NonEnumerableStreamFallsBackLLM do
+    @behaviour Pincer.Ports.LLM
+
+    @impl true
+    def list_providers, do: []
+    @impl true
+    def list_models(_id), do: []
+    @impl true
+    def transcribe_audio(_path, _opts), do: {:error, :not_implemented}
+    @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
+    @impl true
+    def provider_config(_id), do: nil
+
+    @impl true
+    def stream_completion(_messages, _opts) do
+      {:ok, :not_enumerable}
+    end
+
+    @impl true
+    def chat_completion(_messages, _opts) do
+      {:ok, %{"role" => "assistant", "content" => "Fallback after non-enumerable stream"}, nil}
+    end
+  end
+
+  defmodule RecoveryRaisesProtocolErrorLLM do
+    @behaviour Pincer.Ports.LLM
+
+    @impl true
+    def list_providers, do: []
+    @impl true
+    def list_models(_id), do: []
+    @impl true
+    def transcribe_audio(_path, _opts), do: {:error, :not_implemented}
+    @impl true
+    def generate_embedding(_text, _opts), do: {:error, :not_implemented}
+    @impl true
+    def provider_config(_id), do: nil
+
+    @impl true
+    def stream_completion(_messages, _opts) do
+      {:ok, [%{"choices" => [%{"delta" => %{}}]}]}
+    end
+
+    @impl true
+    def chat_completion(_messages, _opts) do
+      raise Protocol.UndefinedError, protocol: Enumerable, value: :bug_in_recovery
+    end
+  end
+
   defmodule EmptyFinalButStreamedLLM do
     @behaviour Pincer.Ports.LLM
 
@@ -810,6 +860,27 @@ defmodule Pincer.Core.ExecutorStreamingTest do
     assert Enum.at(retained_messages, -1) =~ "msg-10"
 
     assert_receive {:executor_finished, _history, "ok", _usage}, 2000
+  end
+
+  test "executor falls back to chat_completion when StreamAccumulator.consume hits Protocol.UndefinedError" do
+    history = [%{"role" => "user", "content" => "Oi"}]
+
+    Executor.run(self(), "test_non_enumerable_stream_session", history,
+      llm_client: NonEnumerableStreamFallsBackLLM
+    )
+
+    assert_receive {:executor_finished, _history, "Fallback after non-enumerable stream", _usage},
+                   2000
+  end
+
+  test "executor surfaces Protocol.UndefinedError raised inside recover_empty_response instead of falling back" do
+    history = [%{"role" => "user", "content" => "Oi"}]
+
+    assert_raise Protocol.UndefinedError, fn ->
+      Executor.run(self(), "test_recovery_protocol_error_session", history,
+        llm_client: RecoveryRaisesProtocolErrorLLM
+      )
+    end
   end
 
   defp restore_env(key, nil), do: System.delete_env(key)
