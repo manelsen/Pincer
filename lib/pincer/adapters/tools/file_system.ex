@@ -2,9 +2,13 @@ defmodule Pincer.Adapters.Tools.FileSystem do
   @moduledoc """
   Tools for file system manipulation with path confinement (jail).
 
-  This module provides safe access to the file system by strictly confining operations
-  to the application's workspace root. It prevents path traversal attacks and restricts
-  access to sensitive system files.
+  This module acts as the `Pincer.Ports.Tool` coordinator and `WorkspaceGuard`
+  path confinement gateway, delegating execution to focused submodules:
+
+  - `Pincer.Adapters.Tools.FileSystem.Walk` (`list`, `find`, `search`, `stat`)
+  - `Pincer.Adapters.Tools.FileSystem.Edit` (`read`, `write`, `append`, `patch`, `anchored_edit`)
+  - `Pincer.Adapters.Tools.FileSystem.Archive` (`zip`, `unzip`)
+  - `Pincer.Adapters.Tools.FileSystem.Transfer` (`mkdir`, `copy`, `move`, `delete_to_trash`, `send_to_channel`)
 
   ## Security Model
 
@@ -13,47 +17,46 @@ defmodule Pincer.Adapters.Tools.FileSystem do
      - `..` (parent directory) traversal is explicitly blocked.
      - Absolute paths are allowed ONLY if they point within the workspace.
      - Null bytes are rejected.
-  3. **Constrained Mutations**: Write and patch operations are allowed only inside
-     the workspace root, using the same confinement guarantees as reads.
-
-  ## Allowed Actions
-
-  - `list`: List files in a directory.
-  - `read`: Read file content.
-  - `write`: Overwrite a file, creating parent directories when needed.
-  - `append`: Append text to a file, creating parent directories when needed.
-  - `mkdir`: Create directories recursively.
-  - `copy`: Copy a file or directory within the workspace.
-  - `move`: Move a file or directory within the workspace.
-  - `search`: Recursively search text in files under the workspace.
-  - `find`: Find files or directories recursively under the workspace.
-  - `stat`: Inspect metadata for a file or directory.
-  - `anchored_edit`: Edit files using verified line anchors.
-  - `patch`: Replace exact text in a file.
-  - `delete_to_trash`: Move a file or directory to the workspace trash.
-
-  ## Security Constraints
-
-  - **Blocked**: `../../etc/passwd` (Traversal)
-  - **Blocked**: `/etc/shadow` (Absolute path outside workspace)
-  - **Allowed**: `lib/pincer.ex` (Relative path inside workspace)
+  3. **Constrained Mutations**: Write, patch, transfer, and archive operations use the
+     same confinement guarantees as reads.
   """
+
   @behaviour Pincer.Ports.Tool
+
   alias Pincer.Adapters.Tools.Args
+  alias Pincer.Adapters.Tools.FileSystem.Archive
+  alias Pincer.Adapters.Tools.FileSystem.Edit
+  alias Pincer.Adapters.Tools.FileSystem.Transfer
+  alias Pincer.Adapters.Tools.FileSystem.Walk
   alias Pincer.Core.WorkspaceGuard
+
   require Logger
 
-  # 50 MB file-read limit. The practical ceiling is the LLM context window
-  # (~500 KB of useful text), but we allow up to 50 MB so the agent can
-  # handle large logs, datasets, and dumps without hitting an artificial wall.
-  @max_file_size Application.compile_env(:pincer, :fs_max_file_size, 52_428_800)
-  @max_search_results Application.compile_env(:pincer, :fs_max_search_results, 100)
-  @search_skip_dirs [".git", "_build", "deps", "node_modules"]
-  @snippet_limit Application.compile_env(:pincer, :fs_snippet_limit, 160)
-  @hashline_dict "ZPMQVRWSNKTXJBYH" |> String.graphemes() |> List.to_tuple()
-  @line_ref_regex ~r/^(\d+)#([A-Z]{5})$/
-  # Determine workspace root at runtime
-  defp get_workspace_root, do: File.cwd!()
+  @actions [
+    %{name: "list", handler: {Walk, :list}, default_path: "."},
+    %{name: "read", handler: {Edit, :read}},
+    %{name: "write", handler: {Edit, :write}},
+    %{name: "append", handler: {Edit, :append}},
+    %{name: "mkdir", handler: {Transfer, :mkdir}},
+    %{name: "copy", handler: {Transfer, :copy}, destination: :required},
+    %{name: "move", handler: {Transfer, :move}, destination: :required},
+    %{name: "search", handler: {Walk, :search}, default_path: "."},
+    %{name: "find", handler: {Walk, :find}},
+    %{name: "stat", handler: {Walk, :stat}},
+    %{name: "anchored_edit", handler: {Edit, :anchored_edit}},
+    %{name: "patch", handler: {Edit, :patch}},
+    %{name: "delete_to_trash", handler: {Transfer, :delete_to_trash}},
+    %{name: "zip", handler: {Archive, :zip}, destination: :required},
+    %{name: "unzip", handler: {Archive, :unzip}, destination: :optional},
+    %{name: "send_to_channel", handler: {Transfer, :send_to_channel}}
+  ]
+
+  @action_names Enum.map(@actions, & &1.name)
+  @action_map Map.new(@actions, &{&1.name, &1})
+
+  @doc "Returns the canonical list of supported `file_system` action names."
+  @spec actions() :: [String.t()]
+  def actions, do: @action_names
 
   @impl true
   def spec do
@@ -66,26 +69,8 @@ defmodule Pincer.Adapters.Tools.FileSystem do
         properties: %{
           action: %{
             type: "string",
-            description:
-              "Action to execute: 'list', 'read', 'write', 'append', 'mkdir', 'copy', 'move', 'search', 'find', 'stat', 'anchored_edit', 'patch', 'delete_to_trash', 'zip', 'unzip', or 'send_to_channel'",
-            enum: [
-              "list",
-              "read",
-              "write",
-              "append",
-              "mkdir",
-              "copy",
-              "move",
-              "search",
-              "find",
-              "stat",
-              "anchored_edit",
-              "patch",
-              "delete_to_trash",
-              "zip",
-              "unzip",
-              "send_to_channel"
-            ]
+            description: format_action_description(@action_names),
+            enum: @action_names
           },
           path: %{
             type: "string",
@@ -199,20 +184,20 @@ defmodule Pincer.Adapters.Tools.FileSystem do
 
   @impl true
   def execute(args, context \\ %{}) do
-    # DEBUG: Log incoming arguments
     Logger.debug("[FILE-SYSTEM] Incoming args: #{inspect(args)}")
 
     action = infer_action(args)
-    raw_path = get_arg(args, "path") || default_path(action)
-
+    action_spec = Map.get(@action_map, action)
+    raw_path = Args.get(args, "path") || default_path(action_spec)
     workspace_root = Args.workspace_root(context, &get_workspace_root/0)
 
     session_id = Args.session_id(context)
     args = if is_binary(session_id), do: Map.put(args, "_session_id", session_id), else: args
 
-    with {:ok, safe_path} <- validate_action_path(action, raw_path, workspace_root),
-         {:ok, normalized_args} <- normalize_args_for_action(action, args, workspace_root) do
-      perform_action(action, safe_path, normalized_args, workspace_root)
+    with {:ok, spec} <- fetch_action_spec(action_spec),
+         {:ok, safe_path} <- validate_action_path(spec, raw_path, workspace_root),
+         {:ok, normalized_args} <- normalize_args_for_action(spec, args, workspace_root) do
+      perform_action(spec, safe_path, normalized_args, workspace_root)
     else
       {:error, reason} ->
         Logger.warning("[FILE-SYSTEM] Security violation: #{reason} (Path: #{inspect(raw_path)})")
@@ -220,68 +205,62 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     end
   end
 
+  @doc "Confines `path` within `root`, rejecting `..` traversal segments and null bytes."
+  @spec validate_path(term(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def validate_path(path, _root) when not is_binary(path), do: {:error, "Invalid path"}
+
+  def validate_path(path, root) do
+    WorkspaceGuard.confine_path(path,
+      root: root,
+      reject_parent_segments: true
+    )
+  end
+
+  @doc "Returns `path` relative to `workspace_root`."
+  @spec relative_to_workspace(String.t(), String.t()) :: String.t()
+  def relative_to_workspace(path, workspace_root), do: Path.relative_to(path, workspace_root)
+
+  @doc "Fetches a required non-empty string argument from `args`."
+  @spec fetch_required_string(map(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def fetch_required_string(args, key), do: string_arg(args, key, :nonempty)
+
+  @doc "Fetches a raw string argument from `args` (allowing empty string)."
+  @spec fetch_string(map(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def fetch_string(args, key), do: string_arg(args, key, :raw)
+
+  defp get_workspace_root, do: File.cwd!()
+
   defp infer_action(args) do
     cond do
-      a = get_arg(args, "action") -> a
-      get_arg(args, "content") -> "write"
-      get_arg(args, "old_text") && get_arg(args, "new_text") -> "patch"
-      get_arg(args, "query") -> "search"
-      get_arg(args, "path") -> "read"
+      a = Args.get(args, "action") -> a
+      Args.get(args, "content") -> "write"
+      Args.get(args, "old_text") && Args.get(args, "new_text") -> "patch"
+      Args.get(args, "query") -> "search"
+      Args.get(args, "path") -> "read"
       true -> nil
     end
   end
 
-  defp get_arg(args, key), do: Args.get(args, key)
+  defp default_path(%{default_path: path}), do: path
+  defp default_path(_spec), do: nil
 
-  defp default_path("list"), do: "."
-  defp default_path("search"), do: "."
-  defp default_path(_action), do: nil
+  defp fetch_action_spec(nil), do: {:error, "Invalid action."}
+  defp fetch_action_spec(spec), do: {:ok, spec}
 
-  defp validate_action_path(nil, _path, _root), do: {:error, "Invalid action."}
-
-  defp validate_action_path(_action, nil, _root),
+  defp validate_action_path(_spec, nil, _root),
     do: {:error, "Path is required for file_system operations."}
 
-  defp validate_action_path(action, path, root)
-       when action in [
-              "list",
-              "read",
-              "write",
-              "append",
-              "mkdir",
-              "copy",
-              "move",
-              "search",
-              "find",
-              "stat",
-              "anchored_edit",
-              "patch",
-              "delete_to_trash",
-              "zip",
-              "unzip",
-              "send_to_channel"
-            ] do
-    validate_path(path, root)
-  end
+  defp validate_action_path(_spec, path, root), do: validate_path(path, root)
 
-  defp validate_action_path(_action, _path, _root), do: {:error, "Invalid action."}
-
-  defp normalize_args_for_action(action, args, workspace_root) when action in ["copy", "move"] do
+  defp normalize_args_for_action(%{destination: :required}, args, workspace_root) do
     with {:ok, destination} <- fetch_required_string(args, "destination"),
          {:ok, safe_destination} <- validate_path(destination, workspace_root) do
       {:ok, Map.put(args, "_destination_path", safe_destination)}
     end
   end
 
-  defp normalize_args_for_action("zip", args, workspace_root) do
-    with {:ok, destination} <- fetch_required_string(args, "destination"),
-         {:ok, safe_destination} <- validate_path(destination, workspace_root) do
-      {:ok, Map.put(args, "_destination_path", safe_destination)}
-    end
-  end
-
-  defp normalize_args_for_action("unzip", args, workspace_root) do
-    case get_arg(args, "destination") do
+  defp normalize_args_for_action(%{destination: :optional}, args, workspace_root) do
+    case Args.get(args, "destination") do
       dest when is_binary(dest) and dest != "" ->
         with {:ok, safe_dest} <- validate_path(dest, workspace_root) do
           {:ok, Map.put(args, "_destination_path", safe_dest)}
@@ -292,1363 +271,24 @@ defmodule Pincer.Adapters.Tools.FileSystem do
     end
   end
 
-  defp normalize_args_for_action(_action, args, _workspace_root), do: {:ok, args}
+  defp normalize_args_for_action(_spec, args, _workspace_root), do: {:ok, args}
 
-  defp validate_path(path, _root) when not is_binary(path), do: {:error, "Invalid path"}
-
-  defp validate_path(path, root) do
-    WorkspaceGuard.confine_path(path,
-      root: root,
-      reject_parent_segments: true
-    )
+  defp perform_action(%{handler: {module, fun}}, safe_path, normalized_args, workspace_root) do
+    apply(module, fun, [safe_path, normalized_args, workspace_root])
   end
-
-  defp perform_action("list", path, args, workspace_root) do
-    rel = relative_to_workspace(path, workspace_root)
-
-    if get_arg(args, "recursive") == true do
-      case list_recursive(path, workspace_root) do
-        {:ok, entries} ->
-          {:ok,
-           Jason.encode!(%{
-             action: "list",
-             path: rel,
-             recursive: true,
-             total: length(entries),
-             entries: entries
-           })}
-
-        {:error, reason} ->
-          {:error, reason}
-      end
-    else
-      case File.ls(path) do
-        {:ok, files} ->
-          sorted = Enum.sort(files)
-
-          {:ok,
-           Jason.encode!(%{
-             action: "list",
-             path: rel,
-             recursive: false,
-             total: length(sorted),
-             entries: sorted
-           })}
-
-        {:error, reason} ->
-          {:error, "Error listing: #{inspect(reason)}"}
-      end
-    end
-  end
-
-  defp perform_action("read", path, args, _workspace_root) do
-    if invalid_read_range?(args) do
-      {:error, "Cannot combine 'tail_lines' with 'from_line' or 'line_count'."}
-    else
-      do_read(path, args)
-    end
-  end
-
-  defp perform_action("write", path, args, workspace_root) do
-    content = get_arg(args, "content")
-
-    if is_binary(content) do
-      case File.stat(path) do
-        {:ok, %{type: :directory}} ->
-          {:error, "Cannot write to a directory."}
-
-        _ ->
-          path
-          |> Path.dirname()
-          |> File.mkdir_p()
-
-          case File.write(path, content) do
-            :ok ->
-              {:ok,
-               "Wrote #{byte_size(content)} bytes to '#{relative_to_workspace(path, workspace_root)}'."}
-
-            {:error, reason} ->
-              {:error, "Error writing file: #{inspect(reason)}"}
-          end
-      end
-    else
-      {:error, "Write action requires string 'content'."}
-    end
-  end
-
-  defp perform_action("append", path, args, workspace_root) do
-    content = get_arg(args, "content")
-
-    if is_binary(content) do
-      case File.stat(path) do
-        {:ok, %{type: :directory}} ->
-          {:error, "Cannot append to a directory."}
-
-        _ ->
-          path
-          |> Path.dirname()
-          |> File.mkdir_p()
-
-          case File.write(path, content, [:append]) do
-            :ok ->
-              {:ok,
-               "Appended #{byte_size(content)} bytes to '#{relative_to_workspace(path, workspace_root)}'."}
-
-            {:error, reason} ->
-              {:error, "Error appending file: #{inspect(reason)}"}
-          end
-      end
-    else
-      {:error, "Append action requires string 'content'."}
-    end
-  end
-
-  defp perform_action("mkdir", path, _args, workspace_root) do
-    case File.stat(path) do
-      {:ok, %{type: :directory}} ->
-        {:ok, "Created directory '#{relative_to_workspace(path, workspace_root)}'."}
-
-      {:ok, %{type: :regular}} ->
-        {:error, "Cannot create directory: file already exists at that path."}
-
-      _ ->
-        case File.mkdir_p(path) do
-          :ok ->
-            {:ok, "Created directory '#{relative_to_workspace(path, workspace_root)}'."}
-
-          {:error, reason} ->
-            {:error, "Error creating directory: #{inspect(reason)}"}
-        end
-    end
-  end
-
-  defp perform_action("copy", path, args, workspace_root) do
-    destination = get_arg(args, "_destination_path")
-    overwrite? = get_arg(args, "overwrite") == true
-
-    with :ok <- ensure_destination_available(destination, overwrite?),
-         :ok <- ensure_parent_directory(destination),
-         :ok <- copy_path(path, destination, overwrite?) do
-      {:ok,
-       "Copied '#{relative_to_workspace(path, workspace_root)}' to '#{relative_to_workspace(destination, workspace_root)}'."}
-    else
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp perform_action("move", path, args, workspace_root) do
-    destination = get_arg(args, "_destination_path")
-    overwrite? = get_arg(args, "overwrite") == true
-
-    with :ok <- ensure_not_workspace_root(path, workspace_root),
-         :ok <- ensure_not_descendant_move(path, destination),
-         :ok <- ensure_destination_available(destination, overwrite?),
-         :ok <- ensure_parent_directory(destination),
-         :ok <- move_path(path, destination, overwrite?) do
-      {:ok,
-       "Moved '#{relative_to_workspace(path, workspace_root)}' to '#{relative_to_workspace(destination, workspace_root)}'."}
-    else
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp perform_action("find", path, args, workspace_root) do
-    limit = normalize_max_results(get_arg(args, "max_results"))
-
-    with {:ok, find_opts} <- normalize_find_opts(args),
-         {:ok, entries} <- find_paths(path, workspace_root, limit, find_opts) do
-      {:ok,
-       Jason.encode!(%{
-         action: "find",
-         path: relative_to_workspace(path, workspace_root),
-         total: length(entries),
-         truncated: length(entries) >= limit,
-         limit: limit,
-         entries: entries
-       })}
-    end
-  end
-
-  defp perform_action("anchored_edit", path, args, workspace_root) do
-    with {:ok, edits} <- normalize_anchored_edits(args),
-         {:ok, content} <- read_regular_file(path),
-         {:ok, updated_content, edit_count} <- apply_anchored_edits(content, edits),
-         :ok <- write_updated_content(path, updated_content) do
-      {:ok,
-       "Applied #{edit_count} anchored edit(s) to '#{relative_to_workspace(path, workspace_root)}'."}
-    else
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  defp perform_action("search", path, args, workspace_root) do
-    limit = normalize_max_results(get_arg(args, "max_results"))
-
-    with {:ok, query} <- fetch_required_string(args, "query"),
-         {:ok, search_opts} <- normalize_search_opts(args),
-         {:ok, matches} <- search_path(path, workspace_root, query, limit, search_opts) do
-      entries =
-        Enum.map(matches, fn %{path: rel_path, line: line, snippet: snippet} ->
-          %{path: rel_path, line: line, snippet: snippet}
-        end)
-
-      {:ok,
-       Jason.encode!(%{
-         action: "search",
-         query: query,
-         total: length(entries),
-         truncated: length(entries) >= limit,
-         limit: limit,
-         matches: entries
-       })}
-    end
-  end
-
-  defp perform_action("stat", path, _args, workspace_root) do
-    case File.lstat(path) do
-      {:ok, stat} ->
-        {:ok,
-         Jason.encode!(%{
-           action: "stat",
-           path: relative_to_workspace(path, workspace_root),
-           type: stat.type,
-           size: stat.size,
-           mtime: format_mtime(stat.mtime)
-         })}
-
-      {:error, reason} ->
-        {:error, "File not found or inaccessible: #{inspect(reason)}"}
-    end
-  end
-
-  defp perform_action("patch", path, args, workspace_root) do
-    with {:ok, old_text} <- fetch_required_string(args, "old_text"),
-         {:ok, new_text} <- fetch_string(args, "new_text"),
-         {:ok, content} <- read_regular_file(path),
-         {:ok, updated, replacements} <- patch_content(content, old_text, new_text, args) do
-      case File.write(path, updated) do
-        :ok ->
-          {:ok,
-           "Patched #{replacements} occurrence(s) in '#{relative_to_workspace(path, workspace_root)}'."}
-
-        {:error, reason} ->
-          {:error, "Error writing patched file: #{inspect(reason)}"}
-      end
-    end
-  end
-
-  defp perform_action("delete_to_trash", path, _args, workspace_root) do
-    trash_root = Path.join(workspace_root, ".trash")
-
-    cond do
-      path == workspace_root ->
-        {:error, "Cannot move the workspace root to trash."}
-
-      path == trash_root or String.starts_with?(path, trash_root <> "/") ->
-        {:error, "Cannot move items that are already inside the workspace trash."}
-
-      true ->
-        case File.stat(path) do
-          {:ok, _stat} ->
-            :ok = File.mkdir_p(trash_root)
-            destination = trash_destination(path, workspace_root, trash_root)
-
-            case File.rename(path, destination) do
-              :ok ->
-                {:ok,
-                 "Moved '#{relative_to_workspace(path, workspace_root)}' to '#{relative_to_workspace(destination, workspace_root)}'."}
-
-              {:error, reason} ->
-                {:error, "Error moving item to trash: #{inspect(reason)}"}
-            end
-
-          {:error, :enoent} ->
-            {:error, "File not found or inaccessible: :enoent"}
-
-          {:error, reason} ->
-            {:error, "File not found or inaccessible: #{inspect(reason)}"}
-        end
-    end
-  end
-
-  defp perform_action("zip", path, args, workspace_root) do
-    destination = get_arg(args, "_destination_path")
-
-    destination =
-      if is_binary(destination) and destination != "" do
-        destination
-      else
-        path <> ".zip"
-      end
-
-    destination =
-      if String.ends_with?(destination, ".zip"),
-        do: destination,
-        else: destination <> ".zip"
-
-    case File.stat(path) do
-      {:error, _} ->
-        {:error, "Path not found: #{relative_to_workspace(path, workspace_root)}"}
-
-      {:ok, _} ->
-        files_to_zip = collect_zip_entries(path)
-
-        # Use relative paths from workspace root so the archive has a clean structure
-        relative_files =
-          Enum.map(files_to_zip, fn abs_path ->
-            abs_path |> Path.relative_to(workspace_root) |> String.to_charlist()
-          end)
-
-        zip_result =
-          :zip.create(
-            String.to_charlist(destination),
-            relative_files,
-            cwd: String.to_charlist(workspace_root)
-          )
-
-        case zip_result do
-          {:ok, _} ->
-            {:ok,
-             "Created archive '#{relative_to_workspace(destination, workspace_root)}' with #{length(files_to_zip)} file(s)."}
-
-          {:error, reason} ->
-            {:error, "Failed to create zip: #{inspect(reason)}"}
-        end
-    end
-  end
-
-  defp perform_action("unzip", path, args, workspace_root) do
-    dest_dir =
-      case get_arg(args, "_destination_path") do
-        d when is_binary(d) -> d
-        _ -> Path.dirname(path)
-      end
-
-    with :ok <- validate_zip_entries(path, dest_dir, workspace_root),
-         :ok <- File.mkdir_p(dest_dir),
-         {:ok, files} <-
-           :zip.extract(
-             String.to_charlist(path),
-             [{:cwd, String.to_charlist(dest_dir)}]
-           ) do
-      rel_dest = relative_to_workspace(dest_dir, workspace_root)
-      {:ok, "Extracted #{length(files)} file(s) to '#{rel_dest}'."}
-    else
-      {:error, reason} when is_binary(reason) ->
-        {:error, reason}
-
-      {:error, reason} ->
-        {:error, "Failed to extract zip: #{inspect(reason)}"}
-    end
-  end
-
-  defp perform_action("send_to_channel", path, args, workspace_root) do
-    session_id = get_arg(args, "session_id") || get_arg(args, "_session_id")
-    caption = get_arg(args, "caption")
-
-    if is_nil(session_id) or session_id == "" do
-      {:error, "send_to_channel requires a session context — run from within an active session."}
-    else
-      rel_path = relative_to_workspace(path, workspace_root)
-
-      case File.stat(path) do
-        {:error, _} ->
-          {:error, "File not found: #{rel_path}"}
-
-        {:ok, %{type: :directory}} ->
-          {:error, "Cannot send a directory. Zip it first with the 'zip' action."}
-
-        {:ok, _} ->
-          opts = if is_binary(caption) and caption != "", do: %{caption: caption}, else: %{}
-          Pincer.Infra.PubSub.broadcast("session:#{session_id}", {:agent_file, path, opts})
-          {:ok, "Sending '#{rel_path}' to the channel..."}
-      end
-    end
-  end
-
-  defp perform_action(_, _path, _args, _workspace_root), do: {:error, "Invalid action."}
-
-  defp validate_zip_entries(archive_path, dest_dir, workspace_root) do
-    case :zip.table(String.to_charlist(archive_path)) do
-      {:ok, entries} ->
-        Enum.reduce_while(entries, :ok, fn
-          {:zip_comment, _}, :ok ->
-            {:cont, :ok}
-
-          {:zip_file, name_charlist, file_info, _comment, _offset, _comp_size}, :ok ->
-            entry = List.to_string(name_charlist)
-
-            case validate_single_zip_entry(entry, file_info, dest_dir, workspace_root) do
-              :ok -> {:cont, :ok}
-              {:error, reason} -> {:halt, {:error, reason}}
-            end
-
-          _, :ok ->
-            {:cont, :ok}
-        end)
-
-      {:error, reason} ->
-        {:error, "Failed to inspect zip: #{inspect(reason)}"}
-    end
-  end
-
-  defp validate_single_zip_entry(entry, file_info, dest_dir, workspace_root) do
-    normalized = entry |> String.replace("\\", "/") |> String.trim_trailing("/")
-
-    cond do
-      entry == "" or String.contains?(entry, "\0") ->
-        {:error, "Zip Slip blocked: unsafe archive entry '#{entry}'"}
-
-      String.starts_with?(entry, "/") or String.starts_with?(entry, "\\") or
-          Regex.match?(~r/^[A-Za-z]:/, entry) ->
-        {:error, "Zip Slip blocked: unsafe archive entry '#{entry}'"}
-
-      zip_symlink?(file_info) ->
-        {:error, "Zip Slip blocked: symlink entry '#{entry}' is not allowed"}
-
-      normalized == "" ->
-        {:error, "Zip Slip blocked: unsafe archive entry '#{entry}'"}
-
-      ".." in String.split(normalized, "/", trim: true) ->
-        {:error, "Zip Slip blocked: unsafe archive entry '#{entry}'"}
-
-      true ->
-        with {:ok, target} <-
-               WorkspaceGuard.confine_path(normalized,
-                 root: dest_dir,
-                 reject_parent_segments: true
-               ),
-             {:ok, _} <-
-               WorkspaceGuard.confine_path(target,
-                 root: workspace_root,
-                 reject_parent_segments: true
-               ) do
-          :ok
-        else
-          {:error, _reason} ->
-            {:error, "Zip Slip blocked: unsafe archive entry '#{entry}'"}
-        end
-    end
-  end
-
-  defp zip_symlink?(file_info) when is_tuple(file_info) and tuple_size(file_info) >= 8 do
-    file_type = elem(file_info, 2)
-    mode = elem(file_info, 7)
-    file_type == :symlink or (is_integer(mode) and Bitwise.band(mode, 0o170000) == 0o120000)
-  end
-
-  defp zip_symlink?(_), do: false
-
-  defp fetch_required_string(args, key), do: string_arg(args, key, :nonempty)
-  defp fetch_string(args, key), do: string_arg(args, key, :raw)
 
   defp string_arg(args, key, mode) do
-    case Args.string(get_arg(args, key), mode) do
+    case Args.string(Args.get(args, key), mode) do
       {:ok, value} -> {:ok, value}
       {:error, :empty} -> {:error, "'#{key}' cannot be empty."}
       {:error, _} -> {:error, "Missing or invalid '#{key}'."}
     end
   end
 
-  defp do_read(path, args) do
-    case File.stat(path) do
-      {:ok, %{type: :regular, size: size}} when size > @max_file_size ->
-        {:error, "File too large: #{size} bytes (limit: #{@max_file_size})"}
-
-      {:ok, %{type: :regular}} ->
-        case File.read(path) do
-          {:ok, content} ->
-            content
-            |> slice_read_content(args)
-            |> render_read_output(args, content)
-
-          {:error, reason} ->
-            {:error, "Error reading: #{inspect(reason)}"}
-        end
-
-      {:ok, %{type: type}} ->
-        {:error, "Cannot read non-file type: #{type}"}
-
-      {:error, reason} ->
-        {:error, "File not found or inaccessible: #{inspect(reason)}"}
-    end
-  end
-
-  defp normalize_max_results(value) when is_integer(value),
-    do: value |> min(@max_search_results) |> max(1)
-
-  defp normalize_max_results(_value), do: 200
-
-  defp normalize_search_opts(args) do
-    extension =
-      case get_arg(args, "extension") do
-        nil -> nil
-        value when is_binary(value) -> normalize_extension(value)
-        _ -> :invalid
-      end
-
-    if extension == :invalid do
-      {:error, "Missing or invalid 'extension'."}
-    else
-      {:ok,
-       %{
-         query: normalize_query(get_arg(args, "query"), get_arg(args, "case_sensitive") == true),
-         case_sensitive?: get_arg(args, "case_sensitive") == true,
-         extension: extension
-       }}
-    end
-  end
-
-  defp normalize_find_opts(args) do
-    type =
-      case get_arg(args, "type") || "any" do
-        value when value in ["file", "directory", "any"] -> value
-        _ -> :invalid
-      end
-
-    extension =
-      case get_arg(args, "extension") do
-        nil -> nil
-        value when is_binary(value) -> normalize_extension(value)
-        _ -> :invalid
-      end
-
-    glob =
-      case get_arg(args, "glob") do
-        nil -> "*"
-        value when is_binary(value) and value != "" -> value
-        _ -> :invalid
-      end
-
-    cond do
-      type == :invalid -> {:error, "Missing or invalid 'type'."}
-      extension == :invalid -> {:error, "Missing or invalid 'extension'."}
-      glob == :invalid -> {:error, "Missing or invalid 'glob'."}
-      true -> {:ok, %{type: type, extension: extension, glob: glob}}
-    end
-  end
-
-  defp normalize_anchored_edits(args) do
-    edits = get_arg(args, "edits")
-
-    if is_list(edits) and edits != [] do
-      edits
-      |> Enum.with_index(1)
-      |> Enum.reduce_while({:ok, []}, fn {edit, index}, {:ok, acc} ->
-        case normalize_anchored_edit(edit, index) do
-          {:ok, normalized} -> {:cont, {:ok, acc ++ [normalized]}}
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
-    else
-      {:error, "'anchored_edit' requires a non-empty 'edits' list."}
-    end
-  end
-
-  defp normalize_anchored_edit(edit, index) when is_map(edit) do
-    with {:ok, op} <- normalize_anchored_op(get_arg(edit, "op"), index),
-         {:ok, anchor} <- fetch_anchored_ref(edit, "anchor", index),
-         {:ok, content} <- fetch_required_string(edit, "content") do
-      end_anchor =
-        case get_arg(edit, "end_anchor") do
-          nil -> nil
-          value when is_binary(value) -> value
-          _ -> :invalid
-        end
-
-      case {op, end_anchor} do
-        {"replace", :invalid} ->
-          {:error, "Edit #{index} has invalid 'end_anchor'."}
-
-        {"replace", _} ->
-          {:ok, %{op: op, anchor: anchor, end_anchor: end_anchor, content: content}}
-
-        {_other, nil} ->
-          {:ok, %{op: op, anchor: anchor, content: content}}
-
-        {_other, _value} ->
-          {:error, "Only 'replace' supports 'end_anchor'."}
-      end
-    end
-  end
-
-  defp normalize_anchored_edit(_edit, _index),
-    do: {:error, "Each anchored edit must be an object."}
-
-  defp normalize_anchored_op(op, _index) when op in ["replace", "insert_after", "insert_before"],
-    do: {:ok, op}
-
-  defp normalize_anchored_op(_op, index),
-    do:
-      {:error,
-       "Edit #{index} has invalid 'op'. Expected replace, insert_after, or insert_before."}
-
-  defp fetch_anchored_ref(args, key, index) do
-    case get_arg(args, key) do
-      value when is_binary(value) and value != "" -> {:ok, value}
-      _ -> {:error, "Edit #{index} is missing '#{key}'."}
-    end
-  end
-
-  defp search_path(path, workspace_root, query, limit, opts) do
-    do_search_path(
-      path,
-      workspace_root,
-      normalize_query(query, opts.case_sensitive?),
-      limit,
-      [],
-      opts
-    )
-  end
-
-  defp find_paths(path, workspace_root, limit, opts) do
-    do_find_paths(path, workspace_root, limit, [], opts)
-  end
-
-  defp do_find_paths(_path, _workspace_root, limit, acc, _opts) when length(acc) >= limit do
-    {:ok, Enum.take(acc, limit)}
-  end
-
-  defp do_find_paths(path, workspace_root, limit, acc, opts) do
-    case File.lstat(path) do
-      {:ok, %{type: :symlink}} ->
-        {:ok, acc}
-
-      {:ok, %{type: :directory}} ->
-        current_acc =
-          maybe_collect_find_entry(
-            path,
-            workspace_root,
-            :directory,
-            acc,
-            opts,
-            path != workspace_root
-          )
-
-        if length(current_acc) >= limit do
-          {:ok, Enum.take(current_acc, limit)}
-        else
-          path
-          |> File.ls()
-          |> case do
-            {:ok, entries} ->
-              entries
-              |> Enum.sort()
-              |> Enum.reject(&(&1 in @search_skip_dirs))
-              |> Enum.reduce_while({:ok, current_acc}, fn entry, {:ok, inner_acc} ->
-                child = Path.join(path, entry)
-
-                case validate_path(child, workspace_root) do
-                  {:ok, safe_child} ->
-                    case do_find_paths(safe_child, workspace_root, limit, inner_acc, opts) do
-                      {:ok, next_acc} when length(next_acc) >= limit ->
-                        {:halt, {:ok, next_acc}}
-
-                      {:ok, next_acc} ->
-                        {:cont, {:ok, next_acc}}
-
-                      {:error, _reason} ->
-                        {:cont, {:ok, inner_acc}}
-                    end
-
-                  {:error, _reason} ->
-                    {:cont, {:ok, inner_acc}}
-                end
-              end)
-
-            {:error, reason} ->
-              {:error, "Error listing directory: #{inspect(reason)}"}
-          end
-        end
-
-      {:ok, %{type: :regular}} ->
-        {:ok, maybe_collect_find_entry(path, workspace_root, :regular, acc, opts, true)}
-
-      {:ok, _other} ->
-        {:ok, acc}
-
-      {:error, reason} ->
-        {:error, "File not found or inaccessible: #{inspect(reason)}"}
-    end
-  end
-
-  defp maybe_collect_find_entry(path, workspace_root, type, acc, opts, include?) do
-    cond do
-      not include? -> acc
-      not find_type_matches?(type, opts.type) -> acc
-      not find_glob_matches?(path, opts.glob) -> acc
-      not find_extension_matches?(path, type, opts.extension) -> acc
-      true -> acc ++ [relative_to_workspace(path, workspace_root)]
-    end
-  end
-
-  defp do_search_path(_path, _workspace_root, _query, limit, matches, _opts)
-       when length(matches) >= limit do
-    {:ok, Enum.take(matches, limit)}
-  end
-
-  defp do_search_path(path, workspace_root, query, limit, matches, opts) do
-    case File.lstat(path) do
-      {:ok, %{type: :symlink}} ->
-        {:ok, matches}
-
-      {:ok, %{type: :directory}} ->
-        path
-        |> File.ls()
-        |> case do
-          {:ok, entries} ->
-            entries
-            |> Enum.sort()
-            |> Enum.reject(&(&1 in @search_skip_dirs))
-            |> Enum.reduce_while({:ok, matches}, fn entry, {:ok, acc} ->
-              child = Path.join(path, entry)
-
-              case validate_path(child, workspace_root) do
-                {:ok, safe_child} ->
-                  case do_search_path(safe_child, workspace_root, query, limit, acc, opts) do
-                    {:ok, child_matches} when length(child_matches) >= limit ->
-                      {:halt, {:ok, child_matches}}
-
-                    {:ok, child_matches} ->
-                      {:cont, {:ok, child_matches}}
-
-                    {:error, _reason} ->
-                      {:cont, {:ok, acc}}
-                  end
-
-                {:error, _reason} ->
-                  {:cont, {:ok, acc}}
-              end
-            end)
-
-          {:error, reason} ->
-            {:error, "Error listing directory: #{inspect(reason)}"}
-        end
-
-      {:ok, %{type: :regular}} ->
-        case search_file(path, workspace_root, query, limit - length(matches), opts) do
-          {:ok, file_matches} -> {:ok, matches ++ file_matches}
-          {:skip, _reason} -> {:ok, matches}
-          {:error, reason} -> {:error, reason}
-        end
-
-      {:ok, _other} ->
-        {:ok, matches}
-
-      {:error, reason} ->
-        {:error, "File not found or inaccessible: #{inspect(reason)}"}
-    end
-  end
-
-  defp search_file(_path, _workspace_root, _query, remaining, _opts) when remaining <= 0,
-    do: {:ok, []}
-
-  defp search_file(path, workspace_root, query, remaining, opts) do
-    case File.stat(path) do
-      {:ok, %{size: size}} when size > @max_file_size ->
-        {:skip, :too_large}
-
-      {:ok, %{type: :regular}} ->
-        cond do
-          not search_extension_matches?(path, opts.extension) ->
-            {:skip, :extension_mismatch}
-
-          true ->
-            case File.read(path) do
-              {:ok, content} ->
-                if String.valid?(content) and not String.contains?(content, "\0") do
-                  hits =
-                    content
-                    |> String.split("\n")
-                    |> Enum.with_index(1)
-                    |> Enum.reduce_while([], fn {line, line_number}, acc ->
-                      if search_match?(line, query, opts.case_sensitive?) do
-                        hit = %{
-                          path: relative_to_workspace(path, workspace_root),
-                          line: line_number,
-                          snippet: truncate_snippet(line)
-                        }
-
-                        next = acc ++ [hit]
-
-                        if length(next) >= remaining, do: {:halt, next}, else: {:cont, next}
-                      else
-                        {:cont, acc}
-                      end
-                    end)
-
-                  {:ok, hits}
-                else
-                  {:skip, :binary}
-                end
-
-              {:error, reason} ->
-                {:error, "Error reading file: #{inspect(reason)}"}
-            end
-        end
-
-      {:ok, _other} ->
-        {:skip, :not_regular}
-
-      {:error, reason} ->
-        {:error, "File not found or inaccessible: #{inspect(reason)}"}
-    end
-  end
-
-  defp read_regular_file(path) do
-    case File.stat(path) do
-      {:ok, %{type: :regular, size: size}} when size > @max_file_size ->
-        {:error, "File too large: #{size} bytes (limit: #{@max_file_size})"}
-
-      {:ok, %{type: :regular}} ->
-        case File.read(path) do
-          {:ok, content} ->
-            if String.valid?(content) do
-              {:ok, content}
-            else
-              {:error, "Patch action only supports UTF-8 text files."}
-            end
-
-          {:error, reason} ->
-            {:error, "Error reading file: #{inspect(reason)}"}
-        end
-
-      {:ok, %{type: type}} ->
-        {:error, "Cannot patch non-file type: #{type}"}
-
-      {:error, reason} ->
-        {:error, "File not found or inaccessible: #{inspect(reason)}"}
-    end
-  end
-
-  defp patch_content(_content, "", _new_text, _args), do: {:error, "'old_text' cannot be empty."}
-
-  defp patch_content(content, old_text, new_text, args) do
-    occurrences = :binary.matches(content, old_text) |> length()
-    replace_all? = get_arg(args, "replace_all") == true
-
-    cond do
-      occurrences == 0 ->
-        {:error, "Patch target not found."}
-
-      occurrences > 1 and not replace_all? ->
-        {:error, "Patch target has multiple occurrences. Use 'replace_all' to confirm."}
-
-      true ->
-        updated = String.replace(content, old_text, new_text, global: replace_all?)
-        replacements = if replace_all?, do: occurrences, else: 1
-        {:ok, updated, replacements}
-    end
-  end
-
-  defp collect_zip_entries(path) do
-    case File.stat(path) do
-      {:ok, %{type: :directory}} ->
-        path
-        |> File.ls!()
-        |> Enum.flat_map(fn entry ->
-          collect_zip_entries(Path.join(path, entry))
-        end)
-
-      {:ok, %{type: :regular}} ->
-        [path]
-
-      _ ->
-        []
-    end
-  end
-
-  defp relative_to_workspace(path, workspace_root) do
-    Path.relative_to(path, workspace_root)
-  end
-
-  defp render_read_output(content, args, original_content) do
-    if get_arg(args, "hashline") == true do
-      {:ok, format_hashlined_content(content, args, original_content)}
-    else
-      {:ok, content}
-    end
-  end
-
-  defp slice_read_content(content, args) do
-    from_line = normalize_from_line(get_arg(args, "from_line"))
-    line_count = normalize_line_count(get_arg(args, "line_count"))
-    tail_lines = normalize_line_count(get_arg(args, "tail_lines"))
-
-    cond do
-      not is_nil(tail_lines) ->
-        content
-        |> String.split("\n", trim: false)
-        |> take_tail_slice(tail_lines)
-        |> Enum.join("\n")
-        |> restore_trailing_newline(content)
-
-      from_line == 1 and is_nil(line_count) ->
-        content
-
-      true ->
-        content
-        |> String.split("\n", trim: false)
-        |> take_line_slice(from_line, line_count)
-        |> Enum.join("\n")
-        |> restore_trailing_newline(content)
-    end
-  end
-
-  defp format_hashlined_content(content, args, original_content) do
-    {lines, trailing_newline?} = split_content_lines(content)
-    start_line = hashline_start_line(args, original_content, lines)
-
-    rendered =
-      lines
-      |> Enum.with_index(start_line)
-      |> Enum.map_join("\n", fn {line, line_number} ->
-        "#{line_number}##{compute_line_hash(line_number, line)}|#{line}"
-      end)
-
-    if rendered != "" and trailing_newline?, do: rendered <> "\n", else: rendered
-  end
-
-  defp invalid_read_range?(args) do
-    get_arg(args, "tail_lines") != nil and
-      (get_arg(args, "from_line") != nil or get_arg(args, "line_count") != nil)
-  end
-
-  defp normalize_from_line(value) when is_integer(value) and value > 0, do: value
-  defp normalize_from_line(_value), do: 1
-
-  defp normalize_line_count(value) when is_integer(value) and value > 0, do: value
-  defp normalize_line_count(_value), do: nil
-
-  defp take_line_slice(lines, from_line, nil), do: Enum.drop(lines, from_line - 1)
-
-  defp take_line_slice(lines, from_line, line_count),
-    do: lines |> Enum.drop(from_line - 1) |> Enum.take(line_count)
-
-  defp take_tail_slice(lines, tail_lines) do
-    lines
-    |> drop_trailing_empty_line()
-    |> Enum.take(-tail_lines)
-  end
-
-  defp drop_trailing_empty_line([]), do: []
-
-  defp drop_trailing_empty_line(lines) do
-    if List.last(lines) == "" do
-      Enum.drop(lines, -1)
-    else
-      lines
-    end
-  end
-
-  defp restore_trailing_newline(result, original) do
-    if result != "" and String.ends_with?(original, "\n"), do: result <> "\n", else: result
-  end
-
-  defp split_content_lines(content) do
-    trailing_newline? = String.ends_with?(content, "\n")
-
-    lines =
-      content
-      |> String.split("\n", trim: false)
-      |> drop_trailing_empty_line()
-
-    {lines, trailing_newline?}
-  end
-
-  defp hashline_start_line(args, original_content, rendered_lines) do
-    from_line = get_arg(args, "from_line")
-    tail_lines = get_arg(args, "tail_lines")
-
-    cond do
-      is_integer(from_line) and from_line > 0 ->
-        from_line
-
-      is_integer(tail_lines) and tail_lines > 0 ->
-        {all_lines, _} = split_content_lines(original_content)
-        max(length(all_lines) - length(rendered_lines) + 1, 1)
-
-      true ->
-        1
-    end
-  end
-
-  defp normalize_extension(""), do: nil
-  defp normalize_extension("."), do: nil
-  defp normalize_extension(extension), do: "." <> String.trim_leading(extension, ".")
-
-  defp normalize_query(query, false) when is_binary(query), do: String.downcase(query)
-  defp normalize_query(query, _case_sensitive), do: query
-
-  defp search_extension_matches?(_path, nil), do: true
-  defp search_extension_matches?(path, extension), do: Path.extname(path) == extension
-
-  defp search_match?(line, query, false), do: String.contains?(String.downcase(line), query)
-  defp search_match?(line, query, true), do: String.contains?(line, query)
-
-  defp list_recursive(path, workspace_root) do
-    do_list_recursive(path, workspace_root, [])
-  end
-
-  defp do_list_recursive(path, workspace_root, acc) do
-    case File.lstat(path) do
-      {:ok, %{type: :symlink}} ->
-        {:ok, acc}
-
-      {:ok, %{type: :directory}} ->
-        base_acc =
-          if path == workspace_root do
-            acc
-          else
-            acc ++ [relative_to_workspace(path, workspace_root)]
-          end
-
-        path
-        |> File.ls()
-        |> case do
-          {:ok, entries} ->
-            entries
-            |> Enum.sort()
-            |> Enum.reject(&(&1 in @search_skip_dirs))
-            |> Enum.reduce_while({:ok, base_acc}, fn entry, {:ok, inner_acc} ->
-              child = Path.join(path, entry)
-
-              case validate_path(child, workspace_root) do
-                {:ok, safe_child} ->
-                  case do_list_recursive(safe_child, workspace_root, inner_acc) do
-                    {:ok, next_acc} -> {:cont, {:ok, next_acc}}
-                    {:error, reason} -> {:halt, {:error, reason}}
-                  end
-
-                {:error, _reason} ->
-                  {:cont, {:ok, inner_acc}}
-              end
-            end)
-
-          {:error, reason} ->
-            {:error, "Error listing directory: #{inspect(reason)}"}
-        end
-
-      {:ok, %{type: :regular}} ->
-        {:ok, acc ++ [relative_to_workspace(path, workspace_root)]}
-
-      {:ok, _other} ->
-        {:ok, acc}
-
-      {:error, reason} ->
-        {:error, "File not found or inaccessible: #{inspect(reason)}"}
-    end
-  end
-
-  defp find_type_matches?(:regular, "file"), do: true
-  defp find_type_matches?(:directory, "directory"), do: true
-  defp find_type_matches?(:regular, "any"), do: true
-  defp find_type_matches?(:directory, "any"), do: true
-  defp find_type_matches?(_type, _filter), do: false
-
-  defp find_glob_matches?(path, glob) do
-    path
-    |> Path.basename()
-    |> String.match?(glob_to_regex(glob))
-  end
-
-  defp find_extension_matches?(_path, :directory, nil), do: true
-  defp find_extension_matches?(_path, :directory, _extension), do: false
-  defp find_extension_matches?(_path, :regular, nil), do: true
-  defp find_extension_matches?(path, :regular, extension), do: Path.extname(path) == extension
-
-  defp glob_to_regex(glob) do
-    glob
-    |> Regex.escape()
-    |> String.replace("\\*", ".*")
-    |> String.replace("\\?", ".")
-    |> then(&Regex.compile!("^" <> &1 <> "$"))
-  end
-
-  defp apply_anchored_edits(content, edits) do
-    {lines, trailing_newline?} = split_content_lines(content)
-
-    with {:ok, validated_edits} <- validate_anchored_edits(lines, edits) do
-      updated_lines =
-        validated_edits
-        |> Enum.sort_by(&anchored_sort_key/1, :desc)
-        |> Enum.reduce(lines, &apply_anchored_edit/2)
-
-      {:ok, join_content_lines(updated_lines, trailing_newline?), length(validated_edits)}
-    end
-  end
-
-  defp validate_anchored_edits(lines, edits) do
-    edits
-    |> Enum.reduce_while({:ok, []}, fn edit, {:ok, acc} ->
-      with {:ok, anchor} <- parse_line_ref(edit.anchor),
-           :ok <- validate_line_anchor(lines, anchor),
-           {:ok, normalized_edit} <- normalize_validated_edit(edit, lines, anchor) do
-        {:cont, {:ok, acc ++ [normalized_edit]}}
-      else
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-  end
-
-  defp normalize_validated_edit(%{op: "replace", end_anchor: nil} = edit, _lines, anchor) do
-    {:ok, Map.put(edit, :anchor_data, anchor)}
-  end
-
-  defp normalize_validated_edit(%{op: "replace", end_anchor: end_anchor} = edit, lines, anchor) do
-    with {:ok, parsed_end_anchor} <- parse_line_ref(end_anchor),
-         :ok <- validate_line_anchor(lines, parsed_end_anchor),
-         :ok <- validate_anchor_order(anchor, parsed_end_anchor) do
-      {:ok, edit |> Map.put(:anchor_data, anchor) |> Map.put(:end_anchor_data, parsed_end_anchor)}
-    end
-  end
-
-  defp normalize_validated_edit(edit, _lines, anchor) do
-    {:ok, Map.put(edit, :anchor_data, anchor)}
-  end
-
-  defp validate_anchor_order(%{line: start_line}, %{line: end_line}) when end_line >= start_line,
-    do: :ok
-
-  defp validate_anchor_order(_start_anchor, _end_anchor),
-    do: {:error, "'end_anchor' must be on or after 'anchor'."}
-
-  defp anchored_sort_key(%{op: "replace", anchor_data: %{line: line}}), do: {line, 2}
-  defp anchored_sort_key(%{op: "insert_after", anchor_data: %{line: line}}), do: {line, 1}
-  defp anchored_sort_key(%{op: "insert_before", anchor_data: %{line: line}}), do: {line, 0}
-
-  defp apply_anchored_edit(%{op: "replace", anchor_data: %{line: line}} = edit, lines) do
-    replacement = split_edit_lines(edit.content)
-    end_line = Map.get(edit, :end_anchor_data, %{line: line}).line
-    prefix = Enum.take(lines, line - 1)
-    suffix = Enum.drop(lines, end_line)
-    prefix ++ replacement ++ suffix
-  end
-
-  defp apply_anchored_edit(
-         %{op: "insert_after", anchor_data: %{line: line}, content: content},
-         lines
-       ) do
-    insertion = split_edit_lines(content)
-    {prefix, suffix} = Enum.split(lines, line)
-    prefix ++ insertion ++ suffix
-  end
-
-  defp apply_anchored_edit(
-         %{op: "insert_before", anchor_data: %{line: line}, content: content},
-         lines
-       ) do
-    insertion = split_edit_lines(content)
-    {prefix, suffix} = Enum.split(lines, line - 1)
-    prefix ++ insertion ++ suffix
-  end
-
-  defp split_edit_lines(content) do
-    content
-    |> String.split("\n", trim: false)
-    |> drop_trailing_empty_line()
-  end
-
-  defp join_content_lines([], _trailing_newline?), do: ""
-
-  defp join_content_lines(lines, trailing_newline?) do
-    rendered = Enum.join(lines, "\n")
-    if trailing_newline?, do: rendered <> "\n", else: rendered
-  end
-
-  defp write_updated_content(path, content) do
-    case File.write(path, content) do
-      :ok -> :ok
-      {:error, reason} -> {:error, "Error writing file: #{inspect(reason)}"}
-    end
-  end
-
-  defp parse_line_ref(ref) when is_binary(ref) do
-    normalized = ref |> String.trim() |> String.replace_prefix("LINE#", "")
-
-    case Regex.run(@line_ref_regex, normalized) do
-      [_, line, hash] ->
-        {:ok, %{line: String.to_integer(line), hash: hash}}
-
-      _ ->
-        {:error, "Invalid line reference format: #{inspect(ref)}. Expected format: {line}#ID."}
-    end
-  end
-
-  defp validate_line_anchor(lines, %{line: line, hash: hash}) do
-    cond do
-      line < 1 or line > length(lines) ->
-        {:error, "Line number #{line} out of bounds. File has #{length(lines)} lines."}
-
-      compute_line_hash(line, Enum.at(lines, line - 1, "")) != hash ->
-        {:error, format_anchor_mismatch(line, hash, lines)}
-
-      true ->
-        :ok
-    end
-  end
-
-  defp format_anchor_mismatch(line, expected_hash, lines) do
-    lower = max(line - 2, 1)
-    upper = min(line + 2, length(lines))
-
-    window =
-      lower..upper
-      |> Enum.map_join("\n", fn current_line ->
-        content = Enum.at(lines, current_line - 1, "")
-        anchor = "#{current_line}##{compute_line_hash(current_line, content)}|#{content}"
-        if current_line == line, do: ">>> " <> anchor, else: "    " <> anchor
-      end)
-
-    "Line #{line} has changed since last read (expected #{line}##{expected_hash}). Use updated anchors below:\n\n" <>
-      window
-  end
-
-  defp compute_line_hash(line_number, content) do
-    stripped =
-      content
-      |> String.trim_trailing("\r")
-      |> String.replace(~r/\s+/u, "")
-
-    seed =
-      if String.match?(stripped, ~r/[\p{L}\p{N}]/u) do
-        stripped
-      else
-        "#{line_number}:#{stripped}"
-      end
-
-    hash_bin = :crypto.hash(:sha256, seed)
-    <<n1::4, n2::4, n3::4, n4::4, n5::4, _::bitstring>> = hash_bin
-
-    [n1, n2, n3, n4, n5]
-    |> Enum.map(&elem(@hashline_dict, &1))
-    |> Enum.join()
-  end
-
-  defp format_mtime({{year, month, day}, {hour, minute, second}}) do
-    :io_lib.format("~4..0B-~2..0B-~2..0B ~2..0B:~2..0B:~2..0B", [
-      year,
-      month,
-      day,
-      hour,
-      minute,
-      second
-    ])
-    |> IO.iodata_to_binary()
-  end
-
-  defp ensure_destination_available(destination, true) do
-    case File.lstat(destination) do
-      {:ok, %{type: :directory}} ->
-        case File.rm_rf(destination) do
-          {_removed, []} -> :ok
-          {_removed, errors} -> {:error, "Could not overwrite destination: #{inspect(errors)}"}
-        end
-
-      {:ok, _stat} ->
-        case File.rm(destination) do
-          :ok -> :ok
-          {:error, reason} -> {:error, "Could not overwrite destination: #{inspect(reason)}"}
-        end
-
-      {:error, :enoent} ->
-        :ok
-
-      {:error, reason} ->
-        {:error, "Could not inspect destination: #{inspect(reason)}"}
-    end
-  end
-
-  defp ensure_destination_available(destination, false) do
-    if File.exists?(destination) do
-      {:error, "Destination already exists. Use 'overwrite' to replace it."}
-    else
-      :ok
-    end
-  end
-
-  defp ensure_parent_directory(destination) do
-    destination
-    |> Path.dirname()
-    |> File.mkdir_p()
-  end
-
-  defp ensure_not_workspace_root(path, workspace_root) do
-    if path == workspace_root do
-      {:error, "Cannot move the workspace root."}
-    else
-      :ok
-    end
-  end
-
-  defp ensure_not_descendant_move(path, destination) do
-    if path == destination or String.starts_with?(destination, path <> "/") do
-      {:error, "Cannot move a directory into its own descendant."}
-    else
-      :ok
-    end
-  end
-
-  defp copy_path(path, destination, overwrite?) do
-    case File.stat(path) do
-      {:ok, %{type: :directory}} ->
-        case File.cp_r(path, destination) do
-          {:ok, _files} -> :ok
-          {:error, reason, _file} -> {:error, "Error copying directory: #{inspect(reason)}"}
-        end
-
-      {:ok, _stat} ->
-        case File.cp(path, destination) do
-          :ok -> :ok
-          {:error, reason} -> {:error, "Error copying file: #{inspect(reason)}"}
-        end
-
-      {:error, reason} ->
-        if overwrite? do
-          {:error, "Error copying path: #{inspect(reason)}"}
-        else
-          {:error, "File not found or inaccessible: #{inspect(reason)}"}
-        end
-    end
-  end
-
-  defp move_path(path, destination, _overwrite?) do
-    case File.rename(path, destination) do
-      :ok ->
-        :ok
-
-      {:error, :exdev} ->
-        with :ok <- copy_path(path, destination, true),
-             {_removed, []} <- File.rm_rf(path) do
-          :ok
-        else
-          {:error, reason} -> {:error, reason}
-          {_removed, errors} -> {:error, "Error removing source after move: #{inspect(errors)}"}
-        end
-
-      {:error, reason} ->
-        {:error, "Error moving path: #{inspect(reason)}"}
-    end
-  end
-
-  defp truncate_snippet(line) do
-    trimmed = String.trim(line)
-
-    if String.length(trimmed) <= @snippet_limit do
-      trimmed
-    else
-      String.slice(trimmed, 0, @snippet_limit) <> "..."
-    end
-  end
-
-  defp trash_destination(path, workspace_root, trash_root) do
-    timestamp = System.system_time(:millisecond)
-
-    basename =
-      path
-      |> Path.relative_to(workspace_root)
-      |> String.replace("/", "__")
-
-    Path.join(trash_root, "#{timestamp}_#{basename}")
+  defp format_action_description([last]), do: "Action to execute: '#{last}'"
+
+  defp format_action_description(names) do
+    {init, [last]} = Enum.split(names, -1)
+    "Action to execute: " <> Enum.map_join(init, ", ", &"'#{&1}'") <> ", or '#{last}'"
   end
 end
