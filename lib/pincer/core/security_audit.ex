@@ -61,6 +61,7 @@ defmodule Pincer.Core.SecurityAudit do
         webhook_bind_checks(config) ++
         dangerous_flag_checks(config) ++
         workspace_restriction_checks(config) ++
+        sandbox_isolation_checks(config, env_fetcher) ++
         sidecar_isolation_checks(config)
 
     Posture.report(checks, config_path, :audit)
@@ -262,6 +263,74 @@ defmodule Pincer.Core.SecurityAudit do
         ]
     end
   end
+
+  defp sandbox_isolation_checks(config, env_fetcher) do
+    adapter = effective_sandbox_adapter(config, env_fetcher)
+    transport = effective_local_transport(config, env_fetcher)
+
+    external_channels =
+      config
+      |> channels()
+      |> Enum.filter(fn {name, cfg} -> name != "cli" and enabled?(cfg) end)
+      |> Enum.map(fn {name, _cfg} -> name end)
+
+    if adapter == "local" and transport == "os" and external_channels != [] do
+      [
+        warn_check(
+          :sandbox_os_transport_exposure,
+          "Local sandbox uses 'os' transport without namespace isolation while external channels are enabled (#{Enum.join(external_channels, ", ")})",
+          %{
+            adapter: adapter,
+            transport: transport,
+            external_channels: external_channels,
+            recovery:
+              "Use bwrap transport on bare metal or an isolated sandbox backend/Compose profile for untrusted external sessions"
+          }
+        )
+      ]
+    else
+      [
+        ok_check(
+          :sandbox_isolation,
+          "Sandbox transport '#{adapter}/#{transport}' matches enabled channel exposure",
+          %{adapter: adapter, transport: transport, external_channels: external_channels}
+        )
+      ]
+    end
+  end
+
+  defp effective_sandbox_adapter(config, env_fetcher) do
+    raw =
+      non_empty_string(env_fetcher.("PINCER_SANDBOX_ADAPTER")) ||
+        non_empty_string(get_in_path(config, ["sandbox", "adapter"])) ||
+        "local"
+
+    String.downcase(raw)
+  end
+
+  defp effective_local_transport(config, env_fetcher) do
+    local_cfg = get_in_path(config, ["sandbox", "local"]) || %{}
+
+    raw =
+      non_empty_string(env_fetcher.("PINCER_SANDBOX_TRANSPORT")) ||
+        non_empty_string(MapHelpers.read_field(local_cfg, :transport))
+
+    cond do
+      raw in ["os", "bwrap", "tool_registry"] -> raw
+      not is_nil(raw) -> String.downcase(raw)
+      MapHelpers.read_field(local_cfg, :bwrap) not in [nil, false] -> "bwrap"
+      true -> "tool_registry"
+    end
+  end
+
+  defp non_empty_string(val) when is_binary(val) do
+    case val |> String.trim() do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp non_empty_string(_), do: nil
 
   defp channels(config), do: ConfigProbe.channels(config)
 

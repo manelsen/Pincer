@@ -1039,6 +1039,84 @@ defmodule Pincer.Core.SecurityAuditTest do
                check.severity == :warn and is_binary(check.meta[:recovery])
              end)
     end
+
+    test "warns when PINCER_SANDBOX_TRANSPORT=os downgrades local sandbox while external channels are enabled" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        sandbox:
+          adapter: "local"
+          local:
+            transport: "bwrap"
+        channels:
+          telegram:
+            enabled: true
+            token_env: "TELEGRAM_BOT_TOKEN"
+            dm_policy:
+              mode: "allowlist"
+              allow_from: ["123"]
+        """
+      )
+
+      report_os =
+        SecurityAudit.run(
+          root: tmp,
+          env_fetcher: fn
+            "TELEGRAM_BOT_TOKEN" -> "token"
+            "PINCER_SANDBOX_TRANSPORT" -> "os"
+            _ -> nil
+          end
+        )
+
+      assert report_os.status == :warn
+
+      assert Enum.any?(report_os.checks, fn check ->
+               check.id == :sandbox_os_transport_exposure and check.severity == :warn
+             end)
+
+      report_bwrap =
+        SecurityAudit.run(
+          root: tmp,
+          env_fetcher: fn
+            "TELEGRAM_BOT_TOKEN" -> "token"
+            "PINCER_SANDBOX_TRANSPORT" -> "bwrap"
+            _ -> nil
+          end
+        )
+
+      assert report_bwrap.status == :ok
+
+      assert Enum.any?(report_bwrap.checks, fn check ->
+               check.id == :sandbox_isolation and check.severity == :ok
+             end)
+    end
+
+    test "allows local os transport without warning when only CLI channel is enabled" do
+      tmp = tmp_dir!()
+
+      write_config!(
+        tmp,
+        """
+        sandbox:
+          adapter: "local"
+          local:
+            transport: "os"
+        channels:
+          cli:
+            enabled: true
+        """
+      )
+
+      report = SecurityAudit.run(root: tmp, env_fetcher: fn _ -> nil end)
+
+      assert report.status == :ok
+
+      assert Enum.any?(report.checks, fn check ->
+               check.id == :sandbox_isolation and check.severity == :ok
+             end)
+    end
   end
 
   defp tmp_dir! do
