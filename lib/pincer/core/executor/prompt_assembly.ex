@@ -42,6 +42,7 @@ defmodule Pincer.Core.Executor.PromptAssembly do
     root_agent_id = Keyword.get(opts, :root_agent_id, "default")
     self_state = Keyword.get(opts, :self_state)
     lesson_store = Keyword.get(opts, :lesson_store, Pincer.Core.Introspection.LessonStore)
+    prompt_index = Keyword.get(opts, :prompt_index, Pincer.Core.Skills.PromptIndex)
 
     identity = AgentPaths.read_file(AgentPaths.identity_path(workspace))
     soul = AgentPaths.read_file(AgentPaths.soul_path(workspace))
@@ -73,7 +74,7 @@ defmodule Pincer.Core.Executor.PromptAssembly do
       #{if history != "", do: "## SESSION HISTORY:\n#{history}\n", else: ""}
       #{self_state_section(self_state)}
       #{lessons_section(root_agent_id, lesson_store)}
-      #{skills_section(workspace)}
+      #{skills_section(workspace, prompt_index)}
       ## CAPABILITIES & TOOLS:
       You are a technical agent with access to multiple tools through the Model Context Protocol (MCP) and native Elixir integrations.
       You can read and write files, execute shell commands, manage projects, and more.
@@ -316,7 +317,7 @@ defmodule Pincer.Core.Executor.PromptAssembly do
   end
 
   defp lessons_section(agent_id, lesson_store) do
-    case lesson_store.top_lessons(agent_id, 5, min_confidence: 0.4) do
+    case fetch_top_lessons(agent_id, lesson_store) do
       [] ->
         ""
 
@@ -328,13 +329,54 @@ defmodule Pincer.Core.Executor.PromptAssembly do
         #{items}
         """
     end
-  rescue
-    _ -> ""
   end
 
-  defp skills_section(workspace_path) do
-    Pincer.Core.Skills.PromptIndex.build(workspace_path)
+  defp fetch_top_lessons(agent_id, lesson_store) do
+    case lesson_store.top_lessons(agent_id, 5, min_confidence: 0.4) do
+      {:ok, lessons} when is_list(lessons) ->
+        lessons
+
+      lessons when is_list(lessons) ->
+        lessons
+
+      {:error, reason} ->
+        Logger.warning(
+          "[PROMPT-ASSEMBLY] Failed to load lessons for #{agent_id}: #{inspect(reason)}"
+        )
+
+        []
+    end
   rescue
-    _ -> ""
+    e in [RuntimeError, ArgumentError, File.Error] ->
+      Logger.warning(
+        "[PROMPT-ASSEMBLY] Failed to load lessons for #{agent_id}: #{Exception.message(e)}"
+      )
+
+      []
+  catch
+    :exit, reason ->
+      Logger.warning(
+        "[PROMPT-ASSEMBLY] Lesson store unavailable for #{agent_id}: #{inspect(reason)}"
+      )
+
+      []
+  end
+
+  defp skills_section(workspace_path, prompt_index) do
+    case prompt_index.build(workspace_path) do
+      {:ok, content} when is_binary(content) ->
+        content
+
+      content when is_binary(content) ->
+        content
+
+      {:error, reason} ->
+        Logger.warning("[PROMPT-ASSEMBLY] Failed to build skills index: #{inspect(reason)}")
+        ""
+    end
+  rescue
+    e in [File.Error, ArgumentError] ->
+      Logger.warning("[PROMPT-ASSEMBLY] Failed to build skills index: #{Exception.message(e)}")
+      ""
   end
 end

@@ -97,7 +97,24 @@ defmodule Pincer.Core.Executor.PromptAssemblyTest do
       raise "db unavailable"
     end
 
+    def top_lessons("agent-bug", 5, min_confidence: 0.4) do
+      raise KeyError, key: :missing_field, term: %{}
+    end
+
+    def top_lessons("agent-error-tuple", 5, min_confidence: 0.4) do
+      {:error, :db_offline}
+    end
+
     def top_lessons(_agent_id, _limit, _opts), do: []
+  end
+
+  defmodule SkillIndexFileErrorStub do
+    def build(_workspace_path),
+      do: raise(File.Error, reason: :eacces, action: "read", path: "/skills")
+  end
+
+  defmodule SkillIndexBugStub do
+    def build(_workspace_path), do: raise(ArithmeticError, message: "bad arithmetic")
   end
 
   describe "bootstrap_active?/2" do
@@ -205,6 +222,53 @@ defmodule Pincer.Core.Executor.PromptAssemblyTest do
       refute prompt =~ "## INTERNAL STATE:"
       refute prompt =~ "## LESSONS FROM EXPERIENCE:"
       assert prompt =~ "## CAPABILITIES & TOOLS:"
+    end
+
+    test "degrades gracefully with warning on lesson error tuple or skill File.Error, but surfaces unexpected bugs" do
+      import ExUnit.CaptureLog
+
+      workspace =
+        Path.join(System.tmp_dir!(), "pincer_pa_narrow_#{System.unique_integer([:positive])}")
+
+      File.mkdir_p!(AgentPaths.pincer_dir(workspace))
+      on_exit(fn -> File.rm_rf!(workspace) end)
+
+      log =
+        capture_log(fn ->
+          prompt =
+            PromptAssembly.build_system_prompt(
+              workspace_path: workspace,
+              root_agent_id: "agent-error-tuple",
+              self_state: nil,
+              lesson_store: LessonStoreStub,
+              prompt_index: SkillIndexFileErrorStub
+            )
+
+          refute prompt =~ "## LESSONS FROM EXPERIENCE:"
+          assert prompt =~ "## CAPABILITIES & TOOLS:"
+        end)
+
+      assert log =~ "Failed to load lessons"
+      assert log =~ "Failed to build skills index"
+
+      assert_raise KeyError, fn ->
+        PromptAssembly.build_system_prompt(
+          workspace_path: workspace,
+          root_agent_id: "agent-bug",
+          self_state: nil,
+          lesson_store: LessonStoreStub
+        )
+      end
+
+      assert_raise ArithmeticError, fn ->
+        PromptAssembly.build_system_prompt(
+          workspace_path: workspace,
+          root_agent_id: "agent-with-lessons",
+          self_state: nil,
+          lesson_store: LessonStoreStub,
+          prompt_index: SkillIndexBugStub
+        )
+      end
     end
   end
 

@@ -358,6 +358,71 @@ defmodule Pincer.Adapters.Tools.WorkflowTest do
   end
 
   # ---------------------------------------------------------------------------
+  # Corrupt tasks.json handling
+  # ---------------------------------------------------------------------------
+
+  test "corrupt JSON in tasks.json returns error and is not overwritten by create_task or update_task" do
+    ws = tmp_workspace()
+    pincer_dir = Path.join(ws, ".pincer")
+    File.mkdir_p!(pincer_dir)
+    tasks_file = Path.join(pincer_dir, "tasks.json")
+    corrupt_payload = "{not valid json"
+    File.write!(tasks_file, corrupt_payload)
+
+    assert {:error, list_err} = execute(%{"action" => "list_tasks"}, ws)
+    assert list_err =~ "Corrupt tasks"
+
+    assert {:error, get_err} = execute(%{"action" => "get_task", "task_id" => "T1"}, ws)
+    assert get_err =~ "Corrupt tasks"
+
+    assert {:error, create_err} =
+             execute(%{"action" => "create_task", "title" => "Should not overwrite"}, ws)
+
+    assert create_err =~ "Corrupt tasks"
+    assert File.read!(tasks_file) == corrupt_payload
+
+    assert {:error, update_err} =
+             execute(%{"action" => "update_task", "task_id" => "T1", "status" => "done"}, ws)
+
+    assert update_err =~ "Corrupt tasks"
+    assert File.read!(tasks_file) == corrupt_payload
+  end
+
+  test "non-list JSON in tasks.json returns error without overwriting" do
+    ws = tmp_workspace()
+    pincer_dir = Path.join(ws, ".pincer")
+    File.mkdir_p!(pincer_dir)
+    tasks_file = Path.join(pincer_dir, "tasks.json")
+    File.write!(tasks_file, ~s({"unexpected": true}))
+
+    assert {:error, err} = execute(%{"action" => "create_task", "title" => "New"}, ws)
+    assert err =~ "Corrupt tasks"
+    assert File.read!(tasks_file) == ~s({"unexpected": true})
+  end
+
+  defmodule BuggyRegistry do
+    def list_session_ids, do: raise(ArithmeticError, message: "unexpected bug")
+  end
+
+  defmodule UnstartedRegistry do
+    def list_session_ids, do: raise(ArgumentError, message: "registry not started")
+  end
+
+  test "list_sessions handles ArgumentError from unstarted registry but surfaces unexpected bugs" do
+    Application.put_env(:pincer, :workflow_session_registry, UnstartedRegistry)
+    assert {:error, msg} = Workflow.execute(%{"action" => "list_sessions"})
+    assert msg =~ "Could not list sessions"
+
+    Application.put_env(:pincer, :workflow_session_registry, BuggyRegistry)
+
+    assert_raise ArithmeticError, fn ->
+      Workflow.execute(%{"action" => "list_sessions"})
+    end
+  after
+    Application.delete_env(:pincer, :workflow_session_registry)
+  end
+
+  # ---------------------------------------------------------------------------
   # Unknown action
   # ---------------------------------------------------------------------------
 

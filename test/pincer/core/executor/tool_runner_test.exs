@@ -28,6 +28,12 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
       raise "kaboom"
     end
 
+    def execute_tool("rescue_crash_tool", _args, _ctx) do
+      {:error,
+       {:approval_required,
+        %{tool: "rescue_crash_tool", command: {:not_string_chars}, class: :privileged}}}
+    end
+
     def execute_tool("approval_tool", %{"approved" => true}, _ctx) do
       {:ok, "approved-run"}
     end
@@ -175,6 +181,48 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
 
     assert updated_ctx.consecutive_errors == 3
     assert_received {:saved_tool_error, "fail_tool", %{}, ":boom"}
+  end
+
+  test "surfaces rescued run_tool exceptions as error outcomes so consecutive_errors increments" do
+    ctx =
+      Ctx.new(self(), "runner_rescue_errors",
+        workspace_path: tmp_dir!(),
+        tool_registry: RegistryStub,
+        storage: StorageSpy,
+        subagent?: true
+      )
+      |> Map.put(:consecutive_errors, 2)
+
+    call = %{
+      "id" => "c_rescue",
+      "function" => %{"name" => "rescue_crash_tool", "arguments" => "{}"}
+    }
+
+    {[msg], updated_ctx} = ToolRunner.execute_batch([call], ctx)
+
+    assert msg["content"] =~ "raised an unexpected exception"
+    assert updated_ctx.consecutive_errors == 3
+    assert_received {:saved_tool_error, "rescue_crash_tool", %{}, _reason}
+  end
+
+  test "increments consecutive_errors when a parallel tool task exits with a crash" do
+    ctx =
+      Ctx.new(self(), "runner_parallel_crash",
+        workspace_path: tmp_dir!(),
+        tool_registry: RegistryStub,
+        storage: StorageSpy
+      )
+
+    calls = [
+      %{"id" => "c_ok", "function" => %{"name" => "ok_tool", "arguments" => ~s({"v":"1"})}},
+      %{"id" => "c_crash", "function" => %{"name" => "crash_tool", "arguments" => "{}"}}
+    ]
+
+    {results, updated_ctx} = ToolRunner.execute_batch(calls, ctx)
+
+    assert length(results) == 2
+    assert Enum.at(results, 1)["content"] =~ "Parallel execution error"
+    assert updated_ctx.consecutive_errors == 1
   end
 
   test "handles approval timeout, crashes, truncation, invalid call, and markdown artifacts" do

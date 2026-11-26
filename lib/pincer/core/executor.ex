@@ -228,31 +228,30 @@ defmodule Pincer.Core.Executor do
          client_opts,
          tools_spec
        ) do
-    try do
-      assistant_msg = StreamAccumulator.consume(stream, &send_stream_token(ctx, &1))
+    case consume_stream(stream, ctx) do
+      {:ok, assistant_msg} ->
+        case finalize_assistant_message(
+               assistant_msg,
+               logical_history,
+               prompt_history,
+               depth,
+               ctx,
+               stream_usage
+             ) do
+          {:error, :empty_response, updated_ctx} ->
+            recover_empty_response(
+              logical_history,
+              prompt_history,
+              depth,
+              updated_ctx,
+              client_opts
+            )
 
-      case finalize_assistant_message(
-             assistant_msg,
-             logical_history,
-             prompt_history,
-             depth,
-             ctx,
-             stream_usage
-           ) do
-        {:error, :empty_response, updated_ctx} ->
-          recover_empty_response(
-            logical_history,
-            prompt_history,
-            depth,
-            updated_ctx,
-            client_opts
-          )
+          other ->
+            other
+        end
 
-        other ->
-          other
-      end
-    rescue
-      error in Protocol.UndefinedError ->
+      {:error, error} ->
         Logger.warning("[EXECUTOR] Invalid streaming payload. Falling back to chat completion.")
 
         fallback_chat_completion(
@@ -265,6 +264,12 @@ defmodule Pincer.Core.Executor do
           tools_spec
         )
     end
+  end
+
+  defp consume_stream(stream, ctx) do
+    {:ok, StreamAccumulator.consume(stream, &send_stream_token(ctx, &1))}
+  rescue
+    error in Protocol.UndefinedError -> {:error, error}
   end
 
   defp fallback_chat_completion(

@@ -62,13 +62,25 @@ defmodule Pincer.Core.Executor.ToolRunner do
       timeout: stream_timeout,
       on_timeout: :kill_task
     )
+    |> Enum.zip(calls)
     |> Enum.map(fn
-      {:ok, outcome} ->
+      {{:ok, outcome}, _call} ->
         outcome
 
-      {:exit, reason} ->
-        {%{"role" => "tool", "content" => "Parallel execution error: #{inspect(reason)}"}, [],
-         :ok}
+      {{:exit, reason}, call} ->
+        {call_id, name, raw_args} =
+          if is_map(call),
+            do: ToolCall.normalize(call),
+            else: {"tool_call_invalid", "unknown_tool", %{}}
+
+        args = ToolCall.parse_arguments(raw_args)
+
+        {%{
+           "role" => "tool",
+           "tool_call_id" => call_id,
+           "name" => name,
+           "content" => "Parallel execution error: #{inspect(reason)}"
+         }, [], {:error, name, args, reason}}
     end)
   end
 
@@ -195,7 +207,7 @@ defmodule Pincer.Core.Executor.ToolRunner do
         Logger.error("[TOOL] #{name} raised an exception: #{Exception.message(e)}")
 
         {"Error: tool '#{name}' raised an unexpected exception — #{Exception.message(e)}", steps,
-         :ok}
+         {:error, name, args, e}}
     end
   end
 
