@@ -23,6 +23,10 @@ defmodule Pincer.CLI.Test do
       assert Pincer.CLI.process_command("/history clear") == :history_clear
       assert Pincer.CLI.process_command("/history nope") == {:history, 10}
     end
+
+    test "retorna :status para consulta de estado da sessão" do
+      assert Pincer.CLI.process_command("/status") == :status
+    end
   end
 
   # Teste de Integração (Mock Session)
@@ -94,6 +98,95 @@ defmodule Pincer.CLI.Test do
 
       Application.put_env(:elixir, :ansi_enabled, false)
       assert Pincer.CLI.prompt_label() == "[User]: "
+    end
+  end
+
+  describe "format_status/1 and fetch_status/2" do
+    test "formats idle session state with default model" do
+      state = %{
+        session_id: "cli_user",
+        root_agent_id: "cli_user",
+        status: :idle,
+        model_override: nil
+      }
+
+      formatted = Pincer.CLI.format_status({:ok, state})
+      assert formatted =~ "Idle"
+      assert formatted =~ "Session: cli_user"
+      assert formatted =~ "Agent: cli_user"
+      assert formatted =~ "Model: default"
+    end
+
+    test "formats working session state with active model override" do
+      state = %{
+        session_id: "cli_user",
+        root_agent_id: "architect",
+        status: :working,
+        model_override: %{provider: "openrouter", model: "anthropic/claude-3.5-sonnet"}
+      }
+
+      formatted = Pincer.CLI.format_status(state)
+      assert formatted =~ "Working"
+      assert formatted =~ "Session: cli_user"
+      assert formatted =~ "Agent: architect"
+      assert formatted =~ "Model: openrouter:anthropic/claude-3.5-sonnet"
+    end
+
+    test "formats error and badrpc responses gracefully without crashing" do
+      assert Pincer.CLI.format_status({:error, :not_found}) =~ "offline"
+      assert Pincer.CLI.format_status({:error, {:exit, {:noproc, :details}}}) =~ "offline"
+      assert Pincer.CLI.format_status({:badrpc, :nodedown}) =~ "nodedown"
+      assert Pincer.CLI.format_status({:error, {:badrpc, :nodedown}}) =~ "nodedown"
+    end
+
+    test "fetch_status/2 queries a session pid and handles offline targets gracefully" do
+      session_pid =
+        spawn(fn ->
+          receive do
+            {:"$gen_call", from, :get_status} ->
+              GenServer.reply(
+                from,
+                {:ok,
+                 %{
+                   session_id: "cli_user",
+                   root_agent_id: "cli_user",
+                   status: :working,
+                   model_override: %{provider: "groq", model: "llama-3.3-70b"}
+                 }}
+              )
+          end
+        end)
+
+      assert {:ok, %{status: :working, root_agent_id: "cli_user"}} =
+               Pincer.CLI.fetch_status(session_pid, "cli_user")
+
+      assert {:error, {:exit, _reason}} = Pincer.CLI.fetch_status(session_pid, "cli_user")
+
+      missing_id = "missing_cli_session_#{System.unique_integer([:positive])}"
+      assert {:error, {:exit, _reason}} = Pincer.CLI.fetch_status(Node.self(), missing_id)
+
+      assert {:error, {:badrpc, :nodedown}} =
+               Pincer.CLI.fetch_status(:"offline_pincer_node@127.0.0.1", "cli_user")
+    end
+  end
+
+  describe "docs/SPECS/CLI_INTERACTIVE.md alignment" do
+    test "documents current CLI protocol and commands with no stale references" do
+      spec = File.read!(Path.expand("../../docs/SPECS/CLI_INTERACTIVE.md", __DIR__))
+
+      assert spec =~ "{:cli_output,"
+      assert spec =~ "/status"
+      assert spec =~ "/history"
+      assert spec =~ "process_command/1"
+      assert spec =~ "main/1"
+      assert spec =~ "loop/1"
+      assert spec =~ "send_message/2"
+      assert spec =~ "format_status/1"
+
+      refute spec =~ "{:assistant_reply_finished"
+      refute spec =~ "{:sme_status"
+      refute spec =~ "{:executor_finished"
+      refute spec =~ "handle_input"
     end
   end
 end
