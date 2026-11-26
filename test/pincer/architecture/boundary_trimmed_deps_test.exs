@@ -36,10 +36,10 @@ defmodule Pincer.Architecture.BoundaryTrimmedDepsTest do
     refute Pincer.Utils in deps
   end
 
-  test "Pincer.CLI boundary depends on Core and Plugin instead of Channels" do
+  test "Pincer.CLI boundary depends on Core, Plugin, and Utils instead of Channels" do
     deps = "lib/pincer/cli.ex" |> extract_boundary_opts!() |> dep_names()
 
-    assert Enum.sort(deps) == Enum.sort([Pincer.Core, Pincer.Plugin])
+    assert Enum.sort(deps) == Enum.sort([Pincer.Core, Pincer.Plugin, Pincer.Utils])
     refute Pincer.Channels in deps
   end
 

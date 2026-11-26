@@ -4,29 +4,32 @@ defmodule Pincer.Utils.LoggerFormatter do
   Adds colors and structured layout to console logs.
   """
 
+  alias Pincer.Utils.ANSI
+
+  @level_styles %{
+    info: {"[INFO]", :cyan},
+    error: {"[ERROR]", :red},
+    warning: {"[WARN]", :yellow},
+    debug: {"[DEBUG]", :magenta}
+  }
+
+  @doc "Formats a log event with timestamp, colored level tag, and session/project metadata."
   def format(level, message, timestamp, metadata) do
-    time = format_timestamp(timestamp)
+    time = timestamp |> format_timestamp() |> ANSI.muted(enabled?: true)
     level_tag = format_level(level)
     meta = format_metadata(metadata)
-
-    # ANSI Colors
-    reset = "\e[0m"
-    gray = "\e[90m"
 
     # Normalize message to string and trim trailing newlines to avoid double spacing
     msg_str = message |> IO.iodata_to_binary() |> String.trim_trailing()
 
     # Example Output: 22:15:01 [INFO] [session:123] Hello world
-    "#{gray}#{time}#{reset} #{level_tag} #{meta}#{msg_str}\n"
+    "#{time} #{level_tag} #{meta}#{msg_str}\n"
   end
 
   defp format_level(level) do
-    case level do
-      :info -> "\e[36m[INFO]\e[0m"
-      :error -> "\e[31m[ERROR]\e[0m"
-      :warning -> "\e[33m[WARN]\e[0m"
-      :debug -> "\e[35m[DEBUG]\e[0m"
-      _ -> "[#{level |> to_string() |> String.upcase()}]"
+    case Map.get(@level_styles, level) do
+      {label, color} -> ANSI.colorize(label, color, enabled?: true)
+      nil -> "[#{level |> to_string() |> String.upcase()}]"
     end
   end
 
@@ -34,13 +37,10 @@ defmodule Pincer.Utils.LoggerFormatter do
     session = Keyword.get(metadata, :session_id)
     project = Keyword.get(metadata, :project_id)
 
-    yellow = "\e[33m"
-    reset = "\e[0m"
-
     cond do
-      session && project -> "#{yellow}[S:#{session}|P:#{project}]#{reset} "
-      session -> "#{yellow}[S:#{session}]#{reset} "
-      project -> "#{yellow}[P:#{project}]#{reset} "
+      session && project -> ANSI.yellow("[S:#{session}|P:#{project}]", enabled?: true) <> " "
+      session -> ANSI.yellow("[S:#{session}]", enabled?: true) <> " "
+      project -> ANSI.yellow("[P:#{project}]", enabled?: true) <> " "
       true -> ""
     end
   end

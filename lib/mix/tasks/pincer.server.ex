@@ -17,6 +17,8 @@ defmodule Mix.Tasks.Pincer.Server do
   use Boundary, classify_to: Pincer.Mix
   require Logger
 
+  alias Pincer.Utils.ANSI
+
   @service_name "pincer"
   @service_file "infrastructure/systemd/pincer.service"
   @systemd_path "/etc/systemd/system/#{@service_name}.service"
@@ -31,15 +33,12 @@ defmodule Mix.Tasks.Pincer.Server do
     start_node()
 
     if args != [] do
-      IO.puts(
-        IO.ANSI.yellow() <>
-          "Active Channel Filter (Server): #{Enum.join(args, ", ")}" <> IO.ANSI.reset()
-      )
+      IO.puts(ANSI.warn("Active Channel Filter (Server): #{Enum.join(args, ", ")}"))
 
       Application.put_env(:pincer, :enabled_channels, args)
     end
 
-    IO.puts(IO.ANSI.green() <> "=== Pincer Server (Immortal Node) ===" <> IO.ANSI.reset())
+    IO.puts(ANSI.ok("=== Pincer Server (Immortal Node) ==="))
     IO.puts("Node: #{Node.self()}")
     IO.puts("Cookie: #{Node.get_cookie()}")
 
@@ -58,7 +57,7 @@ defmodule Mix.Tasks.Pincer.Server do
 
   defp handle_service("install", is_user) do
     mode_label = if is_user, do: "User (Rootless)", else: "System (Root)"
-    IO.puts(IO.ANSI.blue() <> "Installing Pincer Service (#{mode_label})..." <> IO.ANSI.reset())
+    IO.puts(ANSI.info("Installing Pincer Service (#{mode_label})..."))
 
     user = System.get_env("USER") || "root"
     home = System.user_home!()
@@ -85,9 +84,9 @@ defmodule Mix.Tasks.Pincer.Server do
           "Service installed as root. Using .env from: #{cwd}"
         end
 
-      IO.puts(IO.ANSI.green() <> msg <> IO.ANSI.reset())
+      IO.puts(ANSI.ok(msg))
     else
-      {:error, msg} -> IO.puts(IO.ANSI.red() <> "Installation failed: #{msg}" <> IO.ANSI.reset())
+      {:error, msg} -> IO.puts(ANSI.error("Installation failed: #{msg}"))
     end
   end
 
@@ -102,7 +101,7 @@ defmodule Mix.Tasks.Pincer.Server do
         @systemd_path
       end
 
-    IO.puts(IO.ANSI.red() <> "Removing Pincer Service..." <> IO.ANSI.reset())
+    IO.puts(ANSI.error("Removing Pincer Service..."))
 
     execute("#{cmd_prefix} stop #{@service_name}")
     execute("#{cmd_prefix} disable #{@service_name}")
@@ -114,7 +113,7 @@ defmodule Mix.Tasks.Pincer.Server do
     end
 
     execute("#{cmd_prefix} daemon-reload")
-    IO.puts(IO.ANSI.green() <> "Service removed successfully." <> IO.ANSI.reset())
+    IO.puts(ANSI.ok("Service removed successfully."))
   end
 
   defp handle_service("start", is_user) do
@@ -124,8 +123,8 @@ defmodule Mix.Tasks.Pincer.Server do
         else: "sudo systemctl start #{@service_name}"
 
     case execute(cmd) do
-      :ok -> IO.puts(IO.ANSI.green() <> "Service started." <> IO.ANSI.reset())
-      _ -> IO.puts(IO.ANSI.red() <> "Failed to start service." <> IO.ANSI.reset())
+      :ok -> IO.puts(ANSI.ok("Service started."))
+      _ -> IO.puts(ANSI.error("Failed to start service."))
     end
   end
 
@@ -136,8 +135,8 @@ defmodule Mix.Tasks.Pincer.Server do
         else: "sudo systemctl stop #{@service_name}"
 
     case execute(cmd) do
-      :ok -> IO.puts(IO.ANSI.green() <> "Service stopped." <> IO.ANSI.reset())
-      _ -> IO.puts(IO.ANSI.red() <> "Failed to stop service." <> IO.ANSI.reset())
+      :ok -> IO.puts(ANSI.ok("Service stopped."))
+      _ -> IO.puts(ANSI.error("Failed to stop service."))
     end
   end
 
@@ -147,11 +146,11 @@ defmodule Mix.Tasks.Pincer.Server do
         do: "systemctl --user restart #{@service_name}",
         else: "sudo systemctl restart #{@service_name}"
 
-    IO.puts(IO.ANSI.blue() <> "Restarting Pincer Service..." <> IO.ANSI.reset())
+    IO.puts(ANSI.info("Restarting Pincer Service..."))
 
     case execute(cmd) do
-      :ok -> IO.puts(IO.ANSI.green() <> "Service restarted." <> IO.ANSI.reset())
-      _ -> IO.puts(IO.ANSI.red() <> "Failed to restart service." <> IO.ANSI.reset())
+      :ok -> IO.puts(ANSI.ok("Service restarted."))
+      _ -> IO.puts(ANSI.error("Failed to restart service."))
     end
   end
 
@@ -166,7 +165,7 @@ defmodule Mix.Tasks.Pincer.Server do
   end
 
   defp handle_service(unknown, _) do
-    IO.puts(IO.ANSI.red() <> "Unknown service command: #{unknown}" <> IO.ANSI.reset())
+    IO.puts(ANSI.error("Unknown service command: #{unknown}"))
 
     IO.puts(
       "Usage: mix pincer.server service [install|remove|start|stop|restart|status] [--system]"
@@ -215,7 +214,7 @@ defmodule Mix.Tasks.Pincer.Server do
         :ok
 
       {output, exit_code} ->
-        IO.puts(IO.ANSI.red() <> "Error (exit code #{exit_code}): #{output}" <> IO.ANSI.reset())
+        IO.puts(ANSI.error("Error (exit code #{exit_code}): #{output}"))
         {:error, "Command failed: #{command}"}
     end
   end

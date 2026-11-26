@@ -14,17 +14,22 @@ defmodule Pincer.Core.UXTest do
     assert "ping" in names
   end
 
-  test "help_text/1 is screen-reader-friendly and explicit" do
+  test "help_text/1 is screen-reader-friendly and includes every catalog command" do
     text = UX.help_text(:telegram)
 
     assert text =~ "Command Menu"
-    assert text =~ "/menu"
-    assert text =~ "/status"
-    assert text =~ "/models"
-    assert text =~ "/kanban"
-    assert text =~ "/project"
-    assert text =~ "/ping"
     assert text =~ "with or without /"
+
+    for %{name: name, description: description} <- UX.commands() do
+      assert text =~ "/#{name}"
+      assert text =~ description
+    end
+
+    assert text =~ "/new"
+    assert text =~ "/reset"
+    assert text =~ "/model"
+    assert text =~ "/think"
+    assert text =~ "/reasoning"
   end
 
   test "unknown_command_hint/0 points users to menu" do
@@ -37,7 +42,7 @@ defmodule Pincer.Core.UXTest do
     assert String.length(UX.unknown_interaction_hint()) <= 80
   end
 
-  test "resolve_shortcut/1 accepts menu/status/models/kanban/project/ping with and without slash" do
+  test "resolve_shortcut/1 accepts all catalog commands and aliases with and without slash" do
     assert {:ok, "/menu"} = UX.resolve_shortcut("menu")
     assert {:ok, "/menu"} = UX.resolve_shortcut("/menu")
     assert {:ok, "/status"} = UX.resolve_shortcut("status")
@@ -46,7 +51,24 @@ defmodule Pincer.Core.UXTest do
     assert {:ok, "/kanban"} = UX.resolve_shortcut("/kanban")
     assert {:ok, "/project"} = UX.resolve_shortcut("project")
     assert {:ok, "/project"} = UX.resolve_shortcut("/project")
+    assert {:ok, "/project"} = UX.resolve_shortcut("projeto")
+    assert {:ok, "/project"} = UX.resolve_shortcut("/projeto")
     assert {:ok, "/ping"} = UX.resolve_shortcut("ping")
+    assert {:ok, "/new"} = UX.resolve_shortcut("new")
+    assert {:ok, "/new"} = UX.resolve_shortcut("/new")
+    assert {:ok, "/new"} = UX.resolve_shortcut("reset")
+    assert {:ok, "/new"} = UX.resolve_shortcut("/reset")
+    assert {:ok, "/model"} = UX.resolve_shortcut("model")
+    assert {:ok, "/model"} = UX.resolve_shortcut("/model")
+    assert {:ok, "/think"} = UX.resolve_shortcut("think")
+    assert {:ok, "/think"} = UX.resolve_shortcut("/think")
+    assert {:ok, "/reasoning"} = UX.resolve_shortcut("reasoning")
+    assert {:ok, "/reasoning"} = UX.resolve_shortcut("/reasoning")
+
+    for %{name: name} <- UX.commands() do
+      assert {:ok, _route} = UX.resolve_shortcut(name)
+      assert {:ok, _route} = UX.resolve_shortcut("/#{name}")
+    end
   end
 
   test "resolve_shortcut/1 keeps compatibility for help aliases and Menu label" do

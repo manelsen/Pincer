@@ -4,25 +4,24 @@ defmodule Pincer.CLI do
   Can run locally (Standalone) or connect to a remote server.
   """
   use Boundary,
-    deps: [Pincer.Core, Pincer.Plugin],
+    deps: [Pincer.Core, Pincer.Plugin, Pincer.Utils],
     exports: []
 
   alias Pincer.CLI.History
   alias Pincer.Plugin.Manifest
+  alias Pincer.Utils.ANSI
   require Logger
 
   @session_id "cli_user"
   @default_history_limit 10
 
   def main(args) do
-    IO.puts(IO.ANSI.green() <> "=== Pincer CLI v0.2 (Distributed) ===" <> IO.ANSI.reset())
+    IO.puts(ANSI.ok("=== Pincer CLI v0.2 (Distributed) ==="))
     IO.puts("Type /q to exit. Use /history, /history N or /history clear.")
 
     # If there are arguments, assume they are the desired channels (e.g.: telegram)
     if args != [] do
-      IO.puts(
-        IO.ANSI.yellow() <> "Active Channel Filter: #{Enum.join(args, ", ")}" <> IO.ANSI.reset()
-      )
+      IO.puts(ANSI.warn("Active Channel Filter: #{Enum.join(args, ", ")}"))
 
       Application.put_env(:pincer, :enabled_channels, args)
     end
@@ -43,16 +42,11 @@ defmodule Pincer.CLI do
     server_node = :pincer_server@localhost
 
     if Node.connect(server_node) do
-      IO.puts(
-        IO.ANSI.blue() <> "🔗 Connected to Immortal Server: #{server_node}" <> IO.ANSI.reset()
-      )
+      IO.puts(ANSI.info("🔗 Connected to Immortal Server: #{server_node}"))
 
       server_node
     else
-      IO.puts(
-        IO.ANSI.yellow() <>
-          "⚠️ Server not found. Starting Standalone mode..." <> IO.ANSI.reset()
-      )
+      IO.puts(ANSI.warn("⚠️ Server not found. Starting Standalone mode..."))
 
       Mix.Task.run("app.start", [])
       ensure_local_session()
@@ -65,9 +59,7 @@ defmodule Pincer.CLI do
       GenServer.call({backend_name(), node}, :attach)
     catch
       :exit, _ ->
-        IO.puts(
-          IO.ANSI.red() <> "❌ Failed to connect to CLI channel on server." <> IO.ANSI.reset()
-        )
+        IO.puts(ANSI.error("❌ Failed to connect to CLI channel on server."))
 
         System.halt(1)
     end
@@ -93,6 +85,10 @@ defmodule Pincer.CLI do
     end
   end
 
+  @doc false
+  @spec prompt_label() :: String.t()
+  def prompt_label, do: ANSI.cyan("[User]: ")
+
   defp ensure_local_session do
     case Registry.lookup(Pincer.Core.Session.Registry, @session_id) do
       [{_pid, _}] -> :ok
@@ -101,7 +97,7 @@ defmodule Pincer.CLI do
   end
 
   def loop(target_node) do
-    input = IO.gets(IO.ANSI.cyan() <> "[User]: " <> IO.ANSI.reset()) |> String.trim()
+    input = IO.gets(prompt_label()) |> String.trim()
 
     case process_command(input) do
       :quit ->
@@ -109,7 +105,7 @@ defmodule Pincer.CLI do
         System.halt(0)
 
       :clear ->
-        IO.puts(IO.ANSI.clear() <> IO.ANSI.home())
+        IO.puts(ANSI.clear_screen())
         loop(target_node)
 
       {:history, limit} ->
@@ -152,7 +148,7 @@ defmodule Pincer.CLI do
   defp await_response do
     receive do
       {:cli_output, text} ->
-        IO.puts(IO.ANSI.green() <> "[Pincer]: " <> text <> IO.ANSI.reset())
+        IO.puts(ANSI.ok("[Pincer]: " <> text))
 
         # If it's a status message, keep waiting for the final response
         if String.starts_with?(text, "📐") or String.starts_with?(text, "⚙️") do
@@ -165,7 +161,7 @@ defmodule Pincer.CLI do
       _ ->
         await_response()
     after
-      60_000 -> IO.puts(IO.ANSI.red() <> "[Timeout] No response." <> IO.ANSI.reset())
+      60_000 -> IO.puts(ANSI.error("[Timeout] No response."))
     end
   end
 
@@ -180,9 +176,9 @@ defmodule Pincer.CLI do
     entries = History.recent(limit)
 
     if entries == [] do
-      IO.puts(IO.ANSI.yellow() <> "[History] No entries yet." <> IO.ANSI.reset())
+      IO.puts(ANSI.warn("[History] No entries yet."))
     else
-      IO.puts(IO.ANSI.blue() <> "[History] Last #{length(entries)} entries:" <> IO.ANSI.reset())
+      IO.puts(ANSI.info("[History] Last #{length(entries)} entries:"))
 
       entries
       |> Enum.with_index(1)
@@ -195,10 +191,10 @@ defmodule Pincer.CLI do
   defp clear_history do
     case History.clear() do
       :ok ->
-        IO.puts(IO.ANSI.yellow() <> "[History] Cleared." <> IO.ANSI.reset())
+        IO.puts(ANSI.warn("[History] Cleared."))
 
       {:error, reason} ->
-        IO.puts(IO.ANSI.red() <> "[History] Clear failed: #{inspect(reason)}" <> IO.ANSI.reset())
+        IO.puts(ANSI.error("[History] Clear failed: #{inspect(reason)}"))
     end
   end
 
