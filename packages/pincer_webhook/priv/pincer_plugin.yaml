@@ -1,6 +1,6 @@
 id: webhook
 name: Pincer Webhook
-version: "0.1.0"
+version: "0.2.0"
 kind: channel
 adapter: "Pincer.Channels.Webhook"
 description: "Generic HTTP webhook channel for external integrations"

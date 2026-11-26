@@ -1,7 +1,7 @@
 defmodule PincerWebhook.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/manelsen/Pincer"
 
   def project do
@@ -23,8 +23,8 @@ defmodule PincerWebhook.MixProject do
 
   defp deps do
     [
-      {:pincer_ports, "~> 0.1"},
-      {:pincer_shared, "~> 0.1"},
+      {:pincer_ports, "~> 0.2"},
+      {:pincer_shared, "~> 0.2"},
       {:jason, "~> 1.4"},
       {:plug, "~> 1.16"},
       {:bandit, "~> 1.5"}

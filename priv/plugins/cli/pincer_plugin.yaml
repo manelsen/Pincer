@@ -1,6 +1,6 @@
 id: cli
 name: Pincer CLI
-version: "0.1.0"
+version: "0.2.0"
 kind: channel
 adapter: "Pincer.Channels.CLI"
 description: "Interactive command-line channel for local development and testing"

@@ -1,6 +1,6 @@
 id: dingtalk
 name: Pincer DingTalk
-version: "0.1.0"
+version: "0.2.0"
 kind: channel
 adapter: "Pincer.Channels.DingTalk"
 description: "DingTalk robot channel adapter"
