@@ -6,6 +6,8 @@ defmodule Pincer.Core.Session.Preferences do
   so they survive restarts. Stored as JSON in the workspace `.pincer/` directory.
   """
 
+  require Logger
+
   alias Pincer.Utils.ModelOverride
   alias PincerPorts.Structs.Usage
 
@@ -43,6 +45,39 @@ defmodule Pincer.Core.Session.Preferences do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  @doc """
+  Persists preference fields from a session state map, logging warnings/errors
+  instead of crashing the session process.
+  """
+  @spec save_state(map()) :: :ok
+  def save_state(%{workspace_path: nil, session_id: session_id}) do
+    Logger.warning("[SESSION] #{session_id} save_preferences skipped: workspace_path is nil")
+    :ok
+  end
+
+  def save_state(state) do
+    result =
+      save(state.workspace_path, %{
+        model_override: state.model_override,
+        thinking_level: state.thinking_level,
+        reasoning_visible: state.reasoning_visible,
+        usage_display: state.usage_display,
+        token_usage_total: state.token_usage_total
+      })
+
+    case result do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "[SESSION] #{state.session_id} save_preferences failed (workspace=#{state.workspace_path}): #{inspect(reason)}"
+        )
+
+        :ok
     end
   end
 

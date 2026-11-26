@@ -2,36 +2,30 @@ defmodule Pincer.Core.Session.Server do
   @moduledoc """
   Core session GenServer implementing the Pincer Brain (The Maestro).
 
-  The Maestro orchestrates conversation lifecycle, manages supervised executor
-  and unsolicited-evaluation tasks via `Task.Supervisor.async_nolink/2` with
-  reference correlation, and delegates persistence, prompt rendering, tool
-  approvals, and Blackboard ingestion to focused `Session.*` / `PromptAssembly`
-  modules.
+  The Maestro owns the GenServer lifecycle, local/Horde registration, and
+  conversation state orchestration while delegating task supervision to
+  `TaskCoordinator`, Blackboard polling/ingestion to `BlackboardIngestor`,
+  debounced input queuing to `InputBuffer`, and control/approval commands to
+  `CommandDispatcher`.
   """
   use GenServer, restart: :transient
   require Logger
 
   alias Pincer.Core.AgentPaths
-  alias Pincer.Core.Session.AlignmentIntegrity
-  alias Pincer.Core.Session.ErrorUX
-  alias Pincer.Core.Executor
+  alias Pincer.Core.Executor.PromptAssembly
   alias Pincer.Core.Introspection
   alias Pincer.Core.Orchestration.Archivist
-  alias Pincer.Core.Orchestration.Blackboard
-  alias Pincer.Core.Project.ProjectRouter
-  alias Pincer.Core.Executor.PromptAssembly
   alias Pincer.Core.Registry, as: CoreRegistry
-  alias Pincer.Core.Session.Approval, as: SessionApproval
-  alias Pincer.Core.Session.Blackboard, as: SessionBlackboard
+  alias Pincer.Core.Session.AlignmentIntegrity
+  alias Pincer.Core.Session.BlackboardIngestor
+  alias Pincer.Core.Session.CommandDispatcher
   alias Pincer.Core.Session.History, as: SessionHistory
+  alias Pincer.Core.Session.InputBuffer
   alias Pincer.Core.Session.Preferences
-  alias PincerPorts.Structs.IncomingMessage
-  alias PincerPorts.Structs.Usage
+  alias Pincer.Core.Session.TaskCoordinator
   alias Pincer.Core.Telemetry
   alias Pincer.Infra.PubSub
-  alias Pincer.Ports.Storage
-
-  @task_supervisor Pincer.Core.TaskSupervisor
+  alias PincerPorts.Structs.IncomingMessage
 
   @doc false
   defdelegate bootstrap_active?(workspace_path, opts \\ []), to: PromptAssembly
@@ -114,13 +108,11 @@ defmodule Pincer.Core.Session.Server do
     blackboard_scope = Keyword.get(opts, :blackboard_scope, root_agent_id)
 
     AgentPaths.ensure_workspace!(workspace_path, bootstrap?: bootstrap?)
-
     Introspection.Kernel.ensure_started(root_agent_id, workspace_path: workspace_path)
     Introspection.Kernel.register_session(root_agent_id, self())
     self_state = Introspection.Kernel.get_self_state(root_agent_id)
 
-    verify_alignment_integrity(workspace_path, session_id)
-
+    AlignmentIntegrity.ensure_verified(workspace_path, session_id)
     PubSub.subscribe("session:#{session_id}")
     PubSub.subscribe("system:updates")
 
@@ -131,8 +123,6 @@ defmodule Pincer.Core.Session.Server do
         "[SESSION] #{session_id} loaded model preference: #{prefs.model_override.provider}:#{prefs.model_override.model}"
       )
     end
-
-    watcher_pid = maybe_start_graph_watcher(workspace_path)
 
     system_prompt =
       PromptAssembly.build_system_prompt(
@@ -167,7 +157,7 @@ defmodule Pincer.Core.Session.Server do
       input_buffer: [],
       debounce_timer: nil,
       llm_client: Keyword.get(opts, :llm_client),
-      watcher_pid: watcher_pid,
+      watcher_pid: maybe_start_graph_watcher(workspace_path),
       pending_approval: nil,
       auto_approve_until: nil,
       last_executor_trace: nil,
@@ -184,230 +174,85 @@ defmodule Pincer.Core.Session.Server do
 
     Process.send_after(self(), :heartbeat, 5000)
     Telemetry.emit_conversation_start(session_id, %{fresh: fresh?})
-
     {:ok, state}
   end
 
-  # --- Supervised Task & Correlated Outcomes ---
-
   @impl true
-  def handle_info({ref, {:ok, final_history, response, usage}}, %{worker_ref: ref} = state)
-      when is_reference(ref) do
-    Process.demonitor(ref, [:flush])
-    SessionHistory.persist_assistant_response(state.session_id, response)
+  def handle_info({ref, _} = msg, state) when is_reference(ref),
+    do: dispatch_task_message(msg, state)
 
-    normalized_usage = Usage.normalize(usage)
-    new_totals = Usage.add(state.token_usage_total, normalized_usage)
+  def handle_info({:DOWN, ref, :process, _pid, _reason} = msg, state) when is_reference(ref),
+    do: dispatch_task_message(msg, state)
 
-    publish(state.session_id, {:agent_response, response, usage})
-    Introspection.Kernel.report_activity(state.root_agent_id, :idle)
-
-    if state.turn_start_ms do
-      Telemetry.emit_conversation_turn_stop(state.session_id, state.turn_start_ms, %{
-        prompt_tokens: normalized_usage.prompt_tokens,
-        completion_tokens: normalized_usage.completion_tokens
-      })
-    end
-
-    new_state = %{
-      state
-      | history: SessionHistory.prune(final_history, state.session_id),
-        status: :idle,
-        worker_pid: nil,
-        worker_ref: nil,
-        token_usage_total: new_totals,
-        turn_start_ms: nil
-    }
-
-    save_preferences(new_state)
-    {:noreply, new_state}
-  end
-
-  @impl true
-  def handle_info({ref, {:error, reason}}, %{worker_ref: ref} = state)
-      when is_reference(ref) do
-    Process.demonitor(ref, [:flush])
-    handle_executor_failure(reason, state)
-  end
-
-  @impl true
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{worker_ref: ref} = state)
-      when is_reference(ref) do
-    handle_executor_failure(reason, state)
-  end
-
-  @impl true
-  def handle_info({ref, {:reply, response, usage}}, state)
-      when is_reference(ref) and is_map_key(state.pending_evals, ref) do
-    Process.demonitor(ref, [:flush])
-    SessionHistory.persist_assistant_response(state.session_id, response)
-
-    normalized_usage = Usage.normalize(usage)
-    new_totals = Usage.add(state.token_usage_total, normalized_usage)
-    new_history = state.history ++ [%{"role" => "assistant", "content" => response}]
-
-    new_state = %{
-      state
-      | history: new_history,
-        token_usage_total: new_totals,
-        pending_evals: Map.delete(state.pending_evals, ref)
-    }
-
-    save_preferences(new_state)
-    publish(state.session_id, {:agent_response, response, usage})
-    {:noreply, new_state}
-  end
-
-  @impl true
-  def handle_info({ref, :ignore}, state)
-      when is_reference(ref) and is_map_key(state.pending_evals, ref) do
-    Process.demonitor(ref, [:flush])
-    {:noreply, %{state | pending_evals: Map.delete(state.pending_evals, ref)}}
-  end
-
-  @impl true
-  def handle_info({ref, {:error, reason}}, state)
-      when is_reference(ref) and is_map_key(state.pending_evals, ref) do
-    Process.demonitor(ref, [:flush])
-
-    Logger.error(
-      "[SESSION] #{state.session_id} evaluate_blackboard_update failed: #{inspect(reason)}"
-    )
-
-    {:noreply, %{state | pending_evals: Map.delete(state.pending_evals, ref)}}
-  end
-
-  @impl true
-  def handle_info({:DOWN, ref, :process, _pid, reason}, state)
-      when is_reference(ref) and is_map_key(state.pending_evals, ref) do
-    Logger.error(
-      "[SESSION] #{state.session_id} evaluate_blackboard_update crashed: #{inspect(reason)}"
-    )
-
-    {:noreply, %{state | pending_evals: Map.delete(state.pending_evals, ref)}}
-  end
-
-  # --- Session Lifecycle & Scheduling ---
-
-  @impl true
   def handle_info(:recovery_catch_up, state) do
     Logger.info("[SESSION] #{state.session_id} Maestro performing recovery catch-up...")
-
-    parent = self()
-    since_id = state.last_blackboard_id
-    scope = state.blackboard_scope
-
-    Task.Supervisor.start_child(@task_supervisor, fn ->
-      case Blackboard.fetch_new(since_id, scope: scope) do
-        {[], _} -> :ok
-        {messages, new_last_id} -> send(parent, {:recovery_catch_up_done, messages, new_last_id})
-      end
-    end)
-
+    BlackboardIngestor.start_recovery_catch_up(state, self())
     {:noreply, state}
   end
 
-  @impl true
   def handle_info({:recovery_catch_up_done, messages, new_last_id}, state) do
     Logger.info(
       "[SESSION] #{state.session_id} Caught up with #{length(messages)} missed messages."
     )
 
-    process_blackboard_messages(messages, new_last_id, state, broadcast?: false)
+    {_status, next_state} =
+      BlackboardIngestor.ingest_batch(messages, new_last_id, state, broadcast?: false)
+
+    {:noreply, next_state}
   end
 
-  @impl true
   def handle_info(:trigger_bootstrap, state) do
     history_with_prompt = [%{"role" => "system", "content" => system_prompt(state)}]
-    {:noreply, start_unsolicited_eval(state, history_with_prompt, :bootstrap)}
+    {:noreply, TaskCoordinator.start_unsolicited_eval(state, history_with_prompt, :bootstrap)}
   end
 
-  @impl true
   def handle_info(:heartbeat, state) do
     Process.send_after(self(), :heartbeat, 10_000)
 
-    case Blackboard.fetch_new(state.last_blackboard_id, scope: state.blackboard_scope) do
-      {[], _} ->
-        {:noreply, state}
+    case BlackboardIngestor.poll(state) do
+      {:evaluate, next_state} ->
+        {:noreply,
+         TaskCoordinator.start_unsolicited_eval(next_state, next_state.history, :blackboard)}
 
-      {messages, new_last_id} ->
-        process_blackboard_messages(messages, new_last_id, state, broadcast?: true)
+      {_status, next_state} ->
+        {:noreply, next_state}
     end
   end
 
-  @impl true
   def handle_info({:system_update_prompt}, state) do
     Logger.info("[SESSION] #{state.session_id} hot-swapping system prompt...")
     new_history = SessionHistory.swap_system_prompt(state.history, system_prompt(state))
     {:noreply, %{state | history: new_history}}
   end
 
-  @impl true
   def handle_info(:flush_input, state) do
-    combined_input =
-      state.input_buffer
-      |> Enum.map_join("\n", &SessionHistory.content_to_text/1)
+    {combined_input, state} = InputBuffer.flush(state)
 
-    state = %{state | input_buffer: [], debounce_timer: nil}
-
-    case ProjectRouter.parse(combined_input) do
-      {:ok, cmd, args} ->
-        session_id = state.session_id
-
-        Task.Supervisor.start_child(@task_supervisor, fn ->
-          case ProjectRouter.handle_command(cmd, args, session_id) do
-            {:ok, id} ->
-              publish(session_id, {:agent_response, "🚀 Project started with ID: `#{id}`"})
-
-            _ ->
-              publish(session_id, {:agent_response, "✅ Command #{cmd} executed."})
-          end
-        end)
-
-        {:noreply, state}
-
-      :error ->
-        {:reply, _reply, new_state} = process_standard_input(combined_input, state)
-        {:noreply, new_state}
+    case CommandDispatcher.dispatch_project_command(combined_input, state) do
+      {:handled, next_state} -> {:noreply, next_state}
+      :not_a_command -> {:noreply, TaskCoordinator.start_standard_turn(state, combined_input)}
     end
   end
 
-  @impl true
-  def handle_info({:cron_trigger, prompt}, state) when is_binary(prompt) do
-    Logger.info("[SESSION] #{state.session_id} cron trigger: #{String.slice(prompt, 0, 80)}")
-    {:reply, _, new_state} = process_standard_input(prompt, state)
-    {:noreply, new_state}
+  def handle_info({trigger, prompt}, state)
+      when trigger in [:cron_trigger, :scheduler_trigger] and is_binary(prompt) do
+    Logger.info("[SESSION] #{state.session_id} #{trigger}: #{String.slice(prompt, 0, 80)}")
+    {:noreply, TaskCoordinator.start_standard_turn(state, prompt)}
   end
 
-  @impl true
-  def handle_info({:scheduler_trigger, prompt}, state) when is_binary(prompt) do
-    Logger.info("[SESSION] #{state.session_id} scheduler trigger: #{String.slice(prompt, 0, 80)}")
-    {:reply, _, new_state} = process_standard_input(prompt, state)
-    {:noreply, new_state}
-  end
+  def handle_info({:executor_trace, trace_meta}, state) when is_map(trace_meta),
+    do: {:noreply, TaskCoordinator.record_trace(state, trace_meta)}
 
-  # --- Runtime Forwarding & Telemetry ---
-
-  @impl true
-  def handle_info({:executor_trace, trace_meta}, state) when is_map(trace_meta) do
-    Introspection.Kernel.report_trace(state.root_agent_id, trace_meta)
-    maybe_update_lesson_outcomes(state.injected_lesson_ids, trace_meta)
-    {:noreply, %{state | last_executor_trace: trace_meta, injected_lesson_ids: []}}
-  end
-
-  @impl true
   def handle_info({:agent_stream_token, token}, state) do
     publish(state.session_id, {:agent_partial, token})
     {:noreply, state}
   end
 
-  @impl true
   def handle_info({:executor_status, status}, state) do
     publish(state.session_id, {:agent_status, status})
     {:noreply, state}
   end
 
-  @impl true
   def handle_info({:llm_runtime_status, %{kind: :failover} = meta}, state) do
     if state.verbose do
       msg = "🔄 **Failover**: Swapping to `#{meta.provider}/#{meta.model}` due to `#{meta.reason}`"
@@ -417,71 +262,39 @@ defmodule Pincer.Core.Session.Server do
     {:noreply, state}
   end
 
-  @impl true
-  def handle_info({:llm_runtime_status, _meta}, state), do: {:noreply, state}
+  def handle_info({event, _}, state)
+      when event in [:llm_runtime_status, :agent_partial, :agent_status, :agent_response],
+      do: {:noreply, state}
 
-  @impl true
-  def handle_info({:agent_partial, _token}, state), do: {:noreply, state}
+  def handle_info({event, _, _}, state) when event in [:agent_response, :agent_file],
+    do: {:noreply, state}
 
-  @impl true
-  def handle_info({:agent_status, _status}, state), do: {:noreply, state}
-
-  @impl true
-  def handle_info({:agent_response, _content, _usage}, state), do: {:noreply, state}
-
-  @impl true
-  def handle_info({:agent_response, _content}, state), do: {:noreply, state}
-
-  @impl true
-  def handle_info({:agent_file, _path, _opts}, state), do: {:noreply, state}
-
-  @impl true
   def handle_info({:sme_status, _sme_name, msg}, state) do
     publish(state.session_id, {:agent_status, msg})
     {:noreply, state}
   end
 
-  @impl true
   def handle_info({:sme_tool_use, tools}, state) when is_list(tools) do
-    joined = Enum.join(tools, "\n")
-    publish(state.session_id, {:agent_status, "🛠️ Usando ferramentas:\n#{joined}"})
+    publish(state.session_id, {:agent_status, "🛠️ Usando ferramentas:\n#{Enum.join(tools, "\n")}"})
     {:noreply, state}
   end
 
-  @impl true
   def handle_info({:sme_tool_use, tools}, state) do
     publish(state.session_id, {:agent_status, "🛠️ Usando ferramentas: #{tools}"})
     {:noreply, state}
   end
 
-  @impl true
-  def handle_info({:approval_required, call_id, command}, state) do
-    Logger.info("[SESSION] #{state.session_id} Approval required for #{call_id}: #{command}")
+  def handle_info({:approval_required, call_id, command}, state),
+    do: {:noreply, CommandDispatcher.handle_approval_required(call_id, command, state)}
 
-    case SessionApproval.handle_request(call_id, command, state.auto_approve_until) do
-      {:auto_approved, approved_call_id} ->
-        Logger.info("[SESSION] #{state.session_id} Auto-approved: #{command}")
-        send_approval_decision(state, approved_call_id, :approved)
-        {:noreply, state}
+  def handle_info({:kernel_self_state_updated, self_state}, state),
+    do: {:noreply, %{state | self_state: self_state}}
 
-      {:pending, pending} ->
-        publish(state.session_id, {:approval_ui, call_id, command})
-        {:noreply, %{state | pending_approval: pending}}
-    end
-  end
-
-  @impl true
-  def handle_info({:kernel_self_state_updated, self_state}, state) do
-    {:noreply, %{state | self_state: self_state}}
-  end
-
-  @impl true
   def handle_info({:kernel_skills_updated, _skill}, state) do
     new_history = SessionHistory.swap_system_prompt(state.history, system_prompt(state))
     {:noreply, %{state | history: new_history}}
   end
 
-  @impl true
   def handle_info(msg, state) do
     Logger.debug("[SESSION] #{state.session_id} received unexpected message: #{inspect(msg)}")
     {:noreply, state}
@@ -492,274 +305,55 @@ defmodule Pincer.Core.Session.Server do
   @impl true
   def handle_call(:get_status, _from, state), do: {:reply, {:ok, state}, state}
 
-  @impl true
-  def handle_call(:reset, _from, state) do
-    Logger.info("[SESSION] #{state.session_id} resetting history...")
+  def handle_call(:reset, _from, state),
+    do: CommandDispatcher.dispatch_call(:reset, state, prompt_builder: &system_prompt/1)
 
-    history = state.history
-    session_id = state.session_id
+  def handle_call({:set_model, _, _} = msg, _from, state),
+    do: CommandDispatcher.dispatch_call(msg, state)
 
-    Task.Supervisor.start_child(@task_supervisor, fn ->
-      SessionHistory.record_reset_snapshot(session_id, history)
-    end)
+  def handle_call({cmd, _} = msg, _from, state)
+      when cmd in [:set_thinking, :set_reasoning_visible, :set_verbose, :set_usage, :approve_all],
+      do: CommandDispatcher.dispatch_call(msg, state)
 
-    state = state |> stop_worker() |> clear_pending_evals()
-    Storage.delete_messages(state.session_id)
-    new_history = [%{"role" => "system", "content" => system_prompt(state)}]
-
-    if PromptAssembly.bootstrap_active?(state.workspace_path) do
-      send(self(), :trigger_bootstrap)
-    end
-
-    {:reply, :ok, %{state | history: new_history, status: :idle, turn_start_ms: nil}}
-  end
-
-  @impl true
-  def handle_call({:set_model, provider, model}, _from, state) do
-    Logger.info("[SESSION] #{state.session_id} switching model to #{provider}:#{model}")
-
-    if worker_alive?(state) do
-      send(state.worker_pid, {:model_changed, provider, model})
-    end
-
-    new_state = %{state | model_override: %{provider: provider, model: model}}
-    save_preferences(new_state)
-    {:reply, :ok, new_state}
-  end
-
-  @impl true
-  def handle_call({:set_thinking, level}, _from, state) do
-    new_state = %{state | thinking_level: level}
-    save_preferences(new_state)
-    {:reply, :ok, new_state}
-  end
-
-  @impl true
-  def handle_call({:set_reasoning_visible, visible}, _from, state) do
-    new_state = %{state | reasoning_visible: visible}
-    save_preferences(new_state)
-    {:reply, :ok, new_state}
-  end
-
-  @impl true
-  def handle_call({:set_verbose, verbose}, _from, state) do
-    {:reply, :ok, %{state | verbose: verbose}}
-  end
-
-  @impl true
-  def handle_call({:set_usage, level}, _from, state) do
-    new_state = %{state | usage_display: level}
-    save_preferences(new_state)
-    {:reply, :ok, new_state}
-  end
-
-  @impl true
-  def handle_call({:approve_all, seconds}, _from, state) do
-    {until, pending_approval, effect} =
-      SessionApproval.enable_auto_approve(state.pending_approval, seconds)
-
-    Logger.info("[SESSION] #{state.session_id} Auto-approve enabled until #{until}")
-
-    case effect do
-      {:auto_approve, call_id} ->
-        Logger.info("[SESSION] #{state.session_id} Auto-approved pending: #{call_id}")
-        send_approval_decision(state, call_id, :approved)
-
-      :noop ->
-        :ok
-    end
-
-    {:reply, :ok, %{state | auto_approve_until: until, pending_approval: pending_approval}}
-  end
-
-  @impl true
   def handle_call({:process_input, %IncomingMessage{} = input}, _from, state) do
     text = SessionHistory.content_to_text(input)
 
     case state.pending_approval do
       nil ->
-        handle_standard_process_input(input, text, state)
+        if CommandDispatcher.cancel_command?(text) do
+          CommandDispatcher.handle_cancel(state)
+        else
+          {:reply, {:ok, :buffered}, InputBuffer.enqueue(state, input.text)}
+        end
 
       pending ->
-        case SessionApproval.resolve_pending(pending, text) do
-          {:decided, call_id, decision} ->
-            send_approval_decision(state, call_id, decision)
-            {:reply, {:ok, :approval_sent}, %{state | pending_approval: nil}}
-
-          {:prompt_again, ^pending} ->
-            publish(
-              state.session_id,
-              {:agent_status, "⚠️ Aprovação pendente. Responda **Aprovo** ou **Rejeito**."}
-            )
-
-            {:reply, {:ok, :buffered}, state}
-        end
+        CommandDispatcher.handle_pending_approval_input(pending, text, state)
     end
   end
 
-  def handle_call({:process_input, input}, from, state) when is_binary(input) do
-    msg = IncomingMessage.new(state.session_id, input)
-    handle_call({:process_input, msg}, from, state)
-  end
+  def handle_call({:process_input, input}, from, state) when is_binary(input),
+    do: handle_call({:process_input, IncomingMessage.new(state.session_id, input)}, from, state)
 
   @impl true
   def terminate(reason, state) do
     Logger.info("[SERVER] Session #{state.session_id} terminating: #{inspect(reason)}")
-    _ = state |> stop_worker() |> clear_pending_evals()
+    _ = state |> TaskCoordinator.stop_worker() |> TaskCoordinator.clear_pending_evals()
     Archivist.start_consolidation(state.session_id, [], workspace_path: state.workspace_path)
     :ok
   end
 
   # --- Internal Helpers ---
 
-  defp process_blackboard_messages(messages, new_last_id, state, opts) do
-    broadcast? = Keyword.get(opts, :broadcast?, true)
+  defp dispatch_task_message(msg, state) do
+    case TaskCoordinator.handle_task_message(msg, state) do
+      {:handled, new_state} ->
+        {:noreply, new_state}
 
-    %{
-      history: new_history,
-      tracker: tracker,
-      notifications: notifications,
-      needs_review?: review?
-    } =
-      SessionBlackboard.ingest(state.history, state.subagent_progress_tracker, messages)
-
-    if broadcast? do
-      Enum.each(notifications, &publish(state.session_id, {:agent_status, &1}))
-    end
-
-    next_state = %{
-      state
-      | history: new_history,
-        last_blackboard_id: new_last_id,
-        subagent_progress_tracker: tracker
-    }
-
-    if broadcast? and state.status == :idle and review? do
-      {:noreply, start_unsolicited_eval(next_state, new_history, :blackboard)}
-    else
-      {:noreply, next_state}
+      :ignore ->
+        Logger.debug("[SESSION] #{state.session_id} received unexpected message: #{inspect(msg)}")
+        {:noreply, state}
     end
   end
-
-  defp handle_standard_process_input(input, text, state) do
-    if SessionApproval.cancel_command?(text) do
-      if worker_alive?(state) do
-        new_state = stop_worker(state)
-        publish(state.session_id, {:agent_response, "🛑 Execução cancelada pelo usuário."})
-        if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
-
-        {:reply, {:ok, :stopped},
-         %{new_state | status: :idle, input_buffer: [], debounce_timer: nil, turn_start_ms: nil}}
-      else
-        {:reply, {:ok, :idle}, state}
-      end
-    else
-      if state.status == :working do
-        publish(
-          state.session_id,
-          {:agent_status, "⏳ Mensagem recebida. Vou processar após concluir o passo atual..."}
-        )
-      end
-
-      if state.debounce_timer, do: Process.cancel_timer(state.debounce_timer)
-      new_buffer = state.input_buffer ++ [input.text]
-      new_timer = Process.send_after(self(), :flush_input, 1200)
-
-      {:reply, {:ok, :buffered}, %{state | input_buffer: new_buffer, debounce_timer: new_timer}}
-    end
-  end
-
-  defp process_standard_input(input, state) do
-    SessionHistory.persist_user_input(state.session_id, input, state.workspace_path)
-    user_msg = SessionHistory.build_user_message(input, state.workspace_path)
-    new_history = state.history ++ [user_msg]
-
-    executor_opts =
-      [
-        model_override: model_override_with_thinking(state),
-        workspace_path: state.workspace_path,
-        trace_events?: true,
-        notify?: false
-      ]
-      |> maybe_put_opt(:llm_client, state.llm_client)
-
-    turn_start_ms = Telemetry.emit_conversation_turn_start(state.session_id)
-    parent = self()
-
-    task =
-      Task.Supervisor.async_nolink(@task_supervisor, fn ->
-        Executor.run(parent, state.session_id, new_history, executor_opts)
-      end)
-
-    lesson_ids = Introspection.Kernel.get_lesson_ids(state.root_agent_id)
-    Introspection.Kernel.report_activity(state.root_agent_id, :working)
-
-    {:reply, {:ok, :started},
-     %{
-       state
-       | history: new_history,
-         worker_pid: task.pid,
-         worker_ref: task.ref,
-         status: :working,
-         injected_lesson_ids: lesson_ids,
-         turn_start_ms: turn_start_ms
-     }}
-  end
-
-  defp start_unsolicited_eval(state, history, kind) do
-    eval_opts = maybe_put_opt([], :llm_client, state.llm_client)
-    model_override = state.model_override
-
-    task =
-      Task.Supervisor.async_nolink(@task_supervisor, fn ->
-        SessionBlackboard.evaluate_update(history, model_override, eval_opts)
-      end)
-
-    %{state | pending_evals: Map.put(state.pending_evals, task.ref, kind)}
-  end
-
-  defp handle_executor_failure(reason, state) do
-    Logger.error("[SESSION] #{state.session_id} Executor failed: #{inspect(reason)}")
-    Telemetry.emit_conversation_error(state.session_id, reason)
-    Introspection.Kernel.report_activity(state.root_agent_id, :idle)
-
-    error_msg = "❌ #{ErrorUX.friendly(reason, scope: :executor)}"
-    publish(state.session_id, {:agent_response, error_msg})
-
-    {:noreply, %{state | status: :idle, worker_pid: nil, worker_ref: nil, turn_start_ms: nil}}
-  end
-
-  defp stop_worker(state) do
-    if is_reference(state.worker_ref) do
-      Process.demonitor(state.worker_ref, [:flush])
-    end
-
-    if worker_alive?(state) do
-      case Task.Supervisor.terminate_child(@task_supervisor, state.worker_pid) do
-        :ok -> :ok
-        {:error, :not_found} -> Process.exit(state.worker_pid, :kill)
-      end
-    end
-
-    %{state | worker_pid: nil, worker_ref: nil}
-  end
-
-  defp clear_pending_evals(state) do
-    Enum.each(state.pending_evals, fn {ref, _kind} ->
-      if is_reference(ref), do: Process.demonitor(ref, [:flush])
-    end)
-
-    %{state | pending_evals: %{}}
-  end
-
-  defp send_approval_decision(state, call_id, decision) do
-    if worker_alive?(state) do
-      send(state.worker_pid, {:tool_approval_result, call_id, decision})
-    end
-  end
-
-  defp worker_alive?(%{worker_pid: pid}) when is_pid(pid), do: Process.alive?(pid)
-  defp worker_alive?(_state), do: false
 
   defp system_prompt(state) do
     PromptAssembly.build_system_prompt(
@@ -768,16 +362,6 @@ defmodule Pincer.Core.Session.Server do
       self_state: state.self_state
     )
   end
-
-  defp model_override_with_thinking(%{thinking_level: level, model_override: override})
-       when not is_nil(level) and is_map(override) do
-    Map.put(override, :thinking_level, level)
-  end
-
-  defp model_override_with_thinking(%{model_override: override}), do: override
-
-  defp maybe_put_opt(opts, _key, nil), do: opts
-  defp maybe_put_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp publish(session_id, event), do: PubSub.broadcast("session:#{session_id}", event)
 
@@ -788,75 +372,6 @@ defmodule Pincer.Core.Session.Server do
         _ -> nil
       end
     end
-  end
-
-  defp save_preferences(%{workspace_path: nil, session_id: session_id}) do
-    Logger.warning("[SESSION] #{session_id} save_preferences skipped: workspace_path is nil")
-  end
-
-  defp save_preferences(state) do
-    result =
-      Preferences.save(state.workspace_path, %{
-        model_override: state.model_override,
-        thinking_level: state.thinking_level,
-        reasoning_visible: state.reasoning_visible,
-        usage_display: state.usage_display,
-        token_usage_total: state.token_usage_total
-      })
-
-    case result do
-      :ok ->
-        :ok
-
-      {:error, reason} ->
-        Logger.error(
-          "[SESSION] #{state.session_id} save_preferences failed (workspace=#{state.workspace_path}): #{inspect(reason)}"
-        )
-    end
-  end
-
-  defp verify_alignment_integrity(workspace_path, session_id) do
-    case AlignmentIntegrity.verify(workspace_path) do
-      {:ok, []} ->
-        :ok
-
-      {:ok, violations} ->
-        files = Enum.map_join(violations, ", ", & &1.file)
-        Logger.warning("[SESSION] #{session_id} alignment integrity violation: #{files}")
-
-      {:error, :no_snapshot} ->
-        if AlignmentIntegrity.protected_files(workspace_path) != [] do
-          AlignmentIntegrity.snapshot!(workspace_path)
-          Logger.info("[SESSION] #{session_id} alignment integrity snapshot created")
-        end
-    end
-  end
-
-  defp maybe_update_lesson_outcomes([], _trace_meta), do: :ok
-
-  defp maybe_update_lesson_outcomes(lesson_ids, trace_meta) do
-    outcome = trace_outcome(trace_meta)
-
-    Task.Supervisor.start_child(@task_supervisor, fn ->
-      Enum.each(lesson_ids, fn id ->
-        Introspection.LessonStore.record_outcome(id, outcome)
-      end)
-    end)
-
-    :ok
-  end
-
-  defp trace_outcome(trace_meta) do
-    steps = trace_meta[:steps] || trace_meta["steps"] || []
-
-    has_error? =
-      Enum.any?(steps, fn
-        %{kind: "error"} -> true
-        %{"kind" => "error"} -> true
-        _ -> false
-      end)
-
-    if has_error?, do: :failure, else: :success
   end
 
   defp via_tuple(id), do: CoreRegistry.via_tuple(Pincer.Core.Session.Registry, id, :local)
