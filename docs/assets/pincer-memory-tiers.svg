@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 260" width="1100" height="260" role="img" aria-label="Pincer three-layer memory architecture">
+  <defs>
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#0b1020"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="260" rx="14" fill="#090d16" stroke="#1e293b" stroke-width="1.5"/>
+
+  <text x="32" y="38" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#f1f5f9">Three-Layer Memory &amp; Archivist Consolidation</text>
+
+  <!-- Card 1: Session -->
+  <rect x="32" y="62" width="245" height="162" rx="10" fill="url(#cardBg)" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="52" y="92" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#38bdf8">1. Session Log</text>
+  <text x="52" y="118" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">HISTORY.md</text>
+  <text x="52" y="148" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Rolling turn transcript</text>
+  <text x="52" y="168" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">scoped per agent workspace.</text>
+  <text x="52" y="202" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">session_search tool</text>
+
+  <!-- Arrow 1 -->
+  <line x1="284" y1="143" x2="318" y2="143" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Card 2: Curated -->
+  <rect x="326" y="62" width="255" height="162" rx="10" fill="url(#cardBg)" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="346" y="92" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#c084fc">2. Curated Memory</text>
+  <text x="346" y="118" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">MEMORY.md &amp; USER.md</text>
+  <text x="346" y="148" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Durable facts extracted by</text>
+  <text x="346" y="168" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Orchestration.Archivist.</text>
+  <text x="346" y="202" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">:curated_memory_limits</text>
+
+  <!-- Arrow 2 -->
+  <line x1="588" y1="143" x2="622" y2="143" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Card 3: Semantic & Graph -->
+  <rect x="630" y="62" width="265" height="162" rx="10" fill="url(#cardBg)" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="650" y="92" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#4ade80">3. SQLite Graph + Vec</text>
+  <text x="650" y="118" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Pincer.Infra.SQLite</text>
+  <text x="650" y="148" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">FTS5 full-text, entity edges,</text>
+  <text x="650" y="168" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">sqlite-vec vec0 (or cosine).</text>
+  <text x="650" y="202" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">zero external DB service</text>
+
+  <!-- Arrow 3 -->
+  <line x1="902" y1="143" x2="936" y2="143" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Recall output -->
+  <rect x="944" y="84" width="126" height="118" rx="10" fill="#172554" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="1007" y="122" text-anchor="middle" font-family="ui-sans-serif, sans-serif" font-size="14" font-weight="700" fill="#93c5fd">Prompt</text>
+  <text x="1007" y="142" text-anchor="middle" font-family="ui-sans-serif, sans-serif" font-size="14" font-weight="700" fill="#93c5fd">Assembly</text>
+  <text x="1007" y="174" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#cbd5e1">sanitized recall</text>
+</svg>
