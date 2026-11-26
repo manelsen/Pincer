@@ -192,6 +192,7 @@ defmodule Pincer.Application do
       Pincer.Core.CircuitBreaker,
       Pincer.Core.RateLimiter,
       Pincer.Core.HookDispatcher,
+      Pincer.Core.Pairing.Store,
       Pincer.Core.Session.Supervisor,
       {Pincer.Core.Registry, name: Pincer.Core.Project.Registry, backend: :local},
       Pincer.Core.Project.Supervisor,
