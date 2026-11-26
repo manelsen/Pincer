@@ -5,24 +5,12 @@ defmodule Pincer.LLM.Providers.OpencodeZen do
   Particularities:
   - Standard OpenAI-compatible implementation (`https://api.opencode.ai/v1/chat/completions`).
   """
-  @behaviour PincerPorts.LLM.Provider
-
-  @impl true
-  def chat_completion(messages, model, config, tools) do
-    config = Map.put_new(config, :base_url, "https://opencode.ai/zen/v1/chat/completions")
-
-    Pincer.LLM.Providers.OpenAICompat.chat_completion(messages, model, config, tools)
-  end
-
-  @impl true
-  def stream_completion(messages, model, config, tools) do
-    config = Map.put_new(config, :base_url, "https://opencode.ai/zen/v1/chat/completions")
-    Pincer.LLM.Providers.OpenAICompat.stream_completion(messages, model, config, tools)
-  end
+  use Pincer.LLM.Providers.OpenAICompat,
+    base_url: "https://opencode.ai/zen/v1/chat/completions"
 
   @impl true
   def list_models(config) do
-    config = Map.put_new(config, :base_url, "https://opencode.ai/zen/v1/chat/completions")
+    config = normalize_config(config)
 
     case Pincer.LLM.Providers.OpenAICompat.list_models(config) do
       {:ok, models} ->
@@ -43,9 +31,4 @@ defmodule Pincer.LLM.Providers.OpencodeZen do
         error
     end
   end
-
-  @impl true
-  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
-  @impl true
-  def generate_embedding(_text, _model, _config), do: {:error, :not_implemented}
 end

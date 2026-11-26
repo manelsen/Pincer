@@ -12,7 +12,7 @@ defmodule PincerCLI.MixProject do
       elixirc_options: [warnings_as_errors: true],
       start_permanent: false,
       deps: deps(),
-      description: "CLI channel adapter for the Pincer AI agent framework",
+      description: description(),
       package: package(),
       name: "PincerCLI",
       source_url: @source_url
@@ -25,6 +25,10 @@ defmodule PincerCLI.MixProject do
     [
       {:pincer_ports, "~> 0.1"}
     ]
+  end
+
+  defp description do
+    "CLI channel adapter for the Pincer AI agent framework"
   end
 
   defp package do

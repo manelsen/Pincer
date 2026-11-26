@@ -3,13 +3,17 @@ name: Pincer DingTalk
 version: "0.1.0"
 kind: channel
 adapter: "Pincer.Channels.DingTalk"
-description: "DingTalk (Ding) channel adapter"
+description: "DingTalk robot channel adapter"
 config_schema:
   client_id_env:
     type: string
     required: true
-    description: "Env var with the DingTalk client ID"
+    description: "Env var with the DingTalk client ID (DINGTALK_CLIENT_ID)"
   client_secret_env:
     type: string
     required: true
-    description: "Env var with the DingTalk client secret"
+    description: "Env var with the DingTalk client secret (DINGTALK_CLIENT_SECRET)"
+  webhook:
+    type: object
+    required: false
+    description: "Inbound webhook settings: enabled, bind, port, path, signing_secret_env"

@@ -9,23 +9,10 @@ defmodule Pincer.LLM.Providers.MiniMax do
   - API key via `MINIMAX_API_KEY`, Group ID via `MINIMAX_GROUP_ID`.
   - Otherwise follows the OpenAI-compatible chat completion schema.
   """
-  @behaviour PincerPorts.LLM.Provider
+  use Pincer.LLM.Providers.OpenAICompat,
+    base_url: "https://api.minimax.chat/v1/text/chatcompletion_v2"
 
   require Logger
-
-  @base_url "https://api.minimax.chat/v1/text/chatcompletion_v2"
-
-  @impl true
-  def chat_completion(messages, model, config, tools) do
-    config = normalize_config(config)
-    Pincer.LLM.Providers.OpenAICompat.chat_completion(messages, model, config, tools)
-  end
-
-  @impl true
-  def stream_completion(messages, model, config, tools) do
-    config = normalize_config(config)
-    Pincer.LLM.Providers.OpenAICompat.stream_completion(messages, model, config, tools)
-  end
 
   @impl true
   def list_models(config) do
@@ -70,15 +57,11 @@ defmodule Pincer.LLM.Providers.MiniMax do
     end
   end
 
-  @impl true
-  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
-
-  @impl true
-  def generate_embedding(_text, _model, _config), do: {:error, :not_implemented}
-
   # --- Private helpers ---
 
-  defp normalize_config(config) do
+  @doc false
+  def normalize_config(config) do
+    config = super(config)
     api_key = config[:api_key] || System.get_env("MINIMAX_API_KEY") || ""
     group_id = config[:minimax_group_id] || System.get_env("MINIMAX_GROUP_ID") || ""
 
@@ -86,15 +69,11 @@ defmodule Pincer.LLM.Providers.MiniMax do
     existing_headers = config[:headers] || []
 
     config
-    |> Map.put_new(:base_url, @base_url)
     |> Map.put(:api_key, api_key)
     |> Map.put(:minimax_group_id, group_id)
     # MiniMax requires both Authorization and Authority headers;
-    # we inject them and clear :api_key so OpenAICompat does not double-set it.
+    # we inject them alongside the API key.
     |> Map.put(:headers, existing_headers ++ auth_headers)
-    # Use a dummy key so OpenAICompat does not bail for missing api_key,
-    # while the real auth is carried in the headers above.
-    |> Map.put(:api_key, api_key)
   end
 
   defp build_auth_headers(api_key, group_id) when is_binary(api_key) and is_binary(group_id) do

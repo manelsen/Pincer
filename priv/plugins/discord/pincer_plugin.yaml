@@ -3,9 +3,9 @@ name: Pincer Discord
 version: "0.1.0"
 kind: channel
 adapter: "Pincer.Channels.Discord"
-description: "Discord channel adapter via bot gateway"
+description: "Discord channel adapter (Nostrum)"
 config_schema:
   token_env:
     type: string
     required: true
-    description: "Env var with the Discord bot token"
+    description: "Env var with the Discord bot token (DISCORD_BOT_TOKEN)"

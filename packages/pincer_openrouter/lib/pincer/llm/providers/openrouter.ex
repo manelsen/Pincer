@@ -6,19 +6,9 @@ defmodule Pincer.LLM.Providers.OpenRouter do
   - Strongly compatible with OpenAI (`https://openrouter.ai/api/v1/chat/completions`).
   - Requires `HTTP-Referer` and `X-Title` headers for application ranking.
   """
-  @behaviour PincerPorts.LLM.Provider
-
-  @impl true
-  def chat_completion(messages, model, config, tools) do
-    config = normalize_config(config)
-    Pincer.LLM.Providers.OpenAICompat.chat_completion(messages, model, config, tools)
-  end
-
-  @impl true
-  def stream_completion(messages, model, config, tools) do
-    config = normalize_config(config)
-    Pincer.LLM.Providers.OpenAICompat.stream_completion(messages, model, config, tools)
-  end
+  use Pincer.LLM.Providers.OpenAICompat,
+    base_url: "https://openrouter.ai/api/v1/chat/completions",
+    embedding: true
 
   @impl true
   def list_models(config) do
@@ -51,17 +41,9 @@ defmodule Pincer.LLM.Providers.OpenRouter do
     end
   end
 
-  @impl true
-  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
-
-  @impl true
-  def generate_embedding(text, model, config) do
-    config = normalize_config(config)
-    Pincer.LLM.Providers.OpenAICompat.generate_embedding(text, model, config)
-  end
-
-  defp normalize_config(config) do
-    config = Map.put_new(config, :base_url, "https://openrouter.ai/api/v1/chat/completions")
+  @doc false
+  def normalize_config(config) do
+    config = super(config)
 
     # Inject application headers required by OpenRouter
     existing_headers = config[:headers] || []

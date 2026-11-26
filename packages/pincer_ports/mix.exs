@@ -9,11 +9,11 @@ defmodule PincerPorts.MixProject do
       app: :pincer_ports,
       version: @version,
       elixir: "~> 1.14",
+      elixirc_options: [warnings_as_errors: true],
       start_permanent: false,
       compilers: [:boundary] ++ Mix.compilers(),
-      elixirc_options: [warnings_as_errors: true],
       deps: deps(),
-      description: "Port behaviours and contracts for the Pincer AI agent framework",
+      description: description(),
       package: package(),
       name: "PincerPorts",
       source_url: @source_url
@@ -26,6 +26,10 @@ defmodule PincerPorts.MixProject do
     [
       {:boundary, "~> 0.12", runtime: false}
     ]
+  end
+
+  defp description do
+    "Port behaviours and contracts for the Pincer AI agent framework"
   end
 
   defp package do

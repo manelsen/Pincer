@@ -1,5 +1,5 @@
 id: feishu
-name: Pincer Feishu / Lark
+name: Pincer Feishu
 version: "0.1.0"
 kind: channel
 adapter: "Pincer.Channels.Feishu"
@@ -8,11 +8,16 @@ config_schema:
   app_id_env:
     type: string
     required: true
-    description: "Env var with the Feishu App ID"
+    description: "Env var with the Feishu app ID (FEISHU_APP_ID)"
   app_secret_env:
     type: string
     required: true
-    description: "Env var with the Feishu App Secret"
+    description: "Env var with the Feishu app secret (FEISHU_APP_SECRET)"
   base_url:
     type: string
-    description: "API base URL (open.feishu.cn or open.larksuite.com)"
+    required: false
+    description: "Feishu or Lark API base URL"
+  webhook:
+    type: object
+    required: false
+    description: "Inbound webhook settings: enabled, bind, port, path, encrypt_key_env, verification_token_env"
