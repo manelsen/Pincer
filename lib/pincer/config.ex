@@ -128,6 +128,7 @@ defmodule Pincer.Infra.Config do
     "model_router" => :model_router,
     "pairing" => :pairing,
     "rate_limits" => :rate_limits,
+    "rbac" => :rbac,
     "sandbox" => :sandbox,
     "security" => :security,
     "skills_registry" => :skills_registry,

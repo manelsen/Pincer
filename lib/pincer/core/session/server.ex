@@ -135,6 +135,7 @@ defmodule Pincer.Core.Session.Server do
 
     state = %{
       mode: :normal,
+      channel: Keyword.get(opts, :channel),
       session_id: session_id,
       root_agent_id: root_agent_id,
       principal_ref: Keyword.get(opts, :principal_ref),

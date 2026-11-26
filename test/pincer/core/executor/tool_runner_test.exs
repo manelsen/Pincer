@@ -1,8 +1,24 @@
 defmodule Pincer.Core.Executor.ToolRunnerTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Pincer.Core.Executor.Ctx
   alias Pincer.Core.Executor.ToolRunner
+
+  setup do
+    env_keys = [:agents, :channels, :rbac]
+
+    snapshot =
+      Map.new(env_keys, fn key -> {key, Application.get_env(:pincer, key, :__unset__)} end)
+
+    on_exit(fn ->
+      Enum.each(snapshot, fn
+        {key, :__unset__} -> Application.delete_env(:pincer, key)
+        {key, value} -> Application.put_env(:pincer, key, value)
+      end)
+    end)
+
+    :ok
+  end
 
   defmodule RegistryStub do
     @behaviour Pincer.Ports.ToolRegistry
@@ -266,6 +282,7 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
 
     ctx =
       Ctx.new(self(), session_id,
+        approval_timeout_ms: 200,
         workspace_path: tmp_dir!(),
         tool_registry: RegistryStub,
         storage: StorageSpy
@@ -303,6 +320,7 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
 
     ctx =
       Ctx.new(self(), session_id,
+        approval_timeout_ms: 200,
         workspace_path: tmp_dir!(),
         tool_registry: RegistryStub,
         storage: StorageSpy
@@ -314,6 +332,88 @@ defmodule Pincer.Core.Executor.ToolRunnerTest do
 
     assert msg["content"] =~ "Approval denied for approval_tool"
     refute_received {:approval_required, _id, _prompt}
+  end
+
+  test "enforces paired agent_id role over session_id and channel default_role" do
+    session_id = "telegram_#{System.unique_integer([:positive])}"
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+    on_exit(fn -> Pincer.Infra.PubSub.unsubscribe("session:#{session_id}") end)
+
+    Application.put_env(:pincer, :agents, %{
+      "annie" => %{"role" => "bot"},
+      "lucie" => %{"role" => "operator"}
+    })
+
+    Application.put_env(:pincer, :channels, %{
+      "telegram" => %{"default_role" => "bot"}
+    })
+
+    call = %{"id" => "c_paired", "function" => %{"name" => "approval_tool", "arguments" => "{}"}}
+
+    annie_ctx =
+      Ctx.new(self(), session_id,
+        agent_id: "annie",
+        channel: :telegram,
+        approval_timeout_ms: 200,
+        workspace_path: tmp_dir!(),
+        tool_registry: RegistryStub,
+        storage: StorageSpy
+      )
+
+    {[denied_msg], _ctx} = ToolRunner.execute_batch([call], annie_ctx)
+    assert denied_msg["content"] =~ "Approval denied for approval_tool"
+    refute_received {:approval_required, "c_paired", _prompt}
+
+    lucie_ctx =
+      Ctx.new(self(), session_id,
+        agent_id: "lucie",
+        channel: :telegram,
+        workspace_path: tmp_dir!(),
+        tool_registry: RegistryStub,
+        storage: StorageSpy
+      )
+
+    test_pid = self()
+
+    task =
+      Task.async(fn -> ToolRunner.execute_batch([call], %{lucie_ctx | session_pid: test_pid}) end)
+
+    assert_receive {:approval_required, "c_paired", "rm -rf /tmp/x"}, 1_000
+    send(task.pid, {:tool_approval_result, "c_paired", :approved})
+    {[approved_msg], _ctx} = Task.await(task, 2_000)
+    assert approved_msg["content"] == "approved-run"
+  end
+
+  test "denies unmapped sessions when channel default_role or rbac.unconfigured_role is bot" do
+    session_id = "telegram_#{System.unique_integer([:positive])}"
+    Pincer.Infra.PubSub.subscribe("session:#{session_id}")
+    on_exit(fn -> Pincer.Infra.PubSub.unsubscribe("session:#{session_id}") end)
+
+    Application.delete_env(:pincer, :agents)
+
+    call = %{
+      "id" => "c_unmapped",
+      "function" => %{"name" => "approval_tool", "arguments" => "{}"}
+    }
+
+    ctx =
+      Ctx.new(self(), session_id,
+        approval_timeout_ms: 200,
+        workspace_path: tmp_dir!(),
+        tool_registry: RegistryStub,
+        storage: StorageSpy
+      )
+
+    Application.put_env(:pincer, :channels, %{"telegram" => %{"default_role" => "bot"}})
+    {[channel_denied], _ctx} = ToolRunner.execute_batch([call], ctx)
+    assert channel_denied["content"] =~ "Approval denied for approval_tool"
+    refute_received {:approval_required, "c_unmapped", _prompt}
+
+    Application.delete_env(:pincer, :channels)
+    Application.put_env(:pincer, :rbac, %{"unconfigured_role" => "bot"})
+    {[rbac_denied], _ctx} = ToolRunner.execute_batch([call], ctx)
+    assert rbac_denied["content"] =~ "Approval denied for approval_tool"
+    refute_received {:approval_required, "c_unmapped", _prompt}
   end
 
   test "handles approval granted and denied in sequential tool execution" do

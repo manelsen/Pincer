@@ -10,6 +10,7 @@ defmodule Pincer.Core.Executor.Ctx do
   alias Pincer.Core.Executor.Trace
 
   @default_max_recursion_depth 100
+  @known_channels ~w(cli discord dingtalk feishu line slack telegram webhook whatsapp)
 
   @type deps :: %{
           llm_client: module(),
@@ -28,6 +29,8 @@ defmodule Pincer.Core.Executor.Ctx do
   defstruct [
     :session_pid,
     :session_id,
+    :agent_id,
+    :channel,
     :ref,
     :workspace_path,
     :deps,
@@ -42,6 +45,8 @@ defmodule Pincer.Core.Executor.Ctx do
   @type t :: %__MODULE__{
           session_pid: pid() | nil,
           session_id: String.t(),
+          agent_id: String.t(),
+          channel: String.t() | nil,
           ref: reference() | nil,
           workspace_path: String.t(),
           deps: deps(),
@@ -55,13 +60,20 @@ defmodule Pincer.Core.Executor.Ctx do
 
   @doc """
   Builds a new `%Ctx{}` from executor arguments and options, resolving runtime
-  dependencies and normalizing `model_override` once at the boundary.
+  dependencies, `agent_id`, `channel`, and `model_override` once at the boundary.
   """
   @spec new(pid() | nil, String.t(), keyword()) :: t()
   def new(session_pid, session_id, opts \\ []) when is_binary(session_id) and is_list(opts) do
     max_depth =
       opts[:max_depth] ||
         Application.get_env(:pincer, :max_recursion_depth, @default_max_recursion_depth)
+
+    agent_id =
+      normalize_non_empty(opts[:agent_id]) ||
+        normalize_non_empty(opts[:root_agent_id]) ||
+        session_id
+
+    channel = resolve_channel(opts, session_id)
 
     deps = %{
       llm_client: opts[:llm_client] || Pincer.Ports.LLM,
@@ -81,8 +93,10 @@ defmodule Pincer.Core.Executor.Ctx do
     %__MODULE__{
       session_pid: session_pid,
       session_id: session_id,
+      agent_id: agent_id,
+      channel: channel,
       ref: Keyword.get(opts, :ref),
-      workspace_path: opts[:workspace_path] || AgentPaths.workspace_root(session_id),
+      workspace_path: opts[:workspace_path] || AgentPaths.workspace_root(agent_id),
       deps: deps,
       model_override: ModelOverride.normalize(opts[:model_override]),
       trace: trace,
@@ -91,6 +105,54 @@ defmodule Pincer.Core.Executor.Ctx do
       opts: opts
     }
   end
+
+  defp resolve_channel(opts, session_id) do
+    normalize_channel(opts[:channel]) ||
+      channel_from_conversation_ref(opts[:conversation_ref]) ||
+      channel_from_session_id(session_id)
+  end
+
+  defp channel_from_conversation_ref(ref) when is_binary(ref) do
+    case String.split(ref, ":", parts: 2) do
+      [channel, _rest] -> normalize_channel(channel)
+      _ -> nil
+    end
+  end
+
+  defp channel_from_conversation_ref(_ref), do: nil
+
+  defp channel_from_session_id("cli"), do: "cli"
+
+  defp channel_from_session_id(session_id) when is_binary(session_id) do
+    Enum.find(@known_channels, fn channel ->
+      String.starts_with?(session_id, "#{channel}_")
+    end)
+  end
+
+  defp normalize_channel(nil), do: nil
+
+  defp normalize_channel(value) when is_atom(value) do
+    value |> Atom.to_string() |> normalize_channel()
+  end
+
+  defp normalize_channel(value) when is_binary(value) do
+    case value |> String.trim() |> String.downcase() do
+      "" -> nil
+      "nil" -> nil
+      normalized -> normalized
+    end
+  end
+
+  defp normalize_channel(_value), do: nil
+
+  defp normalize_non_empty(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp normalize_non_empty(_value), do: nil
 
   @doc """
   Updates the normalized `model_override` mid-turn (e.g., on `:model_changed`).

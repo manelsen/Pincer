@@ -44,11 +44,14 @@ defmodule Pincer.Core.Session.TaskCoordinator do
 
     executor_opts =
       [
+        agent_id: state.root_agent_id,
         model_override: model_override_with_thinking(state),
         workspace_path: state.workspace_path,
         trace_events?: true,
         notify?: false
       ]
+      |> maybe_put_opt(:channel, Map.get(state, :channel))
+      |> maybe_put_opt(:conversation_ref, Map.get(state, :conversation_ref))
       |> maybe_put_opt(:llm_client, state.llm_client)
 
     turn_start_ms = telemetry.emit_conversation_turn_start(state.session_id)
