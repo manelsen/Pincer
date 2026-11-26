@@ -272,36 +272,36 @@ defmodule Mix.Tasks.Pincer.Plugins do
 
     lines = String.split(content, "\n")
 
-    {result_lines, state, found_enabled} =
+    {rev_lines, state, found_enabled} =
       Enum.reduce(lines, {[], :scanning, false}, fn line, {acc, state, found_enabled} ->
         case state do
           :scanning ->
             if Regex.match?(section_re, line) do
-              {acc ++ [line], :in_section, false}
+              {[line | acc], :in_section, false}
             else
-              {acc ++ [line], :scanning, found_enabled}
+              {[line | acc], :scanning, found_enabled}
             end
 
           :in_section ->
             cond do
               Regex.match?(enabled_re, line) ->
-                {acc ++ ["    enabled: #{value}"], :in_section, true}
+                {["    enabled: #{value}" | acc], :in_section, true}
 
               Regex.match?(next_section_re, line) ->
                 # Leaving the section — inject `enabled:` if not seen yet
-                prefix =
+                acc_with_enabled =
                   if found_enabled,
                     do: acc,
-                    else: acc ++ ["    enabled: #{value}"]
+                    else: ["    enabled: #{value}" | acc]
 
-                {prefix ++ [line], :done, true}
+                {[line | acc_with_enabled], :done, true}
 
               true ->
-                {acc ++ [line], :in_section, found_enabled}
+                {[line | acc], :in_section, found_enabled}
             end
 
           :done ->
-            {acc ++ [line], :done, found_enabled}
+            {[line | acc], :done, found_enabled}
         end
       end)
 
@@ -311,10 +311,16 @@ defmodule Mix.Tasks.Pincer.Plugins do
 
       # Reached EOF while still in the section and never saw enabled: — inject it
       state == :in_section and not found_enabled ->
-        {:ok, Enum.join(result_lines ++ ["    enabled: #{value}"], "\n")}
+        rev_lines =
+          case rev_lines do
+            ["" | rest] -> ["", "    enabled: #{value}" | rest]
+            _ -> ["    enabled: #{value}" | rev_lines]
+          end
+
+        {:ok, rev_lines |> Enum.reverse() |> Enum.join("\n")}
 
       true ->
-        {:ok, Enum.join(result_lines, "\n")}
+        {:ok, rev_lines |> Enum.reverse() |> Enum.join("\n")}
     end
   end
 

@@ -68,7 +68,7 @@ defmodule Pincer.Core.LLM.FailoverPolicy do
       retry_same_limit: retry_same_limit,
       retry_same_count: 0,
       attempted_routes: MapSet.new([{provider, model}]),
-      attempts: [],
+      attempts_rev: [],
       terminal_reason: nil
     }
   end
@@ -92,8 +92,14 @@ defmodule Pincer.Core.LLM.FailoverPolicy do
 
   @spec summarize_attempts(state()) :: %{attempts: [map()], terminal_reason: term() | nil}
   def summarize_attempts(state) when is_map(state) do
+    attempts =
+      case Map.fetch(state, :attempts_rev) do
+        {:ok, rev} -> Enum.reverse(rev)
+        :error -> Map.get(state, :attempts, [])
+      end
+
     %{
-      attempts: Map.get(state, :attempts, []),
+      attempts: attempts,
       terminal_reason: Map.get(state, :terminal_reason)
     }
   end
@@ -147,7 +153,7 @@ defmodule Pincer.Core.LLM.FailoverPolicy do
       model: model
     }
 
-    Map.update(state, :attempts, [attempt], &(&1 ++ [attempt]))
+    Map.update(state, :attempts_rev, [attempt], &[attempt | &1])
   end
 
   defp next_model_candidate(state) do

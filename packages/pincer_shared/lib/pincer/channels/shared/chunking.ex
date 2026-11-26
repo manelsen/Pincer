@@ -70,31 +70,62 @@ defmodule Pincer.Channels.Shared.Chunking do
   end
 
   defp split_by_lines(text, max_len) do
-    lines = String.split(text, "\n", trim: false)
-    last_index = length(lines) - 1
+    text
+    |> String.split("\n", trim: false)
+    |> accumulate_lines(max_len, [], [], 0)
+  end
 
-    {chunks, current_chunk} =
-      lines
-      |> Enum.with_index()
-      |> Enum.reduce({[], ""}, fn {line, idx}, {acc, current} ->
-        line_with_newline = if idx < last_index, do: line <> "\n", else: line
+  defp accumulate_lines([], _max_len, rev_chunks, [], _current_len) do
+    Enum.reverse(rev_chunks)
+  end
 
-        cond do
-          String.length(line_with_newline) > max_len ->
-            acc = if current == "", do: acc, else: acc ++ [current]
-            blind_parts = split_by_graphemes(line_with_newline, max_len)
-            {new_current, rest} = List.pop_at(blind_parts, -1)
-            {acc ++ rest, new_current}
+  defp accumulate_lines([], _max_len, rev_chunks, rev_current_parts, _current_len) do
+    Enum.reverse([flush_parts(rev_current_parts) | rev_chunks])
+  end
 
-          String.length(current) + String.length(line_with_newline) > max_len ->
-            {acc ++ [current], line_with_newline}
+  defp accumulate_lines([line | rest], max_len, rev_chunks, rev_current_parts, current_len) do
+    line_with_newline = if rest == [], do: line, else: line <> "\n"
+    line_len = String.length(line_with_newline)
 
-          true ->
-            {acc, current <> line_with_newline}
-        end
-      end)
+    cond do
+      line_len > max_len ->
+        rev_chunks = flush_into(rev_chunks, rev_current_parts)
+        blind_parts = split_by_graphemes(line_with_newline, max_len)
+        {rev_chunks, new_current} = push_blind_parts(blind_parts, rev_chunks)
+        new_len = last_chunk_len(line_len, max_len)
+        accumulate_lines(rest, max_len, rev_chunks, [new_current], new_len)
 
-    if current_chunk == "", do: chunks, else: chunks ++ [current_chunk]
+      current_len + line_len > max_len ->
+        rev_chunks = flush_into(rev_chunks, rev_current_parts)
+        accumulate_lines(rest, max_len, rev_chunks, [line_with_newline], line_len)
+
+      true ->
+        accumulate_lines(
+          rest,
+          max_len,
+          rev_chunks,
+          [line_with_newline | rev_current_parts],
+          current_len + line_len
+        )
+    end
+  end
+
+  defp flush_into(rev_chunks, []), do: rev_chunks
+  defp flush_into(rev_chunks, rev_parts), do: [flush_parts(rev_parts) | rev_chunks]
+
+  defp flush_parts(rev_parts), do: rev_parts |> Enum.reverse() |> IO.iodata_to_binary()
+
+  defp push_blind_parts([last], rev_chunks), do: {rev_chunks, last}
+
+  defp push_blind_parts([part | rest], rev_chunks) do
+    push_blind_parts(rest, [part | rev_chunks])
+  end
+
+  defp last_chunk_len(total_len, max_len) do
+    case rem(total_len, max_len) do
+      0 -> max_len
+      remainder -> remainder
+    end
   end
 
   defp split_by_graphemes(text, max_len) do
@@ -104,36 +135,54 @@ defmodule Pincer.Channels.Shared.Chunking do
       text
       |> String.graphemes()
       |> Enum.chunk_every(max_len)
-      |> Enum.map(&Enum.join/1)
+      |> Enum.map(&IO.iodata_to_binary/1)
     end
   end
 
   defp split_newline_window(text, max_len, search_range) do
-    if String.length(text) <= max_len do
+    graphemes = String.graphemes(text)
+    total_len = length(graphemes)
+
+    if total_len <= max_len do
       [text]
     else
-      chunk = String.slice(text, 0, max_len)
-      split_at = find_last_newline_within(chunk, search_range) || max_len
-
-      [
-        String.slice(text, 0, split_at)
-        | split_newline_window(String.slice(text, split_at..-1//1), max_len, search_range)
-      ]
+      do_split_newline_window(graphemes, total_len, max_len, search_range, [])
     end
   end
 
-  defp find_last_newline_within(text, search_range) do
-    len = String.length(text)
-    start_pos = max(0, len - search_range)
-    tail = String.slice(text, start_pos..-1//1)
+  defp do_split_newline_window(graphemes, remaining_len, max_len, _search_range, rev_chunks)
+       when remaining_len <= max_len do
+    Enum.reverse([IO.iodata_to_binary(graphemes) | rev_chunks])
+  end
 
-    case String.split(tail, "\n") do
-      [_] ->
-        nil
+  defp do_split_newline_window(graphemes, remaining_len, max_len, search_range, rev_chunks) do
+    min_pos = max(0, max_len - search_range)
+    split_at = find_window_split(graphemes, 0, max_len, min_pos, nil) || max_len
+    {chunk_graphemes, rest_graphemes} = Enum.split(graphemes, split_at)
+    chunk = IO.iodata_to_binary(chunk_graphemes)
 
-      parts ->
-        last_part_len = parts |> List.last() |> String.length()
-        len - last_part_len
-    end
+    do_split_newline_window(
+      rest_graphemes,
+      remaining_len - split_at,
+      max_len,
+      search_range,
+      [chunk | rev_chunks]
+    )
+  end
+
+  defp find_window_split(_graphemes, idx, max_len, _min_pos, last_nl_pos) when idx >= max_len,
+    do: last_nl_pos
+
+  defp find_window_split([], _idx, _max_len, _min_pos, last_nl_pos), do: last_nl_pos
+
+  defp find_window_split([g | rest], idx, max_len, min_pos, last_nl_pos) do
+    next_nl_pos =
+      if idx >= min_pos and (g == "\n" or g == "\r\n") do
+        idx + 1
+      else
+        last_nl_pos
+      end
+
+    find_window_split(rest, idx + 1, max_len, min_pos, next_nl_pos)
   end
 end

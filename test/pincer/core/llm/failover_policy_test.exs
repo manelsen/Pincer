@@ -66,6 +66,56 @@ defmodule Pincer.Core.LLM.FailoverPolicyTest do
     assert is_list(summary.attempts)
     assert length(summary.attempts) == 3
     assert summary.terminal_reason == reason
+
+    assert Enum.map(summary.attempts, & &1.action) == [
+             {:fallback_model, "p1", "m2"},
+             {:fallback_provider, "p2", "x1"},
+             :stop
+           ]
+  end
+
+  test "preserves exact chronological attempts order across retries and fallbacks" do
+    state0 =
+      FailoverPolicy.initial_state(
+        provider: "p1",
+        model: "m1",
+        registry: @registry,
+        retry_same_limit: 1
+      )
+
+    r1 = {:http_error, 503, "step1"}
+    r2 = {:http_error, 429, "step2"}
+    r3 = {:http_error, 500, "step3"}
+    r4 = {:http_error, 502, "step4"}
+    r5 = {:http_error, 504, "step5"}
+    r6 = {:http_error, 503, "step6"}
+
+    {a1, state1} = FailoverPolicy.next_action(r1, state0)
+    {a2, state2} = FailoverPolicy.next_action(r2, state1)
+    {a3, state3} = FailoverPolicy.next_action(r3, state2)
+    {a4, state4} = FailoverPolicy.next_action(r4, state3)
+    {a5, state5} = FailoverPolicy.next_action(r5, state4)
+    {a6, state6} = FailoverPolicy.next_action(r6, state5)
+
+    assert [a1, a2, a3, a4, a5, a6] == [
+             :retry_same,
+             {:fallback_model, "p1", "m2"},
+             :retry_same,
+             {:fallback_provider, "p2", "x1"},
+             :retry_same,
+             :stop
+           ]
+
+    summary = FailoverPolicy.summarize_attempts(state6)
+
+    assert Enum.map(summary.attempts, &{&1.action, &1.reason}) == [
+             {:retry_same, r1},
+             {{:fallback_model, "p1", "m2"}, r2},
+             {:retry_same, r3},
+             {{:fallback_provider, "p2", "x1"}, r4},
+             {:retry_same, r5},
+             {:stop, r6}
+           ]
   end
 
   test "stops immediately for terminal class" do
