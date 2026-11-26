@@ -593,7 +593,8 @@ defmodule Pincer.Infra.Config do
   def set_model(model_id, provider \\ nil) do
     case YamlElixir.read_from_file(@config_file) do
       {:ok, config} ->
-        current_provider = provider || Map.get(config["llm"], "provider", "openrouter")
+        llm_config = if is_map(config) and is_map(config["llm"]), do: config["llm"], else: %{}
+        current_provider = provider || Map.get(llm_config, "provider", "openrouter")
 
         case write_yaml(@config_file, current_provider, model_id) do
           :ok ->
@@ -643,64 +644,113 @@ defmodule Pincer.Infra.Config do
   end
 
   @doc false
-  @spec put_scalar(String.t(), [String.t()], String.t()) :: String.t()
+  @spec put_scalar(String.t(), [String.t()], String.t() | boolean() | number() | nil) ::
+          String.t()
   def put_scalar(content, path, value) when is_binary(content) and is_list(path) and path != [] do
     lines = String.split(content, "\n")
-    {updated, found?} = rewrite_path(lines, path, value, [])
+    {updated, found?} = rewrite_path(lines, path, value)
 
     if found? do
       Enum.join(updated, "\n")
     else
-      Enum.join(append_path(lines, path, value, 0), "\n")
+      Enum.join(append_path(lines, path, value), "\n")
     end
   end
 
-  # Replaces `path` when every key on the way exists.
-  defp rewrite_path([line | rest], path, value, acc) do
-    indent = leading_spaces(line)
+  # Replaces `path` when every key on the way exists within its parent indentation subtree.
+  defp rewrite_path(lines, path, value),
+    do: do_rewrite(lines, path, value, -1, nil, [])
 
-    case match_key(line, path, indent) do
-      :no_match ->
-        rewrite_path(rest, path, value, [line | acc])
+  defp do_rewrite([], _path, _value, _parent_indent, _child_indent, acc),
+    do: {Enum.reverse(acc), false}
 
-      {:match, sub_path} when length(sub_path) == 1 ->
-        {Enum.reverse(acc) ++ [scalar_line(indent, hd(sub_path), value) | rest], true}
+  defp do_rewrite([line | rest], [key | sub_rest] = path, value, parent_indent, child_indent, acc) do
+    if blank_or_comment?(line) do
+      do_rewrite(rest, path, value, parent_indent, child_indent, [line | acc])
+    else
+      indent = leading_spaces(line)
 
-      {:match, sub_path} ->
-        case rewrite_path(rest, tl(sub_path), value, []) do
-          {inner, true} -> {Enum.reverse(acc) ++ [line | inner], true}
-          {_inner, false} -> rewrite_path(rest, path, value, [line | acc])
+      if indent <= parent_indent do
+        {Enum.reverse(acc), false}
+      else
+        expected_indent = child_indent || indent
+
+        rewrite_non_blank_line(
+          line,
+          rest,
+          key,
+          sub_rest,
+          path,
+          value,
+          indent,
+          parent_indent,
+          expected_indent,
+          acc
+        )
+      end
+    end
+  end
+
+  defp rewrite_non_blank_line(
+         line,
+         rest,
+         key,
+         sub_rest,
+         path,
+         value,
+         indent,
+         parent_indent,
+         expected_indent,
+         acc
+       ) do
+    if indent == expected_indent and key_matches?(line, key) do
+      if sub_rest == [] do
+        {Enum.reverse(acc) ++ [scalar_line(indent, key, value) | rest], true}
+      else
+        case do_rewrite(rest, sub_rest, value, indent, nil, []) do
+          {inner, true} ->
+            {Enum.reverse(acc) ++ [line | inner], true}
+
+          {_inner, false} ->
+            do_rewrite(rest, path, value, parent_indent, expected_indent, [line | acc])
         end
+      end
+    else
+      do_rewrite(rest, path, value, parent_indent, expected_indent, [line | acc])
     end
   end
-
-  defp rewrite_path([], _path, _value, acc), do: {Enum.reverse(acc), false}
 
   # Appends `path` (and any missing intermediate blocks) right after the last
-  # line of the deepest existing ancestor block.
-  defp append_path(lines, path, value, indent) do
-    {missing, insert_at, block_indent} =
-      descend_for_append(lines, path, indent, 0, length(lines) - 1)
+  # content line of the deepest existing ancestor block.
+  defp append_path(lines, path, value) do
+    {normalized_lines, missing, insert_at, block_indent} =
+      descend_for_append(lines, path, -1, 0, length(lines) - 1)
 
     addition = build_block(missing, value, block_indent)
-    {before, after_block} = Enum.split(lines, insert_at)
+    {before, after_block} = Enum.split(normalized_lines, insert_at)
     before ++ addition ++ after_block
   end
 
-  defp descend_for_append(lines, [key | rest], indent, start, stop) do
-    case find_child(lines, start, stop, indent, key) do
+  defp descend_for_append(lines, [key | rest], parent_indent, start, stop) do
+    level_indent = child_indent_in_range(lines, start, stop, parent_indent)
+
+    case find_child(lines, start, stop, level_indent, key) do
       nil ->
-        {[key | rest], max(stop, 0), indent}
+        insert_at = block_insert_index(lines, start, stop, parent_indent)
+        {lines, [key | rest], insert_at, level_indent}
 
       index when rest == [] ->
-        {[], index + 1, indent}
+        {lines, [], index + 1, level_indent}
 
       index ->
-        block_start = index + 1
-        block_stop = max(next_sibling_line(lines, block_start, stop, indent) - 1, index)
-        child_indent = child_indent_at(lines, block_start, indent)
+        updated_lines =
+          List.update_at(lines, index, &strip_empty_inline_value(&1, key))
 
-        descend_for_append(lines, rest, child_indent, block_start, block_stop)
+        block_start = index + 1
+        next_sibling = next_sibling_line(updated_lines, block_start, stop, level_indent)
+        block_stop = max(next_sibling - 1, index)
+
+        descend_for_append(updated_lines, rest, level_indent, block_start, block_stop)
     end
   end
 
@@ -717,16 +767,10 @@ defmodule Pincer.Infra.Config do
   defp scalar_line(indent, key, value),
     do: String.duplicate(" ", indent) <> key <> ": " <> encode_scalar(value)
 
-  defp match_key(line, [key | _] = path, indent) do
-    if leading_spaces(line) == indent and key_matches?(line, key),
-      do: {:match, path},
-      else: :no_match
-  end
-
   defp find_child(lines, start, stop, indent, key) when start <= stop do
     Enum.find(start..stop//1, fn i ->
       line = Enum.at(lines, i)
-      leading_spaces(line) == indent and key_matches?(line, key)
+      not blank_or_comment?(line) and leading_spaces(line) == indent and key_matches?(line, key)
     end)
   end
 
@@ -735,21 +779,72 @@ defmodule Pincer.Infra.Config do
   defp next_sibling_line(lines, from, stop, indent) when from <= stop do
     Enum.find(from..stop//1, stop + 1, fn i ->
       line = Enum.at(lines, i)
-      String.trim(line) != "" and not comment?(line) and leading_spaces(line) <= indent
+      not blank_or_comment?(line) and leading_spaces(line) <= indent
     end)
   end
 
   defp next_sibling_line(_lines, _from, stop, _indent), do: stop + 1
 
-  defp child_indent_at(lines, index, fallback) do
-    lines
-    |> Enum.drop(index)
-    |> Enum.reject(&(String.trim(&1) == "" or comment?(&1)))
+  defp child_indent_in_range(lines, start, stop, parent_indent) when start <= stop do
+    start..stop//1
+    |> Enum.map(&Enum.at(lines, &1))
+    |> Enum.find(&(not blank_or_comment?(&1) and leading_spaces(&1) > parent_indent))
     |> case do
-      [line | _] -> leading_spaces(line)
-      [] -> fallback + 2
+      nil -> fallback_child_indent(parent_indent)
+      line -> leading_spaces(line)
     end
   end
+
+  defp child_indent_in_range(_lines, _start, _stop, parent_indent),
+    do: fallback_child_indent(parent_indent)
+
+  defp fallback_child_indent(parent_indent) when parent_indent < 0, do: 0
+  defp fallback_child_indent(parent_indent), do: parent_indent + 2
+
+  defp block_insert_index(_lines, start, stop, _parent_indent) when start > stop, do: start
+
+  defp block_insert_index(lines, start, stop, parent_indent) do
+    last_content =
+      Enum.reduce(start..stop//1, nil, fn i, acc ->
+        if blank_or_comment?(Enum.at(lines, i)), do: acc, else: i
+      end)
+
+    case last_content do
+      idx when is_integer(idx) ->
+        idx + 1
+
+      nil ->
+        last_scoped_comment =
+          Enum.reduce(start..stop//1, nil, fn i, acc ->
+            line = Enum.at(lines, i)
+
+            if String.trim(line) != "" and leading_spaces(line) > parent_indent,
+              do: i,
+              else: acc
+          end)
+
+        if is_integer(last_scoped_comment), do: last_scoped_comment + 1, else: start
+    end
+  end
+
+  defp strip_empty_inline_value(line, key) do
+    indent = leading_spaces(line)
+    trimmed = String.trim(line)
+
+    case String.split(trimmed, key <> ":", parts: 2) do
+      ["", after_colon] ->
+        case Regex.run(~r/\A\s*(?:\{\}|null|~)(?:\s+(#.*))?\z/, after_colon) do
+          [_] -> String.duplicate(" ", indent) <> key <> ":"
+          [_, comment] -> String.duplicate(" ", indent) <> key <> ": " <> comment
+          nil -> line
+        end
+
+      _ ->
+        line
+    end
+  end
+
+  defp blank_or_comment?(line), do: String.trim(line) == "" or comment?(line)
 
   defp comment?(line), do: String.starts_with?(String.trim(line), "#")
 
@@ -762,12 +857,19 @@ defmodule Pincer.Infra.Config do
     line |> String.to_charlist() |> Enum.take_while(&(&1 == ?\s)) |> length()
   end
 
+  defp encode_scalar(nil), do: "null"
+  defp encode_scalar(value) when is_boolean(value), do: Atom.to_string(value)
+  defp encode_scalar(value) when is_integer(value) or is_float(value), do: to_string(value)
+
   defp encode_scalar(value) do
     escaped =
       value
       |> to_string()
       |> String.replace("\\", "\\\\")
       |> String.replace("\"", "\\\"")
+      |> String.replace("\n", "\\n")
+      |> String.replace("\r", "\\r")
+      |> String.replace("\t", "\\t")
 
     "\"" <> escaped <> "\""
   end
