@@ -2,11 +2,95 @@ defmodule Pincer.LLM.Providers.OpenAICompat do
   @moduledoc """
   A generic adapter for any LLM provider that strictly adopts the OpenAI API format.
   Includes Groq, Together, vLLM, Ollama, etc.
+
+  Provider packages that wrap `OpenAICompat` can `use Pincer.LLM.Providers.OpenAICompat`
+  to inherit `@behaviour PincerPorts.LLM.Provider` and overridable default callbacks
+  (`chat_completion/4`, `stream_completion/4`, `list_models/1`, `transcribe_audio/3`,
+  `generate_embedding/3`, and `normalize_config/1`).
+
+  Options:
+    * `:base_url` - default endpoint injected via `Map.put_new(config, :base_url, url)`
+    * `:embedding` - when `true`, delegates `generate_embedding/3` to `OpenAICompat`
+      instead of returning `{:error, :not_implemented}` (defaults to `false`)
   """
   @behaviour PincerPorts.LLM.Provider
 
   require Logger
   alias PincerPorts.LLM.RawResponseLogger
+
+  @doc """
+  Injects `PincerPorts.LLM.Provider` default implementations delegating to `OpenAICompat`.
+  """
+  defmacro __using__(opts \\ []) do
+    default_base_url = Keyword.get(opts, :base_url)
+    embedding? = Keyword.get(opts, :embedding, false)
+
+    normalize_ast =
+      if default_base_url do
+        quote do
+          @doc false
+          def normalize_config(config) do
+            Map.put_new(config, :base_url, unquote(default_base_url))
+          end
+        end
+      else
+        quote do
+          @doc false
+          def normalize_config(config), do: config
+        end
+      end
+
+    embedding_ast =
+      if embedding? do
+        quote do
+          @impl true
+          def generate_embedding(text, model, config) do
+            config = normalize_config(config)
+            Pincer.LLM.Providers.OpenAICompat.generate_embedding(text, model, config)
+          end
+        end
+      else
+        quote do
+          @impl true
+          def generate_embedding(_text, _model, _config), do: {:error, :not_implemented}
+        end
+      end
+
+    quote do
+      @behaviour PincerPorts.LLM.Provider
+
+      @impl true
+      def chat_completion(messages, model, config, tools) do
+        config = normalize_config(config)
+        Pincer.LLM.Providers.OpenAICompat.chat_completion(messages, model, config, tools)
+      end
+
+      @impl true
+      def stream_completion(messages, model, config, tools) do
+        config = normalize_config(config)
+        Pincer.LLM.Providers.OpenAICompat.stream_completion(messages, model, config, tools)
+      end
+
+      @impl true
+      def list_models(config) do
+        config = normalize_config(config)
+        Pincer.LLM.Providers.OpenAICompat.list_models(config)
+      end
+
+      @impl true
+      def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
+
+      unquote(embedding_ast)
+      unquote(normalize_ast)
+
+      defoverridable chat_completion: 4,
+                     stream_completion: 4,
+                     list_models: 1,
+                     transcribe_audio: 3,
+                     generate_embedding: 3,
+                     normalize_config: 1
+    end
+  end
 
   @timeout 300_000
   @default_context_window 131_072

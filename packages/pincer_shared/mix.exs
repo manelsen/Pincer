@@ -12,12 +12,8 @@ defmodule PincerShared.MixProject do
       elixirc_options: [warnings_as_errors: true],
       start_permanent: false,
       compilers: [:boundary] ++ Mix.compilers(),
-      deps: [
-        {:pincer_ports, "~> 0.1"},
-        {:boundary, "~> 0.12", runtime: false}
-      ],
-      description:
-        "Shared utilities for Pincer channel adapters (Attachments, Chunking, Formatting, Inbound, Pairing, ProjectBridge, SessionBridge, Text, TokenCache, WebhookVerifier)",
+      deps: deps(),
+      description: description(),
       package: package(),
       name: "PincerShared",
       source_url: @source_url
@@ -25,6 +21,17 @@ defmodule PincerShared.MixProject do
   end
 
   def application, do: [extra_applications: [:logger, :crypto]]
+
+  defp deps do
+    [
+      {:pincer_ports, "~> 0.1"},
+      {:boundary, "~> 0.12", runtime: false}
+    ]
+  end
+
+  defp description do
+    "Shared utilities for Pincer channel adapters (Attachments, Chunking, Formatting, Inbound, Pairing, ProjectBridge, SessionBridge, Text, TokenCache, WebhookVerifier)"
+  end
 
   defp package do
     [

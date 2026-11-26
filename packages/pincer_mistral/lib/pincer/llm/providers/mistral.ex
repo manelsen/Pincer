@@ -9,19 +9,15 @@ defmodule Pincer.LLM.Providers.Mistral do
   - `list_models/1` via `GET /v1/models`.
   - API key via `MISTRAL_API_KEY` environment variable.
   """
-  @behaviour PincerPorts.LLM.Provider
-
-  require Logger
-
   @base_url "https://api.mistral.ai/v1/chat/completions"
   @models_url "https://api.mistral.ai/v1/models"
   @timeout 300_000
 
-  @impl true
-  def chat_completion(messages, model, config, tools) do
-    config = normalize_config(config)
-    Pincer.LLM.Providers.OpenAICompat.chat_completion(messages, model, config, tools)
-  end
+  use Pincer.LLM.Providers.OpenAICompat,
+    base_url: "https://api.mistral.ai/v1/chat/completions",
+    embedding: true
+
+  require Logger
 
   @impl true
   def stream_completion(messages, model, config, tools) do
@@ -83,20 +79,13 @@ defmodule Pincer.LLM.Providers.Mistral do
     end
   end
 
-  @impl true
-  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
-
-  @impl true
-  def generate_embedding(text, model, config) do
-    config = normalize_config(config)
-    Pincer.LLM.Providers.OpenAICompat.generate_embedding(text, model, config)
-  end
-
   # --- Private helpers ---
 
-  defp normalize_config(config) do
+  @doc false
+  def normalize_config(config) do
+    config = super(config)
     api_key = config[:api_key] || System.get_env("MISTRAL_API_KEY") || ""
-    config |> Map.put_new(:base_url, @base_url) |> Map.put(:api_key, api_key)
+    Map.put(config, :api_key, api_key)
   end
 
   defp build_stream_body(messages, model, tools, config) do

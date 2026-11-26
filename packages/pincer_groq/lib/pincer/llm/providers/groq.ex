@@ -6,31 +6,19 @@ defmodule Pincer.LLM.Providers.Groq do
   - High-performance inference.
   - OpenAI-compatible endpoints (`https://api.groq.com/openai/v1/chat/completions`).
   """
-  @behaviour PincerPorts.LLM.Provider
-  alias Pincer.LLM.Providers.OpenAICompat
-
-  @impl true
-  def chat_completion(messages, model, config, tools) do
-    config = Map.put_new(config, :base_url, "https://api.groq.com/openai/v1/chat/completions")
-    OpenAICompat.chat_completion(messages, model, config, tools)
-  end
-
-  @impl true
-  def stream_completion(messages, model, config, tools) do
-    config = Map.put_new(config, :base_url, "https://api.groq.com/openai/v1/chat/completions")
-    OpenAICompat.stream_completion(messages, model, config, tools)
-  end
+  use Pincer.LLM.Providers.OpenAICompat,
+    base_url: "https://api.groq.com/openai/v1/chat/completions"
 
   @impl true
   def list_models(config) do
-    config = Map.put_new(config, :base_url, "https://api.groq.com/openai/v1/chat/completions")
+    config = normalize_config(config)
 
-    case OpenAICompat.list_models(config) do
+    case Pincer.LLM.Providers.OpenAICompat.list_models(config) do
       {:ok, models} ->
         tagged_models =
           models
           |> Enum.map(fn m ->
-            # Groq doesn't always tag free models in the ID, but often includes 
+            # Groq doesn't always tag free models in the ID, but often includes
             # them in a specific tier or name. We check for 'free' or small models often used as free.
             # 'versatile' is often the free tier
             is_free =
@@ -50,9 +38,4 @@ defmodule Pincer.LLM.Providers.Groq do
         error
     end
   end
-
-  @impl true
-  def transcribe_audio(_file_path, _model, _config), do: {:error, :not_implemented}
-  @impl true
-  def generate_embedding(_text, _model, _config), do: {:error, :not_implemented}
 end

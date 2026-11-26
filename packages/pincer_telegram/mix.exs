@@ -10,21 +10,17 @@ defmodule PincerTelegram.MixProject do
       version: @version,
       elixir: "~> 1.14",
       elixirc_options: [warnings_as_errors: true],
-      start_permanent: Mix.env() == :prod,
+      start_permanent: false,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
-
-      # Hex
-      description: "Telegram channel adapter for Pincer AI agent framework",
+      description: description(),
       package: package(),
       name: "PincerTelegram",
       source_url: @source_url
     ]
   end
 
-  def application do
-    [extra_applications: [:logger]]
-  end
+  def application, do: [extra_applications: [:logger]]
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
@@ -39,6 +35,10 @@ defmodule PincerTelegram.MixProject do
       {:req, "~> 0.7"},
       {:mox, "~> 1.0", only: :test}
     ]
+  end
+
+  defp description do
+    "Telegram channel adapter for Pincer AI agent framework"
   end
 
   defp package do
