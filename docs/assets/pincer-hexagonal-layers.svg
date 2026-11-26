@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 400" width="1100" height="400" role="img" aria-label="Pincer hexagonal layers and compile-time boundaries">
+  <defs>
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#0b1020"/>
+    </linearGradient>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#38bdf8"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="400" rx="14" fill="#090d16" stroke="#1e293b" stroke-width="1.5"/>
+
+  <text x="32" y="38" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#f1f5f9">Hexagonal Layers &amp; Compile-Time Boundaries</text>
+  <text x="1068" y="38" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="12" fill="#64748b">Boundary 0.12 | warnings_as_errors: true</text>
+
+  <!-- Layer 1: Entrypoints & Channels -->
+  <rect x="32" y="62" width="936" height="68" rx="10" fill="url(#cardBg)" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="52" y="89" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#38bdf8">1. Entrypoints &amp; Channels</text>
+  <text x="948" y="89" text-anchor="end" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Channels (9 pkgs) &#x2022; CLI &#x2022; Application</text>
+  <text x="52" y="114" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Receives chat, webhook, and CLI events. Routes inputs inward with zero business policy.</text>
+
+  <!-- Layer 2: Adapters & LLM -->
+  <rect x="68" y="146" width="864" height="68" rx="10" fill="url(#cardBg)" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="88" y="173" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#fbbf24">2. Adapters &amp; LLM</text>
+  <text x="912" y="173" text-anchor="end" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Adapters (19 Tools, Sandbox, Cron) &#x2022; Pincer.LLM (14)</text>
+  <text x="88" y="198" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Implements external side effects behind port behaviours and security guards.</text>
+
+  <!-- Layer 3: Domain Core -->
+  <rect x="104" y="230" width="792" height="74" rx="10" fill="url(#cardBg)" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="124" y="256" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#c084fc">3. Domain Core</text>
+  <text x="876" y="256" text-anchor="end" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">9 isolated slices &#x2022; zero direct adapter imports</text>
+  <text x="124" y="278" font-family="ui-monospace, monospace" font-size="11.5" fill="#cbd5e1">Session | Executor | Memory | Project | Orchestration | Introspection | Skills | LLM | Graph</text>
+  <text x="124" y="295" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">Crosses layer boundaries exclusively through Pincer.Ports</text>
+
+  <!-- Layer 4a: Pure Ports Contract -->
+  <rect x="140" y="320" width="352" height="60" rx="10" fill="#052e16" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="316" y="344" text-anchor="middle" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#4ade80">4a. Pure Ports Contract</text>
+  <text x="316" y="366" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Pincer.Ports -&gt; PincerPorts (zero Infra)</text>
+
+  <!-- Layer 4b: Shared Infrastructure -->
+  <rect x="508" y="320" width="352" height="60" rx="10" fill="#172554" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="684" y="344" text-anchor="middle" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#93c5fd">4b. Shared Infrastructure</text>
+  <text x="684" y="366" text-anchor="middle" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Pincer.Infra (SQLite, PubSub, Config)</text>
+
+  <!-- Right-side Inward Dependency Guide -->
+  <line x1="1026" y1="74" x2="1026" y2="364" stroke="#38bdf8" stroke-width="2" stroke-dasharray="5 4" marker-end="url(#arrowBlue)"/>
+  <rect x="984" y="190" width="84" height="54" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1.2"/>
+  <text x="1026" y="213" text-anchor="middle" font-family="ui-sans-serif, sans-serif" font-size="12" font-weight="700" fill="#f1f5f9">Deps</text>
+  <text x="1026" y="231" text-anchor="middle" font-family="ui-monospace, monospace" font-size="11" fill="#38bdf8">Inward</text>
+</svg>

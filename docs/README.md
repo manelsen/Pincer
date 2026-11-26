@@ -16,6 +16,7 @@ Browse guides, architecture notes, and subsystem specs for Pincer `0.2.0`.
 
 ## Architecture & Quality
 
+- [Technical Architecture Reference](architecture/overview.md): Module-level Mermaid runtime pipeline, compile-time `Boundary 0.12` graph, turn sequence diagram, and OTP supervision tree.
 - [Code Quality & SRP Audit](AUDIT-code-quality.md): Verified repository inventory, completed refactorings, test metrics, and remaining backlog items.
 - [Architecture & Boundaries Report (2026-03-13)](architecture/2026-03-13-architecture-boundaries-report.md): Historical boundary diagnosis before the `0.2.0` compile-time `Boundary` mesh.
 - [Agent Guide](../AGENTS.md): Authoritative contributor conventions, layer rules, and security invariants.

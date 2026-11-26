@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 388" width="1100" height="388" role="img" aria-label="Pincer end-to-end runtime pipeline">
+  <defs>
+    <linearGradient id="cardBg" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#0b1020"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrowPurple" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#a855f7"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="388" rx="14" fill="#090d16" stroke="#1e293b" stroke-width="1.5"/>
+
+  <text x="32" y="38" font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" font-size="18" font-weight="700" fill="#f1f5f9">End-to-End Runtime Pipeline</text>
+  <text x="1068" y="38" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" font-size="12" fill="#64748b">message in -&gt; guarded execution -&gt; reply &amp; recall</text>
+
+  <!-- Row 1: Primary Request Flow -->
+  <!-- Card 1: Chat Channels -->
+  <rect x="32" y="62" width="234" height="132" rx="10" fill="url(#cardBg)" stroke="#38bdf8" stroke-width="1.5"/>
+  <text x="50" y="90" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#38bdf8">1. Chat Channels</text>
+  <text x="50" y="113" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Channels.Shared (9 pkgs)</text>
+  <text x="50" y="140" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Normalizes chat, media,</text>
+  <text x="50" y="159" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">and DM pairing rules.</text>
+  <text x="50" y="182" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">CLI, Telegram, Slack...</text>
+
+  <line x1="272" y1="128" x2="296" y2="128" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Card 2: User Session -->
+  <rect x="302" y="62" width="234" height="132" rx="10" fill="url(#cardBg)" stroke="#818cf8" stroke-width="1.5"/>
+  <text x="320" y="90" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#a5b4fc">2. User Session</text>
+  <text x="320" y="113" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Core.Session.Server</text>
+  <text x="320" y="140" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">One isolated GenServer</text>
+  <text x="320" y="159" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">and workspace per user.</text>
+  <text x="320" y="182" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">Horde + InputBuffer</text>
+
+  <line x1="542" y1="128" x2="566" y2="128" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Card 3: Turn Executor -->
+  <rect x="572" y="62" width="234" height="132" rx="10" fill="url(#cardBg)" stroke="#a855f7" stroke-width="1.5"/>
+  <text x="590" y="90" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#c084fc">3. Turn Executor</text>
+  <text x="590" y="113" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Core.Executor</text>
+  <text x="590" y="140" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Builds prompt, recalls</text>
+  <text x="590" y="159" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">facts, runs tool loop.</text>
+  <text x="590" y="182" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">max loop depth: 100</text>
+
+  <line x1="812" y1="121" x2="836" y2="121" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="836" y1="136" x2="812" y2="136" stroke="#a855f7" stroke-width="1.8" stroke-dasharray="4 3" marker-end="url(#arrowPurple)"/>
+
+  <!-- Card 4: LLM Providers -->
+  <rect x="842" y="62" width="226" height="132" rx="10" fill="url(#cardBg)" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="860" y="90" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#fbbf24">4. LLM Providers</text>
+  <text x="860" y="113" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Pincer.LLM.Client (14)</text>
+  <text x="860" y="140" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Streams tokens with</text>
+  <text x="860" y="159" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">retry and failover.</text>
+  <text x="860" y="182" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">OpenRouter, Groq, Anthropic</text>
+
+  <!-- Orthogonal Distribution Bus from Executor to Row 2 -->
+  <path d="M 689 194 L 689 215" fill="none" stroke="#64748b" stroke-width="2"/>
+  <path d="M 196 215 L 904 215" fill="none" stroke="#64748b" stroke-width="2"/>
+  <line x1="196" y1="215" x2="196" y2="231" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="550" y1="215" x2="550" y2="231" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="904" y1="215" x2="904" y2="231" stroke="#64748b" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Row 2: Execution & Persistence Subsystems -->
+  <!-- B1: Guarded Tools & Sandboxes -->
+  <rect x="32" y="236" width="328" height="126" rx="10" fill="url(#cardBg)" stroke="#22c55e" stroke-width="1.5"/>
+  <text x="52" y="264" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#4ade80">Guarded Tools &amp; Sandboxes</text>
+  <text x="52" y="286" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Ports.ToolRegistry + Ports.Sandbox</text>
+  <text x="52" y="313" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">19 native tools and MCP confined by</text>
+  <text x="52" y="331" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">WorkspaceGuard and SafeShell.</text>
+  <text x="52" y="350" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">Local | bwrap | Docker | SSH</text>
+
+  <!-- B2: Multimodal & Speech -->
+  <rect x="386" y="236" width="328" height="126" rx="10" fill="url(#cardBg)" stroke="#ec4899" stroke-width="1.5"/>
+  <text x="406" y="264" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#f472b6">Multimodal &amp; Speech</text>
+  <text x="406" y="286" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Tools.Media + Ports.TTS</text>
+  <text x="406" y="313" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Whisper audio transcription, OCR,</text>
+  <text x="406" y="331" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">sandboxed PDF extract &amp; TTS voice.</text>
+  <text x="406" y="350" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">vision | voice | document parsing</text>
+
+  <!-- B3: Memory & Skill Consolidation -->
+  <rect x="740" y="236" width="328" height="126" rx="10" fill="url(#cardBg)" stroke="#3b82f6" stroke-width="1.5"/>
+  <text x="760" y="264" font-family="ui-sans-serif, sans-serif" font-size="15" font-weight="700" fill="#93c5fd">Memory &amp; Skill Consolidation</text>
+  <text x="760" y="286" font-family="ui-monospace, monospace" font-size="12" fill="#cbd5e1">Archivist + Introspection.Kernel</text>
+  <text x="760" y="313" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">Persists facts to MEMORY.md, SQLite</text>
+  <text x="760" y="331" font-family="ui-sans-serif, sans-serif" font-size="13" fill="#94a3b8">FTS5 + vec0, and vetted SKILL.md.</text>
+  <text x="760" y="350" font-family="ui-monospace, monospace" font-size="11" fill="#64748b">runs off hot path after turn</text>
+</svg>
