@@ -463,23 +463,11 @@ defmodule Pincer.Core.Session.ServerTest do
   end
 
   defp wait_until(timeout_ms, fun, interval_ms \\ 10) do
-    deadline = System.monotonic_time(:millisecond) + timeout_ms
-    wait_until_loop(deadline, interval_ms, fun)
-  end
-
-  defp wait_until_loop(deadline, interval_ms, fun) do
-    case fun.() do
-      nil ->
-        if System.monotonic_time(:millisecond) < deadline do
-          Process.sleep(interval_ms)
-          wait_until_loop(deadline, interval_ms, fun)
-        else
-          flunk("wait_until/2 timed out")
-        end
-
-      value ->
-        value
-    end
+    Pincer.Test.Support.SyncHelpers.eventually(fun,
+      timeout: timeout_ms,
+      interval: interval_ms,
+      message: "wait_until/2 timed out"
+    )
   end
 
   test "session server loads workspace from root_agent_id instead of session_id" do

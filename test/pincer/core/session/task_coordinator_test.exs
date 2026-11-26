@@ -263,7 +263,13 @@ defmodule Pincer.Core.Session.TaskCoordinatorTest do
 
   describe "stop_worker/2 and clear_pending_evals/1" do
     test "clears worker fields and pending evals" do
-      pid = spawn(fn -> Process.sleep(5_000) end)
+      pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
       ref = Process.monitor(pid)
       eval_ref = make_ref()
 

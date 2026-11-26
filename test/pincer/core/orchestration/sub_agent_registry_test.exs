@@ -2,14 +2,29 @@ defmodule Pincer.Core.Orchestration.SubAgentRegistryTest do
   use ExUnit.Case, async: false
 
   alias Pincer.Core.Orchestration.SubAgentRegistry
+  alias Pincer.Test.Support.LLMHelpers
+  alias Pincer.Test.Support.SyncHelpers
 
   setup do
-    Application.ensure_all_started(:pincer)
+    SyncHelpers.ensure_started!(SubAgentRegistry)
 
-    prev_global = Application.get_env(:pincer, :max_subagents)
-    prev_session = Application.get_env(:pincer, :max_subagents_per_session)
-    prev_tree_tokens = Application.get_env(:pincer, :max_subagent_tree_tokens)
-    prev_tree_ms = Application.get_env(:pincer, :max_subagent_tree_ms)
+    LLMHelpers.put_app_env!(:max_subagents, Application.get_env(:pincer, :max_subagents))
+
+    LLMHelpers.put_app_env!(
+      :max_subagents_per_session,
+      Application.get_env(:pincer, :max_subagents_per_session)
+    )
+
+    LLMHelpers.put_app_env!(
+      :max_subagent_tree_tokens,
+      Application.get_env(:pincer, :max_subagent_tree_tokens)
+    )
+
+    LLMHelpers.put_app_env!(
+      :max_subagent_tree_ms,
+      Application.get_env(:pincer, :max_subagent_tree_ms)
+    )
+
     original_now_fun = registry_now_fun()
     {:ok, reserved} = Agent.start(fn -> [] end)
 
@@ -17,10 +32,6 @@ defmodule Pincer.Core.Orchestration.SubAgentRegistryTest do
       ids = Agent.get(reserved, & &1)
       Enum.each(ids, &SubAgentRegistry.release/1)
       Agent.stop(reserved)
-      restore_env(:max_subagents, prev_global)
-      restore_env(:max_subagents_per_session, prev_session)
-      restore_env(:max_subagent_tree_tokens, prev_tree_tokens)
-      restore_env(:max_subagent_tree_ms, prev_tree_ms)
       restore_now_fun(original_now_fun)
     end)
 
@@ -90,7 +101,7 @@ defmodule Pincer.Core.Orchestration.SubAgentRegistryTest do
 
     send(pid, :stop)
     assert_receive {:DOWN, ^ref, :process, ^pid, _reason}, 1_000
-    wait_until(fn -> SubAgentRegistry.lookup(id) == :error end)
+    SyncHelpers.eventually(fn -> SubAgentRegistry.lookup(id) == :error end)
     assert SubAgentRegistry.count_for(session) == 0
     assert SubAgentRegistry.tree_usage(session) == :error
 
@@ -305,21 +316,4 @@ defmodule Pincer.Core.Orchestration.SubAgentRegistryTest do
 
     :ok
   end
-
-  defp wait_until(fun, attempts \\ 200) do
-    cond do
-      fun.() ->
-        :ok
-
-      attempts == 0 ->
-        flunk("condition not met in time")
-
-      true ->
-        Process.sleep(5)
-        wait_until(fun, attempts - 1)
-    end
-  end
-
-  defp restore_env(key, nil), do: Application.delete_env(:pincer, key)
-  defp restore_env(key, value), do: Application.put_env(:pincer, key, value)
 end

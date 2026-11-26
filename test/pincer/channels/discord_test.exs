@@ -4,6 +4,7 @@ defmodule Pincer.Channels.DiscordTest do
 
   alias Pincer.Channels.Discord
   alias Pincer.Channels.Discord.APIMock
+  alias Pincer.Test.Support.LLMHelpers
 
   setup do
     Application.put_env(:pincer, :discord_api, Pincer.Channels.Discord.APIMock)
@@ -325,13 +326,9 @@ defmodule Pincer.Channels.DiscordTest do
     end
 
     test "models interaction includes a Menu fallback button" do
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "z_ai" => %{default_model: "glm-4.7"}
       })
-
-      on_exit(fn ->
-        Application.delete_env(:pincer, :llm_providers)
-      end)
 
       APIMock
       |> expect(:create_interaction_response, fn 111, "token-1", response ->
@@ -361,14 +358,10 @@ defmodule Pincer.Channels.DiscordTest do
     test "models interaction filters provider custom_id above discord limit" do
       long_provider = "provider_" <> String.duplicate("x", 120)
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "z_ai" => %{default_model: "glm-4.7"},
         long_provider => %{default_model: "model-x"}
       })
-
-      on_exit(fn ->
-        Application.delete_env(:pincer, :llm_providers)
-      end)
 
       APIMock
       |> expect(:create_interaction_response, fn 119, "token-119", response ->
@@ -525,18 +518,13 @@ defmodule Pincer.Channels.DiscordTest do
     end
 
     test "DM select_model interaction uses main session scope when configured" do
-      Application.put_env(:pincer, :discord_channel_config, %{
+      LLMHelpers.put_app_env!(:discord_channel_config, %{
         "dm_session_scope" => "main"
       })
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "z_ai" => %{default_model: "glm-4.7"}
       })
-
-      on_exit(fn ->
-        Application.delete_env(:pincer, :discord_channel_config)
-        Application.delete_env(:pincer, :llm_providers)
-      end)
 
       APIMock
       |> expect(:create_interaction_response, fn 934, "token-934", response ->

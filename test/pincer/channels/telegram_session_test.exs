@@ -4,6 +4,7 @@ defmodule Pincer.Channels.Telegram.SessionTest do
 
   alias Pincer.Channels.Telegram.APIMock
   alias Pincer.Channels.Telegram.Session
+  alias Pincer.Test.Support.SyncHelpers
 
   setup do
     Application.put_env(:pincer, :telegram_api, APIMock)
@@ -88,7 +89,7 @@ defmodule Pincer.Channels.Telegram.SessionTest do
     allow(APIMock, self(), pid)
 
     send(pid, {:agent_partial, payload})
-    Process.sleep(80)
+    SyncHelpers.barrier(pid)
     refute_receive {:telegram_chunk, _, _}, 50
 
     send(pid, {:agent_response, payload, nil})
@@ -194,6 +195,6 @@ defmodule Pincer.Channels.Telegram.SessionTest do
 
     send(pid, {:agent_status, "✅ Sub-Agent a1 finished."})
 
-    Process.sleep(80)
+    SyncHelpers.barrier(pid)
   end
 end

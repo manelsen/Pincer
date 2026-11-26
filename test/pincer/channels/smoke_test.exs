@@ -6,6 +6,7 @@ defmodule Pincer.Channels.SmokeTest do
   alias Pincer.Channels.Discord
   alias Pincer.Channels.Telegram.APIMock, as: TelegramAPIMock
   alias Pincer.Channels.Discord.APIMock, as: DiscordAPIMock
+  alias Pincer.Test.Support.LLMHelpers
 
   # Simple Mock Provider for Streaming
   defmodule MockStreamProvider do
@@ -48,32 +49,18 @@ defmodule Pincer.Channels.SmokeTest do
 
     # The application boots the embedded SQLite engine and its schema.
     # Setup Mock LLM
-    original_llm = Application.get_env(:pincer, :llm_providers)
-    original_default = Application.get_env(:pincer, :default_llm_provider)
-
-    Application.put_env(:pincer, :llm_providers, %{
-      "test_provider" => %{adapter: MockStreamProvider, default_model: "test"}
-    })
-
-    Application.put_env(:pincer, :default_llm_provider, "test_provider")
+    LLMHelpers.put_providers!(
+      %{
+        "test_provider" => %{adapter: MockStreamProvider, default_model: "test"}
+      },
+      default: "test_provider"
+    )
 
     # Setup Channel Mocks
     Application.put_env(:pincer, :telegram_api, TelegramAPIMock)
     Application.put_env(:pincer, :discord_api, DiscordAPIMock)
 
     on_exit(fn ->
-      if is_nil(original_llm) do
-        Application.delete_env(:pincer, :llm_providers)
-      else
-        Application.put_env(:pincer, :llm_providers, original_llm)
-      end
-
-      if is_nil(original_default) do
-        Application.delete_env(:pincer, :default_llm_provider)
-      else
-        Application.put_env(:pincer, :default_llm_provider, original_default)
-      end
-
       # Ensure the application is running for subsequent tests that depend on it
       Application.ensure_all_started(:pincer)
     end)

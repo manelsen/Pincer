@@ -3,6 +3,8 @@ defmodule Pincer.Core.ArchivistTest do
 
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.Orchestration.Archivist
+  alias Pincer.Test.Support.LLMHelpers
+  alias Pincer.Test.Support.SyncHelpers
 
   defmodule ArchivistProvider do
     use Pincer.Test.Support.LLMProviderDefaults
@@ -191,7 +193,11 @@ defmodule Pincer.Core.ArchivistTest do
   end
 
   setup do
-    Application.ensure_all_started(:pincer)
+    SyncHelpers.ensure_started!([
+      Pincer.Utils.ETSTableHeir,
+      Pincer.Core.CircuitBreaker,
+      Pincer.Core.RateLimiter
+    ])
 
     tmp = Path.join(System.tmp_dir!(), "pincer_archivist_#{System.unique_integer([:positive])}")
     workspace = Path.join(tmp, "workspaces/archivist")
@@ -209,50 +215,26 @@ defmodule Pincer.Core.ArchivistTest do
       """
     )
 
-    original_storage = Application.get_env(:pincer, :storage_adapter)
-    original_providers = Application.get_env(:pincer, :llm_providers)
-    original_default = Application.get_env(:pincer, :default_llm_provider)
-    original_curated = Application.get_env(:pincer, :curated_memory_limits)
+    LLMHelpers.put_app_env!(:storage_adapter, StorageStub)
+    LLMHelpers.put_app_env!(:archivist_test_agent, agent)
 
-    Application.put_env(:pincer, :storage_adapter, StorageStub)
-    Application.put_env(:pincer, :archivist_test_agent, agent)
+    LLMHelpers.put_app_env!(
+      :curated_memory_limits,
+      Application.get_env(:pincer, :curated_memory_limits)
+    )
 
-    Application.put_env(:pincer, :llm_providers, %{
-      "archivist" => %{
-        adapter: ArchivistProvider,
-        env_key: "MOCK_KEY",
-        default_model: "archivist-model"
-      }
-    })
-
-    Application.put_env(:pincer, :default_llm_provider, "archivist")
+    LLMHelpers.put_providers!(
+      %{
+        "archivist" => %{
+          adapter: ArchivistProvider,
+          env_key: "MOCK_KEY",
+          default_model: "archivist-model"
+        }
+      },
+      default: "archivist"
+    )
 
     on_exit(fn ->
-      if original_storage do
-        Application.put_env(:pincer, :storage_adapter, original_storage)
-      else
-        Application.delete_env(:pincer, :storage_adapter)
-      end
-
-      if original_providers do
-        Application.put_env(:pincer, :llm_providers, original_providers)
-      else
-        Application.delete_env(:pincer, :llm_providers)
-      end
-
-      if original_default do
-        Application.put_env(:pincer, :default_llm_provider, original_default)
-      else
-        Application.delete_env(:pincer, :default_llm_provider)
-      end
-
-      if original_curated do
-        Application.put_env(:pincer, :curated_memory_limits, original_curated)
-      else
-        Application.delete_env(:pincer, :curated_memory_limits)
-      end
-
-      Application.delete_env(:pincer, :archivist_test_agent)
       File.rm_rf!(tmp)
     end)
 

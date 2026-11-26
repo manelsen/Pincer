@@ -2,6 +2,7 @@ defmodule Pincer.LLM.ModelCacheTest do
   use ExUnit.Case, async: false
 
   alias Pincer.LLM.ModelCache
+  alias Pincer.Test.Support.LLMHelpers
 
   defmodule CountingModelsAdapter do
     use Pincer.Test.Support.LLMProviderDefaults
@@ -24,26 +25,14 @@ defmodule Pincer.LLM.ModelCacheTest do
   end
 
   setup do
-    orig_providers = Application.get_env(:pincer, :llm_providers)
-    orig_llm = Application.get_env(:pincer, :llm)
+    LLMHelpers.put_app_env!(:llm_providers, Application.get_env(:pincer, :llm_providers))
+    LLMHelpers.put_app_env!(:llm, Application.get_env(:pincer, :llm))
     old_api_key = System.get_env("MODEL_CACHE_TEST_KEY")
 
     clear_cache_table()
 
     on_exit(fn ->
       clear_cache_table()
-
-      if orig_providers do
-        Application.put_env(:pincer, :llm_providers, orig_providers)
-      else
-        Application.delete_env(:pincer, :llm_providers)
-      end
-
-      if orig_llm do
-        Application.put_env(:pincer, :llm, orig_llm)
-      else
-        Application.delete_env(:pincer, :llm)
-      end
 
       if old_api_key do
         System.put_env("MODEL_CACHE_TEST_KEY", old_api_key)
@@ -57,7 +46,7 @@ defmodule Pincer.LLM.ModelCacheTest do
 
   describe "list_providers/0 and provider_config/1" do
     test "merges :llm over :llm_providers while ignoring selector and invalid entries" do
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "moonshot" => %{adapter: CountingModelsAdapter, default_model: "moonshot-v1"},
         "z_ai" => %{adapter: CountingModelsAdapter, default_model: "legacy"}
       })
@@ -87,7 +76,7 @@ defmodule Pincer.LLM.ModelCacheTest do
     test "caches adapter models in :pincer_llm_cache and avoids duplicate adapter calls" do
       System.put_env("MODEL_CACHE_TEST_KEY", "cache-key-1")
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "cached_provider" => %{
           adapter: CountingModelsAdapter,
           env_key: "MODEL_CACHE_TEST_KEY",
@@ -116,7 +105,7 @@ defmodule Pincer.LLM.ModelCacheTest do
     test "re-fetches when ETS cache entry has expired" do
       System.put_env("MODEL_CACHE_TEST_KEY", "cache-key-2")
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "expired_provider" => %{
           adapter: CountingModelsAdapter,
           env_key: "MODEL_CACHE_TEST_KEY",
@@ -141,7 +130,7 @@ defmodule Pincer.LLM.ModelCacheTest do
     test "invalidates cache via config_fingerprint/1 when configuration changes" do
       Application.delete_env(:pincer, :llm)
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "fp_provider" => %{
           adapter: CountingModelsAdapter,
           default_model: "m1",
@@ -152,7 +141,7 @@ defmodule Pincer.LLM.ModelCacheTest do
       fp1 = ModelCache.config_fingerprint("fp_provider")
       assert ModelCache.list_models("fp_provider") == ["m1"]
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "fp_provider" => %{
           adapter: CountingModelsAdapter,
           default_model: "m2",
@@ -169,7 +158,7 @@ defmodule Pincer.LLM.ModelCacheTest do
       Application.delete_env(:pincer, :llm)
       System.delete_env("MODEL_CACHE_TEST_KEY")
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "mock" => %{default_model: "mock-1", models: ["mock-1", "mock-2"]},
         "no_creds" => %{
           adapter: CountingModelsAdapter,

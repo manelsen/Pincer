@@ -566,32 +566,23 @@ defmodule Pincer.Adapters.Tools.OrchestratorTest do
     end
   end
 
-  defp await_agent(registry, id, attempts \\ 100) do
-    case registry.lookup(id) do
-      {:ok, pid} ->
-        {:ok, pid}
-
-      :error when attempts > 0 ->
-        Process.sleep(5)
-        await_agent(registry, id, attempts - 1)
-
-      :error ->
-        {:error, :not_found}
-    end
+  defp await_agent(registry, id) do
+    Pincer.Test.Support.SyncHelpers.eventually(
+      fn ->
+        case registry.lookup(id) do
+          {:ok, pid} -> {:ok, pid}
+          :error -> nil
+        end
+      end,
+      timeout: 500,
+      interval: 5,
+      message: "agent #{id} not found in registry"
+    )
   end
 
-  defp wait_until(fun, attempts \\ 200) do
-    cond do
-      fun.() ->
-        :ok
-
-      attempts == 0 ->
-        flunk("condition not met in time")
-
-      true ->
-        Process.sleep(5)
-        wait_until(fun, attempts - 1)
-    end
+  defp wait_until(fun) do
+    Pincer.Test.Support.SyncHelpers.eventually(fun, timeout: 1_000, interval: 5)
+    :ok
   end
 
   defp restore_env(key, nil), do: Application.delete_env(:pincer, key)

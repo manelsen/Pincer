@@ -55,7 +55,13 @@ defmodule Pincer.Utils.ETSHelperTest do
 
   test "an explicit heir is not overridden" do
     table = :"ets_helper_explicit_heir_#{System.unique_integer([:positive])}"
-    keeper = spawn(fn -> Process.sleep(:infinity) end)
+
+    keeper =
+      spawn(fn ->
+        receive do
+          :stop -> :ok
+        end
+      end)
 
     on_exit(fn ->
       Process.exit(keeper, :kill)

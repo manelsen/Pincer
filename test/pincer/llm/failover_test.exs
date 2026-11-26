@@ -4,6 +4,7 @@ defmodule Pincer.LLM.FailoverTest do
   alias Pincer.Core.AuthProfiles
   alias Pincer.Core.LLM.CooldownStore
   alias Pincer.LLM.Failover
+  alias Pincer.Test.Support.LLMHelpers
 
   defmodule ProbeAdapter do
     use Pincer.Test.Support.LLMProviderDefaults
@@ -22,35 +23,13 @@ defmodule Pincer.LLM.FailoverTest do
   end
 
   setup do
-    orig_providers = Application.get_env(:pincer, :llm_providers)
-    orig_default = Application.get_env(:pincer, :default_llm_provider)
-    old_key = System.get_env("FAILOVER_TEST_KEY")
-
     CooldownStore.reset()
     AuthProfiles.reset()
-    System.put_env("FAILOVER_TEST_KEY", "failover-secret")
+    LLMHelpers.put_system_env!("FAILOVER_TEST_KEY", "failover-secret")
 
     on_exit(fn ->
       CooldownStore.reset()
       AuthProfiles.reset()
-
-      if orig_providers do
-        Application.put_env(:pincer, :llm_providers, orig_providers)
-      else
-        Application.delete_env(:pincer, :llm_providers)
-      end
-
-      if orig_default do
-        Application.put_env(:pincer, :default_llm_provider, orig_default)
-      else
-        Application.delete_env(:pincer, :default_llm_provider)
-      end
-
-      if old_key do
-        System.put_env("FAILOVER_TEST_KEY", old_key)
-      else
-        System.delete_env("FAILOVER_TEST_KEY")
-      end
     end)
 
     :ok
@@ -86,7 +65,7 @@ defmodule Pincer.LLM.FailoverTest do
         "p2" => %{adapter: ProbeAdapter, default_model: "x1"}
       }
 
-      Application.put_env(:pincer, :default_llm_provider, "p1")
+      LLMHelpers.put_default_provider!("p1")
       CooldownStore.cooldown_provider("p1", {:http_error, 503, "down"}, duration_ms: 5_000)
 
       assert Failover.resolve_provider(registry, []) == "p2"
@@ -119,8 +98,7 @@ defmodule Pincer.LLM.FailoverTest do
 
   describe "dispatch/3" do
     test "simulates mock responses and returns provider_not_found for missing providers" do
-      Application.put_env(:pincer, :llm_providers, %{})
-      Application.put_env(:pincer, :default_llm_provider, "mock")
+      LLMHelpers.put_providers!(%{}, default: "mock")
 
       assert {:ok, %{"content" => "[MOCK] Hello! Configure your LLM providers."}, nil} =
                Failover.dispatch(:chat_completion, [], [])
@@ -133,15 +111,17 @@ defmodule Pincer.LLM.FailoverTest do
     end
 
     test "resolves auth and dispatches chat and stream requests through RetryEngine" do
-      Application.put_env(:pincer, :llm_providers, %{
-        "p1" => %{
-          adapter: ProbeAdapter,
-          env_key: "FAILOVER_TEST_KEY",
-          default_model: "m1"
-        }
-      })
+      LLMHelpers.put_providers!(
+        %{
+          "p1" => %{
+            adapter: ProbeAdapter,
+            env_key: "FAILOVER_TEST_KEY",
+            default_model: "m1"
+          }
+        },
+        default: "p1"
+      )
 
-      Application.put_env(:pincer, :default_llm_provider, "p1")
       messages = [%{"role" => "user", "content" => "hi"}]
 
       assert {:ok, %{"content" => "ok:m1"}, nil} =

@@ -17,12 +17,18 @@ defmodule Pincer.Core.ExecutorParallelTest do
     Pincer.MockToolRegistryParallel
     |> stub(:list_tools, fn -> [] end)
     |> expect(:execute_tool, fn name, _args, _ctx ->
-      Process.sleep(500)
-      {:ok, "Result from #{name}"}
+      send(session_pid, {:tool_started, name, self()})
+
+      receive do
+        :release -> {:ok, "Result from #{name}"}
+      end
     end)
     |> expect(:execute_tool, fn name, _args, _ctx ->
-      Process.sleep(500)
-      {:ok, "Result from #{name}"}
+      send(session_pid, {:tool_started, name, self()})
+
+      receive do
+        :release -> {:ok, "Result from #{name}"}
+      end
     end)
 
     Pincer.MockLLMClientParallel
@@ -61,21 +67,18 @@ defmodule Pincer.Core.ExecutorParallelTest do
       {:ok, [%{"choices" => [%{"delta" => %{"content" => "Done"}}]}]}
     end)
 
-    start_time = System.monotonic_time(:millisecond)
-
     {:ok, _pid} =
       Pincer.Core.Executor.start(session_pid, session_id, history,
         tool_registry: Pincer.MockToolRegistryParallel,
         llm_client: Pincer.MockLLMClientParallel
       )
 
-    assert_receive {:executor_finished, _, "Done", _usage}, 5000
+    # Both tools must be active concurrently before either is released.
+    assert_receive {:tool_started, "tool_a", pid_a}, 2_000
+    assert_receive {:tool_started, "tool_b", pid_b}, 2_000
+    send(pid_a, :release)
+    send(pid_b, :release)
 
-    end_time = System.monotonic_time(:millisecond)
-    duration = end_time - start_time
-
-    # If sequential, it should take ~1000ms. If parallel, ~500ms + overhead.
-    assert duration < 850,
-           "Expected parallel execution to take less than 850ms, but took #{duration}ms"
+    assert_receive {:executor_finished, _, "Done", _usage}, 5_000
   end
 end

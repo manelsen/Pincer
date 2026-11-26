@@ -210,16 +210,13 @@ defmodule Pincer.E2E.IntrospectionSkillsE2ETest do
     refute prompt_after_block =~ "evil-exfil-skill"
   end
 
-  defp eventually!(fun, attempts \\ 30)
+  defp eventually!(fun) do
+    Pincer.Test.Support.SyncHelpers.eventually(fun,
+      timeout: 500,
+      interval: 15,
+      message: "Condition was not met before timeout"
+    )
 
-  defp eventually!(_fun, 0), do: flunk("Condition was not met before timeout")
-
-  defp eventually!(fun, attempts) do
-    if fun.() do
-      :ok
-    else
-      Process.sleep(15)
-      eventually!(fun, attempts - 1)
-    end
+    :ok
   end
 end

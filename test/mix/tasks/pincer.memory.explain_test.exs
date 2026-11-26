@@ -5,11 +5,12 @@ defmodule Mix.Tasks.Pincer.MemoryExplainTest do
   alias Pincer.Core.AgentPaths
   alias Pincer.Infra.SQLite
   alias Pincer.Adapters.Storage.SQLite, as: SQLiteStorage
+  alias Pincer.Test.Support.SyncHelpers
 
   @task "pincer.memory.explain"
 
   setup do
-    Application.ensure_all_started(:pincer)
+    SyncHelpers.ensure_started!({SQLite, db_path: ":memory:"})
 
     :ok = SQLite.execute("DELETE FROM edges")
     :ok = SQLite.execute("DELETE FROM nodes")

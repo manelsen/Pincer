@@ -2,6 +2,7 @@ defmodule Pincer.Core.BlackboardTest do
   use ExUnit.Case, async: false
 
   alias Pincer.Core.Orchestration.Blackboard
+  alias Pincer.Test.Support.SyncHelpers
 
   setup do
     Blackboard.reset()
@@ -67,17 +68,17 @@ defmodule Pincer.Core.BlackboardTest do
     assert Process.whereis(Blackboard) == restarted
   end
 
-  defp wait_for_blackboard_restart(original, attempts \\ 100) do
-    case Process.whereis(Blackboard) do
-      pid when is_pid(pid) and pid != original ->
-        pid
-
-      _ when attempts == 0 ->
-        flunk("Blackboard did not restart after being killed")
-
-      _ ->
-        Process.sleep(10)
-        wait_for_blackboard_restart(original, attempts - 1)
-    end
+  defp wait_for_blackboard_restart(original) do
+    SyncHelpers.eventually(
+      fn ->
+        case Process.whereis(Blackboard) do
+          pid when is_pid(pid) and pid != original -> pid
+          _ -> nil
+        end
+      end,
+      timeout: 1_000,
+      interval: 10,
+      message: "Blackboard did not restart after being killed"
+    )
   end
 end

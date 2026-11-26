@@ -2,6 +2,7 @@ defmodule Pincer.LLM.ClientTest do
   use ExUnit.Case
 
   alias Pincer.LLM.Client
+  alias Pincer.Test.Support.LLMHelpers
 
   defmodule MockAdapter do
     use Pincer.Test.Support.LLMProviderDefaults
@@ -95,43 +96,21 @@ defmodule Pincer.LLM.ClientTest do
   end
 
   setup do
-    # Save original env
-    orig_providers = Application.get_env(:pincer, :llm_providers)
-    orig_default = Application.get_env(:pincer, :default_llm_provider)
-    orig_llm = Application.get_env(:pincer, :llm)
+    LLMHelpers.put_app_env!(:llm, Application.get_env(:pincer, :llm))
 
-    # Set test env
-    Application.put_env(:pincer, :llm_providers, %{
-      "test_provider" => %{
-        adapter: MockAdapter,
-        env_key: "TEST_API_KEY",
-        default_model: "test-model"
-      }
-    })
+    LLMHelpers.put_providers!(
+      %{
+        "test_provider" => %{
+          adapter: MockAdapter,
+          env_key: "TEST_API_KEY",
+          default_model: "test-model"
+        }
+      },
+      default: "test_provider"
+    )
 
-    Application.put_env(:pincer, :default_llm_provider, "test_provider")
     Application.delete_env(:pincer, :llm)
-    System.put_env("TEST_API_KEY", "fake_key_123")
-
-    on_exit(fn ->
-      if orig_providers do
-        Application.put_env(:pincer, :llm_providers, orig_providers)
-      else
-        Application.delete_env(:pincer, :llm_providers)
-      end
-
-      if orig_default do
-        Application.put_env(:pincer, :default_llm_provider, orig_default)
-      else
-        Application.delete_env(:pincer, :default_llm_provider)
-      end
-
-      if orig_llm do
-        Application.put_env(:pincer, :llm, orig_llm)
-      else
-        Application.delete_env(:pincer, :llm)
-      end
-    end)
+    LLMHelpers.put_system_env!("TEST_API_KEY", "fake_key_123")
 
     :ok
   end
@@ -175,7 +154,7 @@ defmodule Pincer.LLM.ClientTest do
         "openrouter" => %{"default_model" => "openrouter/free"}
       })
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "moonshot" => %{adapter: MockAdapter, default_model: "moonshot-v1-auto"}
       })
 
@@ -193,7 +172,7 @@ defmodule Pincer.LLM.ClientTest do
         }
       })
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "z_ai" => %{adapter: MockAdapter, default_model: "legacy-model"}
       })
 
@@ -201,7 +180,7 @@ defmodule Pincer.LLM.ClientTest do
     end
 
     test "list_providers/0 returns stable ids" do
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "z_ai" => %{adapter: MockAdapter, default_model: "glm-4.7"},
         "openrouter" => %{adapter: MockAdapter, default_model: "openrouter/free"}
       })
@@ -212,7 +191,7 @@ defmodule Pincer.LLM.ClientTest do
     end
 
     test "list_models/1 deduplicates default and model list" do
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "z_ai" => %{
           adapter: MockAdapter,
           default_model: "glm-4.7",
@@ -226,7 +205,7 @@ defmodule Pincer.LLM.ClientTest do
     test "list_models/1 falls back to llm_providers when llm config is unavailable" do
       Application.delete_env(:pincer, :llm)
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "z_ai" => %{
           adapter: MockAdapter,
           default_model: "glm-4.7",
@@ -240,13 +219,13 @@ defmodule Pincer.LLM.ClientTest do
     test "list_models/1 does not serve a list cached under a different configuration" do
       Application.delete_env(:pincer, :llm)
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "z_ai" => %{adapter: MockAdapter, default_model: "glm-4.7", models: ["glm-4.7"]}
       })
 
       assert Client.list_models("z_ai") == ["glm-4.7"]
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "z_ai" => %{adapter: MockAdapter, default_model: "glm-4.5", models: ["glm-4.5"]}
       })
 
@@ -256,14 +235,15 @@ defmodule Pincer.LLM.ClientTest do
 
   describe "streaming hardening" do
     test "falls back to single-shot chat when stream is not consumable" do
-      Application.put_env(:pincer, :llm_providers, %{
-        "invalid_stream_provider" => %{
-          adapter: InvalidStreamAdapter,
-          default_model: "test-model"
-        }
-      })
-
-      Application.put_env(:pincer, :default_llm_provider, "invalid_stream_provider")
+      LLMHelpers.put_providers!(
+        %{
+          "invalid_stream_provider" => %{
+            adapter: InvalidStreamAdapter,
+            default_model: "test-model"
+          }
+        },
+        default: "invalid_stream_provider"
+      )
 
       assert {:ok, chunks} = Client.stream_completion([%{"role" => "user", "content" => "oi"}])
 
@@ -275,7 +255,7 @@ defmodule Pincer.LLM.ClientTest do
 
   describe "embedding fallback" do
     test "retries openrouter embeddings with the 1024d fallback model on router miss" do
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "openrouter" => %{
           adapter: FallbackEmbeddingAdapter,
           env_key: "TEST_API_KEY",
@@ -291,7 +271,7 @@ defmodule Pincer.LLM.ClientTest do
     end
 
     test "does not override an explicit embedding model from the caller" do
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "openrouter" => %{
           adapter: FallbackEmbeddingAdapter,
           env_key: "TEST_API_KEY",

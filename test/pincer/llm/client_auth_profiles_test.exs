@@ -3,6 +3,7 @@ defmodule Pincer.LLM.ClientAuthProfilesTest do
 
   alias Pincer.Core.AuthProfiles
   alias Pincer.LLM.Client
+  alias Pincer.Test.Support.LLMHelpers
 
   defmodule AuthProfileAdapter do
     use Pincer.Test.Support.LLMProviderDefaults
@@ -21,45 +22,27 @@ defmodule Pincer.LLM.ClientAuthProfilesTest do
   end
 
   setup do
-    original_providers = Application.get_env(:pincer, :llm_providers)
-    original_default = Application.get_env(:pincer, :default_llm_provider)
-    old_primary = System.get_env("TEST_AUTH_PRIMARY")
-    old_backup = System.get_env("TEST_AUTH_BACKUP")
-
     AuthProfiles.reset()
 
-    Application.put_env(:pincer, :llm_providers, %{
-      "auth_provider" => %{
-        adapter: AuthProfileAdapter,
-        default_model: "auth-model",
-        auth_profiles: [
-          %{name: "primary", env_key: "TEST_AUTH_PRIMARY"},
-          %{name: "backup", env_key: "TEST_AUTH_BACKUP"}
-        ]
-      }
-    })
+    LLMHelpers.put_providers!(
+      %{
+        "auth_provider" => %{
+          adapter: AuthProfileAdapter,
+          default_model: "auth-model",
+          auth_profiles: [
+            %{name: "primary", env_key: "TEST_AUTH_PRIMARY"},
+            %{name: "backup", env_key: "TEST_AUTH_BACKUP"}
+          ]
+        }
+      },
+      default: "auth_provider"
+    )
 
-    Application.put_env(:pincer, :default_llm_provider, "auth_provider")
-    System.put_env("TEST_AUTH_PRIMARY", "primary-key")
-    System.put_env("TEST_AUTH_BACKUP", "backup-key")
+    LLMHelpers.put_system_env!("TEST_AUTH_PRIMARY", "primary-key")
+    LLMHelpers.put_system_env!("TEST_AUTH_BACKUP", "backup-key")
 
     on_exit(fn ->
       AuthProfiles.reset()
-
-      if original_providers do
-        Application.put_env(:pincer, :llm_providers, original_providers)
-      else
-        Application.delete_env(:pincer, :llm_providers)
-      end
-
-      if original_default do
-        Application.put_env(:pincer, :default_llm_provider, original_default)
-      else
-        Application.delete_env(:pincer, :default_llm_provider)
-      end
-
-      restore_env("TEST_AUTH_PRIMARY", old_primary)
-      restore_env("TEST_AUTH_BACKUP", old_backup)
     end)
 
     :ok
@@ -99,20 +82,18 @@ defmodule Pincer.LLM.ClientAuthProfilesTest do
   end
 
   test "keeps backward compatibility when provider has no auth chain" do
-    Application.put_env(:pincer, :llm_providers, %{
-      "legacy_provider" => %{
-        adapter: AuthProfileAdapter,
-        default_model: "legacy-model"
-      }
-    })
-
-    Application.put_env(:pincer, :default_llm_provider, "legacy_provider")
+    LLMHelpers.put_providers!(
+      %{
+        "legacy_provider" => %{
+          adapter: AuthProfileAdapter,
+          default_model: "legacy-model"
+        }
+      },
+      default: "legacy_provider"
+    )
 
     assert {:ok, %{"content" => "ok"}, _usage} = Client.chat_completion([])
     assert_received {:auth_profile_adapter_config, config}
     refute Map.has_key?(config, :auth_profile)
   end
-
-  defp restore_env(key, nil), do: System.delete_env(key)
-  defp restore_env(key, value), do: System.put_env(key, value)
 end

@@ -3,6 +3,7 @@ defmodule Pincer.LLM.CapabilitiesTest do
 
   alias Pincer.Core.AuthProfiles
   alias Pincer.LLM.Capabilities
+  alias Pincer.Test.Support.LLMHelpers
 
   defmodule CapabilityAdapter do
     use Pincer.Test.Support.LLMProviderDefaults
@@ -45,26 +46,11 @@ defmodule Pincer.LLM.CapabilitiesTest do
   end
 
   setup do
-    orig_providers = Application.get_env(:pincer, :llm_providers)
-    old_key = System.get_env("CAPABILITIES_TEST_KEY")
-
     AuthProfiles.reset()
-    System.put_env("CAPABILITIES_TEST_KEY", "cap-secret-1")
+    LLMHelpers.put_system_env!("CAPABILITIES_TEST_KEY", "cap-secret-1")
 
     on_exit(fn ->
       AuthProfiles.reset()
-
-      if orig_providers do
-        Application.put_env(:pincer, :llm_providers, orig_providers)
-      else
-        Application.delete_env(:pincer, :llm_providers)
-      end
-
-      if old_key do
-        System.put_env("CAPABILITIES_TEST_KEY", old_key)
-      else
-        System.delete_env("CAPABILITIES_TEST_KEY")
-      end
     end)
 
     :ok
@@ -72,14 +58,14 @@ defmodule Pincer.LLM.CapabilitiesTest do
 
   describe "transcribe_audio/2" do
     test "returns :unknown_provider when configured provider is missing" do
-      Application.put_env(:pincer, :llm_providers, %{})
+      LLMHelpers.put_providers!(%{})
       assert {:error, :unknown_provider} = Capabilities.transcribe_audio("/tmp/audio.ogg")
     end
 
     test "returns auth error when credentials are missing" do
       System.delete_env("CAPABILITIES_TEST_KEY")
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "groq_whisper" => %{
           adapter: CapabilityAdapter,
           env_key: "CAPABILITIES_TEST_KEY",
@@ -91,7 +77,7 @@ defmodule Pincer.LLM.CapabilitiesTest do
     end
 
     test "resolves auth profile, delegates to adapter, and normalizes wrapped errors" do
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "groq_whisper" => %{
           adapter: CapabilityAdapter,
           env_key: "CAPABILITIES_TEST_KEY",
@@ -120,7 +106,7 @@ defmodule Pincer.LLM.CapabilitiesTest do
          {:http_error, 200,
           %{"error" => %{"code" => 404, "message" => "No successful provider responses."}}}}
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "openrouter" => %{
           adapter: CapabilityAdapter,
           env_key: "CAPABILITIES_TEST_KEY",
@@ -139,7 +125,7 @@ defmodule Pincer.LLM.CapabilitiesTest do
         {:error,
          {:http_error, 404, %{"error" => %{"message" => "No successful provider responses."}}}}
 
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "openrouter" => %{
           adapter: CapabilityAdapter,
           env_key: "CAPABILITIES_TEST_KEY",
@@ -161,7 +147,7 @@ defmodule Pincer.LLM.CapabilitiesTest do
     end
 
     test "normalizes nested errors from embedding adapter" do
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "custom_embed" => %{
           adapter: CapabilityAdapter,
           env_key: "CAPABILITIES_TEST_KEY",

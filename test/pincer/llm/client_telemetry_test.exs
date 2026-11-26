@@ -2,6 +2,7 @@ defmodule Pincer.LLM.ClientTelemetryTest do
   use ExUnit.Case, async: false
 
   alias Pincer.LLM.Client
+  alias Pincer.Test.Support.LLMHelpers
 
   defmodule TelemetryAdapter do
     use Pincer.Test.Support.LLMProviderDefaults
@@ -33,9 +34,6 @@ defmodule Pincer.LLM.ClientTelemetryTest do
   end
 
   setup do
-    original_providers = Application.get_env(:pincer, :llm_providers)
-    original_default = Application.get_env(:pincer, :default_llm_provider)
-    original_retry = Application.get_env(:pincer, :llm_retry)
     handler_id = "pincer-client-telemetry-#{System.unique_integer([:positive])}"
 
     :ok =
@@ -48,28 +46,11 @@ defmodule Pincer.LLM.ClientTelemetryTest do
         self()
       )
 
-    Application.put_env(:pincer, :default_llm_provider, "telemetry_provider")
+    LLMHelpers.put_default_provider!("telemetry_provider")
+    LLMHelpers.put_app_env!(:llm_retry, Application.get_env(:pincer, :llm_retry))
 
     on_exit(fn ->
       :telemetry.detach(handler_id)
-
-      if original_providers do
-        Application.put_env(:pincer, :llm_providers, original_providers)
-      else
-        Application.delete_env(:pincer, :llm_providers)
-      end
-
-      if original_default do
-        Application.put_env(:pincer, :default_llm_provider, original_default)
-      else
-        Application.delete_env(:pincer, :default_llm_provider)
-      end
-
-      if original_retry do
-        Application.put_env(:pincer, :llm_retry, original_retry)
-      else
-        Application.delete_env(:pincer, :llm_retry)
-      end
     end)
 
     :ok
@@ -78,7 +59,7 @@ defmodule Pincer.LLM.ClientTelemetryTest do
   test "emits error telemetry on terminal failure" do
     Process.delete(:client_telemetry_call)
 
-    Application.put_env(:pincer, :llm_providers, %{
+    LLMHelpers.put_providers!(%{
       "telemetry_provider" => %{
         adapter: TelemetryAdapter,
         default_model: "test-model",
@@ -104,7 +85,7 @@ defmodule Pincer.LLM.ClientTelemetryTest do
   test "emits retry telemetry on transient failure before success" do
     Process.delete(:client_telemetry_call)
 
-    Application.put_env(:pincer, :llm_providers, %{
+    LLMHelpers.put_providers!(%{
       "telemetry_provider" => %{
         adapter: TelemetryAdapter,
         default_model: "test-model",

@@ -78,7 +78,7 @@ defmodule Pincer.Core.ClusterTest do
 
     test "handles unknown messages gracefully" do
       send(NodeObserver, :unknown_message)
-      Process.sleep(20)
+      Pincer.Test.Support.SyncHelpers.barrier(NodeObserver)
       assert Process.whereis(NodeObserver) != nil
     end
   end

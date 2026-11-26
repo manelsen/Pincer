@@ -680,16 +680,8 @@ defmodule Pincer.Adapters.Connectors.MCP.ManagerTest do
     assert {:error, :boom} = result
   end
 
-  defp eventually(fun, attempts \\ 30)
-
-  defp eventually(fun, 1), do: fun.()
-
-  defp eventually(fun, attempts) do
-    fun.()
-  rescue
-    ExUnit.AssertionError ->
-      Process.sleep(20)
-      eventually(fun, attempts - 1)
+  defp eventually(fun) do
+    Pincer.Test.Support.SyncHelpers.eventually(fun, timeout: 600, interval: 20)
   end
 
   defp write_tmp_json!(map) do

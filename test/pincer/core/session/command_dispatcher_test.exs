@@ -183,7 +183,12 @@ defmodule Pincer.Core.Session.CommandDispatcherTest do
 
   describe "handle_cancel/2" do
     test "stops alive worker, clears input buffer, and returns :stopped" do
-      pid = spawn(fn -> Process.sleep(5_000) end)
+      pid =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
 
       state =
         base_state(%{

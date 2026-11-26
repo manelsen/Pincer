@@ -16,6 +16,8 @@ defmodule Pincer.Core.Orchestration.SubAgentNestingE2ETest do
   alias Pincer.Core.Orchestration.SubAgentSupervisor
   alias Pincer.Infra.PubSub
   alias Pincer.Ports.Storage
+  alias Pincer.Test.Support.LLMHelpers
+  alias Pincer.Test.Support.SyncHelpers
 
   @provider "scripted"
   @model "scripted-model"
@@ -158,35 +160,24 @@ defmodule Pincer.Core.Orchestration.SubAgentNestingE2ETest do
     Application.ensure_all_started(:pincer)
     Blackboard.reset()
 
-    prev_providers = Application.get_env(:pincer, :llm_providers)
-    prev_default = Application.get_env(:pincer, :default_llm_provider)
-    prev_depth = Application.get_env(:pincer, :max_subagent_depth)
-    prev_global = Application.get_env(:pincer, :max_subagents)
-    prev_session = Application.get_env(:pincer, :max_subagents_per_session)
+    LLMHelpers.put_providers!(
+      %{
+        @provider => %{
+          adapter: ScriptedProvider,
+          env_key: "MOCK_KEY",
+          default_model: @model
+        }
+      },
+      default: @provider
+    )
 
-    Application.put_env(:pincer, :llm_providers, %{
-      @provider => %{
-        adapter: ScriptedProvider,
-        env_key: "MOCK_KEY",
-        default_model: @model
-      }
-    })
-
-    Application.put_env(:pincer, :default_llm_provider, @provider)
-    Application.put_env(:pincer, :max_subagent_depth, @depth_cap)
-    Application.put_env(:pincer, :max_subagents, :infinity)
-    Application.put_env(:pincer, :max_subagents_per_session, 8)
-    Application.put_env(:pincer, :nesting_e2e_holder, self())
+    LLMHelpers.put_app_env!(:max_subagent_depth, @depth_cap)
+    LLMHelpers.put_app_env!(:max_subagents, :infinity)
+    LLMHelpers.put_app_env!(:max_subagents_per_session, 8)
+    LLMHelpers.put_app_env!(:nesting_e2e_holder, self())
 
     on_exit(fn ->
       terminate_children()
-
-      restore_env(:llm_providers, prev_providers)
-      restore_env(:default_llm_provider, prev_default)
-      restore_env(:max_subagent_depth, prev_depth)
-      restore_env(:max_subagents, prev_global)
-      restore_env(:max_subagents_per_session, prev_session)
-      Application.delete_env(:pincer, :nesting_e2e_holder)
       Blackboard.reset()
     end)
 
@@ -349,35 +340,14 @@ defmodule Pincer.Core.Orchestration.SubAgentNestingE2ETest do
   end
 
   defp await_value(fun, timeout) do
-    value = wait_until_value(fun, timeout)
-    assert value, "timed out waiting for blackboard state"
-    value
+    SyncHelpers.eventually(fun,
+      timeout: timeout,
+      interval: 20,
+      message: "timed out waiting for blackboard state"
+    )
   end
 
   defp wait_until(fun, timeout) do
-    wait_until_value(fn -> if fun.(), do: true end, timeout) == true
+    SyncHelpers.eventually(fun, timeout: timeout, interval: 20)
   end
-
-  defp wait_until_value(fun, timeout) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_wait_until_value(fun, deadline)
-  end
-
-  defp do_wait_until_value(fun, deadline) do
-    case fun.() do
-      value when value not in [nil, false] ->
-        value
-
-      _other ->
-        if System.monotonic_time(:millisecond) >= deadline do
-          nil
-        else
-          Process.sleep(20)
-          do_wait_until_value(fun, deadline)
-        end
-    end
-  end
-
-  defp restore_env(key, nil), do: Application.delete_env(:pincer, key)
-  defp restore_env(key, value), do: Application.put_env(:pincer, key, value)
 end

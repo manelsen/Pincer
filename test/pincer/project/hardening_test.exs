@@ -5,22 +5,18 @@ defmodule Pincer.Core.Project.HardeningTest do
   alias Pincer.Core.Project.Server
   alias Pincer.Core.Orchestration.Blackboard
   alias Pincer.Test.ProjectServer
+  alias Pincer.Test.Support.LLMHelpers
+  alias Pincer.Test.Support.SyncHelpers
 
   # Usamos stub global para que os processos asíncronos (handle_continue)
   # consigam chamar o mock sem erro de ownership.
   setup :set_mox_from_context
 
   setup do
-    Application.put_env(:pincer, :llm_providers, %{
-      "test" => %{
-        adapter: Pincer.LLM.ClientMock,
-        base_url: "http://mock",
-        default_model: "test-model",
-        env_key: "MOCK_KEY"
-      }
-    })
-
-    Application.put_env(:pincer, :default_llm_provider, "test")
+    LLMHelpers.put_providers!(
+      %{"test" => LLMHelpers.mock_provider_config()},
+      default: "test"
+    )
 
     Pincer.LLM.ClientMock
     |> stub(:chat_completion, fn _msgs, _model, _config, _tools ->
@@ -100,50 +96,36 @@ defmodule Pincer.Core.Project.HardeningTest do
 
   # --- Helpers ---
 
-  defp wait_for_status(id, target_status, attempts \\ 20) do
-    if attempts == 0 do
-      flunk("Timeout waiting for status #{target_status}")
-    else
-      case Server.get_status(id) do
-        {:ok, %{status: ^target_status}} ->
-          :ok
-
-        _ ->
-          Process.sleep(50)
-          wait_for_status(id, target_status, attempts - 1)
-      end
-    end
+  defp wait_for_status(id, target_status) do
+    SyncHelpers.eventually(
+      fn -> match?({:ok, %{status: ^target_status}}, Server.get_status(id)) end,
+      timeout: 1_000,
+      interval: 10,
+      message: "Timeout waiting for status #{target_status}"
+    )
   end
 
-  # Waits until `predicate` becomes false. Returns `:gone` when it did, or
-  # `:still_alive` after the budget runs out - a fixed sleep either flakes or
-  # wastes time, and this is what every timing assertion here actually needs.
-  defp wait_until(predicate, attempts \\ 100) do
-    cond do
-      not predicate.() ->
-        :gone
+  defp wait_until(predicate) do
+    SyncHelpers.eventually(
+      fn -> not predicate.() end,
+      timeout: 1_000,
+      interval: 10
+    )
 
-      attempts == 0 ->
-        :still_alive
-
-      true ->
-        Process.sleep(10)
-        wait_until(predicate, attempts - 1)
-    end
+    :gone
   end
 
-  defp wait_for_worker(id, attempts \\ 20) do
-    if attempts == 0 do
-      flunk("Timeout waiting for worker process")
-    else
-      case Server.get_status(id) do
-        {:ok, %{worker_pid: pid}} when is_pid(pid) ->
-          pid
-
-        _ ->
-          Process.sleep(50)
-          wait_for_worker(id, attempts - 1)
-      end
-    end
+  defp wait_for_worker(id) do
+    SyncHelpers.eventually(
+      fn ->
+        case Server.get_status(id) do
+          {:ok, %{worker_pid: pid}} when is_pid(pid) -> pid
+          _ -> nil
+        end
+      end,
+      timeout: 1_000,
+      interval: 10,
+      message: "Timeout waiting for worker process"
+    )
   end
 end

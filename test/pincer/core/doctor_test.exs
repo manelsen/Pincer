@@ -2,6 +2,7 @@ defmodule Pincer.Core.DoctorTest do
   use ExUnit.Case, async: true
 
   alias Pincer.Core.Doctor
+  alias Pincer.Test.Support.LLMHelpers
 
   describe "run/1" do
     test "returns error when config.yaml is invalid" do
@@ -166,17 +167,7 @@ defmodule Pincer.Core.DoctorTest do
 
   describe "llm_provider_checks" do
     setup do
-      original_providers = Application.get_env(:pincer, :llm_providers)
-
-      on_exit(fn ->
-        if original_providers do
-          Application.put_env(:pincer, :llm_providers, original_providers)
-        else
-          Application.delete_env(:pincer, :llm_providers)
-        end
-      end)
-
-      Application.put_env(:pincer, :llm_providers, %{
+      LLMHelpers.put_providers!(%{
         "openrouter" => %{
           adapter: Pincer.LLM.Providers.OpenAICompat,
           env_key: "OPENROUTER_API_KEY",
@@ -241,7 +232,7 @@ defmodule Pincer.Core.DoctorTest do
         """
       )
 
-      Application.put_env(:pincer, :llm_providers, %{})
+      LLMHelpers.put_providers!(%{})
 
       report = Doctor.run(root: tmp, env_fetcher: fn _ -> nil end)
 
