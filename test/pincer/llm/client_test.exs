@@ -309,4 +309,28 @@ defmodule Pincer.LLM.ClientTest do
       refute_received {:embedding_called, "baai/bge-large-en-v1.5"}
     end
   end
+
+  describe "facade architecture (SRP-003)" do
+    test "Pincer.LLM.Client is a thin facade under 250 LOC implementing PincerPorts.LLM" do
+      source = File.read!("lib/pincer/llm/client.ex")
+      line_count = source |> String.split("\n", trim: false) |> length()
+
+      assert line_count < 250,
+             "Expected lib/pincer/llm/client.ex to be a thin facade (< 250 LOC), got #{line_count} lines"
+
+      assert {:module, Pincer.LLM.ModelCache} = Code.ensure_loaded(Pincer.LLM.ModelCache)
+      assert {:module, Pincer.LLM.Capabilities} = Code.ensure_loaded(Pincer.LLM.Capabilities)
+      assert {:module, Pincer.LLM.Failover} = Code.ensure_loaded(Pincer.LLM.Failover)
+
+      behaviours =
+        Client.__info__(:attributes) |> Keyword.get_values(:behaviour) |> List.flatten()
+
+      assert PincerPorts.LLM in behaviours
+
+      assert {:ok, "mock transcript"} =
+               Client.transcribe_audio("/tmp/sample.ogg", provider: "test_provider")
+
+      assert Client.provider_config("test_provider")[:default_model] == "test-model"
+    end
+  end
 end
