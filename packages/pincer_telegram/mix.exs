@@ -1,7 +1,7 @@
 defmodule PincerTelegram.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/manelsen/Pincer"
 
   def project do
@@ -27,8 +27,8 @@ defmodule PincerTelegram.MixProject do
 
   defp deps do
     [
-      {:pincer_ports, "~> 0.1"},
-      {:pincer_shared, "~> 0.1"},
+      {:pincer_ports, "~> 0.2"},
+      {:pincer_shared, "~> 0.2"},
       {:telegex, "~> 1.8"},
       {:plug, "~> 1.15"},
       {:earmark_parser, "~> 1.4"},

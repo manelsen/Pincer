@@ -1,6 +1,6 @@
 id: line
 name: Pincer LINE
-version: "0.1.0"
+version: "0.2.0"
 kind: channel
 adapter: "Pincer.Channels.Line"
 description: "LINE Messaging API channel adapter"

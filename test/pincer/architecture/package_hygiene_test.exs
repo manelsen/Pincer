@@ -54,7 +54,7 @@ defmodule Pincer.Architecture.PackageHygieneTest do
         assert File.read!(root_path) == File.read!(pkg_path),
                "Manifest drift detected between #{root_path} and #{pkg_path}"
 
-        assert {:ok, %Manifest{id: ^name, version: "0.1.0"}} = Manifest.from_file(root_path)
+        assert {:ok, %Manifest{id: ^name, version: "0.2.0"}} = Manifest.from_file(root_path)
       end
     end
   end

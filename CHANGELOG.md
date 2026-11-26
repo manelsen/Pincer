@@ -7,7 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-26
+
 ### Changed
+- Enforce compile-time `Boundary` 0.12 architecture across `Core`, `Ports`, `Adapters`, `LLM`, `Channels`, `CLI`, `Plugin`, and `Utils`, including strict internal `Core` slice boundaries and trimmed deps.
+- Decompose monolithic modules (`Telegram`, `FileSystem`, `LLM.Client`, `Session.Server`, `Pairing`, `ProjectOrchestrator`) into single-responsibility submodules under strict facade and FSM contracts.
+- Canonicalize plugin manifests (`priv/plugins/*/pincer_plugin.yaml` in parity with `packages/*/priv/pincer_plugin.yaml`), standardize `packages/*/mix.exs` Hex metadata, and extract shared `OpenAICompat` provider defaults.
+- Route `Tools.Media` TTS synthesis through `Pincer.Ports.TTS` (`Pincer.LLM.TTS`) and PDF text extraction through `Pincer.Ports.Sandbox` + `WorkspaceGuard` path confinement.
+- Serialize `CircuitBreaker`, `RateLimiter`, and `Pairing.Store` ETS/DETS transitions through supervised GenServer owners instead of per-call open/close or lockless races.
+- Unify `Pincer.Core.UX` commands/shortcuts/help from one canonical table and centralize terminal ANSI helpers in `Pincer.Utils.ANSI`.
+- Narrow broad `rescue` blocks in `ToolRunner`, `Workflow`, `PromptAssembly`, and `Executor` so tool crashes and corrupt state files surface explicitly.
 - Doctor, SecurityAudit, and assisted onboarding share channel token and DM policy checks. Doctor and onboarding now flag enabled webhooks with no `token_env`, and onboarding warns about open, missing, or invalid DM modes.
 - Malformed DM policies disable direct messages. Doctor and assisted onboarding check provider credentials using the configured auth profiles.
 - Onboarding preflight rejects unsupported storage backends using the same configuration precedence as Doctor and runtime startup.

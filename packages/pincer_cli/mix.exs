@@ -1,7 +1,7 @@
 defmodule PincerCLI.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.2.0"
   @source_url "https://github.com/manelsen/Pincer"
 
   def project do
@@ -23,7 +23,7 @@ defmodule PincerCLI.MixProject do
 
   defp deps do
     [
-      {:pincer_ports, "~> 0.1"}
+      {:pincer_ports, "~> 0.2"}
     ]
   end
 

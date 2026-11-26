@@ -1,6 +1,6 @@
 id: feishu
 name: Pincer Feishu
-version: "0.1.0"
+version: "0.2.0"
 kind: channel
 adapter: "Pincer.Channels.Feishu"
 description: "Feishu (Lark) channel adapter"

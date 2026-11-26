@@ -1,6 +1,6 @@
 id: slack
 name: Pincer Slack
-version: "0.1.0"
+version: "0.2.0"
 kind: channel
 adapter: "Pincer.Channels.Slack"
 description: "Slack channel adapter (Socket Mode)"
