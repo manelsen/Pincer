@@ -1,8 +1,10 @@
 # PRD: New Channel Integrations
 
-**Status**: Draft
+**Status**: Implemented (Phases 1–3 extracted to standalone packages under `packages/pincer_*`)
 **Author**: Agent
 **Date**: 2026-03-30
+
+> **Architecture Note**: Channel adapters in Pincer are standalone Mix/Hex packages under `packages/pincer_*` (`pincer_cli`, `pincer_telegram`, `pincer_discord`, `pincer_slack`, `pincer_whatsapp`, `pincer_webhook`, `pincer_feishu`, `pincer_line`, `pincer_dingtalk`) implementing `Pincer.Ports.Channel` and sharing common lifecycle/formatting helpers via `packages/pincer_shared`. Root `Pincer.Channels` retains only `Factory` and `Supervisor` to discover and boot enabled channel packages.
 
 ## Goal
 
@@ -171,14 +173,15 @@ POST /im/v1/images                           -- upload image
 - `im.message.receive_v1` -- new message received
 - `im.message.message_read_v1` -- read receipt (optional)
 
-**Files to create/modify**:
-- `lib/pincer/channels/feishu.ex` -- Supervisor + Channel behaviour
-- `lib/pincer/channels/feishu/api.ex` -- HTTP client for Feishu REST API
-- `lib/pincer/channels/feishu/session.ex` -- Session callbacks (on_agent_response, on_agent_partial, etc.)
-- `lib/pincer/channels/feishu/cards.ex` -- Card builder for streaming
-- `config.yaml` -- feishu/lark section
-- `test/pincer/channels/feishu_test.exs`
-- `test/pincer/channels/feishu_session_test.exs`
+**Package (`packages/pincer_feishu/`)**:
+- `packages/pincer_feishu/mix.exs` & `packages/pincer_feishu/priv/pincer_plugin.yaml`
+- `Pincer.Channels.Feishu` -- Supervisor + `Pincer.Ports.Channel` behaviour
+- `Pincer.Channels.Feishu.API` -- HTTP client for Feishu REST API
+- `Pincer.Channels.Feishu.Session` & `SessionSupervisor` -- Session callbacks (on_agent_response, on_agent_partial, etc.) & DynamicSupervisor
+- `Pincer.Channels.Feishu.Cards` -- Card builder for streaming
+- `Pincer.Channels.Feishu.Listener` & `Webhook` -- Webhook listener & signature/decryption handling
+- `config.yaml` -- `channels.feishu` section
+- `test/pincer/channels/feishu_test.exs`, `test/pincer/channels/feishu_session_test.exs`, and `test/pincer/channels/feishu/`
 
 ### Phase 2: LINE
 
@@ -205,13 +208,14 @@ GET  /v2/bot/profile/{userId}   -- get user profile
 GET  /v2/bot/message/delivery/reply  -- delivery stats (optional)
 ```
 
-**Files to create/modify**:
-- `lib/pincer/channels/line.ex` -- Supervisor + Channel behaviour
-- `lib/pincer/channels/line/api.ex` -- HTTP client for LINE Messaging API
-- `lib/pincer/channels/line/session.ex` -- Session callbacks
-- `config.yaml` -- line section
-- `test/pincer/channels/line_test.exs`
-- `test/pincer/channels/line_session_test.exs`
+**Package (`packages/pincer_line/`)**:
+- `packages/pincer_line/mix.exs` & `packages/pincer_line/priv/pincer_plugin.yaml`
+- `Pincer.Channels.Line` -- Supervisor + `Pincer.Ports.Channel` behaviour
+- `Pincer.Channels.Line.API` -- HTTP client for LINE Messaging API
+- `Pincer.Channels.Line.Session` & `SessionSupervisor` -- Session callbacks & DynamicSupervisor
+- `Pincer.Channels.Line.Listener` & `Webhook` -- Webhook listener & HMAC signature verification
+- `config.yaml` -- `channels.line` section
+- `test/pincer/channels/line_test.exs`, `test/pincer/channels/line_session_test.exs`, and `test/pincer/channels/line/`
 
 ### Phase 3: DingTalk (Enterprise Bot)
 
@@ -238,13 +242,14 @@ POST /v1.0/card/instances                     -- create interactive card
 PUT  /v1.0/card/instances/{cardInstanceId}    -- update card (streaming)
 ```
 
-**Files to create/modify**:
-- `lib/pincer/channels/dingtalk.ex`
-- `lib/pincer/channels/dingtalk/api.ex`
-- `lib/pincer/channels/dingtalk/session.ex`
-- `config.yaml` -- dingtalk section
-- `test/pincer/channels/dingtalk_test.exs`
-- `test/pincer/channels/dingtalk_session_test.exs`
+**Package (`packages/pincer_dingtalk/`)**:
+- `packages/pincer_dingtalk/mix.exs` & `packages/pincer_dingtalk/priv/pincer_plugin.yaml`
+- `Pincer.Channels.DingTalk` -- Supervisor + `Pincer.Ports.Channel` behaviour
+- `Pincer.Channels.DingTalk.API` -- HTTP client for DingTalk API
+- `Pincer.Channels.DingTalk.Session` & `SessionSupervisor` -- Session callbacks & DynamicSupervisor
+- `Pincer.Channels.DingTalk.Listener` & `Webhook` -- Webhook listener & verification
+- `config.yaml` -- `channels.dingtalk` section
+- `test/pincer/channels/dingtalk_test.exs`, `test/pincer/channels/dingtalk_session_test.exs`, and `test/pincer/channels/dingtalk/`
 
 ## Scope Decisions
 
