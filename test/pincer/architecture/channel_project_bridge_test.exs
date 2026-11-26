@@ -7,10 +7,13 @@ defmodule Pincer.Architecture.ChannelProjectBridgeTest do
     "packages/pincer_whatsapp/lib/pincer/channels/whatsapp/session.ex"
   ]
 
-  @adapter_files [
-    "packages/pincer_telegram/lib/pincer/channels/telegram.ex",
-    "packages/pincer_discord/lib/pincer/channels/discord.ex",
-    "packages/pincer_whatsapp/lib/pincer/channels/whatsapp.ex"
+  @adapter_targets [
+    {"telegram",
+     ["packages/pincer_telegram/lib/pincer/channels/telegram.ex"] ++
+       (Path.wildcard("packages/pincer_telegram/lib/pincer/channels/telegram/*.ex")
+        |> Enum.reject(&String.ends_with?(&1, ["/session.ex", "/session_supervisor.ex"])))},
+    {"discord", ["packages/pincer_discord/lib/pincer/channels/discord.ex"]},
+    {"whatsapp", ["packages/pincer_whatsapp/lib/pincer/channels/whatsapp.ex"]}
   ]
 
   test "Telegram, Discord, and WhatsApp sessions delegate project callbacks to Shared.ProjectBridge" do
@@ -29,20 +32,24 @@ defmodule Pincer.Architecture.ChannelProjectBridgeTest do
   end
 
   test "Telegram, Discord, and WhatsApp adapters delegate kickoff and continue to Shared.ProjectBridge" do
-    for file <- @adapter_files do
-      source = File.read!(file)
+    for {name, files} <- @adapter_targets do
+      combined = Enum.map_join(files, "\n", &File.read!/1)
 
-      assert source =~ "ProjectBridge.kickoff",
-             "#{file} must delegate kickoff to ProjectBridge.kickoff"
+      assert combined =~ "ProjectBridge.kickoff",
+             "#{name} must delegate kickoff to ProjectBridge.kickoff"
 
-      assert source =~ "ProjectBridge.continue",
-             "#{file} must delegate continue_project to ProjectBridge.continue"
+      assert combined =~ "ProjectBridge.continue",
+             "#{name} must delegate continue_project to ProjectBridge.continue"
 
-      refute source =~ "PincerPorts.Project.kickoff",
-             "#{file} must not call PincerPorts.Project.kickoff directly"
+      for file <- files do
+        source = File.read!(file)
 
-      refute source =~ "PincerPorts.Project.continue_if_collecting",
-             "#{file} must not call PincerPorts.Project.continue_if_collecting directly"
+        refute source =~ "PincerPorts.Project.kickoff",
+               "#{file} must not call PincerPorts.Project.kickoff directly"
+
+        refute source =~ "PincerPorts.Project.continue_if_collecting",
+               "#{file} must not call PincerPorts.Project.continue_if_collecting directly"
+      end
     end
   end
 end
