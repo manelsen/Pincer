@@ -14,6 +14,8 @@ defmodule Pincer.Core.Session.AlignmentIntegrity do
   expected to change over time.
   """
 
+  require Logger
+
   alias Pincer.Core.AgentPaths
 
   @protected_filenames ~w(IDENTITY.md SOUL.md)
@@ -85,6 +87,31 @@ defmodule Pincer.Core.Session.AlignmentIntegrity do
       {:ok, violations}
     else
       {:error, :no_snapshot}
+    end
+  end
+
+  @doc """
+  Verifies alignment integrity for `workspace_path` or initializes a snapshot
+  if protected files exist and no snapshot has been recorded yet.
+  """
+  @spec ensure_verified(String.t(), String.t()) :: :ok
+  def ensure_verified(workspace_path, session_id) do
+    case verify(workspace_path) do
+      {:ok, []} ->
+        :ok
+
+      {:ok, violations} ->
+        files = Enum.map_join(violations, ", ", & &1.file)
+        Logger.warning("[SESSION] #{session_id} alignment integrity violation: #{files}")
+        :ok
+
+      {:error, :no_snapshot} ->
+        if protected_files(workspace_path) != [] do
+          snapshot!(workspace_path)
+          Logger.info("[SESSION] #{session_id} alignment integrity snapshot created")
+        end
+
+        :ok
     end
   end
 
