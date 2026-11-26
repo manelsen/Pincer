@@ -42,6 +42,7 @@ defmodule Pincer.Ports do
       LLM,
       ToolRegistry,
       Tool,
+      TTS,
       Cron,
       Git,
       Hook,
