@@ -169,17 +169,17 @@ defmodule Pincer.Core.HookDispatcherTest do
     end
   end
 
-  defp wait_for_restart(original, attempts \\ 100) do
-    case Process.whereis(HookDispatcher) do
-      pid when is_pid(pid) and pid != original ->
-        pid
-
-      _ when attempts == 0 ->
-        flunk("HookDispatcher did not restart after being killed")
-
-      _ ->
-        Process.sleep(10)
-        wait_for_restart(original, attempts - 1)
-    end
+  defp wait_for_restart(original) do
+    Pincer.Test.Support.SyncHelpers.eventually(
+      fn ->
+        case Process.whereis(HookDispatcher) do
+          pid when is_pid(pid) and pid != original -> pid
+          _ -> nil
+        end
+      end,
+      timeout: 1_000,
+      interval: 10,
+      message: "HookDispatcher did not restart after being killed"
+    )
   end
 end

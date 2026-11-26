@@ -23,8 +23,6 @@ defmodule Pincer.Core.Session.AutoApproveTest do
       # Simulate approval_required
       send(pid, {:approval_required, "call_abc", "safe_shell ls"})
 
-      Process.sleep(100)
-
       {:ok, state} = Server.get_status("auto_approve_2")
       # Should be auto-approved, pending_approval should be nil
       assert state.pending_approval == nil
@@ -35,8 +33,6 @@ defmodule Pincer.Core.Session.AutoApproveTest do
 
       # Do NOT enable auto-approve
       send(pid, {:approval_required, "call_def", "safe_shell ls"})
-
-      Process.sleep(100)
 
       {:ok, state} = Server.get_status("auto_approve_3")
       assert state.pending_approval != nil
@@ -56,7 +52,7 @@ defmodule Pincer.Core.Session.AutoApproveTest do
         llm_client: Pincer.MockLLM
       )
 
-    Process.sleep(200)
+    _ = :sys.get_state(pid)
     {:ok, pid}
   end
 end

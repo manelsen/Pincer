@@ -5,6 +5,7 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
   alias Pincer.Core.Orchestration.SubAgent
   alias Pincer.Core.Orchestration.SubAgentRegistry
   alias Pincer.Infra.PubSub
+  alias Pincer.Test.Support.SyncHelpers
 
   defmodule ToolRegistryStub do
     @behaviour Pincer.Ports.ToolRegistry
@@ -197,7 +198,14 @@ defmodule Pincer.Core.Orchestration.SubAgentTest do
   end
 
   setup do
-    Application.ensure_all_started(:pincer)
+    SyncHelpers.ensure_started!([
+      Pincer.Utils.ETSTableHeir,
+      PubSub,
+      Blackboard,
+      SubAgentRegistry,
+      {Task.Supervisor, name: Pincer.Core.TaskSupervisor}
+    ])
+
     agent = start_supervised!({Agent, fn -> :ok end})
     Application.put_env(:pincer, :sub_agent_test_agent, agent)
     Blackboard.reset()

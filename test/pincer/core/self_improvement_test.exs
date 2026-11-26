@@ -1,9 +1,10 @@
 defmodule Pincer.Core.SelfImprovementTest do
   use ExUnit.Case, async: false
   alias Pincer.Ports.Storage
+  alias Pincer.Test.Support.SyncHelpers
 
   setup do
-    Application.ensure_all_started(:pincer)
+    SyncHelpers.ensure_started!({Pincer.Infra.SQLite, db_path: ":memory:"})
 
     # Clean up graph nodes for a deterministic learnings list.
     :ok = Pincer.Infra.SQLite.execute("DELETE FROM edges")

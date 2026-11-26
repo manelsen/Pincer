@@ -3,6 +3,7 @@ defmodule Pincer.LLM.CooldownRoutingTest do
 
   alias Pincer.Core.LLM.CooldownStore
   alias Pincer.LLM.CooldownRouting
+  alias Pincer.Test.Support.LLMHelpers
 
   @registry %{
     "primary" => %{adapter: __MODULE__, default_model: "m"},
@@ -11,18 +12,10 @@ defmodule Pincer.LLM.CooldownRoutingTest do
 
   setup do
     CooldownStore.clear_provider("primary")
-
-    previous = Application.get_env(:pincer, :llm_providers)
-    Application.put_env(:pincer, :llm_providers, @registry)
+    LLMHelpers.put_providers!(@registry)
 
     on_exit(fn ->
       CooldownStore.clear_provider("primary")
-
-      if previous do
-        Application.put_env(:pincer, :llm_providers, previous)
-      else
-        Application.delete_env(:pincer, :llm_providers)
-      end
     end)
 
     :ok
@@ -69,7 +62,7 @@ defmodule Pincer.LLM.CooldownRoutingTest do
     end
 
     test "returns an empty map when the registry is not a map" do
-      Application.put_env(:pincer, :llm_providers, :bogus)
+      LLMHelpers.put_providers!(:bogus)
 
       assert CooldownRouting.provider_registry() == %{}
     end

@@ -6,35 +6,22 @@ defmodule Pincer.Core.Project.DiagnosticTest do
   alias Pincer.Core.Orchestration.Blackboard
   alias Pincer.Core.Project.Server
   alias Pincer.Test.ProjectServer
+  alias Pincer.Test.Support.LLMHelpers
+  alias Pincer.Test.Support.SyncHelpers
 
   setup :set_mox_from_context
 
   setup do
-    original_providers = Application.get_env(:pincer, :llm_providers)
-    original_default = Application.get_env(:pincer, :default_llm_provider)
+    LLMHelpers.put_providers!(
+      %{"test" => LLMHelpers.mock_provider_config()},
+      default: "test"
+    )
 
-    Application.put_env(:pincer, :llm_providers, %{
-      "test" => %{
-        adapter: Pincer.LLM.ClientMock,
-        base_url: "http://mock",
-        default_model: "test-model",
-        env_key: "MOCK_KEY"
-      }
-    })
-
-    Application.put_env(:pincer, :default_llm_provider, "test")
-
-    case Process.whereis(Blackboard) do
-      nil -> Blackboard.start_link([])
-      _ -> :ok
-    end
-
+    SyncHelpers.ensure_started!(Blackboard)
     Blackboard.reset()
     CooldownStore.reset()
 
     on_exit(fn ->
-      Application.put_env(:pincer, :llm_providers, original_providers)
-      Application.put_env(:pincer, :default_llm_provider, original_default)
       CooldownStore.reset()
     end)
 
@@ -116,18 +103,12 @@ defmodule Pincer.Core.Project.DiagnosticTest do
     assert state.last_error == nil
   end
 
-  defp wait_for_status(id, target_status, attempts \\ 20) do
-    if attempts == 0 do
-      flunk("Timeout waiting for status #{target_status}")
-    else
-      case Server.get_status(id) do
-        {:ok, %{status: ^target_status}} ->
-          :ok
-
-        _ ->
-          Process.sleep(100)
-          wait_for_status(id, target_status, attempts - 1)
-      end
-    end
+  defp wait_for_status(id, target_status) do
+    SyncHelpers.eventually(
+      fn -> match?({:ok, %{status: ^target_status}}, Server.get_status(id)) end,
+      timeout: 2_000,
+      interval: 10,
+      message: "Timeout waiting for status #{target_status}"
+    )
   end
 end

@@ -4,6 +4,8 @@ defmodule Pincer.Core.ExecutorMemoryRecallTest do
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.Executor
   alias Pincer.Core.MemoryObservability
+  alias Pincer.Test.Support.LLMHelpers
+  alias Pincer.Test.Support.SyncHelpers
 
   defmodule MemoryProvider do
     use Pincer.Test.Support.LLMProviderDefaults
@@ -169,7 +171,16 @@ defmodule Pincer.Core.ExecutorMemoryRecallTest do
   end
 
   setup do
-    Application.ensure_all_started(:pincer)
+    SyncHelpers.ensure_started!([
+      Pincer.Utils.ETSTableHeir,
+      Pincer.Infra.PubSub,
+      MemoryObservability,
+      Pincer.Core.CircuitBreaker,
+      Pincer.Core.RateLimiter,
+      Pincer.Core.HookDispatcher,
+      {Task.Supervisor, name: Pincer.Core.TaskSupervisor}
+    ])
+
     :ok = MemoryObservability.reset()
 
     tmp =
@@ -192,28 +203,21 @@ defmodule Pincer.Core.ExecutorMemoryRecallTest do
       """
     )
 
-    original_storage = Application.get_env(:pincer, :storage_adapter)
-    original_providers = Application.get_env(:pincer, :llm_providers)
-    original_default = Application.get_env(:pincer, :default_llm_provider)
+    LLMHelpers.put_app_env!(:storage_adapter, StorageStub)
+    LLMHelpers.put_app_env!(:executor_memory_recall_test_pid, self())
 
-    Application.put_env(:pincer, :storage_adapter, StorageStub)
-    Application.put_env(:pincer, :executor_memory_recall_test_pid, self())
-
-    Application.put_env(:pincer, :llm_providers, %{
-      "exec_memory" => %{
-        adapter: MemoryProvider,
-        env_key: "MOCK_KEY",
-        default_model: "memory-model"
-      }
-    })
-
-    Application.put_env(:pincer, :default_llm_provider, "exec_memory")
+    LLMHelpers.put_providers!(
+      %{
+        "exec_memory" => %{
+          adapter: MemoryProvider,
+          env_key: "MOCK_KEY",
+          default_model: "memory-model"
+        }
+      },
+      default: "exec_memory"
+    )
 
     on_exit(fn ->
-      Application.put_env(:pincer, :storage_adapter, original_storage)
-      Application.put_env(:pincer, :llm_providers, original_providers)
-      Application.put_env(:pincer, :default_llm_provider, original_default)
-      Application.delete_env(:pincer, :executor_memory_recall_test_pid)
       File.rm_rf!(tmp)
     end)
 

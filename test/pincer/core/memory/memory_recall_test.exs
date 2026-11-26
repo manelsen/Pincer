@@ -4,6 +4,7 @@ defmodule Pincer.Core.Memory.MemoryRecallTest do
   alias Pincer.Core.AgentPaths
   alias Pincer.Core.MemoryObservability
   alias Pincer.Core.Memory.MemoryRecall
+  alias Pincer.Test.Support.SyncHelpers
 
   defmodule StorageStub do
     def memory_report(_limit), do: {:ok, %{}}
@@ -117,7 +118,7 @@ defmodule Pincer.Core.Memory.MemoryRecallTest do
   end
 
   setup do
-    Application.ensure_all_started(:pincer)
+    SyncHelpers.ensure_started!(MemoryObservability)
     :ok = MemoryObservability.reset()
 
     tmp =

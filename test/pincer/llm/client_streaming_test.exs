@@ -2,6 +2,7 @@ defmodule Pincer.LLM.ClientStreamingTest do
   use ExUnit.Case
 
   alias Pincer.LLM.Client
+  alias Pincer.Test.Support.LLMHelpers
 
   defmodule MockStreamingAdapter do
     use Pincer.Test.Support.LLMProviderDefaults
@@ -24,21 +25,18 @@ defmodule Pincer.LLM.ClientStreamingTest do
   end
 
   setup do
-    Application.put_env(:pincer, :llm_providers, %{
-      "stream_provider" => %{
-        adapter: MockStreamingAdapter,
-        env_key: "STREAM_API_KEY",
-        default_model: "stream-model"
-      }
-    })
+    LLMHelpers.put_providers!(
+      %{
+        "stream_provider" => %{
+          adapter: MockStreamingAdapter,
+          env_key: "STREAM_API_KEY",
+          default_model: "stream-model"
+        }
+      },
+      default: "stream_provider"
+    )
 
-    Application.put_env(:pincer, :default_llm_provider, "stream_provider")
-    System.put_env("STREAM_API_KEY", "stream_key_123")
-
-    on_exit(fn ->
-      Application.delete_env(:pincer, :llm_providers)
-      Application.delete_env(:pincer, :default_llm_provider)
-    end)
+    LLMHelpers.put_system_env!("STREAM_API_KEY", "stream_key_123")
 
     :ok
   end

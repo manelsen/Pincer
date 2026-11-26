@@ -118,12 +118,8 @@ defmodule Pincer.Core.Project.ServerDurabilityTest do
              })
   end
 
-  defp wait_until(predicate, attempts \\ 50) do
-    cond do
-      predicate.() -> true
-      attempts == 0 -> false
-      true -> Process.sleep(20) && wait_until(predicate, attempts - 1)
-    end
+  defp wait_until(predicate) do
+    Pincer.Test.Support.SyncHelpers.eventually(predicate, timeout: 1_000, interval: 20)
   end
 
   defp unique_id(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"

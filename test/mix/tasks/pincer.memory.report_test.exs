@@ -6,11 +6,12 @@ defmodule Mix.Tasks.Pincer.MemoryReportTest do
   alias Pincer.Core.Telemetry
   alias Pincer.Infra.SQLite
   alias Pincer.Adapters.Storage.SQLite, as: SQLiteStorage
+  alias Pincer.Test.Support.SyncHelpers
 
   @task "pincer.memory.report"
 
   setup do
-    Application.ensure_all_started(:pincer)
+    SyncHelpers.ensure_started!([MemoryObservability, {SQLite, db_path: ":memory:"}])
     :ok = MemoryObservability.reset()
 
     :ok = SQLite.execute("DELETE FROM edges")

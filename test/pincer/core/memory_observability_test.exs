@@ -3,9 +3,10 @@ defmodule Pincer.Core.MemoryObservabilityTest do
 
   alias Pincer.Core.MemoryObservability
   alias Pincer.Core.Telemetry
+  alias Pincer.Test.Support.SyncHelpers
 
   setup do
-    Application.ensure_all_started(:pincer)
+    SyncHelpers.ensure_started!(MemoryObservability)
     :ok = MemoryObservability.reset()
     :ok
   end

@@ -2,6 +2,7 @@ defmodule Pincer.LLM.RetryPolicyTest do
   use ExUnit.Case, async: false
 
   alias Pincer.LLM.Client
+  alias Pincer.Test.Support.LLMHelpers
 
   defmodule RetryAdapter do
     use Pincer.Test.Support.LLMProviderDefaults
@@ -63,39 +64,16 @@ defmodule Pincer.LLM.RetryPolicyTest do
   end
 
   setup do
-    original_providers = Application.get_env(:pincer, :llm_providers)
-    original_default = Application.get_env(:pincer, :default_llm_provider)
-    original_retry = Application.get_env(:pincer, :llm_retry)
+    LLMHelpers.put_default_provider!("retry_provider")
 
-    Application.put_env(:pincer, :default_llm_provider, "retry_provider")
-
-    Application.put_env(:pincer, :llm_retry,
+    LLMHelpers.put_app_env!(
+      :llm_retry,
       max_retries: 2,
       initial_backoff: 5,
       max_backoff: 30,
       max_elapsed_ms: 3_000,
       jitter_ratio: 0.0
     )
-
-    on_exit(fn ->
-      if original_providers do
-        Application.put_env(:pincer, :llm_providers, original_providers)
-      else
-        Application.delete_env(:pincer, :llm_providers)
-      end
-
-      if original_default do
-        Application.put_env(:pincer, :default_llm_provider, original_default)
-      else
-        Application.delete_env(:pincer, :default_llm_provider)
-      end
-
-      if original_retry do
-        Application.put_env(:pincer, :llm_retry, original_retry)
-      else
-        Application.delete_env(:pincer, :llm_retry)
-      end
-    end)
 
     :ok
   end
@@ -136,33 +114,9 @@ defmodule Pincer.LLM.RetryPolicyTest do
   end
 
   test "handles terminal HTTP 400 without crashing when retry/cooldown configs are malformed lists" do
-    original_llm_cooldown = Application.get_env(:pincer, :llm_cooldown)
-    original_auth_profile_cooldown = Application.get_env(:pincer, :auth_profile_cooldown)
-    original_auth_key = System.get_env("TEST_RETRY_AUTH_PRIMARY")
+    LLMHelpers.put_system_env!("TEST_RETRY_AUTH_PRIMARY", "test-auth-key")
 
-    on_exit(fn ->
-      if is_nil(original_llm_cooldown) do
-        Application.delete_env(:pincer, :llm_cooldown)
-      else
-        Application.put_env(:pincer, :llm_cooldown, original_llm_cooldown)
-      end
-
-      if is_nil(original_auth_profile_cooldown) do
-        Application.delete_env(:pincer, :auth_profile_cooldown)
-      else
-        Application.put_env(:pincer, :auth_profile_cooldown, original_auth_profile_cooldown)
-      end
-
-      if is_nil(original_auth_key) do
-        System.delete_env("TEST_RETRY_AUTH_PRIMARY")
-      else
-        System.put_env("TEST_RETRY_AUTH_PRIMARY", original_auth_key)
-      end
-    end)
-
-    System.put_env("TEST_RETRY_AUTH_PRIMARY", "test-auth-key")
-
-    Application.put_env(:pincer, :llm_providers, %{
+    LLMHelpers.put_providers!(%{
       "retry_provider" => %{
         adapter: RetryAdapter,
         default_model: "retry-model",
@@ -171,10 +125,10 @@ defmodule Pincer.LLM.RetryPolicyTest do
       }
     })
 
-    Application.put_env(:pincer, :llm_retry, [%{"max_retries" => 0}])
-    Application.put_env(:pincer, :llm_cooldown, [%{"durations_ms" => %{"http_400" => 1_000}}])
+    LLMHelpers.put_app_env!(:llm_retry, [%{"max_retries" => 0}])
+    LLMHelpers.put_app_env!(:llm_cooldown, [%{"durations_ms" => %{"http_400" => 1_000}}])
 
-    Application.put_env(:pincer, :auth_profile_cooldown, [
+    LLMHelpers.put_app_env!(:auth_profile_cooldown, [
       %{"durations_ms" => %{"http_400" => 1_000}}
     ])
 
@@ -299,7 +253,7 @@ defmodule Pincer.LLM.RetryPolicyTest do
   defp put_provider_scenario(scenario) do
     Process.delete(:retry_policy_call_number)
 
-    Application.put_env(:pincer, :llm_providers, %{
+    LLMHelpers.put_providers!(%{
       "retry_provider" => %{
         adapter: RetryAdapter,
         default_model: "retry-model",

@@ -13,6 +13,7 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
   alias Pincer.Core.Session.History
   alias Pincer.LLM.Providers.Google
   alias PincerPorts.Structs.IncomingMessage
+  alias Pincer.Test.Support.LLMHelpers
 
   defmodule AttachmentAdapter do
     @behaviour PincerPorts.Attachments
@@ -66,23 +67,6 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
   end
 
   setup do
-    original_providers = Application.get_env(:pincer, :llm_providers)
-    original_default = Application.get_env(:pincer, :default_llm_provider)
-
-    on_exit(fn ->
-      if is_nil(original_providers) do
-        Application.delete_env(:pincer, :llm_providers)
-      else
-        Application.put_env(:pincer, :llm_providers, original_providers)
-      end
-
-      if is_nil(original_default) do
-        Application.delete_env(:pincer, :default_llm_provider)
-      else
-        Application.put_env(:pincer, :default_llm_provider, original_default)
-      end
-    end)
-
     :ok
   end
 
@@ -144,11 +128,10 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
 
       fake_fetcher = fn _url -> {:ok, fake_b64} end
 
-      Application.put_env(:pincer, :llm_providers, %{
-        "test_multimodal" => %{adapter: nil, supports_files: true}
-      })
-
-      Application.put_env(:pincer, :default_llm_provider, "test_multimodal")
+      LLMHelpers.put_providers!(
+        %{"test_multimodal" => %{adapter: nil, supports_files: true}},
+        default: "test_multimodal"
+      )
 
       {:ok, _} =
         Executor.start(session_pid, session_id, history,
@@ -158,10 +141,6 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
         )
 
       assert_receive {:executor_finished, _, "Summary done", _usage}, 2_000
-
-      # Restore env
-      Application.delete_env(:pincer, :default_llm_provider)
-      Application.delete_env(:pincer, :llm_providers)
     end
 
     test "converts attachment_ref to descriptive text when provider does not support files" do
@@ -195,11 +174,10 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
         flunk("file_fetcher should not be called for non-supporting providers")
       end
 
-      Application.put_env(:pincer, :llm_providers, %{
-        "test_text_only" => %{adapter: nil, supports_files: false}
-      })
-
-      Application.put_env(:pincer, :default_llm_provider, "test_text_only")
+      LLMHelpers.put_providers!(
+        %{"test_text_only" => %{adapter: nil, supports_files: false}},
+        default: "test_text_only"
+      )
 
       {:ok, _} =
         Executor.start(session_pid, session_id, history,
@@ -209,9 +187,6 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
         )
 
       assert_receive {:executor_finished, _, _, _usage}, 2_000
-
-      Application.delete_env(:pincer, :default_llm_provider)
-      Application.delete_env(:pincer, :llm_providers)
     end
 
     test "converts text attachment_ref to inline text even when provider does not support files" do
@@ -239,11 +214,10 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
 
       fetcher = fn _url -> {:ok, Base.encode64("line one\nline two")} end
 
-      Application.put_env(:pincer, :llm_providers, %{
-        "test_text_only" => %{adapter: nil, supports_files: false}
-      })
-
-      Application.put_env(:pincer, :default_llm_provider, "test_text_only")
+      LLMHelpers.put_providers!(
+        %{"test_text_only" => %{adapter: nil, supports_files: false}},
+        default: "test_text_only"
+      )
 
       {:ok, _} =
         Executor.start(session_pid, session_id, history,
@@ -253,9 +227,6 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
         )
 
       assert_receive {:executor_finished, _, "Handled", _usage}, 2_000
-
-      Application.delete_env(:pincer, :default_llm_provider)
-      Application.delete_env(:pincer, :llm_providers)
     end
 
     test "skips download and returns text for oversized attachments" do
@@ -286,11 +257,10 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
 
       never_called = fn _url -> flunk("Should not download oversized file") end
 
-      Application.put_env(:pincer, :llm_providers, %{
-        "test_oversize" => %{adapter: nil, supports_files: true}
-      })
-
-      Application.put_env(:pincer, :default_llm_provider, "test_oversize")
+      LLMHelpers.put_providers!(
+        %{"test_oversize" => %{adapter: nil, supports_files: true}},
+        default: "test_oversize"
+      )
 
       {:ok, _} =
         Executor.start(session_pid, session_id, history,
@@ -300,9 +270,6 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
         )
 
       assert_receive {:executor_finished, _, "Noted", _usage}, 2_000
-
-      Application.delete_env(:pincer, :default_llm_provider)
-      Application.delete_env(:pincer, :llm_providers)
     end
 
     test "returns error text when download fails" do
@@ -329,11 +296,10 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
 
       failing_fetcher = fn _url -> {:error, "connection refused"} end
 
-      Application.put_env(:pincer, :llm_providers, %{
-        "test_dl_fail" => %{adapter: nil, supports_files: true}
-      })
-
-      Application.put_env(:pincer, :default_llm_provider, "test_dl_fail")
+      LLMHelpers.put_providers!(
+        %{"test_dl_fail" => %{adapter: nil, supports_files: true}},
+        default: "test_dl_fail"
+      )
 
       {:ok, _} =
         Executor.start(session_pid, session_id, history,
@@ -343,9 +309,6 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
         )
 
       assert_receive {:executor_finished, _, "Handled", _usage}, 2_000
-
-      Application.delete_env(:pincer, :default_llm_provider)
-      Application.delete_env(:pincer, :llm_providers)
     end
 
     test "plain string messages pass through unchanged" do
@@ -384,11 +347,10 @@ defmodule Pincer.Multimodal.AttachmentIntegrationTest do
         simple_llm_stream("Done")
       end)
 
-      Application.put_env(:pincer, :llm_providers, %{
-        "test_hist" => %{adapter: nil, supports_files: true}
-      })
-
-      Application.put_env(:pincer, :default_llm_provider, "test_hist")
+      LLMHelpers.put_providers!(
+        %{"test_hist" => %{adapter: nil, supports_files: true}},
+        default: "test_hist"
+      )
 
       {:ok, _} =
         Executor.start(session_pid, session_id, history,

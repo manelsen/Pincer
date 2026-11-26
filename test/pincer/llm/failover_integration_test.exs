@@ -3,6 +3,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
 
   alias Pincer.Core.LLM.CooldownStore
   alias Pincer.LLM.Client
+  alias Pincer.Test.Support.LLMHelpers
 
   defmodule FailoverAdapter do
     use Pincer.Test.Support.LLMProviderDefaults
@@ -84,16 +85,12 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
   end
 
   setup do
-    original_providers = Application.get_env(:pincer, :llm_providers)
-    original_default = Application.get_env(:pincer, :default_llm_provider)
-    original_retry = Application.get_env(:pincer, :llm_retry)
-    original_cooldown = Application.get_env(:pincer, :llm_cooldown)
-
     CooldownStore.reset()
 
-    Application.put_env(:pincer, :default_llm_provider, "p1")
+    LLMHelpers.put_default_provider!("p1")
 
-    Application.put_env(:pincer, :llm_retry,
+    LLMHelpers.put_app_env!(
+      :llm_retry,
       max_retries: 0,
       initial_backoff: 1,
       max_backoff: 1,
@@ -101,31 +98,9 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
       jitter_ratio: 0.0
     )
 
+    LLMHelpers.put_app_env!(:llm_cooldown, Application.get_env(:pincer, :llm_cooldown))
+
     on_exit(fn ->
-      if original_providers do
-        Application.put_env(:pincer, :llm_providers, original_providers)
-      else
-        Application.delete_env(:pincer, :llm_providers)
-      end
-
-      if original_default do
-        Application.put_env(:pincer, :default_llm_provider, original_default)
-      else
-        Application.delete_env(:pincer, :default_llm_provider)
-      end
-
-      if original_retry do
-        Application.put_env(:pincer, :llm_retry, original_retry)
-      else
-        Application.delete_env(:pincer, :llm_retry)
-      end
-
-      if original_cooldown do
-        Application.put_env(:pincer, :llm_cooldown, original_cooldown)
-      else
-        Application.delete_env(:pincer, :llm_cooldown)
-      end
-
       CooldownStore.reset()
     end)
 
@@ -133,7 +108,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
   end
 
   test "falls back deterministically model->provider for retryable errors" do
-    Application.put_env(:pincer, :llm_providers, %{
+    LLMHelpers.put_providers!(%{
       "p1" => %{
         adapter: FailoverAdapter,
         provider_id: "p1",
@@ -158,7 +133,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
   end
 
   test "stops immediately for terminal class without fallback" do
-    Application.put_env(:pincer, :llm_providers, %{
+    LLMHelpers.put_providers!(%{
       "p1" => %{
         adapter: FailoverAdapter,
         provider_id: "p1",
@@ -191,7 +166,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
       }
     )
 
-    Application.put_env(:pincer, :llm_providers, %{
+    LLMHelpers.put_providers!(%{
       "p1" => %{
         adapter: FailoverAdapter,
         provider_id: "p1",
@@ -224,7 +199,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
   end
 
   test "stream path follows deterministic failover chain without dropping to chat path" do
-    Application.put_env(:pincer, :llm_providers, %{
+    LLMHelpers.put_providers!(%{
       "p1" => %{
         adapter: StreamParityAdapter,
         provider_id: "p1",
@@ -261,7 +236,7 @@ defmodule Pincer.LLM.FailoverIntegrationTest do
       }
     )
 
-    Application.put_env(:pincer, :llm_providers, %{
+    LLMHelpers.put_providers!(%{
       "p1" => %{
         adapter: StreamParityAdapter,
         provider_id: "p1",

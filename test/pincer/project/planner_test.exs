@@ -3,37 +3,15 @@ defmodule Pincer.Core.Project.PlannerTest do
   import Mox
 
   alias Pincer.Core.Project.Planner
+  alias Pincer.Test.Support.LLMHelpers
 
   setup :set_mox_from_context
 
   setup do
-    original_providers = Application.get_env(:pincer, :llm_providers)
-    original_default = Application.get_env(:pincer, :default_llm_provider)
-
-    Application.put_env(:pincer, :llm_providers, %{
-      "test" => %{
-        adapter: Pincer.LLM.ClientMock,
-        base_url: "http://mock",
-        default_model: "test-model",
-        env_key: "MOCK_KEY"
-      }
-    })
-
-    Application.put_env(:pincer, :default_llm_provider, "test")
-
-    on_exit(fn ->
-      if is_nil(original_providers) do
-        Application.delete_env(:pincer, :llm_providers)
-      else
-        Application.put_env(:pincer, :llm_providers, original_providers)
-      end
-
-      if is_nil(original_default) do
-        Application.delete_env(:pincer, :default_llm_provider)
-      else
-        Application.put_env(:pincer, :default_llm_provider, original_default)
-      end
-    end)
+    LLMHelpers.put_providers!(
+      %{"test" => LLMHelpers.mock_provider_config()},
+      default: "test"
+    )
 
     :ok
   end

@@ -2,6 +2,7 @@ defmodule Pincer.Core.Introspection.KernelTest do
   use ExUnit.Case, async: false
 
   alias Pincer.Core.Introspection.Kernel
+  alias Pincer.Test.Support.SyncHelpers
 
   @agent "kernel_test_agent"
 
@@ -91,16 +92,9 @@ defmodule Pincer.Core.Introspection.KernelTest do
     start_supervised!({Kernel, Keyword.merge(defaults, opts)})
   end
 
-  defp eventually(fun, attempts \\ 200)
-  defp eventually(_fun, 0), do: false
-
-  defp eventually(fun, attempts) do
-    if fun.() do
-      true
-    else
-      Process.sleep(5)
-      eventually(fun, attempts - 1)
-    end
+  defp eventually(fun) do
+    SyncHelpers.eventually(fun, timeout: 1_000, interval: 5)
+    true
   end
 
   describe "lifecycle" do
@@ -126,29 +120,32 @@ defmodule Pincer.Core.Introspection.KernelTest do
 
   describe "session registration" do
     test "registers and monitors a session PID" do
-      start_kernel()
+      pid = start_kernel()
       Kernel.register_session(@agent, self())
-      # Give cast time to process
-      Process.sleep(20)
+      SyncHelpers.barrier(pid)
 
       # Trigger a state update to verify broadcast works
-      send_tick_and_reflect()
+      send_tick_and_reflect(pid)
     end
 
     test "cleans up on session DOWN" do
       kernel_pid = start_kernel()
-      {pid, ref} = spawn_monitor(fn -> Process.sleep(:infinity) end)
+
+      {pid, ref} =
+        spawn_monitor(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
 
       Kernel.register_session(@agent, pid)
-      Process.sleep(20)
+      SyncHelpers.barrier(kernel_pid)
 
       Process.exit(pid, :kill)
       receive do: ({:DOWN, ^ref, _, _, _} -> :ok)
-      Process.sleep(50)
 
       # Kernel should have removed the dead session and still be alive
-      state = :sys.get_state(kernel_pid)
-      refute MapSet.member?(state.session_pids, pid)
+      eventually(fn -> not MapSet.member?(:sys.get_state(kernel_pid).session_pids, pid) end)
       assert Kernel.get_self_state(@agent) != nil
     end
   end
@@ -158,9 +155,8 @@ defmodule Pincer.Core.Introspection.KernelTest do
       pid = start_kernel()
       trace = %{"steps" => [%{"kind" => "tool"}, %{"kind" => "error"}]}
       Kernel.report_trace(@agent, trace)
-      Process.sleep(20)
 
-      state = :sys.get_state(pid)
+      state = SyncHelpers.barrier(pid)
       assert state.last_trace == trace
     end
 
@@ -174,9 +170,8 @@ defmodule Pincer.Core.Introspection.KernelTest do
 
       trace = %{"steps" => [%{"kind" => "tool"}, %{"kind" => "error"}, %{"kind" => "tool"}]}
       Kernel.report_trace(@agent, trace)
-      Process.sleep(20)
 
-      state = :sys.get_state(pid)
+      state = SyncHelpers.barrier(pid)
       assert state.stall_hold_until == nil
     end
   end
@@ -185,77 +180,78 @@ defmodule Pincer.Core.Introspection.KernelTest do
     test "transitions wakefulness to :active on :working" do
       pid = start_kernel()
       Kernel.report_activity(@agent, :working)
-      Process.sleep(20)
 
-      state = :sys.get_state(pid)
+      state = SyncHelpers.barrier(pid)
       assert state.wakefulness == :active
     end
 
     test "transitions wakefulness to :idle on :idle" do
       pid = start_kernel()
       Kernel.report_activity(@agent, :working)
-      Process.sleep(10)
+      SyncHelpers.barrier(pid)
       Kernel.report_activity(@agent, :idle)
-      Process.sleep(20)
 
-      state = :sys.get_state(pid)
+      state = SyncHelpers.barrier(pid)
       assert state.wakefulness == :idle
     end
   end
 
   describe "tick and reflection" do
     test "triggers reflection when trace exists and throttle expired" do
-      pid = start_kernel(tick_interval: 50, reflection_throttle_ms: 0)
+      pid = start_kernel(tick_interval: 20, reflection_throttle_ms: 0)
 
       trace = %{"steps" => [%{"kind" => "tool"}, %{"kind" => "error"}, %{"kind" => "tool"}]}
       Kernel.report_trace(@agent, trace)
-      # Wait for tick + reflection task
-      Process.sleep(200)
 
-      state = :sys.get_state(pid)
-      assert state.last_reflection_at != nil
-      assert length(state.reflection_history) > 0
+      eventually(fn ->
+        s = :sys.get_state(pid)
+        s.last_reflection_at != nil and length(s.reflection_history) > 0
+      end)
     end
 
     test "skips reflection when no trace" do
-      pid = start_kernel(tick_interval: 50, reflection_throttle_ms: 0)
-      Process.sleep(150)
+      pid = start_kernel(tick_interval: 600_000, reflection_throttle_ms: 0)
+      send(pid, :tick)
+      send(pid, :tick)
 
-      state = :sys.get_state(pid)
+      state = SyncHelpers.barrier(pid)
       assert state.last_reflection_at == nil
     end
 
     test "skips shallow traces" do
-      pid = start_kernel(tick_interval: 50, reflection_throttle_ms: 0)
+      pid = start_kernel(tick_interval: 600_000, reflection_throttle_ms: 0)
 
       trace = %{"steps" => [%{"kind" => "tool"}]}
       Kernel.report_trace(@agent, trace)
-      Process.sleep(200)
+      send(pid, :tick)
+      send(pid, :tick)
 
-      state = :sys.get_state(pid)
+      state = SyncHelpers.barrier(pid)
       assert state.last_reflection_at == nil
     end
 
     test "respects throttle" do
-      pid = start_kernel(tick_interval: 50, reflection_throttle_ms: 999_999)
+      pid = start_kernel(tick_interval: 600_000, reflection_throttle_ms: 999_999)
 
       trace = %{"steps" => [%{"kind" => "tool"}, %{"kind" => "error"}, %{"kind" => "tool"}]}
       Kernel.report_trace(@agent, trace)
+      SyncHelpers.barrier(pid)
 
       # Manually set a recent reflection
       :sys.replace_state(pid, fn s ->
         %{s | last_reflection_at: System.system_time(:millisecond)}
       end)
 
-      Process.sleep(150)
+      send(pid, :tick)
+      send(pid, :tick)
 
-      state = :sys.get_state(pid)
+      state = SyncHelpers.barrier(pid)
       # Should still have the manually set value, not a new one
       assert state.reflection_history == []
     end
 
     test "broadcasts self_state update to registered sessions" do
-      _pid = start_kernel(tick_interval: 50, reflection_throttle_ms: 0)
+      _pid = start_kernel(tick_interval: 20, reflection_throttle_ms: 0)
       Kernel.register_session(@agent, self())
 
       trace = %{"steps" => [%{"kind" => "tool"}, %{"kind" => "error"}, %{"kind" => "tool"}]}
@@ -268,7 +264,7 @@ defmodule Pincer.Core.Introspection.KernelTest do
     test "handles reflection errors gracefully" do
       pid =
         start_kernel(
-          tick_interval: 50,
+          tick_interval: 20,
           reflection_throttle_ms: 0,
           introspection_client: LLMErrorStub
         )
@@ -289,7 +285,7 @@ defmodule Pincer.Core.Introspection.KernelTest do
     test "enters stall hold after 3 identical reflections" do
       pid =
         start_kernel(
-          tick_interval: 30,
+          tick_interval: 10,
           reflection_throttle_ms: 0,
           introspection_client: LLMStallStub
         )
@@ -297,12 +293,10 @@ defmodule Pincer.Core.Introspection.KernelTest do
       trace = %{"steps" => [%{"kind" => "tool"}, %{"kind" => "error"}, %{"kind" => "tool"}]}
       Kernel.report_trace(@agent, trace)
 
-      # Wait for 3+ reflection cycles
-      Process.sleep(500)
-
-      state = :sys.get_state(pid)
-      assert state.stall_hold_until != nil
-      assert length(state.reflection_history) >= 3
+      eventually(fn ->
+        s = :sys.get_state(pid)
+        s.stall_hold_until != nil and length(s.reflection_history) >= 3
+      end)
     end
   end
 
@@ -326,9 +320,9 @@ defmodule Pincer.Core.Introspection.KernelTest do
     end
   end
 
-  defp send_tick_and_reflect do
-    # Helper — just ensure kernel doesn't crash
-    Process.sleep(50)
+  defp send_tick_and_reflect(pid) do
+    send(pid, :tick)
+    SyncHelpers.barrier(pid)
   end
 
   describe "mood system" do
@@ -336,9 +330,8 @@ defmodule Pincer.Core.Introspection.KernelTest do
       pid = start_kernel()
       trace = %{"steps" => [%{"kind" => "tool"}, %{"kind" => "error"}]}
       Kernel.report_trace(@agent, trace)
-      Process.sleep(30)
 
-      state = :sys.get_state(pid)
+      state = SyncHelpers.barrier(pid)
       assert state.self_state.mood_valence < 0.0
     end
 
@@ -350,46 +343,39 @@ defmodule Pincer.Core.Introspection.KernelTest do
       }
 
       Kernel.report_trace(@agent, trace)
-      Process.sleep(30)
 
-      state = :sys.get_state(pid)
+      state = SyncHelpers.barrier(pid)
       assert state.self_state.mood_valence > 0.0
     end
 
     test "blends LLM mood from reflection" do
-      pid = start_kernel(tick_interval: 50, reflection_throttle_ms: 0)
+      pid = start_kernel(tick_interval: 20, reflection_throttle_ms: 0)
 
       # First set some initial mood via a trace
       trace = %{"steps" => [%{"kind" => "tool"}, %{"kind" => "error"}]}
       Kernel.report_trace(@agent, trace)
-      Process.sleep(30)
 
-      state_before = :sys.get_state(pid)
+      state_before = SyncHelpers.barrier(pid)
       v_before = state_before.self_state.mood_valence
 
-      # Wait for reflection which returns mood_valence: 0.4, mood_arousal: 0.6
-      Process.sleep(200)
-
-      state_after = :sys.get_state(pid)
-      # Should have blended (0.7 * current + 0.3 * 0.4)
-      assert state_after.self_state.mood_valence != v_before
+      eventually(fn ->
+        s = :sys.get_state(pid)
+        s.last_reflection_at != nil and s.self_state.mood_valence != v_before
+      end)
     end
 
     test "decays mood toward zero on tick" do
-      pid = start_kernel(tick_interval: 50, reflection_throttle_ms: 999_999)
+      pid = start_kernel(tick_interval: 600_000, reflection_throttle_ms: 999_999)
 
       # Set a non-zero mood
       trace = %{"steps" => [%{"kind" => "tool"}, %{"kind" => "error"}]}
       Kernel.report_trace(@agent, trace)
-      Process.sleep(30)
 
-      state = :sys.get_state(pid)
+      state = SyncHelpers.barrier(pid)
       v_after_trace = state.self_state.mood_valence
 
-      # Wait for ticks to decay
-      Process.sleep(150)
-
-      state2 = :sys.get_state(pid)
+      send(pid, :tick)
+      state2 = SyncHelpers.barrier(pid)
       # Mood should have moved toward zero
       assert abs(state2.self_state.mood_valence) < abs(v_after_trace)
     end

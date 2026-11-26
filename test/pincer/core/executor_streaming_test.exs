@@ -2,6 +2,8 @@ defmodule Pincer.Core.ExecutorStreamingTest do
   use ExUnit.Case
 
   alias Pincer.Core.Executor
+  alias Pincer.Test.Support.LLMHelpers
+  alias Pincer.Test.Support.SyncHelpers
   alias Pincer.Utils.Tokenizer
 
   defmodule MockStreamProvider do
@@ -635,26 +637,28 @@ defmodule Pincer.Core.ExecutorStreamingTest do
   end
 
   setup do
-    Application.ensure_all_started(:pincer)
+    SyncHelpers.ensure_started!([
+      Pincer.Utils.ETSTableHeir,
+      Pincer.Infra.PubSub,
+      Pincer.Core.MemoryObservability,
+      Pincer.Core.CircuitBreaker,
+      Pincer.Core.RateLimiter,
+      Pincer.Core.HookDispatcher,
+      {Task.Supervisor, name: Pincer.Core.TaskSupervisor}
+    ])
 
-    old_stream_api_key = System.get_env("STREAM_API_KEY")
-    System.put_env("STREAM_API_KEY", "test-stream-key")
+    LLMHelpers.put_system_env!("STREAM_API_KEY", "test-stream-key")
 
-    Application.put_env(:pincer, :llm_providers, %{
-      "exec_stream" => %{
-        adapter: MockStreamProvider,
-        env_key: "STREAM_API_KEY",
-        default_model: "stream-model"
-      }
-    })
-
-    Application.put_env(:pincer, :default_llm_provider, "exec_stream")
-
-    on_exit(fn ->
-      Application.delete_env(:pincer, :llm_providers)
-      Application.delete_env(:pincer, :default_llm_provider)
-      restore_env("STREAM_API_KEY", old_stream_api_key)
-    end)
+    LLMHelpers.put_providers!(
+      %{
+        "exec_stream" => %{
+          adapter: MockStreamProvider,
+          env_key: "STREAM_API_KEY",
+          default_model: "stream-model"
+        }
+      },
+      default: "exec_stream"
+    )
 
     :ok
   end
@@ -882,7 +886,4 @@ defmodule Pincer.Core.ExecutorStreamingTest do
       )
     end
   end
-
-  defp restore_env(key, nil), do: System.delete_env(key)
-  defp restore_env(key, value), do: System.put_env(key, value)
 end

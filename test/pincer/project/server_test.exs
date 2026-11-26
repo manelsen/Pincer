@@ -5,20 +5,16 @@ defmodule Pincer.Core.Project.ServerTest do
   alias Pincer.Core.Project.Server
   alias Pincer.Core.Orchestration.Blackboard
   alias Pincer.Test.ProjectServer
+  alias Pincer.Test.Support.LLMHelpers
+  alias Pincer.Test.Support.SyncHelpers
 
   setup :set_mox_from_context
 
   setup do
-    Application.put_env(:pincer, :llm_providers, %{
-      "test" => %{
-        adapter: Pincer.LLM.ClientMock,
-        base_url: "http://mock",
-        default_model: "test-model",
-        env_key: "MOCK_KEY"
-      }
-    })
-
-    Application.put_env(:pincer, :default_llm_provider, "test")
+    LLMHelpers.put_providers!(
+      %{"test" => LLMHelpers.mock_provider_config()},
+      default: "test"
+    )
 
     # Inicia o Blackboard se não estiver rodando
     case Process.whereis(Blackboard) do
@@ -64,23 +60,23 @@ defmodule Pincer.Core.Project.ServerTest do
     wait_for_status(id, :awaiting_approval)
     Server.approve(id)
 
-    Process.sleep(100)
-    {:ok, state} = Server.get_status(id)
+    state =
+      SyncHelpers.eventually(fn ->
+        case Server.get_status(id) do
+          {:ok, %{status: status} = state} when status in [:running, :completed] -> state
+          _ -> nil
+        end
+      end)
+
     assert state.status in [:running, :completed]
   end
 
-  defp wait_for_status(id, target_status, attempts \\ 10) do
-    if attempts == 0 do
-      flunk("Timeout waiting for status #{target_status} for project #{id}")
-    else
-      case Server.get_status(id) do
-        {:ok, %{status: ^target_status}} ->
-          :ok
-
-        _ ->
-          Process.sleep(100)
-          wait_for_status(id, target_status, attempts - 1)
-      end
-    end
+  defp wait_for_status(id, target_status) do
+    SyncHelpers.eventually(
+      fn -> match?({:ok, %{status: ^target_status}}, Server.get_status(id)) end,
+      timeout: 1_000,
+      interval: 10,
+      message: "Timeout waiting for status #{target_status} for project #{id}"
+    )
   end
 end

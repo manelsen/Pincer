@@ -4,6 +4,7 @@ defmodule Pincer.Adapters.Cron.SchedulerTest do
   import ExUnit.CaptureLog
 
   alias Pincer.Adapters.Cron.Scheduler
+  alias Pincer.Test.Support.SyncHelpers
 
   test "keeps scheduler alive when cron_jobs table is missing" do
     missing_table_fetcher = fn ->
@@ -27,8 +28,7 @@ defmodule Pincer.Adapters.Cron.SchedulerTest do
           )
 
         send(parent, {:started, pid})
-        # Wait for the async tick to log (generous budget for loaded CI)
-        Process.sleep(200)
+        SyncHelpers.barrier(pid)
       end)
 
     pid =
@@ -42,7 +42,7 @@ defmodule Pincer.Adapters.Cron.SchedulerTest do
     second_log =
       capture_log(fn ->
         send(pid, :tick)
-        Process.sleep(100)
+        SyncHelpers.barrier(pid)
       end)
 
     refute second_log =~ "cron_jobs table missing"

@@ -3,20 +3,12 @@ defmodule Pincer.E2E.CIPostureFixtureTest do
 
   alias Pincer.Core.Doctor
   alias Pincer.Core.SecurityAudit
+  alias Pincer.Test.Support.LLMHelpers
 
   @fixture_path Path.expand("../../fixtures/ci_posture/config.yaml", __DIR__)
 
   setup do
-    original_providers = Application.get_env(:pincer, :llm_providers, :__unset__)
-
-    on_exit(fn ->
-      case original_providers do
-        :__unset__ -> Application.delete_env(:pincer, :llm_providers)
-        val -> Application.put_env(:pincer, :llm_providers, val)
-      end
-    end)
-
-    Application.put_env(:pincer, :llm_providers, %{
+    LLMHelpers.put_providers!(%{
       "openrouter" => %{
         adapter: Pincer.LLM.Providers.OpenRouter,
         env_key: "OPENROUTER_API_KEY",

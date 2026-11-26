@@ -2,6 +2,7 @@ defmodule Pincer.Adapters.Tools.TimerServerTest do
   use ExUnit.Case, async: true
 
   alias Pincer.Adapters.Tools.TimerServer
+  alias Pincer.Test.Support.SyncHelpers
 
   setup do
     reg_name = :"timer_reg_#{System.unique_integer([:positive])}"
@@ -23,7 +24,7 @@ defmodule Pincer.Adapters.Tools.TimerServerTest do
     assert length(TimerServer.list(srv)) == 1
 
     assert_receive {:cron_trigger, "wake up"}, 1_000
-    Process.sleep(10)
+    SyncHelpers.eventually(fn -> TimerServer.list(srv) == [] end)
     assert TimerServer.list(srv) == []
   end
 
@@ -40,7 +41,7 @@ defmodule Pincer.Adapters.Tools.TimerServerTest do
 
   test "handles missing session cleanly without crashing", %{srv: srv} do
     assert {:ok, _} = TimerServer.schedule(srv, "missing_sess", "noop", 15)
-    Process.sleep(40)
+    SyncHelpers.eventually(fn -> TimerServer.list(srv) == [] end)
     assert Process.alive?(srv)
     assert TimerServer.list(srv) == []
   end

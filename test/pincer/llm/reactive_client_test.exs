@@ -2,25 +2,25 @@ defmodule Pincer.LLM.ReactiveClientTest do
   use ExUnit.Case, async: false
 
   alias Pincer.LLM.Client
+  alias Pincer.Test.Support.LLMHelpers
 
   defmodule ReactiveMockAdapter do
     use Pincer.Test.Support.LLMProviderDefaults
 
     @impl true
     def chat_completion(_messages, _model, config, _tools) do
-      # Small delay to simulate network
-      Process.sleep(50)
-
       case config[:scenario] do
         :fail_once ->
           if Process.get(:fail_count, 0) == 0 do
             Process.put(:fail_count, 1)
+            notify_attempt(config)
             {:error, {:http_error, 429, "Rate limited"}}
           else
             {:ok, %{"role" => "assistant", "content" => "Success after retry"}, nil}
           end
 
         :always_fail ->
+          notify_attempt(config)
           {:error, {:http_error, 429, "Rate limited"}}
 
         :success ->
@@ -32,17 +32,22 @@ defmodule Pincer.LLM.ReactiveClientTest do
     def stream_completion(_messages, _model, _config, _tools) do
       {:ok, [%{"choices" => [%{"delta" => %{"content" => "stream"}}]}]}
     end
+
+    defp notify_attempt(config) do
+      if pid = config[:notify_pid], do: send(pid, :reactive_attempt_failed)
+    end
   end
 
   setup do
-    orig_providers = Application.get_env(:pincer, :llm_providers)
+    test_pid = self()
 
-    Application.put_env(:pincer, :llm_providers, %{
+    LLMHelpers.put_providers!(%{
       "p1" => %{
         adapter: ReactiveMockAdapter,
         scenario: :always_fail,
         name: "Provider 1",
-        env_key: "K1"
+        env_key: "K1",
+        notify_pid: test_pid
       },
       "p2" => %{
         adapter: ReactiveMockAdapter,
@@ -52,16 +57,8 @@ defmodule Pincer.LLM.ReactiveClientTest do
       }
     })
 
-    System.put_env("K1", "v1")
-    System.put_env("K2", "v2")
-
-    on_exit(fn ->
-      if orig_providers do
-        Application.put_env(:pincer, :llm_providers, orig_providers)
-      else
-        Application.delete_env(:pincer, :llm_providers)
-      end
-    end)
+    LLMHelpers.put_system_env!("K1", "v1")
+    LLMHelpers.put_system_env!("K2", "v2")
 
     :ok
   end
@@ -73,17 +70,12 @@ defmodule Pincer.LLM.ReactiveClientTest do
         Client.chat_completion([], provider: "p1")
       end)
 
-    # Wait for it to fail once (we need a way to know it entered sleep)
-    # Since we use receive-based sleep, we can send a message to it.
-    # But wait, how do we find the process? Task.async gives us the pid in task.pid.
-
-    # Give it time to hit the first 429
-    Process.sleep(100)
+    assert_receive :reactive_attempt_failed, 1_000
 
     # Now change the model by sending a message to the task process
     send(task.pid, {:model_changed, "p2", "default-model"})
 
-    # The task should now return result from p2 almost immediately 
+    # The task should now return result from p2 almost immediately
     # (instead of waiting for the initial 2s backoff)
     result = Task.await(task, 1000)
 
@@ -91,27 +83,21 @@ defmodule Pincer.LLM.ReactiveClientTest do
   end
 
   test "concurrent model changes during backoff apply the latest selection" do
-    providers = Application.get_env(:pincer, :llm_providers, %{})
+    LLMHelpers.put_provider!("p3", %{
+      adapter: ReactiveMockAdapter,
+      scenario: :success,
+      name: "Provider 3",
+      env_key: "K3"
+    })
 
-    Application.put_env(
-      :pincer,
-      :llm_providers,
-      Map.put(providers, "p3", %{
-        adapter: ReactiveMockAdapter,
-        scenario: :success,
-        name: "Provider 3",
-        env_key: "K3"
-      })
-    )
-
-    System.put_env("K3", "v3")
+    LLMHelpers.put_system_env!("K3", "v3")
 
     task =
       Task.async(fn ->
         Client.chat_completion([], provider: "p1")
       end)
 
-    Process.sleep(100)
+    assert_receive :reactive_attempt_failed, 1_000
     send(task.pid, {:model_changed, "p2", "default-model"})
     send(task.pid, {:model_changed, "p3", "default-model"})
 

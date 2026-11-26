@@ -52,7 +52,6 @@ defmodule Pincer.LLM.HotSwapIntegrationTest do
 
     defp do_stream("fail") do
       if pid = :persistent_term.get(@pt_key, nil), do: send(pid, :entered_backoff)
-      Process.sleep(100)
 
       # Wait for a model swap signal or give up after a generous timeout.
       # This mirrors the receive/after block in Pincer.LLM.Client.do_request_with_retry.

@@ -113,7 +113,7 @@ defmodule Pincer.Core.CircuitBreakerTest do
     end
 
     assert CircuitBreaker.state(name) == :open
-    Process.sleep(30)
+    Pincer.Test.Support.SyncHelpers.eventually(fn -> CircuitBreaker.state(name) == :half_open end)
     assert CircuitBreaker.state(name) == :half_open
 
     executions = :atomics.new(1, signed: false)
@@ -159,7 +159,10 @@ defmodule Pincer.Core.CircuitBreakerTest do
           fn -> exit(:probe_exit) end,
           fn -> throw(:probe_throw) end
         ] do
-      Process.sleep(95)
+      Pincer.Test.Support.SyncHelpers.eventually(fn ->
+        CircuitBreaker.state(name) == :half_open
+      end)
+
       assert CircuitBreaker.state(name) == :half_open
 
       caught =
@@ -187,7 +190,7 @@ defmodule Pincer.Core.CircuitBreakerTest do
       CircuitBreaker.call(name, fn -> raise "trip" end)
     end
 
-    Process.sleep(95)
+    Pincer.Test.Support.SyncHelpers.eventually(fn -> CircuitBreaker.state(name) == :half_open end)
     assert CircuitBreaker.state(name) == :half_open
 
     parent = self()
@@ -196,7 +199,10 @@ defmodule Pincer.Core.CircuitBreakerTest do
       spawn_monitor(fn ->
         CircuitBreaker.call(name, fn ->
           send(parent, :probe_started)
-          Process.sleep(:infinity)
+
+          receive do
+            :stop -> :ok
+          end
         end)
       end)
 
@@ -209,21 +215,13 @@ defmodule Pincer.Core.CircuitBreakerTest do
     # Cross-process monitor delivery order is not guaranteed; wait for CircuitBreaker to handle {:DOWN, ...}.
     wait_until(fn -> CircuitBreaker.state(name) == :open end)
 
-    Process.sleep(95)
+    Pincer.Test.Support.SyncHelpers.eventually(fn -> CircuitBreaker.state(name) == :half_open end)
     assert :recovered = CircuitBreaker.call(name, fn -> :recovered end)
     assert CircuitBreaker.state(name) == :closed
   end
 
-  defp wait_until(fun, attempts \\ 100)
-  defp wait_until(fun, 0), do: assert(fun.())
-
-  defp wait_until(fun, attempts) do
-    if fun.() do
-      :ok
-    else
-      Process.sleep(2)
-      wait_until(fun, attempts - 1)
-    end
+  defp wait_until(fun) do
+    Pincer.Test.Support.SyncHelpers.eventually(fun, timeout: 500, interval: 2)
   end
 
   test "allows nested and recursive calls without deadlocking", %{name: name} do
@@ -262,7 +260,7 @@ defmodule Pincer.Core.CircuitBreakerTest do
       CircuitBreaker.call(name, fn -> raise "trip" end)
     end
 
-    Process.sleep(25)
+    Pincer.Test.Support.SyncHelpers.eventually(fn -> CircuitBreaker.state(name) == :half_open end)
     assert CircuitBreaker.state(name) == :half_open
 
     parent = self()
