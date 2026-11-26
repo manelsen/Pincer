@@ -30,6 +30,35 @@ defmodule Pincer.Channels.Telegram.Session do
     )
   end
 
+  @doc """
+  Resolves the `PincerPorts.Session.Context` for a Telegram chat.
+  """
+  @spec context_for_chat(String.t() | integer(), String.t() | nil) ::
+          PincerPorts.Session.Context.t()
+  def context_for_chat(chat_id, chat_type) do
+    channel_config = Application.get_env(:pincer, :telegram_channel_config, %{})
+
+    PincerPorts.Session.resolve(
+      :telegram,
+      %{chat_id: chat_id, chat_type: chat_type},
+      channel_config
+    )
+  end
+
+  @doc """
+  Ensures the core session process for `context` is running.
+  """
+  @spec ensure_core_started(PincerPorts.Session.Context.t()) :: :ok | {:ok, pid()} | {:error, term()}
+  def ensure_core_started(%PincerPorts.Session.Context{} = context) do
+    SessionBridge.ensure_started(context,
+      on_start: fn sid ->
+        Logger.info(
+          "[TELEGRAM] Creating new session: #{sid} (root_agent=#{context.root_agent_id})"
+        )
+      end
+    )
+  end
+
   @impl true
   def init(%{chat_id: chat_id, session_id: session_id} = args)
       when is_binary(session_id) and session_id != "" do
