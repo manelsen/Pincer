@@ -69,4 +69,31 @@ defmodule Pincer.CLI.Test do
       assert Pincer.CLI.backend_name() == Pincer.CLI.Test.FakeBackend
     end
   end
+
+  describe "ANSI styling" do
+    setup do
+      previous = Application.get_env(:elixir, :ansi_enabled)
+
+      on_exit(fn ->
+        if is_nil(previous) do
+          Application.delete_env(:elixir, :ansi_enabled)
+        else
+          Application.put_env(:elixir, :ansi_enabled, previous)
+        end
+      end)
+
+      :ok
+    end
+
+    test "delegates styling to Pincer.Utils.ANSI without inline IO.ANSI calls" do
+      source = File.read!(Path.expand("../../lib/pincer/cli.ex", __DIR__))
+      refute source =~ "IO.ANSI"
+
+      Application.put_env(:elixir, :ansi_enabled, true)
+      assert Pincer.CLI.prompt_label() == "\e[36m[User]: \e[0m"
+
+      Application.put_env(:elixir, :ansi_enabled, false)
+      assert Pincer.CLI.prompt_label() == "[User]: "
+    end
+  end
 end

@@ -12,50 +12,111 @@ defmodule Pincer.Core.UX do
   @type command :: %{name: String.t(), description: String.t()}
   @type shortcut_result :: {:ok, String.t()} | :error
 
-  @commands [
-    %{name: "menu", description: "Show command menu and shortcuts"},
-    %{name: "status", description: "Show current session status"},
-    %{name: "models", description: "Switch AI provider and model"},
-    %{name: "kanban", description: "Show project kanban board"},
-    %{name: "project", description: "Open project manager wizard"},
-    %{name: "ping", description: "Health check"},
-    %{name: "new", description: "Reset the current session"},
-    %{name: "reset", description: "Alias for /new"},
-    %{name: "model", description: "Switch model: /model <provider/model>"},
-    %{name: "think", description: "Thinking level: /think off|low|medium|high"},
-    %{name: "reasoning", description: "Show reasoning: /reasoning on|off"}
+  @command_catalog [
+    %{
+      name: "menu",
+      description: "Show command menu and shortcuts",
+      route: "/menu",
+      aliases: ["help", "commands"]
+    },
+    %{
+      name: "status",
+      description: "Show current session status",
+      route: "/status",
+      aliases: []
+    },
+    %{
+      name: "models",
+      description: "Switch AI provider and model",
+      route: "/models",
+      aliases: []
+    },
+    %{
+      name: "kanban",
+      description: "Show project kanban board",
+      route: "/kanban",
+      aliases: []
+    },
+    %{
+      name: "project",
+      description: "Open project manager wizard",
+      route: "/project",
+      aliases: ["projeto"]
+    },
+    %{
+      name: "ping",
+      description: "Health check",
+      route: "/ping",
+      aliases: []
+    },
+    %{
+      name: "new",
+      description: "Reset the current session",
+      route: "/new",
+      aliases: []
+    },
+    %{
+      name: "reset",
+      description: "Alias for /new",
+      route: "/new",
+      aliases: []
+    },
+    %{
+      name: "model",
+      description: "Switch model: /model <provider/model>",
+      route: "/model",
+      aliases: []
+    },
+    %{
+      name: "think",
+      description: "Thinking level: /think off|low|medium|high",
+      route: "/think",
+      aliases: []
+    },
+    %{
+      name: "reasoning",
+      description: "Show reasoning: /reasoning on|off",
+      route: "/reasoning",
+      aliases: []
+    }
   ]
 
-  @shortcut_routes %{
-    "menu" => "/menu",
-    "/menu" => "/menu",
-    "status" => "/status",
-    "/status" => "/status",
-    "models" => "/models",
-    "/models" => "/models",
-    "kanban" => "/kanban",
-    "/kanban" => "/kanban",
-    "project" => "/project",
-    "/project" => "/project",
-    "projeto" => "/project",
-    "/projeto" => "/project",
-    "ping" => "/ping",
-    "/ping" => "/ping",
-    "help" => "/menu",
-    "/help" => "/menu",
-    "commands" => "/menu",
-    "/commands" => "/menu",
-    "new" => "/new",
-    "/new" => "/new",
-    "reset" => "/new",
-    "/reset" => "/new",
-    "model" => "/model",
-    "/model" => "/model",
-    "think" => "/think",
-    "/think" => "/think",
-    "reasoning" => "/reasoning",
-    "/reasoning" => "/reasoning"
-  }
+  @commands Enum.map(@command_catalog, &%{name: &1.name, description: &1.description})
+
+  @shortcut_routes Map.new(
+                     Enum.flat_map(@command_catalog, fn %{
+                                                          name: name,
+                                                          route: route,
+                                                          aliases: aliases
+                                                        } ->
+                       Enum.flat_map([name | aliases], fn trigger ->
+                         [{trigger, route}, {"/#{trigger}", route}]
+                       end)
+                     end)
+                   )
+
+  @max_name_width Enum.reduce(@command_catalog, 0, fn %{name: name}, acc ->
+                    max(acc, String.length(name))
+                  end)
+
+  @help_text (
+               command_lines =
+                 Enum.map(@command_catalog, fn %{name: name, description: description} ->
+                   "/#{String.pad_trailing(name, @max_name_width)} - #{description}"
+                 end)
+
+               shortcut_names = Enum.map_join(@command_catalog, ", ", & &1.name)
+
+               (["Command Menu" | command_lines] ++
+                  [
+                    "",
+                    "Accessibility note:",
+                    "- Use short, explicit commands.",
+                    "- Type #{shortcut_names} with or without /.",
+                    "- Menu button always opens /menu."
+                  ])
+               |> Enum.join("\n")
+             )
 
   @doc "Returns the list of available commands with descriptions."
   @spec commands() :: [command()]
@@ -63,24 +124,7 @@ defmodule Pincer.Core.UX do
 
   @doc "Returns the formatted help text for a given channel."
   @spec help_text(atom()) :: String.t()
-  def help_text(_channel \\ :generic) do
-    """
-    Command Menu
-    /menu   - Open this menu
-    /status - Show session status
-    /models - Switch provider/model
-    /kanban - Show session kanban board
-    /project - Start/resume project manager wizard
-    /ping   - Check if the bot is alive
-    /new    - Reset the session
-
-    Accessibility note:
-    - Use short, explicit commands.
-    - Type menu, status, models, kanban, project or ping with or without /.
-    - Menu button always opens /menu.
-    """
-    |> String.trim()
-  end
+  def help_text(_channel \\ :generic), do: @help_text
 
   @doc """
   Resolves a user's text input to a known shortcut command.

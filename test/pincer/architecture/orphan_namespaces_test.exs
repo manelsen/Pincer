@@ -49,7 +49,7 @@ defmodule Pincer.Architecture.OrphanNamespacesTest do
     assert Keyword.get(app_opts, :exports) == []
 
     cli_opts = extract_boundary_opts!("lib/pincer/cli.ex")
-    assert Enum.sort(dep_names(cli_opts)) == Enum.sort([Pincer.Core, Pincer.Plugin])
+    assert Enum.sort(dep_names(cli_opts)) == Enum.sort([Pincer.Core, Pincer.Plugin, Pincer.Utils])
     assert Keyword.get(cli_opts, :exports) == []
   end
 

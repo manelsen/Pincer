@@ -58,6 +58,7 @@ defmodule Pincer.Utils do
       NetworkGuard,
       Time,
       Value,
+      ANSI,
       LoggerFormatter,
       MessageSplitter,
       TokenCounter,
