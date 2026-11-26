@@ -198,9 +198,12 @@ nothing (it consumes Core, not the reverse).
   `lib/pincer/core.ex`'s `exports`, otherwise the boundary plugin emits a warning and the
   compile fails.
 - Mix tasks live in `Mix.Tasks.Pincer.*` and carry `use Boundary, classify_to: Pincer.Mix`.
-- `html_entities` is mapped to `Pincer.Utils` (`boundary: [externals: ...]` in `mix.exs`);
-  HTML entity decoding lives in `Pincer.Adapters.Tools.Web.HtmlEntities`, not a top-level
-  `HtmlEntities` module.
+- Boundary enforcement uses `{:boundary, "~> 0.12", runtime: false}` in `mix.exs`
+  (`compilers: [:boundary] ++ Mix.compilers()`), with external application and
+  dependency checks declared via `use Boundary, check: [apps: ...]` in the layer root
+  modules (`lib/pincer/core.ex`, `adapters.ex`, `ports.ex`, `infra.ex`, `llm.ex`,
+  `utils.ex`). HTML entity decoding lives in `Pincer.Adapters.Tools.Web.HtmlEntities`
+  inside `lib/pincer/adapters/tools/web.ex`, not in an external `html_entities` dep.
 
 ### Key runtime flow
 
@@ -216,10 +219,10 @@ nothing (it consumes Core, not the reverse).
 3. The channel maps sender -> agent workspace -> `Pincer.Core.Session.Server` (unique per
    user, Horde-registered), which calls `Pincer.Core.Executor.run/4`.
 4. `Executor` assembles the prompt (`PromptAssembly`, memory recall, `Session.Pruner`),
-   calls `Pincer.LLM.Client` (provider dispatch, failover, `ModelRouter` tiers), executes
-   tool calls via `Pincer.Ports.ToolRegistry` (`Adapters.NativeToolRegistry` = native tools
-   **plus** dynamically discovered MCP tools), recurses, then
-   `Orchestration.Archivist` consolidates memory.
+   calls `Pincer.LLM.Client` (provider dispatch, failover, and `Models.Registry` /
+   `FailoverPolicy`), executes tool calls via `Pincer.Ports.ToolRegistry`
+   (`Adapters.NativeToolRegistry` = native tools **plus** dynamically discovered MCP
+   tools), recurses, then `Orchestration.Archivist` consolidates memory.
 
 Per-concern policies are separate small modules rather than conditionals inside
 `Executor` - e.g. `TurnOutcomePolicy`, `ToolAnswerPatternPolicy`, `StreamingPolicy`,
@@ -357,8 +360,8 @@ requires touching the package's `mix.exs`/`CHANGELOG.md` too.
 ## 8. Docs map
 
 - `README.md` - user-facing overview, architecture diagrams, channel/provider tables.
-- `SPECS.md` - env-var matrix per provider plus subsystem specs (Pruner, ModelRouter,
-  CommandQueue, ContractEngine, Skills Manifest, Kernel, bootstrap ritual, embeddings).
+- `SPECS.md` - env-var matrix per provider plus subsystem specs (Pruner, FailoverPolicy,
+  Session lifecycle, Heartbeat, Skills Manifest, Kernel, bootstrap ritual, embeddings).
 - `CONTRIBUTING.md` / `SECURITY.md` - PR checklist and disclosure policy (CI enforces the
   doctor/security-audit posture).
 - `CHANGELOG.md` - user-visible changes; add an entry for behavioral changes.

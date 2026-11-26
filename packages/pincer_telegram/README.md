@@ -1,59 +1,67 @@
 # pincer_telegram
 
-> **Status: pre-extraction scaffold**
+> **Status: extracted standalone channel package**
 >
-> Este diretório mostra a estrutura que o pacote Hex `pincer_telegram` terá quando
-> `pincer` for publicado no Hex.pm. A extração física requer que `pincer` esteja
-> disponível como dep resolvível (Hex ou umbrella) — sem isso, o Mix não consegue
-> compilar deps que dependem do projeto pai.
+> `pincer_telegram` lives at `packages/pincer_telegram/` as an independent Hex-ready
+> channel package in the Pincer monorepo. It implements `Pincer.Ports.Channel`
+> (`PincerPorts.Channel`) and exposes the `Pincer.Channels.Telegram` adapter
+> discovered via `priv/pincer_plugin.yaml`.
 
-## Estrutura planejada
+## Estrutura do pacote
 
-```
-pincer_telegram/
-  mix.exs                          # {:pincer, "~> 0.1"}, {:telegex, "~> 1.8"}
-  lib/
-    pincer_telegram.ex             # ponto de entrada / @moduledoc
-    pincer/channels/
-      telegram.ex                  # Supervisor + UpdatesProvider
-      telegram/
-        api.ex                     # Behaviour + Telegex adapter
-        renderer.ex                # Markdown → HTML
-        session.ex                 # GenServer de sessão por chat_id
-        session_supervisor.ex      # DynamicSupervisor
+```text
+packages/pincer_telegram/
+  mix.exs                                         # deps: pincer_ports, pincer_shared, telegex, plug, earmark_parser, req
   priv/
-    pincer_plugin.yaml             # manifest descoberto via :code.get_path()
+    pincer_plugin.yaml                            # manifest descoberto por Pincer.Plugin.Manifest.discover/0
+  lib/
+    pincer_telegram.ex                            # PincerTelegram (entrypoint / @moduledoc)
+    pincer/channels/
+      telegram.ex                                 # Pincer.Channels.Telegram (Supervisor + Channel) & UpdatesProvider
+      telegram/
+        api.ex                                    # Pincer.Channels.Telegram.API & API.Adapter (Telegex)
+        renderer.ex                               # Pincer.Channels.Telegram.Renderer (Markdown → HTML)
+        response_envelope.ex                      # Pincer.Channels.Telegram.ResponseEnvelope (HTML footer + reasoning)
+        session.ex                                # Pincer.Channels.Telegram.Session (GenServer por chat_id)
+        session_supervisor.ex                     # Pincer.Channels.Telegram.SessionSupervisor (DynamicSupervisor)
   test/
-    support/
-      mocks.ex                     # Mox.defmock(APIMock, for: API)
-      telegram_stub.ex             # stub leve sem Mox
+    support/mocks.ex                              # Mox.defmock para Pincer.Channels.Telegram.API
+    fixtures/telegram/                            # fixtures de payloads da Bot API
     pincer/channels/
       telegram_test.exs
       telegram_session_test.exs
       telegram_updates_provider_test.exs
 ```
 
-## Caminho de migração
+## Uso
 
-1. Publicar `pincer` no Hex.pm (`mix hex.publish`)
-2. Ajustar `packages/pincer_telegram/mix.exs` → `{:pincer, "~> 0.1"}`
-3. Mover os arquivos de `lib/pincer/channels/telegram*` para este pacote
-4. Remover `telegex` do `mix.exs` principal
-5. Remover `Telegram` e `Telegram.API` dos exports de `Pincer.Channels`
-6. Publicar `pincer_telegram` no Hex.pm
-
-## Uso (após publicação)
+No monorepo Pincer, o pacote já é referenciado como `path:` dependency no `mix.exs`
+da raiz (`{:pincer_telegram, path: "packages/pincer_telegram"}`). Para projetos
+externos, declare a dependência no `mix.exs`:
 
 ```elixir
-# mix.exs do usuário
-{:pincer, "~> 0.1"},
-{:pincer_telegram, "~> 0.1"}
+def deps do
+  [
+    {:pincer_telegram, "~> 0.1"}
+  ]
+end
 ```
 
+E habilite o canal em `config.yaml`:
+
 ```yaml
-# config.yaml — o adapter: é opcional (vem do manifest)
 channels:
   telegram:
     enabled: true
+    adapter: "Pincer.Channels.Telegram"
     token_env: "TELEGRAM_BOT_TOKEN"
+    dm_policy:
+      mode: "pairing"
 ```
+
+## Testes e verificação
+
+- Suite principal no root do repositório:
+  `mix test test/pincer/channels/telegram_test.exs test/pincer/channels/telegram_session_test.exs test/pincer/channels/telegram_updates_provider_test.exs test/pincer/channels/telegram_response_envelope_test.exs`
+- Build e testes isolados do pacote standalone:
+  `elixir scripts/check_packages.exs pincer_telegram`

@@ -13,20 +13,19 @@ The system resolves the key at runtime via the provider's `env_key` setting
 | `google` | `GOOGLE_API_KEY` | No |
 | `openrouter` | `OPENROUTER_API_KEY` | Yes (fallback) |
 | `opencode_zen` | `OPENCODE_ZEN_API_KEY` | Yes (fallback) |
-| `z_ai` | `Z_AI_API_KEY` | Yes (introspection + balanced tier) |
-| `z_ai_coding` | `Z_AI_CODING_API_KEY` | Yes (default provider + powerful tier) |
+| `z_ai` | `Z_AI_API_KEY` | Yes (introspection option) |
+| `z_ai_coding` | `Z_AI_CODING_API_KEY` | Yes (coding provider option) |
 | `moonshot` | `MOONSHOT_API_KEY` | No |
-| `groq` | `GROQ_API_KEY` | Yes (local/fast tiers) |
+| `groq` | `GROQ_API_KEY` | Yes (default provider + introspection) |
 | `minimax` | `MINIMAX_API_KEY` | No |
 
 ### Minimal setup
 
-To run with introspection + model router + default provider:
+To run with introspection + default provider:
 
 ```
-Z_AI_API_KEY=...          # introspection + model router balanced tier
-Z_AI_CODING_API_KEY=...   # default LLM provider + model router powerful tier
-GROQ_API_KEY=...          # model router local/fast tiers
+GROQ_API_KEY=...          # default LLM provider + introspection (per config.yaml)
+Z_AI_API_KEY=...          # optional alternative provider
 TELEGRAM_BOT_TOKEN=...    # if Telegram channel enabled
 ```
 
@@ -65,52 +64,24 @@ Pruner.prune(history)
 Pruner.prune(history, keep_recent: 10)
 ```
 
-### 2. Model Router (`Pincer.Core.LLM.ModelRouter`)
+### 2. LLM Failover & Model Registry (`Pincer.Core.LLM.FailoverPolicy`, `CooldownStore`, `Models.Registry`)
 
-Scores request complexity (0.0–1.0) and routes to a tiered provider/model.
-Controlled by `config.yaml` → `model_router` section.
+Deterministic provider/model failover and registry resolution used by `Pincer.LLM.Client`:
 
-```elixir
-{:ok, :balanced, "z_ai", "glm-4.7"} = ModelRouter.route(history)
-{:ok, :default} = ModelRouter.route(history)  # when disabled
-```
+- `Pincer.Core.Models.Registry` resolves configured providers (`:llm_providers`) and their models.
+- `Pincer.Core.LLM.FailoverPolicy` tracks `initial_state/1` and converts classified errors (`Pincer.Core.LLM.ErrorClass`) into `:retry_same`, `{:fallback_model, provider, model}`, `{:fallback_provider, provider, model}`, or `:stop`.
+- `Pincer.Core.LLM.CooldownStore` records provider/auth-profile cooldown windows across failed attempts.
 
-Tier thresholds: `local < 0.25`, `fast < 0.45`, `balanced < 0.65`, `powerful >= 0.65`.
+### 3. Session Resolution & Lifecycle (`Pincer.Core.Session.SessionResolver`, `Server`, `Supervisor`)
 
-Scoring factors: tool calls (0.30), technical content (0.30), conversation depth (0.20),
-last message length (0.20).
+Per-user and per-chat session routing and supervision:
 
-**Important:** each tier's provider must have its API key set in `.env`. If a key is
-missing the LLM client will fail on that tier. Set `model_router.enabled: false` in
-`config.yaml` to disable routing.
+- `Pincer.Core.Session.SessionResolver` maps channel metadata (`:telegram`, `:discord`, `:whatsapp`, `:feishu`, `:line`, `:dingtalk`, etc.) into `%PincerPorts.Session.Context{}` (`session_id`, `principal_ref`, `conversation_ref`, `root_agent_id`, `workspace_path`), delegating scope rules to `Pincer.Core.Policy` / `Pincer.Core.SessionScopePolicy`.
+- `Pincer.Core.Session.Supervisor` and `Pincer.Core.Session.HordeSupervisor` supervise `Pincer.Core.Session.Server` processes registered via `Pincer.Core.Registry`.
 
-### 3. Command Queue (`Pincer.Core.Session.CommandQueue`)
+### 4. Periodic Heartbeat (`Pincer.Core.Heartbeat`)
 
-Stateful message queue with three modes replacing the simple debounce buffer.
-
-| Mode | Behavior |
-|------|----------|
-| `:collect` | Buffer messages, flush on drain (agent idle) |
-| `:steer` | Flush immediately on every push (interrupt agent) |
-| `:followup` | Hold until explicit drain (next-turn queueing) |
-
-```elixir
-q = CommandQueue.new(:collect)
-{:ok, q} = CommandQueue.push(q, "hello")
-{messages, q} = CommandQueue.drain(q)
-```
-
-### 4. Heartbeat Contract Engine (`Pincer.Core.Heartbeat.ContractEngine`)
-
-ETS-backed promise tracking for proactive agent accountability. Agents record
-promises during turns; heartbeat pulses evaluate expiration.
-
-```elixir
-:ok = ContractEngine.make_promise("agent_1", "Monitor repo X", deadline: future)
-results = ContractEngine.evaluate("agent_1")  # [{:expired | :pending, promise}]
-pending = ContractEngine.pending("agent_1")
-:ok = ContractEngine.fulfill("agent_1", promise_id)
-```
+`Pincer.Core.Heartbeat` is a supervised `GenServer` running a periodic `:pulse` tick (`@interval = 60 * 60 * 1000` ms) to trigger proactive checks.
 
 ### 5. Skills Manifest (`Pincer.Core.Skills.Manifest` + `Loader`)
 
