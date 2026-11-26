@@ -3,5 +3,15 @@ defmodule Pincer.Core.Project do
 
   use Boundary,
     deps: [Pincer.Core, Pincer.Core.Executor, Pincer.Core.Orchestration],
-    exports: [Adapter, HordeSupervisor, ProjectRouter, Recovery, Store, Supervisor]
+    exports: [
+      Adapter,
+      HordeSupervisor,
+      Plan,
+      ProjectRouter,
+      Recovery,
+      Renderer,
+      Store,
+      Supervisor,
+      Wizard
+    ]
 end

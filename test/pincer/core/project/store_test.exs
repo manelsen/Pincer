@@ -74,5 +74,54 @@ defmodule Pincer.Core.Project.StoreTest do
              })
   end
 
+  test "consolidates orchestrator ETS cache and durable store operations" do
+    session_id = unique_id("s-orch")
+    table = :"test_orch_store_#{System.unique_integer([:positive])}"
+    on_exit(fn -> Store.delete_orchestrator_state(session_id, table) end)
+
+    state = %{
+      session_id: session_id,
+      project_id: Store.build_project_id(session_id),
+      phase: :ready,
+      fsm_state: %{
+        project_id: Store.build_project_id(session_id),
+        session_id: session_id,
+        phase: :execution,
+        objective: "Ship",
+        kind: :software,
+        scope: "Core",
+        success_criteria: "Green",
+        plan: %{kind: :software, items: []},
+        execution: nil,
+        review: nil,
+        delivery: nil
+      },
+      objective: "Ship",
+      kind: :software,
+      scope: "Core",
+      success_criteria: "Green",
+      items: [%{status: :in_progress, text: "Task 1"}],
+      retry_count: 0,
+      retry_limit: 0,
+      git_branch: nil,
+      git_branch_status: nil
+    }
+
+    saved = Store.put_orchestrator_state(state, table)
+    assert saved.session_id == session_id
+    refute Map.has_key?(saved, :phase)
+    assert %{session_id: ^session_id} = Store.get_orchestrator_state(session_id, table)
+
+    :ets.delete(table, session_id)
+
+    loaded = Store.get_orchestrator_state(session_id, table)
+    assert loaded.session_id == session_id
+    refute Map.has_key?(loaded, :phase)
+    assert [%{status: :pending, text: "Task 1"}] = loaded.items
+
+    assert :ok = Store.delete_orchestrator_state(session_id, table)
+    assert nil == Store.get_orchestrator_state(session_id, table)
+  end
+
   defp unique_id(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
 end

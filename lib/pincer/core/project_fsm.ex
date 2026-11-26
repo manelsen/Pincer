@@ -1,22 +1,32 @@
 defmodule Pincer.Core.ProjectFSM do
   @moduledoc """
   Explicit project lifecycle FSM with checkpoint persistence on transitions.
+
+  Drives both the high-level lifecycle phases (`:objective` -> `:scope` ->
+  `:plan` -> `:execution` -> `:review` -> `:delivery`) and the derived wizard
+  collection phases (`:await_objective`, `:await_kind`, `:await_scope`,
+  `:await_success`, `:ready`) so callers never maintain a separate phase field.
   """
 
   @type phase :: :objective | :scope | :plan | :execution | :review | :delivery
+  @type wizard_phase :: :await_objective | :await_kind | :await_scope | :await_success | :ready
+  @type project_kind :: :software | :non_software
 
   @type state :: %{
           project_id: String.t(),
           session_id: String.t(),
           phase: phase(),
           objective: String.t() | nil,
+          kind: project_kind() | nil,
           scope: String.t() | nil,
+          success_criteria: String.t() | nil,
           plan: map() | nil,
           execution: map() | nil,
           review: map() | nil,
           delivery: map() | nil
         }
 
+  @doc "Creates a new FSM state in the initial `:objective` phase."
   @spec new(String.t(), String.t()) :: state()
   def new(project_id, session_id) when is_binary(project_id) and is_binary(session_id) do
     %{
@@ -24,7 +34,9 @@ defmodule Pincer.Core.ProjectFSM do
       session_id: session_id,
       phase: :objective,
       objective: nil,
+      kind: nil,
       scope: nil,
+      success_criteria: nil,
       plan: nil,
       execution: nil,
       review: nil,
@@ -32,6 +44,50 @@ defmodule Pincer.Core.ProjectFSM do
     }
   end
 
+  @doc "Derives the wizard collection/ready phase from an FSM state."
+  @spec wizard_phase(state() | map() | nil) :: wizard_phase() | :unknown
+  def wizard_phase(%{phase: :objective}), do: :await_objective
+
+  def wizard_phase(%{phase: :scope} = state) do
+    if is_nil(Map.get(state, :kind)), do: :await_kind, else: :await_scope
+  end
+
+  def wizard_phase(%{phase: :plan} = state) do
+    if is_nil(Map.get(state, :plan)), do: :await_success, else: :ready
+  end
+
+  def wizard_phase(%{phase: phase}) when phase in [:execution, :review, :delivery], do: :ready
+  def wizard_phase(_), do: :unknown
+
+  @doc "Records the project kind while in the `:scope` collection phase."
+  @spec set_kind(state(), project_kind()) :: {:ok, state()} | {:error, {:invalid_kind, map()}}
+  def set_kind(%{phase: :scope} = state, kind) when kind in [:software, :non_software] do
+    {:ok, Map.put(state, :kind, kind)}
+  end
+
+  def set_kind(state, kind) when is_map(state) do
+    {:error, {:invalid_kind, %{phase: Map.get(state, :phase), kind: kind}}}
+  end
+
+  @doc "Attaches finalized success criteria and plan metadata while in `:plan`."
+  @spec attach_plan(state(), String.t(), map()) ::
+          {:ok, state()} | {:error, {:invalid_plan, map()}}
+  def attach_plan(%{phase: :plan} = state, success_criteria, plan)
+      when is_binary(success_criteria) and is_map(plan) and map_size(plan) > 0 do
+    case String.trim(success_criteria) do
+      "" ->
+        {:error, {:invalid_plan, %{phase: :plan, reason: :success_criteria_required}}}
+
+      _ ->
+        {:ok, state |> Map.put(:success_criteria, success_criteria) |> Map.put(:plan, plan)}
+    end
+  end
+
+  def attach_plan(state, _success_criteria, _plan) when is_map(state) do
+    {:error, {:invalid_plan, %{phase: Map.get(state, :phase), reason: :invalid_phase_or_plan}}}
+  end
+
+  @doc "Transitions the FSM to an adjacent lifecycle phase and persists a checkpoint."
   @spec transition(state(), phase(), map(), keyword()) ::
           {:ok, state()} | {:error, {:invalid_transition, map()}}
   def transition(state, to_phase, attrs \\ %{}, opts \\ [])
