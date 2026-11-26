@@ -61,7 +61,7 @@ defmodule Pincer.Ports.Sandbox do
   end
 
   @doc """
-  Resolves a short backend name, atom, or module name into an adapter module.
+  Resolves a registered short backend name or direct module atom into an adapter module.
   """
   @spec resolve_adapter(term()) :: {:ok, module()} | {:error, {:unknown_sandbox_adapter, term()}}
   def resolve_adapter(nil), do: {:error, {:unknown_sandbox_adapter, nil}}
@@ -79,15 +79,14 @@ defmodule Pincer.Ports.Sandbox do
   end
 
   def resolve_adapter(name) when is_binary(name) do
-    trimmed = String.trim(name)
-    normalized = String.downcase(trimmed)
+    normalized = name |> String.trim() |> String.downcase()
 
     case Map.fetch(@sandbox_short_names, normalized) do
       {:ok, key} ->
         resolve_short_adapter(key, name)
 
       :error ->
-        resolve_module_string(trimmed)
+        {:error, {:unknown_sandbox_adapter, name}}
     end
   end
 
@@ -130,24 +129,6 @@ defmodule Pincer.Ports.Sandbox do
   """
   @spec cleanup(String.t()) :: :ok | {:error, term()}
   def cleanup(scope_id) when is_binary(scope_id), do: adapter().cleanup(scope_id)
-
-  defp resolve_module_string(trimmed) do
-    parts = trimmed |> String.trim_leading("Elixir.") |> String.split(".", trim: true)
-
-    if parts != [] and Enum.all?(parts, &Regex.match?(~r/^[A-Z][A-Za-z0-9_]*$/, &1)) do
-      mod = Module.safe_concat(["Elixir" | parts])
-
-      if Code.ensure_loaded?(mod) do
-        {:ok, mod}
-      else
-        {:error, {:unknown_sandbox_adapter, trimmed}}
-      end
-    else
-      {:error, {:unknown_sandbox_adapter, trimmed}}
-    end
-  rescue
-    ArgumentError -> {:error, {:unknown_sandbox_adapter, trimmed}}
-  end
 
   defp resolve_short_adapter(key, original) do
     adapters = Application.get_env(:pincer, :sandbox_adapters, %{})

@@ -169,13 +169,30 @@ defmodule Pincer.Infra.ConfigTest do
   end
 
   describe "sandbox config" do
-    test "loads a fully qualified sandbox adapter without the short-name registry" do
+    test "stores validated short-name atom when :sandbox_adapters is not pre-populated" do
       Application.delete_env(:pincer, :sandbox_adapters)
       System.delete_env("PINCER_SANDBOX_ADAPTER")
-      path = write_yaml!("sandbox:\n  adapter: Pincer.Adapters.Sandbox.Docker\n")
+      path = write_yaml!("sandbox:\n  adapter: \"docker\"\n")
 
       assert :ok = Config.load(config_file: path, load_dotenv: false)
-      assert Application.fetch_env!(:pincer, :sandbox_adapter) == Pincer.Adapters.Sandbox.Docker
+      assert Application.fetch_env!(:pincer, :sandbox_adapter) == :docker
+    end
+
+    test "ignores arbitrary module strings and unknown sandbox adapters with a warning" do
+      Application.put_env(:pincer, :sandbox_adapter, Pincer.Adapters.Sandbox.Local)
+      System.delete_env("PINCER_SANDBOX_ADAPTER")
+
+      for bad_adapter <- ["Pincer.Adapters.Sandbox.Docker", "kubernetes"] do
+        path = write_yaml!("sandbox:\n  adapter: #{inspect(bad_adapter)}\n")
+
+        log =
+          ExUnit.CaptureLog.capture_log(fn ->
+            assert :ok = Config.load(config_file: path, load_dotenv: false)
+          end)
+
+        assert log =~ bad_adapter
+        assert Application.fetch_env!(:pincer, :sandbox_adapter) == Pincer.Adapters.Sandbox.Local
+      end
     end
 
     test "loads sandbox backend and per-backend options from config yaml" do
