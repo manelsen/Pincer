@@ -36,7 +36,10 @@ defmodule Pincer.Adapters.NativeToolRegistry do
   ]
 
   @impl true
-  def list_tools do
+  def list_tools, do: list_tools(%{})
+
+  @doc "Lists native and context-scoped MCP tools available to the caller session/agent."
+  def list_tools(context) when is_map(context) do
     native_specs =
       Enum.flat_map(@native_tools, fn m ->
         case m.spec() do
@@ -51,7 +54,8 @@ defmodule Pincer.Adapters.NativeToolRegistry do
       end)
 
     mcp_specs =
-      list_mcp_tools()
+      context
+      |> list_mcp_tools()
       |> Enum.reject(&blocked_mcp_tool?/1)
       |> Enum.map(fn s ->
         %{"type" => "function", "function" => s, "_type" => :mcp}
@@ -112,7 +116,7 @@ defmodule Pincer.Adapters.NativeToolRegistry do
         started_at_ms = System.monotonic_time(:millisecond)
         Logger.info("[TOOL] Executing MCP: #{name} #{format_arg_metadata(args)}")
 
-        case mcp_manager().execute_tool(name, args) do
+        case execute_mcp_tool(name, args, context) do
           {:ok, c} ->
             Logger.info("[TOOL] SUCCESS: #{name} duration_ms=#{elapsed_ms(started_at_ms)}")
             {:ok, c}
@@ -158,6 +162,16 @@ defmodule Pincer.Adapters.NativeToolRegistry do
 
   defp format_arg_metadata(_args), do: "keys=[]"
 
+  defp execute_mcp_tool(name, args, context) do
+    mgr = mcp_manager()
+
+    if Code.ensure_loaded?(mgr) and function_exported?(mgr, :execute_tool_with_context, 3) do
+      mgr.execute_tool_with_context(name, args, context)
+    else
+      mgr.execute_tool(name, args)
+    end
+  end
+
   defp execute_native(module, name, args, context) do
     # In native tools, we often inject the tool_name into args for convenience
     args_with_meta = Map.put(args, "tool_name", name)
@@ -172,8 +186,14 @@ defmodule Pincer.Adapters.NativeToolRegistry do
     end
   end
 
-  defp list_mcp_tools do
-    mcp_manager().get_all_tools()
+  defp list_mcp_tools(context) do
+    mgr = mcp_manager()
+
+    if Code.ensure_loaded?(mgr) and function_exported?(mgr, :get_tools_for_context, 1) do
+      mgr.get_tools_for_context(context)
+    else
+      mgr.get_all_tools()
+    end
   rescue
     error ->
       Logger.warning("[MCP] Tool discovery failed: #{Exception.message(error)}")

@@ -154,7 +154,7 @@ defmodule Pincer.Core.Executor do
     Logger.info("[EXECUTOR] do_run_loop (Depth: #{depth})")
 
     client_opts = Ctx.client_opts(ctx)
-    tools_spec = ctx.deps.tool_registry.list_tools() |> ToolCall.clean_specs()
+    tools_spec = fetch_tools_spec(ctx) |> ToolCall.clean_specs()
 
     Logger.info(
       "[EXECUTOR] Sending prompt to LLM (STREAMING). History size: #{length(prompt_history)}"
@@ -503,4 +503,26 @@ defmodule Pincer.Core.Executor do
     do: send(pid, {:executor_failed, ref, reason})
 
   defp notify_failed(_ctx, _reason), do: :ok
+
+  defp fetch_tools_spec(%Ctx{} = ctx) do
+    registry = ctx.deps.tool_registry
+
+    if Code.ensure_loaded?(registry) and function_exported?(registry, :list_tools, 1) do
+      agent_id =
+        ctx.agent_id ||
+          Keyword.get(ctx.opts, :agent_id) ||
+          Keyword.get(ctx.opts, :root_agent_id) ||
+          ctx.session_id
+
+      tool_ctx = %{
+        "session_id" => ctx.session_id,
+        "agent_id" => agent_id,
+        "workspace_path" => ctx.workspace_path
+      }
+
+      registry.list_tools(tool_ctx)
+    else
+      registry.list_tools()
+    end
+  end
 end
