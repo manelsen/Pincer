@@ -11,14 +11,16 @@ defmodule Pincer.Architecture.ChannelSessionBridgeTest do
     "packages/pincer_slack/lib/pincer/channels/slack/session.ex"
   ]
 
-  @adapter_files [
-    "packages/pincer_telegram/lib/pincer/channels/telegram.ex",
-    "packages/pincer_discord/lib/pincer/channels/discord.ex",
-    "packages/pincer_whatsapp/lib/pincer/channels/whatsapp.ex",
-    "packages/pincer_dingtalk/lib/pincer/channels/dingtalk.ex",
-    "packages/pincer_line/lib/pincer/channels/line.ex",
-    "packages/pincer_feishu/lib/pincer/channels/feishu.ex",
-    "packages/pincer_slack/lib/pincer/channels/slack.ex"
+  @adapter_targets [
+    {"telegram",
+     ["packages/pincer_telegram/lib/pincer/channels/telegram.ex"] ++
+       Path.wildcard("packages/pincer_telegram/lib/pincer/channels/telegram/*.ex")},
+    {"discord", ["packages/pincer_discord/lib/pincer/channels/discord.ex"]},
+    {"whatsapp", ["packages/pincer_whatsapp/lib/pincer/channels/whatsapp.ex"]},
+    {"dingtalk", ["packages/pincer_dingtalk/lib/pincer/channels/dingtalk.ex"]},
+    {"line", ["packages/pincer_line/lib/pincer/channels/line.ex"]},
+    {"feishu", ["packages/pincer_feishu/lib/pincer/channels/feishu.ex"]},
+    {"slack", ["packages/pincer_slack/lib/pincer/channels/slack.ex"]}
   ]
 
   test "all 7 channel session workers delegate lifecycle to Shared.SessionBridge" do
@@ -34,14 +36,18 @@ defmodule Pincer.Architecture.ChannelSessionBridgeTest do
   end
 
   test "channel adapters delegate session ensure_started to Shared.SessionBridge" do
-    for file <- @adapter_files do
-      source = File.read!(file)
+    for {name, files} <- @adapter_targets do
+      combined = Enum.map_join(files, "\n", &File.read!/1)
 
-      assert source =~ "SessionBridge.ensure_started",
-             "#{file} must delegate ensure_session_started to SessionBridge.ensure_started"
+      assert combined =~ "SessionBridge.ensure_started",
+             "#{name} must delegate ensure_session_started to SessionBridge.ensure_started"
 
-      refute source =~ "Context.to_start_opts",
-             "#{file} must not hand-roll Context.to_start_opts/1 + Registry.lookup"
+      for file <- files do
+        source = File.read!(file)
+
+        refute source =~ "Context.to_start_opts",
+               "#{file} must not hand-roll Context.to_start_opts/1 + Registry.lookup"
+      end
     end
   end
 end
