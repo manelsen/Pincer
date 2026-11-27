@@ -20,13 +20,19 @@ This package is a shared base and is typically pulled in automatically as a depe
 
 ```yaml
 llm:
-  provider: openai
+  provider: "openai"
   openai:
-    api_key: $OPENAI_API_KEY
-    model: gpt-4o
+    default_model: "gpt-6.2-sol"
 ```
 
-To build a custom OpenAI-compatible provider, depend on this package and delegate to `Pincer.OpenaiCompat.Client`.
+To build a custom OpenAI-compatible provider, depend on this package and `use Pincer.LLM.Providers.OpenAICompat`:
+
+```elixir
+defmodule MyApp.LLM.CustomProvider do
+  use Pincer.LLM.Providers.OpenAICompat,
+    base_url: "https://api.example.com/v1/chat/completions"
+end
+```
 
 ## License
 

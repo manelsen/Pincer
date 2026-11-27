@@ -10,15 +10,15 @@ llm:
   default_provider: openrouter
   providers:
     openrouter:
-      adapter: Pincer.LLM.Providers.OpenaiCompat
-      base_url: "https://openrouter.ai/api/v1"
+      adapter: Pincer.LLM.Providers.OpenRouter
+      base_url: "https://openrouter.ai/api/v1/chat/completions"
       api_key: "${OPENROUTER_API_KEY}"
-      default_model: "anthropic/claude-3-sonnet"
+      default_model: "anthropic/claude-sonnet-5-5"
       env_key: "OPENROUTER_API_KEY"
     google:
       adapter: Pincer.LLM.Providers.Google
       api_key: "${GOOGLE_API_KEY}"
-      default_model: "gemini-2.0-flash"
+      default_model: "gemini-3.8-flash"
       env_key: "GOOGLE_API_KEY"
 
 channels:

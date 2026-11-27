@@ -204,25 +204,37 @@ defmodule Mix.Tasks.Pincer.Onboard do
   defp prompt_provider_choice(_default) do
     Mix.shell().info("\nSelect LLM provider:")
     Mix.shell().info("  1) openrouter      (OpenRouter — access to multiple models)")
-    Mix.shell().info("  2) z_ai            (Z.AI / ZhiPu — free)")
-    Mix.shell().info("  3) opencode_zen    (OpenCode Zen — Kimi free)")
-    Mix.shell().info("  4) google          (Google Gemini)")
-    Mix.shell().info("  5) moonshot        (Moonshot / Kimi)")
-    Mix.shell().info("  6) anthropic       (Claude)")
-    Mix.shell().info("  7) groq            (Groq — Ultra fast inference)")
-    Mix.shell().info("  8) Other (type ID)")
+    Mix.shell().info("  2) groq            (Groq — ultra fast inference)")
+    Mix.shell().info("  3) anthropic       (Claude 5.5 / Fable 5.2)")
+    Mix.shell().info("  4) google          (Google Gemini 4 / 3.8 Flash)")
+    Mix.shell().info("  5) openai          (OpenAI GPT-6.2)")
+    Mix.shell().info("  6) z_ai            (Z.AI / Zhipu GLM-5)")
+    Mix.shell().info("  7) deepseek        (DeepSeek V4)")
+    Mix.shell().info("  8) qwen            (Alibaba DashScope Qwen 3.6/3.7)")
+    Mix.shell().info("  9) moonshot        (Moonshot / Kimi K3)")
+    Mix.shell().info(" 10) mistral         (Mistral Large/Small 4)")
+    Mix.shell().info(" 11) minimax         (MiniMax M3)")
+    Mix.shell().info(" 12) ollama          (Ollama — local models)")
+    Mix.shell().info(" 13) opencode_zen    (OpenCode Zen — Kimi free)")
+    Mix.shell().info(" 14) Other (type ID)")
 
-    answer = Mix.shell().prompt("Choose [1-8]: ") |> to_string() |> String.trim()
+    answer = Mix.shell().prompt("Choose [1-14]: ") |> to_string() |> String.trim()
 
     case answer do
       "1" -> "openrouter"
-      "2" -> "z_ai"
-      "3" -> "opencode_zen"
+      "2" -> "groq"
+      "3" -> "anthropic"
       "4" -> "google"
-      "5" -> "moonshot"
-      "6" -> "anthropic"
-      "7" -> "groq"
-      "8" -> prompt_with_default("Enter provider_id", "openrouter")
+      "5" -> "openai"
+      "6" -> "z_ai"
+      "7" -> "deepseek"
+      "8" -> "qwen"
+      "9" -> "moonshot"
+      "10" -> "mistral"
+      "11" -> "minimax"
+      "12" -> "ollama"
+      "13" -> "opencode_zen"
+      "14" -> prompt_with_default("Enter provider_id", "openrouter")
       _ -> "openrouter"
     end
   end
@@ -230,20 +242,24 @@ defmodule Mix.Tasks.Pincer.Onboard do
   defp prompt_model_for_provider(provider) do
     case provider do
       "openrouter" ->
-        Mix.shell().info("\nAvailable models for openrouter:")
-        Mix.shell().info("  1) openrouter/free (default)")
-        Mix.shell().info("  2) openrouter/mistral-7b")
-        Mix.shell().info("  3) Other (type ID)")
+        Mix.shell().info("\nRecommended models for openrouter:")
+        Mix.shell().info("  1) openrouter/free (auto-router default)")
+        Mix.shell().info("  2) google/gemma-4-31b-it:free")
+        Mix.shell().info("  3) anthropic/claude-sonnet-5-5")
+        Mix.shell().info("  4) google/gemini-3.8-flash")
+        Mix.shell().info("  5) Other (type ID)")
 
-        case Mix.shell().prompt("Choose [1-3]: ") |> to_string() |> String.trim() do
+        case Mix.shell().prompt("Choose [1-5]: ") |> to_string() |> String.trim() do
           "1" -> "openrouter/free"
-          "2" -> "openrouter/mistral-7b"
-          "3" -> prompt_with_default("Enter model_id", "openrouter/free")
+          "2" -> "google/gemma-4-31b-it:free"
+          "3" -> "anthropic/claude-sonnet-5-5"
+          "4" -> "google/gemini-3.8-flash"
+          "5" -> prompt_with_default("Enter model_id", "openrouter/free")
           _ -> "openrouter/free"
         end
 
       _ ->
-        prompt_with_default("Default model for #{provider}", "default")
+        prompt_with_default("Default model for #{provider}", Defaults.recommended_model(provider))
     end
   end
 

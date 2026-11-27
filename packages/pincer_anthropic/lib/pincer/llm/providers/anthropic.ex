@@ -14,6 +14,12 @@ defmodule Pincer.LLM.Providers.Anthropic do
   alias PincerPorts.LLM.RawResponseLogger
 
   @timeout 300_000
+  @default_models [
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "claude-fable-5-2",
+    "claude-haiku-5-5"
+  ]
 
   @impl true
   def chat_completion(messages, model, config, tools) do
@@ -123,15 +129,31 @@ defmodule Pincer.LLM.Providers.Anthropic do
   end
 
   @impl true
-  def list_models(_config) do
-    {:ok,
-     [
-       "claude-3-5-sonnet-latest",
-       "claude-3-5-haiku-latest",
-       "claude-3-opus-latest",
-       "claude-3-sonnet-20240229",
-       "claude-3-haiku-20240307"
-     ]}
+  def list_models(config) do
+    api_key = config[:api_key]
+    version = config[:anthropic_version] || "2023-06-01"
+    base_url = config[:base_url] || "https://api.anthropic.com/v1/messages"
+    models_url = config[:models_url] || String.replace(base_url, ~r{/messages$}, "/models")
+
+    if api_key in [nil, ""] do
+      {:ok, @default_models}
+    else
+      case Req.get(models_url,
+             headers: [{"x-api-key", api_key}, {"anthropic-version", version}],
+             receive_timeout: 10_000
+           ) do
+        {:ok, %{status: 200, body: %{"data" => data}}} when is_list(data) ->
+          models =
+            data
+            |> Enum.map(& &1["id"])
+            |> Enum.filter(&(is_binary(&1) and &1 != ""))
+
+          {:ok, if(models == [], do: @default_models, else: models)}
+
+        _ ->
+          {:ok, @default_models}
+      end
+    end
   end
 
   @impl true

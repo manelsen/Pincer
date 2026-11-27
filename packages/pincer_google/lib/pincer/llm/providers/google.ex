@@ -18,7 +18,7 @@ defmodule Pincer.LLM.Providers.Google do
   def chat_completion(messages, model, config, tools) do
     api_key = config[:api_key]
 
-    # Example: https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent
+    # Example: https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent
     base_url =
       config[:base_url] ||
         "https://generativelanguage.googleapis.com/v1beta/models/#{model}:generateContent?key=#{api_key}"
@@ -142,7 +142,7 @@ defmodule Pincer.LLM.Providers.Google do
     api_key = config[:api_key]
 
     if api_key in [nil, ""] do
-      {:ok, ["gemini-1.5-flash"]}
+      {:ok, ["gemini-3.8-flash", "gemini-4-hydrogen", "gemini-4-argon", "gemini-3.5-flash-lite"]}
     else
       url = "https://generativelanguage.googleapis.com/v1beta/models"
 

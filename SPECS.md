@@ -8,16 +8,24 @@ The system resolves the key at runtime via the provider's `env_key` setting
 
 ### Required keys per provider
 
-| Provider | Env Variable | Used by default? |
-|----------|-------------|-----------------|
-| `google` | `GOOGLE_API_KEY` | No |
-| `openrouter` | `OPENROUTER_API_KEY` | Yes (fallback) |
-| `opencode_zen` | `OPENCODE_ZEN_API_KEY` | Yes (fallback) |
-| `z_ai` | `Z_AI_API_KEY` | Yes (introspection option) |
-| `z_ai_coding` | `Z_AI_CODING_API_KEY` | Yes (coding provider option) |
-| `moonshot` | `MOONSHOT_API_KEY` | No |
-| `groq` | `GROQ_API_KEY` | Yes (default provider + introspection) |
-| `minimax` | `MINIMAX_API_KEY` | No |
+| Provider | Env Variable | Default Model (`config/config.exs`) | Role / Notes |
+|----------|-------------|---------------------------------------|--------------|
+| `openrouter` | `OPENROUTER_API_KEY` | `openrouter/free` | Compile-time default + `:free` fallback router |
+| `groq` | `GROQ_API_KEY` | `openai/gpt-oss-120b` | Default `config.yaml` provider + fast introspection |
+| `groq_whisper` | `GROQ_API_KEY` | `whisper-large-v3-turbo` | Audio transcription (`transcribe_audio/3`) |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-5-5` | Claude 5.5 (`opus`, `sonnet`, `haiku`) and `claude-fable-5-2` |
+| `google` | `GOOGLE_API_KEY` | `gemini-3.8-flash` | Gemini 3.8/4 with `supports_files: true` |
+| `openai` | `OPENAI_API_KEY` | `gpt-6.2-sol` | GPT-6.2 (`astra`, `sol`) and TTS (`tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`) |
+| `z_ai` | `Z_AI_API_KEY` | `glm-5.3` | Standard Z.AI GLM endpoint |
+| `z_ai_coding` | `Z_AI_CODING_API_KEY` | `glm-5.4` | Coding harness endpoint (`api.z.ai/api/coding/...`) |
+| `moonshot` | `MOONSHOT_API_KEY` | `kimi-k3` | Moonshot Kimi K3 standard endpoint |
+| `moonshot_coding` | `MOONSHOT_CODING_API_KEY` | `k3.1-pro` | Coding plan endpoint for Kimi K3.1 Pro |
+| `minimax` | `MINIMAX_API_KEY` (+ optional `MINIMAX_GROUP_ID`) | `MiniMax-M3.1-Flash` | Dual Bearer + `Authority` group header |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-v4-flash` | DeepSeek V4 (`deepseek-v4-flash`, `deepseek-v4-pro`) |
+| `qwen` | `DASHSCOPE_API_KEY` | `qwen3.6-plus` | Alibaba DashScope Qwen 3.6/3.7 |
+| `mistral` | `MISTRAL_API_KEY` | `mistral-large-4` | Mistral Large 4 / Small 4 |
+| `ollama` | None (`OLLAMA_BASE_URL` optional) | `qwen3.5:9b` | Local inference server (`localhost:11434`) |
+| `opencode_zen` | `OPENCODE_ZEN_API_KEY` | `kimi-k2.5-free` | OpenCode Zen / Console gateway |
 
 ### Minimal setup
 
@@ -126,15 +134,14 @@ with a valid provider and model.
 
 ```yaml
 introspection:
-  provider: "z_ai"
-  model: "glm-4.7"
+  provider: "groq"
+  model: "openai/gpt-oss-20b"
   max_tokens: 512
   temperature: 0.7
+  locality: "follow_session" # optional: "follow_session" | "local_only"
 ```
 
-**Important:** the `Z_AI_API_KEY` (or whichever provider is configured) must be
-set in `.env` for introspection to work. If missing, reflection will time out
-with a warning and the kernel continues operating normally.
+**Important:** the API key for whichever remote introspection provider is configured (`GROQ_API_KEY`, `Z_AI_API_KEY`, etc.) must be set in `.env`. Sessions running on local backends (such as `ollama`) keep introspection local when `locality: "follow_session"` or `"local_only"`.
 
 ### 7. Bootstrap Ritual
 
