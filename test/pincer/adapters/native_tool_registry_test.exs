@@ -57,6 +57,32 @@ defmodule Pincer.Adapters.NativeToolRegistryTest do
     def execute_tool(_name, _args), do: {:ok, "done"}
   end
 
+  defmodule MCPManagerContextStub do
+    def get_all_tools, do: []
+
+    def get_tools_for_context(%{"agent_id" => "agent_a"}) do
+      [
+        %{
+          name: "scoped_mcp_tool",
+          description: "Scoped tool",
+          parameters: %{type: "object", properties: %{}}
+        }
+      ]
+    end
+
+    def get_tools_for_context(_ctx), do: []
+
+    def execute_tool_with_context(name, args, context) do
+      send(self(), {:mcp_exec_with_context, name, args, context})
+
+      if context["agent_id"] == "agent_a" do
+        {:ok, "scoped-ok"}
+      else
+        {:error, {:mcp_access_denied, "scoped_srv"}}
+      end
+    end
+  end
+
   setup do
     original = Application.get_env(:pincer, :mcp_manager)
     original_enable_browser = Application.get_env(:pincer, :enable_browser)
@@ -286,5 +312,28 @@ defmodule Pincer.Adapters.NativeToolRegistryTest do
     assert mcp_log =~ "duration_ms="
     refute mcp_log =~ "mcp_secret_value_456"
     refute mcp_log =~ "hello"
+  end
+
+  test "propagates verified session context to MCP discovery and execution" do
+    Application.put_env(:pincer, :mcp_manager, MCPManagerContextStub)
+
+    ctx_a = %{"session_id" => "tg_1", "agent_id" => "agent_a", "workspace_path" => "/tmp/ws_a"}
+    ctx_b = %{"session_id" => "tg_2", "agent_id" => "agent_b", "workspace_path" => "/tmp/ws_b"}
+
+    tools_a = NativeToolRegistry.list_tools(ctx_a)
+    tools_b = NativeToolRegistry.list_tools(ctx_b)
+
+    assert Enum.any?(tools_a, &(get_in(&1, ["function", :name]) == "scoped_mcp_tool"))
+    refute Enum.any?(tools_b, &(get_in(&1, ["function", :name]) == "scoped_mcp_tool"))
+
+    assert {:ok, "scoped-ok"} =
+             NativeToolRegistry.execute_tool("scoped_mcp_tool", %{"q" => "ok"}, ctx_a)
+
+    assert_received {:mcp_exec_with_context, "scoped_mcp_tool", %{"q" => "ok"}, ^ctx_a}
+
+    assert {:error, reason} =
+             NativeToolRegistry.execute_tool("scoped_mcp_tool", %{"q" => "ok"}, ctx_b)
+
+    assert reason =~ "mcp_access_denied"
   end
 end

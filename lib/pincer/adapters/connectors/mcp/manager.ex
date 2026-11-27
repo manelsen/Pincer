@@ -128,12 +128,14 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
   alias Pincer.Adapters.Connectors.MCP.ConfigLoader
   alias Pincer.Adapters.Connectors.MCP.SidecarAudit
   alias Pincer.Core.LLM.SkillsSidecarPolicy
+  alias Pincer.Core.WorkspaceGuard
   alias Pincer.Adapters.Connectors.MCP.Transports.HTTP
   alias Pincer.Adapters.Connectors.MCP.Transports.Stdio
   @default_get_tools_timeout 200
   @lookup_timeout_ms 5_000
   @skills_sidecar_tool_timeout_ms 15_000
   @skills_sidecar_hard_kill_timeout_ms 100
+  @default_confined_path_args ~w(path file filepath filename cwd directory target destination)
 
   @doc """
   Starts the MCP Manager process.
@@ -243,6 +245,30 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
       []
   end
 
+  @doc """
+  Returns discovered MCP tools filtered by per-server ACLs for the verified
+  execution `context`.
+  """
+  @spec get_tools_for_context(map()) :: [map()]
+  def get_tools_for_context(context) when is_map(context) do
+    get_tools_for_context(__MODULE__, context, @default_get_tools_timeout)
+  end
+
+  @spec get_tools_for_context(GenServer.server(), map()) :: [map()]
+  def get_tools_for_context(server, context) when is_map(context) do
+    get_tools_for_context(server, context, @default_get_tools_timeout)
+  end
+
+  @spec get_tools_for_context(GenServer.server(), map(), non_neg_integer()) :: [map()]
+  def get_tools_for_context(server, context, timeout)
+      when is_map(context) and is_integer(timeout) and timeout >= 0 do
+    GenServer.call(server, {:get_tools, context}, timeout)
+  catch
+    :exit, reason ->
+      Logger.warning("MCP Manager unavailable for get_tools_for_context: #{inspect(reason)}")
+      []
+  end
+
   @doc false
   @spec resolve_servers_config(map(), keyword()) :: map()
   def resolve_servers_config(mcp_config, opts \\ []) when is_map(mcp_config) do
@@ -315,6 +341,30 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
     end
   end
 
+  @doc """
+  Executes a tool on the appropriate MCP server after enforcing per-server
+  `allowed_agents` ACLs, stripping spoofed `_meta` keys, optionally confining
+  workspace path arguments, and propagating verified session metadata.
+  """
+  @spec execute_tool_with_context(String.t(), map(), map()) :: {:ok, String.t()} | {:error, any()}
+  def execute_tool_with_context(name, arguments, context)
+      when is_binary(name) and is_map(arguments) and is_map(context) do
+    execute_tool_with_context(__MODULE__, name, arguments, context)
+  end
+
+  @spec execute_tool_with_context(GenServer.server(), String.t(), map(), map()) ::
+          {:ok, String.t()} | {:error, any()}
+  def execute_tool_with_context(server, name, arguments, context)
+      when is_binary(name) and is_map(arguments) and is_map(context) do
+    case GenServer.call(server, {:lookup_tool_for_context, name, context}, @lookup_timeout_ms) do
+      {:ok, info, policy, client_module} ->
+        run_tool_execution(info, name, arguments, client_module, context, policy)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
   @doc false
   @spec audit_sidecar_result(String.t(), String.t(), integer(), any(), module(), map()) :: any()
   def audit_sidecar_result(
@@ -382,8 +432,10 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
 
     state = %{
       servers: %{},
+      server_policies: %{},
       tools: %{},
       injected_servers: Keyword.get(opts, :servers),
+      injected_server_policies: Keyword.get(opts, :server_policies, %{}),
       retry_interval_ms: Keyword.get(opts, :retry_interval_ms, 5_000),
       max_retries: Keyword.get(opts, :max_retries, 5),
       client_module: Keyword.get(opts, :client_module, Client),
@@ -396,18 +448,23 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
 
   @impl true
   def handle_continue(:load_servers, state) do
-    new_servers =
+    {new_servers, policies} =
       if is_map(state.injected_servers) do
-        state.injected_servers
+        {state.injected_servers, normalize_server_policies(state.injected_server_policies)}
       else
-        start_configured_servers()
+        {started, cfg_policies} = start_configured_servers()
+
+        merged =
+          Map.merge(cfg_policies, normalize_server_policies(state.injected_server_policies))
+
+        {started, merged}
       end
 
     if map_size(new_servers) > 0 and state.max_retries > 0 do
       Process.send_after(self(), {:discover_tools, state.max_retries}, state.retry_interval_ms)
     end
 
-    {:noreply, %{state | servers: new_servers}}
+    {:noreply, %{state | servers: new_servers, server_policies: policies}}
   end
 
   @impl true
@@ -460,23 +517,41 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
 
   @impl true
   def handle_call(:get_tools, _from, state) do
-    # Convert MCP specs to OpenAI format used by Pincer
-    openai_specs =
-      Enum.map(state.tools, fn {name, info} ->
-        %{
-          name: name,
-          description: info.spec["description"],
-          parameters: info.spec["inputSchema"]
-        }
-      end)
+    {:reply, format_openai_specs(state.tools), state}
+  end
 
-    {:reply, openai_specs, state}
+  def handle_call({:get_tools, context}, _from, state) when is_map(context) do
+    filtered_tools =
+      state.tools
+      |> Enum.filter(fn {_name, info} ->
+        policy = Map.get(state.server_policies, info.server_name, default_server_policy())
+        server_allowed_for_context?(policy, context)
+      end)
+      |> Map.new()
+
+    {:reply, format_openai_specs(filtered_tools), state}
   end
 
   def handle_call({:lookup_tool, name}, _from, state) do
     case Map.get(state.tools, name) do
       nil -> {:reply, {:error, :tool_not_found}, state}
       info -> {:reply, {:ok, info, state.client_module}, state}
+    end
+  end
+
+  def handle_call({:lookup_tool_for_context, name, context}, _from, state) do
+    case Map.get(state.tools, name) do
+      nil ->
+        {:reply, {:error, :tool_not_found}, state}
+
+      info ->
+        policy = Map.get(state.server_policies, info.server_name, default_server_policy())
+
+        if server_allowed_for_context?(policy, context) do
+          {:reply, {:ok, info, policy, state.client_module}, state}
+        else
+          {:reply, {:error, {:mcp_access_denied, info.server_name}}, state}
+        end
     end
   end
 
@@ -501,26 +576,30 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
     mcp_config = Application.get_env(:pincer, :mcp, %{})
     servers_config = resolve_servers_config(mcp_config)
     tokens = Application.get_env(:pincer, :tokens, %{})
+    policies = normalize_server_policies(servers_config)
 
-    Enum.reduce(servers_config, %{}, fn {name, cfg}, acc ->
-      client_opts = build_client_opts(name, cfg, tokens)
+    started =
+      Enum.reduce(servers_config, %{}, fn {name, cfg}, acc ->
+        client_opts = build_client_opts(name, cfg, tokens)
 
-      spec = %{
-        id: name,
-        start: {Client, :start_link, [client_opts]},
-        # Try to restart, but don't crash the supervisor if it fails repeatedly
-        restart: :transient
-      }
+        spec = %{
+          id: name,
+          start: {Client, :start_link, [client_opts]},
+          # Try to restart, but don't crash the supervisor if it fails repeatedly
+          restart: :transient
+        }
 
-      case DynamicSupervisor.start_child(Pincer.MCP.Supervisor, spec) do
-        {:ok, pid} ->
-          Map.put(acc, name, pid)
+        case DynamicSupervisor.start_child(Pincer.MCP.Supervisor, spec) do
+          {:ok, pid} ->
+            Map.put(acc, name, pid)
 
-        {:error, reason} ->
-          Logger.error("Failed to start MCP server #{name}: #{inspect(reason)}")
-          acc
-      end
-    end)
+          {:error, reason} ->
+            Logger.error("Failed to start MCP server #{name}: #{inspect(reason)}")
+            acc
+        end
+      end)
+
+    {started, policies}
   end
 
   defp discover_tools_once(servers, client_module) do
@@ -552,16 +631,197 @@ defmodule Pincer.Adapters.Connectors.MCP.Manager do
     end)
   end
 
-  defp run_tool_execution(info, name, args, client_module) do
+  defp run_tool_execution(
+         info,
+         name,
+         args,
+         client_module,
+         context \\ nil,
+         policy \\ default_server_policy()
+       ) do
     started_at_ms = System.monotonic_time(:millisecond)
 
     result =
-      info.server_name
-      |> call_tool_with_timeout(fn -> client_module.call_tool(info.server_pid, name, args) end)
-      |> normalize_tool_response()
+      with {:ok, sanitized_args} <- prepare_arguments(args, context, policy) do
+        trusted_meta = build_trusted_meta(context)
+
+        info.server_name
+        |> call_tool_with_timeout(fn ->
+          invoke_client_call_tool(
+            client_module,
+            info.server_pid,
+            name,
+            sanitized_args,
+            trusted_meta
+          )
+        end)
+        |> normalize_tool_response()
+      end
 
     audit_sidecar_result(info.server_name, name, started_at_ms, result, SidecarAudit, args)
   end
+
+  defp invoke_client_call_tool(client_module, server_pid, name, args, meta)
+       when is_map(meta) and map_size(meta) > 0 do
+    if Code.ensure_loaded?(client_module) and function_exported?(client_module, :call_tool, 4) do
+      client_module.call_tool(server_pid, name, args, meta)
+    else
+      client_module.call_tool(server_pid, name, args)
+    end
+  end
+
+  defp invoke_client_call_tool(client_module, server_pid, name, args, _meta) do
+    client_module.call_tool(server_pid, name, args)
+  end
+
+  defp format_openai_specs(tools) do
+    Enum.map(tools, fn {name, info} ->
+      %{
+        name: name,
+        description: info.spec["description"],
+        parameters: info.spec["inputSchema"]
+      }
+    end)
+  end
+
+  defp default_server_policy do
+    %{
+      allowed_agents: :all,
+      workspace_confined: false,
+      path_args: @default_confined_path_args
+    }
+  end
+
+  defp normalize_server_policies(configs) when is_map(configs) do
+    Map.new(configs, fn {server_name, cfg} ->
+      {to_string(server_name), parse_server_policy(cfg)}
+    end)
+  end
+
+  defp normalize_server_policies(_), do: %{}
+
+  defp parse_server_policy(cfg) when is_map(cfg) do
+    allowed_agents =
+      case fetch_map_value(cfg, "allowed_agents") do
+        list when is_list(list) ->
+          list
+          |> Enum.map(&non_empty_binary/1)
+          |> Enum.reject(&is_nil/1)
+          |> MapSet.new()
+
+        _ ->
+          :all
+      end
+
+    workspace_confined = fetch_map_value(cfg, "workspace_confined", false) == true
+
+    path_args =
+      case fetch_map_value(cfg, "path_args") do
+        list when is_list(list) and list != [] -> Enum.map(list, &to_string/1)
+        _ -> @default_confined_path_args
+      end
+
+    %{
+      allowed_agents: allowed_agents,
+      workspace_confined: workspace_confined,
+      path_args: path_args
+    }
+  end
+
+  defp parse_server_policy(_), do: default_server_policy()
+
+  defp server_allowed_for_context?(%{allowed_agents: :all}, _context), do: true
+
+  defp server_allowed_for_context?(%{allowed_agents: allowed}, context) when is_map(context) do
+    identity = resolve_context_identity(context)
+    is_binary(identity) and MapSet.member?(allowed, identity)
+  end
+
+  defp server_allowed_for_context?(_policy, _context), do: false
+
+  defp resolve_context_identity(context) do
+    non_empty_binary(Map.get(context, "agent_id") || Map.get(context, :agent_id)) ||
+      non_empty_binary(Map.get(context, "session_id") || Map.get(context, :session_id))
+  end
+
+  defp prepare_arguments(args, context, %{workspace_confined: true, path_args: path_args}) do
+    stripped = strip_reserved_meta(args)
+    workspace_root = resolve_context_workspace(context)
+
+    if is_binary(workspace_root) do
+      confine_path_arguments(stripped, path_args, workspace_root)
+    else
+      {:error, {:mcp_path_outside_workspace, :missing_workspace}}
+    end
+  end
+
+  defp prepare_arguments(args, _context, _policy) do
+    {:ok, strip_reserved_meta(args)}
+  end
+
+  defp strip_reserved_meta(args) when is_map(args) do
+    args
+    |> Map.delete("_meta")
+    |> Map.delete(:_meta)
+  end
+
+  defp confine_path_arguments(args, path_args, workspace_root) do
+    path_key_set = MapSet.new(path_args)
+
+    Enum.reduce_while(args, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
+      if MapSet.member?(path_key_set, to_string(key)) and is_binary(value) do
+        case WorkspaceGuard.confine_path(value,
+               root: workspace_root,
+               reject_parent_segments: true
+             ) do
+          {:ok, confined} ->
+            {:cont, {:ok, Map.put(acc, key, confined)}}
+
+          {:error, reason} ->
+            {:halt, {:error, {:mcp_path_outside_workspace, reason}}}
+        end
+      else
+        {:cont, {:ok, Map.put(acc, key, value)}}
+      end
+    end)
+  end
+
+  defp build_trusted_meta(nil), do: %{}
+
+  defp build_trusted_meta(context) when is_map(context) do
+    [
+      {"session_id", Map.get(context, "session_id") || Map.get(context, :session_id)},
+      {"agent_id", Map.get(context, "agent_id") || Map.get(context, :agent_id)},
+      {"workspace_path", resolve_context_workspace(context)}
+    ]
+    |> Enum.reduce(%{}, fn {key, value}, acc ->
+      case non_empty_binary(value) do
+        nil -> acc
+        clean -> Map.put(acc, key, clean)
+      end
+    end)
+  end
+
+  defp build_trusted_meta(_), do: %{}
+
+  defp resolve_context_workspace(context) when is_map(context) do
+    non_empty_binary(Map.get(context, "workspace_path") || Map.get(context, :workspace_path))
+  end
+
+  defp resolve_context_workspace(_), do: nil
+
+  defp non_empty_binary(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp non_empty_binary(value) when is_atom(value) and not is_nil(value) do
+    value |> Atom.to_string() |> non_empty_binary()
+  end
+
+  defp non_empty_binary(_), do: nil
 
   defp normalize_tool_response({:ok, %{"result" => %{"content" => content}}}) do
     text_content =

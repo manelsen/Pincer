@@ -680,6 +680,115 @@ defmodule Pincer.Adapters.Connectors.MCP.ManagerTest do
     assert {:error, :boom} = result
   end
 
+  describe "per-agent ACLs and trusted context propagation" do
+    defmodule ContextCapturingClient do
+      def list_tools(_server_pid) do
+        {:ok,
+         %{
+           "result" => %{
+             "tools" => [
+               %{
+                 "name" => "fs_read",
+                 "description" => "Read workspace file",
+                 "inputSchema" => %{
+                   "type" => "object",
+                   "properties" => %{"path" => %{"type" => "string"}}
+                 }
+               }
+             ]
+           }
+         }}
+      end
+
+      def call_tool(_server_pid, name, args, meta) do
+        if pid = Application.get_env(:pincer, :mcp_context_test_pid) do
+          send(pid, {:mcp_client_call, name, args, meta})
+        end
+
+        {:ok, %{"result" => %{"content" => [%{"type" => "text", "text" => "read-ok"}]}}}
+      end
+    end
+
+    test "enforces allowed_agents, strips spoofed _meta, confines workspace paths, and forwards verified meta" do
+      ws_a = Path.join(System.tmp_dir!(), "mcp_ws_a_#{System.unique_integer([:positive])}")
+      ws_b = Path.join(System.tmp_dir!(), "mcp_ws_b_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(ws_a, "notes"))
+      File.mkdir_p!(ws_b)
+      File.write!(Path.join(ws_a, "notes/todo.txt"), "ok")
+      Application.put_env(:pincer, :mcp_context_test_pid, self())
+
+      on_exit(fn ->
+        Application.delete_env(:pincer, :mcp_context_test_pid)
+        File.rm_rf(ws_a)
+        File.rm_rf(ws_b)
+      end)
+
+      {:ok, fake_srv} = Agent.start_link(fn -> %{} end)
+      on_exit(fn -> if Process.alive?(fake_srv), do: Agent.stop(fake_srv) end)
+
+      pid =
+        start_supervised!(
+          {Manager,
+           name: nil,
+           servers: %{"scoped_fs" => fake_srv},
+           server_policies: %{
+             "scoped_fs" => %{
+               "allowed_agents" => ["agent_a"],
+               "workspace_confined" => true
+             }
+           },
+           client_module: ContextCapturingClient,
+           retry_interval_ms: 10,
+           max_retries: 2}
+        )
+
+      ctx_a = %{"session_id" => "telegram_1", "agent_id" => "agent_a", "workspace_path" => ws_a}
+      ctx_b = %{"session_id" => "telegram_2", "agent_id" => "agent_b", "workspace_path" => ws_b}
+
+      eventually(fn ->
+        tools_a = Manager.get_tools_for_context(pid, ctx_a, 200)
+        assert Enum.any?(tools_a, &(&1.name == "fs_read"))
+      end)
+
+      assert Manager.get_tools_for_context(pid, ctx_b, 200) == []
+
+      assert {:error, {:mcp_access_denied, "scoped_fs"}} =
+               Manager.execute_tool_with_context(
+                 pid,
+                 "fs_read",
+                 %{"path" => "notes/todo.txt"},
+                 ctx_b
+               )
+
+      refute_received {:mcp_client_call, _, _, _}
+
+      assert {:error, {:mcp_path_outside_workspace, _reason}} =
+               Manager.execute_tool_with_context(
+                 pid,
+                 "fs_read",
+                 %{"path" => "../#{Path.basename(ws_b)}/secret.txt"},
+                 ctx_a
+               )
+
+      refute_received {:mcp_client_call, _, _, _}
+
+      assert {:ok, "read-ok"} =
+               Manager.execute_tool_with_context(
+                 pid,
+                 "fs_read",
+                 %{"path" => "notes/todo.txt", "_meta" => %{"agent_id" => "spoofed_admin"}},
+                 ctx_a
+               )
+
+      assert_received {:mcp_client_call, "fs_read", args, meta}
+      refute Map.has_key?(args, "_meta")
+      assert args["path"] == Path.join(ws_a, "notes/todo.txt")
+      assert meta["agent_id"] == "agent_a"
+      assert meta["session_id"] == "telegram_1"
+      assert meta["workspace_path"] == ws_a
+    end
+  end
+
   defp eventually(fun) do
     Pincer.Test.Support.SyncHelpers.eventually(fun, timeout: 600, interval: 20)
   end

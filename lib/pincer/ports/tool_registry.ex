@@ -24,6 +24,21 @@ defmodule Pincer.Ports.ToolRegistry do
     end)
   end
 
+  def list_tools(context) when is_map(context) do
+    Enum.flat_map(adapters(), fn adapter ->
+      cond do
+        Code.ensure_loaded?(adapter) and function_exported?(adapter, :list_tools, 1) ->
+          adapter.list_tools(context)
+
+        Code.ensure_loaded?(adapter) ->
+          adapter.list_tools()
+
+        true ->
+          []
+      end
+    end)
+  end
+
   def execute_tool(name, args, context \\ %{}) do
     Enum.find_value(adapters(), {:error, "Tool not found: #{name}"}, fn adapter ->
       if Code.ensure_loaded?(adapter) do

@@ -181,9 +181,13 @@ defmodule Pincer.Adapters.Connectors.MCP.Client do
         }
       }
   """
-  @spec call_tool(pid(), String.t(), map()) :: {:ok, map()} | {:error, any()}
-  def call_tool(pid, name, arguments) do
-    GenServer.call(pid, {:call_tool, name, arguments}, 60_000)
+  @spec call_tool(pid(), String.t(), map(), map() | nil) :: {:ok, map()} | {:error, any()}
+  def call_tool(pid, name, arguments, meta \\ nil) do
+    if is_map(meta) and map_size(meta) > 0 do
+      GenServer.call(pid, {:call_tool, name, arguments, meta}, 60_000)
+    else
+      GenServer.call(pid, {:call_tool, name, arguments}, 60_000)
+    end
   end
 
   @doc """
@@ -298,13 +302,24 @@ defmodule Pincer.Adapters.Connectors.MCP.Client do
 
   @impl true
   def handle_call({:call_tool, name, args}, from, state) do
+    handle_call({:call_tool, name, args, nil}, from, state)
+  end
+
+  def handle_call({:call_tool, name, args, meta}, from, state) do
     id = state.next_id
+
+    params =
+      if is_map(meta) and map_size(meta) > 0 do
+        %{name: name, arguments: args, _meta: meta}
+      else
+        %{name: name, arguments: args}
+      end
 
     payload = %{
       jsonrpc: "2.0",
       id: id,
       method: "tools/call",
-      params: %{name: name, arguments: args}
+      params: params
     }
 
     if Application.get_env(:pincer, :log_mcp) do
