@@ -1,0 +1,22 @@
+# Hardened Docker Compose override for untrusted or multi-user deployments.
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.hardened.yml up -d
+#
+# Ensure sandbox execution for untrusted sessions runs via an isolated backend
+# (`PINCER_SANDBOX_ADAPTER=ssh` or remote Docker executor without daemon secrets)
+# and run `mix pincer.security_audit --strict` before exposing external channels.
+services:
+  pincer-server:
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    pids_limit: 256
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      # Override the default container `os` fallback when using an isolated executor.
+      PINCER_SANDBOX_TRANSPORT: ${PINCER_SANDBOX_TRANSPORT:-tool_registry}

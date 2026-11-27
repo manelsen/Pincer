@@ -120,7 +120,47 @@ defmodule Pincer.Adapters.Sandbox.LocalTest do
 
       assert_received {:os_runner, "git status", cmd_opts}
       assert Keyword.get(cmd_opts, :cd) == Path.expand(workspace)
-      assert Keyword.get(cmd_opts, :env) == [{"MY_VAR", "123"}]
+      assert {"MY_VAR", "123"} in Keyword.get(cmd_opts, :env, [])
+    end
+
+    test "scrubs daemon secrets from real OS subprocess environment while keeping safe and caller vars",
+         %{workspace: workspace} do
+      prev_secret = System.get_env("PINCER_TEST_DAEMON_SECRET")
+      System.put_env("PINCER_TEST_DAEMON_SECRET", "top-secret-value")
+
+      bin_dir = Path.join(workspace, "fake_bin")
+      File.mkdir_p!(bin_dir)
+      ls_shim = Path.join(bin_dir, "ls")
+
+      File.write!(ls_shim, """
+      #!/bin/sh
+      printf 'SECRET=%s\\nSAFE=%s\\nHOME=%s\\n' "${PINCER_TEST_DAEMON_SECRET:-UNSET}" "${SAFE_VAR:-UNSET}" "${HOME:-UNSET}"
+      """)
+
+      File.chmod!(ls_shim, 0o755)
+
+      on_exit(fn ->
+        if prev_secret do
+          System.put_env("PINCER_TEST_DAEMON_SECRET", prev_secret)
+        else
+          System.delete_env("PINCER_TEST_DAEMON_SECRET")
+        end
+      end)
+
+      assert {:ok, %{output: output, exit_code: 0, backend: :local}} =
+               Local.run("ls",
+                 transport: :os,
+                 workspace_path: workspace,
+                 env: [
+                   {"PATH", "#{bin_dir}:#{System.get_env("PATH")}"},
+                   {"SAFE_VAR", "ok"}
+                 ]
+               )
+
+      refute output =~ "top-secret-value"
+      assert output =~ "SECRET=UNSET"
+      assert output =~ "SAFE=ok"
+      refute output =~ "HOME=UNSET"
     end
 
     test "executes real command cleanly with default runner", %{workspace: workspace} do

@@ -15,11 +15,16 @@ services:
       # bwrap cannot create a nested user namespace under Docker's default
       # AppArmor/seccomp profile. Use the OS transport in the container; the
       # bwrap transport remains available for bare-metal runs.
+      # For untrusted multi-user deployments, pair with docker-compose.hardened.yml
+      # or isolate shell execution onto an external Docker/SSH sandbox backend.
       PINCER_SANDBOX_TRANSPORT: os
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
     volumes:
-      - ./config.yaml:/app/config.yaml
-      - ./.env:/app/.env:ro
+      - ./config.yaml:/app/config.yaml:ro
       - ./data:/app/data
       - ./logs:/app/logs
       - ./sessions:/app/sessions

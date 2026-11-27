@@ -24,6 +24,22 @@ defmodule Pincer.Adapters.Sandbox.Local do
 
   @default_timeout_ms 30_000
 
+  @safe_inherited_env_keys MapSet.new(~w(
+    PATH
+    HOME
+    LANG
+    LC_ALL
+    LC_CTYPE
+    TMPDIR
+    TEMP
+    TMP
+    USER
+    LOGNAME
+    SHELL
+    TERM
+    TZ
+  ))
+
   @bwrap_keys %{
     "network" => :network,
     "limits" => :limits,
@@ -155,7 +171,7 @@ defmodule Pincer.Adapters.Sandbox.Local do
       timeout_ms = Keyword.get(opts, :timeout_ms, @default_timeout_ms)
 
       case Runtime.run_with_timeout(
-             fn -> runner.(exe, args, stderr_to_stdout: true) end,
+             fn -> runner.(exe, args, stderr_to_stdout: true, env: build_sanitized_env([])) end,
              timeout_ms
            ) do
         {:ok, {output, exit_code}} when is_integer(exit_code) ->
@@ -296,9 +312,8 @@ defmodule Pincer.Adapters.Sandbox.Local do
 
     with :ok <- ensure_os_command_allowed(command, cwd, opts) do
       cmd_opts =
-        [stderr_to_stdout: true]
+        [stderr_to_stdout: true, env: build_sanitized_env(env)]
         |> then(fn acc -> if cwd, do: Keyword.put(acc, :cd, cwd), else: acc end)
-        |> then(fn acc -> if env != [], do: Keyword.put(acc, :env, env), else: acc end)
 
       case Runtime.run_with_timeout(fn -> runner.(command, cmd_opts) end, timeout_ms) do
         {:ok, {output, exit_code}} when is_integer(exit_code) ->
@@ -340,5 +355,25 @@ defmodule Pincer.Adapters.Sandbox.Local do
 
   defp default_bwrap_runner(exe, args, cmd_opts) do
     System.cmd(exe, args, cmd_opts)
+  end
+
+  @doc false
+  @spec build_sanitized_env([{String.t(), String.t() | nil}], %{
+          optional(String.t()) => String.t()
+        }) ::
+          [{String.t(), String.t() | nil}]
+  def build_sanitized_env(caller_env, system_env \\ System.get_env()) when is_list(caller_env) do
+    caller_keys = MapSet.new(caller_env, fn {key, _val} -> to_string(key) end)
+
+    scrubbed =
+      system_env
+      |> Map.keys()
+      |> Enum.reject(fn key ->
+        MapSet.member?(@safe_inherited_env_keys, key) or MapSet.member?(caller_keys, key)
+      end)
+      |> Enum.sort()
+      |> Enum.map(fn key -> {key, nil} end)
+
+    scrubbed ++ caller_env
   end
 end
