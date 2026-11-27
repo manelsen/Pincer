@@ -15,11 +15,12 @@ defmodule Pincer.Adapters.Tools.Config do
           model_id: %{
             type: "string",
             description:
-              "O ID do modelo (ex: 'kimi-k2.5-free', 'glm-5-free', 'stepfun/step-3.5-flash:free')"
+              "O ID do modelo (ex: 'openrouter/free', 'claude-sonnet-5-5', 'gemini-3.8-flash', 'glm-5.3', 'gpt-6.2-sol')"
           },
           provider: %{
             type: "string",
-            description: "O provedor do modelo ('opencode_zen' ou 'openrouter')"
+            description:
+              "O provedor do modelo (ex: 'openrouter', 'groq', 'anthropic', 'google', 'openai', 'z_ai', 'ollama')"
           }
         },
         required: ["model_id"]

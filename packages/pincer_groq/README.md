@@ -16,15 +16,24 @@ end
 
 ## Usage
 
-Add to your `config.yaml`:
+Set `GROQ_API_KEY` in `.env` and add to your `config.yaml`:
 
 ```yaml
 llm:
-  provider: groq
+  provider: "groq"
   groq:
-    api_key: $GROQ_API_KEY
-    model: openai/gpt-oss-120b
+    base_url: "https://api.groq.com/openai/v1/chat/completions"
+    default_model: "openai/gpt-oss-120b"
 ```
+
+### Recommended Models (late 2026)
+
+| Purpose | Model ID | Notes |
+|---|---|---|
+| General Chat & Tools (Default) | `openai/gpt-oss-120b` | High-capability open-weights model on Groq LPU |
+| Fast Introspection / Routing | `openai/gpt-oss-20b`, `llama-3.1-8b-instant` | Ultra-low latency for reflection and router tiers |
+| Qwen / Llama Open-Weights | `qwen/qwen3.8-27b`, `llama-3.3-70b-versatile` | Strong multilingual reasoning and tool execution |
+| Speech Transcription (`GroqWhisper`) | `whisper-large-v3-turbo` | Audio-to-text endpoint via `groq_whisper` |
 
 ## License
 

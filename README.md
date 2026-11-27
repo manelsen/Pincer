@@ -181,6 +181,19 @@ mcp:
       args: ["-y", "@modelcontextprotocol/server-github"]
 ```
 
+### Recommended LLM models (late 2026)
+
+Pick a default provider and model in `config.yaml` (`llm.provider` + `llm.<provider>.default_model`) or let `mix pincer.onboard` configure it for you:
+
+| Profile | Recommended IDs | Best For |
+|---|---|---|
+| **Flagship Reasoning & Coding** | `claude-opus-5-5` / `claude-fable-5-2` (`anthropic`), `gpt-6.2-astra` (`openai`), `gemini-4-carbon` (`google`), `glm-5.4` (`z_ai_coding`), `k3.1-pro` (`moonshot_coding`), `deepseek-v4-pro` (`deepseek`) | Long-horizon coding, complex debugging, multi-step tool planning |
+| **Balanced Daily Driver** | `claude-sonnet-5-5` (`anthropic`), `gpt-6.2-sol` (`openai`), `gemini-4-argon` / `gemini-4-hydrogen` (`google`), `glm-5.3` (`z_ai`), `kimi-k3` (`moonshot`), `qwen3.6-plus` (`qwen`), `mistral-large-4` (`mistral`) | Everyday sessions combining speed, tool reliability, and depth |
+| **Fast / Introspection & Routing** | `claude-haiku-5-5` (`anthropic`), `gemini-3.8-flash` (`google`), `gpt-6-luna` (`openai`), `openai/gpt-oss-120b` / `openai/gpt-oss-20b` (`groq`), `deepseek-v4-flash` (`deepseek`), `MiniMax-M3.1-Flash` (`minimax`) | Low-latency chat, heartbeats, reflection, and router fast/local tiers |
+| **Zero-Cost / Free Tier** | `openrouter/free` or `google/gemma-4-31b-it:free` / `nvidia/nemotron-3.5-lightning:free` (`openrouter`), `kimi-k2.5-free` (`opencode_zen`), Google AI Studio & Groq free tiers | Experimentation, zero-budget setups, and fallback chains |
+| **Local Inference (`ollama`)** | `qwen3.5:4b` (8 GB VRAM), `qwen3.5:9b` / `gemma4:12b` (12–16 GB VRAM), `qwen3.8:27b` / `qwen3-coder:30b` (24+ GB VRAM), `qwen3.6:35b-a3b` (MoE) | Air-gapped privacy with local introspection locality guarantees |
+| **Audio & Embeddings** | `whisper-large-v3-turbo` (`groq_whisper`), `tts-1` / `tts-1-hd` (`Pincer.LLM.TTS`), `baai/bge-m3` with `baai/bge-large-en-v1.5` fallback (1024d SQLite vectors) | Voice transcription, speech synthesis, and semantic memory recall |
+
 ---
 
 ## Monorepo packages
@@ -215,21 +228,21 @@ Each channel package ships its canonical `priv/pincer_plugin.yaml` manifest in b
 
 13 provider packages export 14 `PincerPorts.LLM.Provider` modules (plus `Pincer.LLM.Providers.OpenAICompat` and `Pincer.LLM.TTS` via `Pincer.Ports.TTS`):
 
-| Package | Provider Module(s) | Capabilities / Notes |
-|---|---|---|
-| [pincer_anthropic](packages/pincer_anthropic) | `Pincer.LLM.Providers.Anthropic` | Messages API and streaming |
-| [pincer_google](packages/pincer_google) | `Pincer.LLM.Providers.Google` | Native PDF and inline image support (`supports_files: true`) |
-| [pincer_openai](packages/pincer_openai) | `Pincer.LLM.Providers.OpenAI` | Chat, streaming, and embeddings via `OpenAICompat` |
-| [pincer_openrouter](packages/pincer_openrouter) | `Pincer.LLM.Providers.OpenRouter` | Multi-model routing and `baai/bge-m3` embeddings |
-| [pincer_groq](packages/pincer_groq) | `Pincer.LLM.Providers.Groq`, `GroqWhisper` | Fast chat inference and Whisper audio transcription |
-| [pincer_ollama](packages/pincer_ollama) | `Pincer.LLM.Providers.Ollama` | Local model discovery and chat |
-| [pincer_mistral](packages/pincer_mistral) | `Pincer.LLM.Providers.Mistral` | Chat and embeddings via `OpenAICompat` |
-| [pincer_deepseek](packages/pincer_deepseek) | `Pincer.LLM.Providers.DeepSeek` | DeepSeek chat via `OpenAICompat` |
-| [pincer_moonshot](packages/pincer_moonshot) | `Pincer.LLM.Providers.Moonshot` | Kimi / Moonshot chat via `OpenAICompat` |
-| [pincer_zhipu](packages/pincer_zhipu) | `Pincer.LLM.Providers.Zhipu` | GLM standard and coding endpoints |
-| [pincer_qwen](packages/pincer_qwen) | `Pincer.LLM.Providers.Qwen` | Qwen chat via `OpenAICompat` |
-| [pincer_minimax](packages/pincer_minimax) | `Pincer.LLM.Providers.MiniMax` | Dual `Authorization` + `Authority` group header |
-| [pincer_opencode_zen](packages/pincer_opencode_zen) | `Pincer.LLM.Providers.OpencodeZen` | OpenCode Zen endpoint ([setup guide](docs/OPENCODE_ZEN_SETUP.md)) |
+| Package | Provider Module(s) | Default Model (`config/config.exs`) | Capabilities / Notes |
+|---|---|---|---|
+| [pincer_anthropic](packages/pincer_anthropic) | `Pincer.LLM.Providers.Anthropic` | `claude-sonnet-5-5` | Messages API, thinking budgets, `/v1/models` discovery |
+| [pincer_google](packages/pincer_google) | `Pincer.LLM.Providers.Google` | `gemini-3.8-flash` | Native PDF and inline image support (`supports_files: true`) |
+| [pincer_openai](packages/pincer_openai) | `Pincer.LLM.Providers.OpenAI` | `gpt-6.2-sol` | Chat, SSE streaming, embeddings via `OpenAICompat` |
+| [pincer_openrouter](packages/pincer_openrouter) | `Pincer.LLM.Providers.OpenRouter` | `openrouter/free` | Multi-model routing, `:free` catalog, `baai/bge-m3` embeddings |
+| [pincer_groq](packages/pincer_groq) | `Pincer.LLM.Providers.Groq`, `GroqWhisper` | `openai/gpt-oss-120b` / `whisper-large-v3-turbo` | LPU ultra-fast inference and Whisper transcription |
+| [pincer_ollama](packages/pincer_ollama) | `Pincer.LLM.Providers.Ollama` | `qwen3.5:9b` | Local `/api/chat` + `/api/tags` discovery without API key |
+| [pincer_mistral](packages/pincer_mistral) | `Pincer.LLM.Providers.Mistral` | `mistral-large-4` | Chat, streaming, and embeddings via `OpenAICompat` |
+| [pincer_deepseek](packages/pincer_deepseek) | `Pincer.LLM.Providers.DeepSeek` | `deepseek-v4-flash` | DeepSeek V4 chat/reasoning via `OpenAICompat` |
+| [pincer_moonshot](packages/pincer_moonshot) | `Pincer.LLM.Providers.Moonshot` | `kimi-k3` (`k3.1-pro` coding) | Kimi K3 chat with temperature clamping and thinking mode |
+| [pincer_zhipu](packages/pincer_zhipu) | `Pincer.LLM.Providers.Zhipu` | `glm-5.3` (`glm-5.4` coding) | Z.AI GLM standard and coding endpoints |
+| [pincer_qwen](packages/pincer_qwen) | `Pincer.LLM.Providers.Qwen` | `qwen3.6-plus` | Alibaba DashScope Qwen3.6/3.7 with `enable_thinking` toggle |
+| [pincer_minimax](packages/pincer_minimax) | `Pincer.LLM.Providers.MiniMax` | `MiniMax-M3.1-Flash` | Dual `Authorization` + `Authority` group header |
+| [pincer_opencode_zen](packages/pincer_opencode_zen) | `Pincer.LLM.Providers.OpencodeZen` | `kimi-k2.5-free` | OpenCode Zen / Console free gateway ([setup guide](docs/OPENCODE_ZEN_SETUP.md)) |
 
 ---
 

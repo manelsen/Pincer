@@ -100,7 +100,7 @@ defmodule Pincer.Core.Onboard.Defaults do
       "provider" => "z_ai",
       "z_ai" => %{
         "base_url" => "https://api.z.ai/api/coding/paas/v4/chat/completions",
-        "default_model" => "glm-4.7"
+        "default_model" => "glm-5.3"
       },
       "opencode_zen" => %{
         "base_url" => "https://opencode.ai/zen/v1/chat/completions",
@@ -181,17 +181,49 @@ defmodule Pincer.Core.Onboard.Defaults do
     "groq" => "GROQ_API_KEY",
     "groq_whisper" => "GROQ_API_KEY",
     "minimax" => "MINIMAX_API_KEY",
-    "anthropic" => "ANTHROPIC_API_KEY"
+    "anthropic" => "ANTHROPIC_API_KEY",
+    "openai" => "OPENAI_API_KEY",
+    "deepseek" => "DEEPSEEK_API_KEY",
+    "qwen" => "DASHSCOPE_API_KEY",
+    "mistral" => "MISTRAL_API_KEY"
+  }
+
+  @recommended_models %{
+    "openrouter" => "openrouter/free",
+    "groq" => "openai/gpt-oss-120b",
+    "groq_whisper" => "whisper-large-v3-turbo",
+    "anthropic" => "claude-sonnet-5-5",
+    "google" => "gemini-3.8-flash",
+    "openai" => "gpt-6.2-sol",
+    "z_ai" => "glm-5.3",
+    "z_ai_coding" => "glm-5.4",
+    "moonshot" => "kimi-k3",
+    "moonshot_coding" => "k3.1-pro",
+    "minimax" => "MiniMax-M3.1-Flash",
+    "deepseek" => "deepseek-v4-flash",
+    "qwen" => "qwen3.6-plus",
+    "mistral" => "mistral-large-4",
+    "ollama" => "qwen3.5:9b",
+    "opencode_zen" => "kimi-k2.5-free"
   }
 
   @doc """
-  Returns the environment variable name for the given provider ID, or nil if unknown.
+  Returns the environment variable name for the given provider ID, or nil if unknown or keyless.
   """
   @spec provider_env_key(String.t() | nil) :: String.t() | nil
   def provider_env_key(provider) when is_binary(provider),
     do: Map.get(@provider_env_keys, provider)
 
   def provider_env_key(_), do: nil
+
+  @doc """
+  Returns the recommended default model ID for the given provider ID.
+  """
+  @spec recommended_model(String.t() | nil) :: String.t()
+  def recommended_model(provider) when is_binary(provider),
+    do: Map.get(@recommended_models, provider, "openrouter/free")
+
+  def recommended_model(_), do: "openrouter/free"
 
   @spec capability_operations(String.t(), map(), keyword()) :: [Pincer.Core.Onboard.operation()]
   def capability_operations(capability, config, opts \\ [])

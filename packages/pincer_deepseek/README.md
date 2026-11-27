@@ -16,15 +16,21 @@ end
 
 ## Usage
 
-Add to your `config.yaml`:
+Set `DEEPSEEK_API_KEY` in `.env` and add to your `config.yaml`:
 
 ```yaml
 llm:
-  provider: deepseek
+  provider: "deepseek"
   deepseek:
-    api_key: $DEEPSEEK_API_KEY
-    model: deepseek-chat
+    default_model: "deepseek-v4-flash"
 ```
+
+### Recommended Models (late 2026)
+
+| Tier | Model ID | Notes |
+|---|---|---|
+| Fast Multimodal (Default) | `deepseek-v4-flash` | High-efficiency V4 model (`deepseek-flash` alias) |
+| Heavy Reasoning & Coding | `deepseek-v4-pro` | Flagship reasoning and complex engineering model |
 
 ## License
 

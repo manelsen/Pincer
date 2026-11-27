@@ -16,15 +16,21 @@ end
 
 ## Usage
 
-Add to your `config.yaml`:
+Set `MINIMAX_API_KEY` (and optionally `MINIMAX_GROUP_ID`) in `.env` and add to your `config.yaml`:
 
 ```yaml
 llm:
-  provider: minimax
+  provider: "minimax"
   minimax:
-    api_key: $MINIMAX_API_KEY
-    model: MiniMax-Text-01
+    default_model: "MiniMax-M3.1-Flash"
 ```
+
+### Recommended Models (late 2026)
+
+| Tier | Model ID | Notes |
+|---|---|---|
+| Fast Coding & Multimodal (Default) | `MiniMax-M3.1-Flash` | `1M` context window with adjustable thinking depth |
+| Base Flagship | `MiniMax-M3` | `1M` max context (`512K` minimum guarantee) |
 
 ## License
 

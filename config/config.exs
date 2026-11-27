@@ -45,14 +45,24 @@ config :pincer, :llm_providers, %{
   "google" => %{
     adapter: Pincer.LLM.Providers.Google,
     env_key: "GOOGLE_API_KEY",
-    default_model: "gemini-2.0-flash",
+    default_model: "gemini-3.8-flash",
     # Gemini suporta leitura nativa de PDFs e imagens via inlineData.
     supports_files: true
   },
   "openrouter" => %{
     adapter: Pincer.LLM.Providers.OpenRouter,
     env_key: "OPENROUTER_API_KEY",
-    default_model: "google/gemini-2.0-flash-exp:free"
+    default_model: "openrouter/free"
+  },
+  "anthropic" => %{
+    adapter: Pincer.LLM.Providers.Anthropic,
+    env_key: "ANTHROPIC_API_KEY",
+    default_model: "claude-sonnet-5-5"
+  },
+  "openai" => %{
+    adapter: Pincer.LLM.Providers.OpenAI,
+    env_key: "OPENAI_API_KEY",
+    default_model: "gpt-6.2-sol"
   },
   "opencode_zen" => %{
     adapter: Pincer.LLM.Providers.OpencodeZen,
@@ -62,23 +72,23 @@ config :pincer, :llm_providers, %{
   "z_ai" => %{
     adapter: Pincer.LLM.Providers.Zhipu,
     env_key: "Z_AI_API_KEY",
-    default_model: "glm-4.7"
+    default_model: "glm-5.3"
   },
   "z_ai_coding" => %{
     adapter: Pincer.LLM.Providers.Zhipu,
     base_url: "https://api.z.ai/api/coding/paas/v4/chat/completions",
     env_key: "Z_AI_CODING_API_KEY",
-    default_model: "glm-4.7"
+    default_model: "glm-5.4"
   },
   "moonshot" => %{
     adapter: Pincer.LLM.Providers.Moonshot,
     env_key: "MOONSHOT_API_KEY",
-    default_model: "moonshot-v1-auto"
+    default_model: "kimi-k3"
   },
   "moonshot_coding" => %{
     adapter: Pincer.LLM.Providers.Moonshot,
     env_key: "MOONSHOT_CODING_API_KEY",
-    default_model: "moonshot-v1-auto"
+    default_model: "k3.1-pro"
   },
   "groq" => %{
     adapter: Pincer.LLM.Providers.Groq,
@@ -93,7 +103,27 @@ config :pincer, :llm_providers, %{
   "minimax" => %{
     adapter: Pincer.LLM.Providers.MiniMax,
     env_key: "MINIMAX_API_KEY",
-    default_model: "MiniMax-M1"
+    default_model: "MiniMax-M3.1-Flash"
+  },
+  "deepseek" => %{
+    adapter: Pincer.LLM.Providers.DeepSeek,
+    env_key: "DEEPSEEK_API_KEY",
+    default_model: "deepseek-v4-flash"
+  },
+  "qwen" => %{
+    adapter: Pincer.LLM.Providers.Qwen,
+    env_key: "DASHSCOPE_API_KEY",
+    default_model: "qwen3.6-plus"
+  },
+  "mistral" => %{
+    adapter: Pincer.LLM.Providers.Mistral,
+    env_key: "MISTRAL_API_KEY",
+    default_model: "mistral-large-4"
+  },
+  "ollama" => %{
+    adapter: Pincer.LLM.Providers.Ollama,
+    env_key: nil,
+    default_model: "qwen3.5:9b"
   }
 }
 

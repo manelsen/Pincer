@@ -486,7 +486,10 @@ defmodule Pincer.Core.Onboard do
 
   defp build_remote_onboard_command(config, capabilities) do
     provider = get_in(config, ["llm", "provider"]) |> normalize_string() || "z_ai"
-    model = get_in(config, ["llm", provider, "default_model"]) |> normalize_string() || "glm-4.7"
+
+    model =
+      get_in(config, ["llm", provider, "default_model"]) |> normalize_string() ||
+        Defaults.recommended_model(provider)
 
     rev_args = [
       "--yes",

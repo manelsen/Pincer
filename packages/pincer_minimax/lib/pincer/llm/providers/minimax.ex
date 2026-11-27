@@ -23,11 +23,8 @@ defmodule Pincer.LLM.Providers.MiniMax do
     if api_key in [nil, ""] do
       {:ok,
        [
-         "abab6.5s-chat",
-         "abab6.5t-chat",
-         "abab6-chat",
-         "abab5.5s-chat",
-         "abab5.5-chat"
+         "MiniMax-M3.1-Flash",
+         "MiniMax-M3"
        ]}
     else
       headers = build_auth_headers(api_key, group_id)

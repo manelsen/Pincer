@@ -15,7 +15,7 @@ defmodule Pincer.Core.Introspection.Client do
 
       introspection:
         provider: "groq"
-        model: "llama-3.1-8b-instant"
+        model: "openai/gpt-oss-20b"
         max_tokens: 512
         temperature: 0.7
         locality: "follow_session" # optional: "follow_session" | "local_only"
