@@ -9,7 +9,7 @@ Shared runtime helpers (`Pincer.Channels.Shared.TokenCache` and `Pincer.Channels
 ```elixir
 def deps do
   [
-    {:pincer_shared, "~> 0.1"}
+    {:pincer_shared, "~> 0.2"}
   ]
 end
 ```

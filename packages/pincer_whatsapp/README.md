@@ -9,7 +9,7 @@ Requires Go `1.21+` in `PATH` when compiling the native `priv/whatsapp_bridge` s
 ```elixir
 def deps do
   [
-    {:pincer_whatsapp, "~> 0.1"}
+    {:pincer_whatsapp, "~> 0.2"}
   ]
 end
 ```

@@ -9,7 +9,7 @@ Part of the [Pincer](https://github.com/manelsen/Pincer) AI agent framework.
 ```elixir
 def deps do
   [
-    {:pincer_webhook, "~> 0.1"}
+    {:pincer_webhook, "~> 0.2"}
   ]
 end
 ```

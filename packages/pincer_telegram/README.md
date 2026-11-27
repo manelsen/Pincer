@@ -42,7 +42,7 @@ externos, declare a dependência no `mix.exs`:
 ```elixir
 def deps do
   [
-    {:pincer_telegram, "~> 0.1"}
+    {:pincer_telegram, "~> 0.2"}
   ]
 end
 ```

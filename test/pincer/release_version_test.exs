@@ -60,6 +60,54 @@ defmodule Pincer.ReleaseVersionTest do
 
   test "CHANGELOG.md includes a 0.2.0 release section" do
     changelog = File.read!("CHANGELOG.md")
-    assert changelog =~ ~r/^## \[0\.2\.0\] - \d{4}-\d{2}-\d{2}/m
+    assert changelog =~ ~r/^## \[0\.2\.0\] - 2026-11-27/m
+    legacy_storage_module = Enum.join(["Pincer", "Storage", "Adapters", "SQLite"], ".")
+    refute changelog =~ legacy_storage_module
+    assert changelog =~ "Pincer.Adapters.Storage.SQLite"
+
+    for expected_entry <- [
+          "Pincer.Core.Executor.Ctx",
+          "PincerPorts.LLM.RawResponseLogger",
+          "Pincer.Core.Introspection.Client",
+          "docker-compose.hardened.yml",
+          "Pincer.Adapters.Connectors.MCP.Manager",
+          "docs/architecture/overview.md"
+        ] do
+      assert changelog =~ expected_entry
+    end
+  end
+
+  test "scripts/hex_publish.sh covers all 25 packages in dependency order" do
+    script = File.read!("scripts/hex_publish.sh")
+    [_, block] = Regex.run(~r/PUBLISH_ORDER=\((.*?)\)/s, script)
+    publish_order = String.split(block, ~r/\s+/, trim: true)
+
+    package_dirs =
+      Path.wildcard("packages/*")
+      |> Enum.filter(&File.dir?/1)
+      |> Enum.map(&Path.basename/1)
+      |> Enum.sort()
+
+    assert length(publish_order) == @expected_package_count
+    assert Enum.sort(publish_order) == package_dirs
+
+    assert Enum.take(publish_order, 3) == [
+             "pincer_ports",
+             "pincer_shared",
+             "pincer_openai_compat"
+           ]
+  end
+
+  test "package READMEs and moduledocs reference ~> 0.2 instead of ~> 0.1" do
+    offenders =
+      (Path.wildcard("packages/*/README.md") ++ Path.wildcard("packages/*/lib/**/*.ex"))
+      |> Enum.sort()
+      |> Enum.filter(fn file ->
+        content = File.read!(file)
+        Regex.match?(~r/\{:pincer_[a-z0-9_]+,\s*"~>\s*0\.1"\}/, content)
+      end)
+
+    assert offenders == [],
+           "Expected all package docs to reference ~> 0.2, found ~> 0.1 in: #{inspect(offenders)}"
   end
 end
