@@ -22,9 +22,10 @@ defmodule Pincer.Core.Introspection.LessonExtractor do
   @spec extract(String.t(), map(), keyword()) :: {:ok, [map()]} | {:error, term()}
   def extract(agent_id, trace_metadata, opts \\ []) do
     client = Keyword.get(opts, :introspection_client, IntrospectionClient)
+    client_opts = Keyword.take(opts, [:session_model_override])
     messages = build_extraction_prompt(trace_metadata)
 
-    case client.chat_completion(messages, []) do
+    case client.chat_completion(messages, client_opts) do
       {:ok, %{"content" => content}, _usage} ->
         lessons = parse_lessons(content)
         persisted = persist_novel(agent_id, lessons)

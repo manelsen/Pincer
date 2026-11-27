@@ -49,6 +49,7 @@ defmodule Pincer.Core do
       MemoryDiagnostics,
       MemoryObservability,
       RetryPolicy,
+      Introspection.Client,
       Introspection.Kernel.Supervisor,
       Telemetry,
       AuthProfiles,

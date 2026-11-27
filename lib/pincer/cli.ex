@@ -8,6 +8,7 @@ defmodule Pincer.CLI do
     exports: []
 
   alias Pincer.CLI.History
+  alias Pincer.Core.Introspection.Client, as: IntrospectionClient
   alias Pincer.Core.Session.Server, as: SessionServer
   alias Pincer.Plugin.Manifest
   alias Pincer.Utils.ANSI
@@ -205,9 +206,11 @@ defmodule Pincer.CLI do
     status = format_status_label(Map.get(state, :status))
     session_id = Map.get(state, :session_id) || @session_id
     agent_id = Map.get(state, :root_agent_id) || session_id
-    model = format_active_model(Map.get(state, :model_override))
+    model_override = Map.get(state, :model_override)
+    model = format_active_model(model_override)
+    introspection = format_introspection_target(model_override)
 
-    "[Status] #{status} | Session: #{session_id} | Agent: #{agent_id} | Model: #{model}"
+    "[Status] #{status} | Session: #{session_id} | Agent: #{agent_id} | Model: #{model} | Introspection: #{introspection}"
   end
 
   def format_status({:badrpc, reason}), do: format_status({:error, {:badrpc, reason}})
@@ -312,6 +315,23 @@ defmodule Pincer.CLI do
     case ModelOverride.normalize(override) do
       %{provider: provider, model: model} -> "#{provider}:#{model}"
       nil -> "default"
+    end
+  end
+
+  defp format_introspection_target(model_override) do
+    target = IntrospectionClient.effective_target(model_override)
+
+    base =
+      case {target.provider, target.model} do
+        {nil, _} -> "default"
+        {provider, nil} -> provider
+        {provider, model} -> "#{provider}:#{model}"
+      end
+
+    cond do
+      target.blocked? -> "#{base} (blocked: non-local)"
+      target.locality in [:local, :local_session] -> "#{base} (local)"
+      true -> base
     end
   end
 end

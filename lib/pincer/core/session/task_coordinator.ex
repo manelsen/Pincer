@@ -275,7 +275,13 @@ defmodule Pincer.Core.Session.TaskCoordinator do
     lesson_store = Keyword.get(opts, :lesson_store, Introspection.LessonStore)
     task_supervisor = Keyword.get(opts, :task_supervisor, @task_supervisor)
 
-    kernel.report_trace(state.root_agent_id, trace_meta)
+    if is_map(state.model_override) and function_exported?(kernel, :report_trace, 3) do
+      kernel.report_trace(state.root_agent_id, trace_meta,
+        session_model_override: state.model_override
+      )
+    else
+      kernel.report_trace(state.root_agent_id, trace_meta)
+    end
 
     maybe_update_lesson_outcomes(
       state.injected_lesson_ids,

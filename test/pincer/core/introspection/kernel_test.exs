@@ -444,5 +444,40 @@ defmodule Pincer.Core.Introspection.KernelTest do
       assert_receive {:kernel_skills_updated, promoted}, 1_000
       assert File.exists?(promoted.path)
     end
+
+    test "forwards session_model_override from reported trace to introspection client" do
+      defmodule CaptureOverrideLLMStub do
+        def chat_completion(_messages, opts) do
+          if pid = Application.get_env(:pincer, :kernel_override_test_pid) do
+            send(pid, {:kernel_reflection_opts, opts})
+          end
+
+          {:ok,
+           %{
+             "content" =>
+               ~s({"focus":"stay local","concerns":[],"open_questions":[],"summary":"ok","mood_valence":0.1,"mood_arousal":0.2})
+           }, nil}
+        end
+      end
+
+      Application.put_env(:pincer, :kernel_override_test_pid, self())
+      on_exit(fn -> Application.delete_env(:pincer, :kernel_override_test_pid) end)
+
+      start_kernel(
+        tick_interval: 25,
+        reflection_throttle_ms: 0,
+        introspection_client: CaptureOverrideLLMStub
+      )
+
+      trace = %{
+        "session_model_override" => %{"provider" => "ollama", "model" => "llama3.2"},
+        "steps" => [%{"kind" => "tool"}, %{"kind" => "error"}, %{"kind" => "tool"}]
+      }
+
+      Kernel.report_trace(@agent, trace)
+
+      assert_receive {:kernel_reflection_opts, opts}, 1_000
+      assert opts[:session_model_override] == %{"provider" => "ollama", "model" => "llama3.2"}
+    end
   end
 end

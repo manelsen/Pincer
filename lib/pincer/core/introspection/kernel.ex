@@ -73,9 +73,10 @@ defmodule Pincer.Core.Introspection.Kernel do
   end
 
   @doc "Reports an executor trace for introspection processing."
-  @spec report_trace(String.t(), map()) :: :ok
-  def report_trace(agent_id, trace_meta) when is_map(trace_meta) do
-    GenServer.cast(via(agent_id), {:report_trace, trace_meta})
+  @spec report_trace(String.t(), map(), keyword()) :: :ok
+  def report_trace(agent_id, trace_meta, opts \\ [])
+      when is_map(trace_meta) and is_list(opts) do
+    GenServer.cast(via(agent_id), {:report_trace, trace_meta, opts})
   end
 
   @doc "Reports session activity change for wakefulness FSM."
@@ -162,7 +163,8 @@ defmodule Pincer.Core.Introspection.Kernel do
       stall_hold_until: nil,
       session_pids: MapSet.new(),
       session_monitors: %{},
-      introspection_client: introspection_client
+      introspection_client: introspection_client,
+      last_session_override: nil
     }
 
     schedule_tick(tick_interval)
@@ -295,7 +297,14 @@ defmodule Pincer.Core.Introspection.Kernel do
 
   @impl true
   def handle_cast({:report_trace, trace_meta}, state) do
-    state = %{state | last_trace: trace_meta}
+    handle_cast({:report_trace, trace_meta, []}, state)
+  end
+
+  def handle_cast({:report_trace, trace_meta, cast_opts}, state) do
+    session_override =
+      Keyword.get(cast_opts, :session_model_override) || extract_session_override(trace_meta)
+
+    state = %{state | last_trace: trace_meta, last_session_override: session_override}
     classification = Reflection.classify(trace_meta)
 
     # Async lesson extraction for non-trivial traces
@@ -305,11 +314,7 @@ defmodule Pincer.Core.Introspection.Kernel do
 
       _ ->
         agent_id = state.agent_id
-
-        opts =
-          if state.introspection_client,
-            do: [introspection_client: state.introspection_client],
-            else: []
+        opts = introspection_call_opts(state, trace_meta)
 
         Task.start(fn ->
           LessonExtractor.extract(agent_id, trace_meta, opts)
@@ -435,11 +440,7 @@ defmodule Pincer.Core.Introspection.Kernel do
         kernel_pid = self()
         trace = state.last_trace
         self_state = state.self_state
-
-        opts =
-          if state.introspection_client,
-            do: [introspection_client: state.introspection_client],
-            else: []
+        opts = introspection_call_opts(state, trace)
 
         Task.start(fn ->
           result = Reflection.reflect(trace, self_state, opts)
@@ -554,4 +555,24 @@ defmodule Pincer.Core.Introspection.Kernel do
   defp now, do: System.system_time(:millisecond)
 
   defp via(agent_id), do: {:via, Registry, {__MODULE__.Registry, agent_id}}
+
+  defp introspection_call_opts(state, trace_meta) do
+    override = extract_session_override(trace_meta) || Map.get(state, :last_session_override)
+
+    []
+    |> then(fn acc ->
+      if state.introspection_client,
+        do: Keyword.put(acc, :introspection_client, state.introspection_client),
+        else: acc
+    end)
+    |> then(fn acc ->
+      if override, do: Keyword.put(acc, :session_model_override, override), else: acc
+    end)
+  end
+
+  defp extract_session_override(trace_meta) when is_map(trace_meta) do
+    Map.get(trace_meta, "session_model_override") || Map.get(trace_meta, :session_model_override)
+  end
+
+  defp extract_session_override(_), do: nil
 end

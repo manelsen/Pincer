@@ -318,5 +318,34 @@ defmodule Pincer.Core.Session.TaskCoordinatorTest do
       assert next_state.injected_lesson_ids == []
       assert_received {:kernel_trace, "agent-tc-1", ^trace}
     end
+
+    test "forwards session_model_override via report_trace/3 when supported without mutating trace" do
+      defmodule KernelV3Spy do
+        def report_trace(agent_id, trace, opts) do
+          send(self(), {:kernel_trace_v3, agent_id, trace, opts})
+          :ok
+        end
+      end
+
+      trace = %{"steps" => [%{"kind" => "tool"}]}
+
+      state =
+        base_state(%{
+          injected_lesson_ids: [],
+          model_override: %{provider: "ollama", model: "llama3.2"}
+        })
+
+      next_state =
+        TaskCoordinator.record_trace(state, trace,
+          kernel: KernelV3Spy,
+          lesson_store: LessonStoreSpy,
+          task_supervisor: Pincer.Core.TaskSupervisor
+        )
+
+      assert next_state.last_executor_trace == trace
+
+      assert_received {:kernel_trace_v3, "agent-tc-1", ^trace,
+                       [session_model_override: %{provider: "ollama", model: "llama3.2"}]}
+    end
   end
 end
