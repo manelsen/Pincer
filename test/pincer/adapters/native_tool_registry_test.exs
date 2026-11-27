@@ -43,6 +43,20 @@ defmodule Pincer.Adapters.NativeToolRegistryTest do
     end
   end
 
+  defmodule MCPManagerSecretOkStub do
+    def get_all_tools do
+      [
+        %{
+          name: "mcp_secret_tool",
+          description: "Secret tool",
+          parameters: %{type: "object", properties: %{}}
+        }
+      ]
+    end
+
+    def execute_tool(_name, _args), do: {:ok, "done"}
+  end
+
   setup do
     original = Application.get_env(:pincer, :mcp_manager)
     original_enable_browser = Application.get_env(:pincer, :enable_browser)
@@ -228,5 +242,49 @@ defmodule Pincer.Adapters.NativeToolRegistryTest do
       end)
 
     assert "browser" in names
+  end
+
+  test "logs tool metadata without raw argument values at INFO level for native and MCP tools" do
+    import ExUnit.CaptureLog
+
+    Application.put_env(:pincer, :mcp_manager, MCPManagerSecretOkStub)
+    original_level = Logger.level()
+    Logger.configure(level: :info)
+
+    on_exit(fn -> Logger.configure(level: original_level) end)
+
+    native_log =
+      capture_log([level: :info], fn ->
+        {:ok, _res} =
+          NativeToolRegistry.execute_tool(
+            "read_blackboard",
+            %{"action" => "read", "secret_note" => "super_secret_token_123"},
+            %{"workspace_path" => File.cwd!()}
+          )
+      end)
+
+    assert native_log =~ "[TOOL] Executing native: read_blackboard"
+    assert native_log =~ "[TOOL] SUCCESS: read_blackboard"
+    assert native_log =~ "action=read"
+    assert native_log =~ "keys=[action,secret_note]"
+    assert native_log =~ "duration_ms="
+    refute native_log =~ "super_secret_token_123"
+
+    mcp_log =
+      capture_log([level: :info], fn ->
+        assert {:ok, "done"} =
+                 NativeToolRegistry.execute_tool(
+                   "mcp_secret_tool",
+                   %{"api_key" => "mcp_secret_value_456", "query" => "hello"},
+                   %{}
+                 )
+      end)
+
+    assert mcp_log =~ "[TOOL] Executing MCP: mcp_secret_tool"
+    assert mcp_log =~ "[TOOL] SUCCESS: mcp_secret_tool"
+    assert mcp_log =~ "keys="
+    assert mcp_log =~ "duration_ms="
+    refute mcp_log =~ "mcp_secret_value_456"
+    refute mcp_log =~ "hello"
   end
 end
