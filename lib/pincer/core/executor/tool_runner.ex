@@ -135,10 +135,12 @@ defmodule Pincer.Core.Executor.ToolRunner do
 
     runtime_ctx = %{
       "session_id" => ctx.session_id,
+      "agent_id" => ctx.agent_id,
       "workspace_path" => ctx.workspace_path,
       "subagent_depth" => ctx.opts[:subagent_depth],
       "root_session_id" => ctx.opts[:root_session_id],
       session_id: ctx.session_id,
+      agent_id: ctx.agent_id,
       workspace_path: ctx.workspace_path,
       subagent_depth: ctx.opts[:subagent_depth],
       root_session_id: ctx.opts[:root_session_id]
@@ -213,10 +215,11 @@ defmodule Pincer.Core.Executor.ToolRunner do
 
   defp record_audit(ctx, tool_name, outcome, command) do
     AuditLog.record(:tool_approval, outcome,
-      actor: ctx.session_id,
+      actor: ctx.agent_id || ctx.session_id,
       target: tool_name,
+      channel: ctx.channel,
       session_id: ctx.session_id,
-      metadata: %{"command" => command}
+      metadata: %{"command" => command, "agent_id" => ctx.agent_id}
     )
   end
 
@@ -229,10 +232,9 @@ defmodule Pincer.Core.Executor.ToolRunner do
   end
 
   defp rbac_forbidden?(ctx) do
-    case RBAC.configured_role_for(ctx.session_id) do
-      nil -> false
-      role -> RBAC.authorize(role, :approve_tools) != :ok
-    end
+    ctx
+    |> RBAC.effective_role()
+    |> RBAC.authorize(:approve_tools) != :ok
   end
 
   defp handle_rbac_denial(approval_data, ctx, steps) do

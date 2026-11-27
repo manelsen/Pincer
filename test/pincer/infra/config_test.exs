@@ -19,7 +19,8 @@ defmodule Pincer.Infra.ConfigTest do
       :tokens,
       :channels,
       :gateway,
-      :tools
+      :tools,
+      :rbac
     ]
 
     snapshot = Map.new(keys, fn k -> {k, Application.get_env(:pincer, k, :__unset__)} end)
@@ -359,6 +360,17 @@ defmodule Pincer.Infra.ConfigTest do
       assert_raise ArgumentError, fn ->
         String.to_existing_atom(unknown_db)
       end
+    end
+
+    test "accepts top-level rbac section from YAML" do
+      yaml =
+        write_yaml!("""
+        rbac:
+          unconfigured_role: "bot"
+        """)
+
+      assert :ok = Config.load(config_file: yaml, load_dotenv: false)
+      assert Config.get(:rbac) == %{"unconfigured_role" => "bot"}
     end
   end
 end

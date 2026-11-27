@@ -60,6 +60,34 @@ defmodule Pincer.Core.Executor.CtxTest do
       assert ctx.long_term_memory == "remember this"
       assert ctx.model_override == nil
     end
+
+    test "resolves agent_id and channel from opts, conversation_ref, or session prefix" do
+      paired =
+        Ctx.new(self(), "telegram_123",
+          root_agent_id: "annie",
+          channel: :telegram
+        )
+
+      assert paired.agent_id == "annie"
+      assert paired.channel == "telegram"
+
+      by_agent =
+        Ctx.new(self(), "telegram_456",
+          agent_id: "lucie",
+          conversation_ref: "discord:dm:456"
+        )
+
+      assert by_agent.agent_id == "lucie"
+      assert by_agent.channel == "discord"
+
+      by_session_prefix = Ctx.new(self(), "telegram_789")
+      assert by_session_prefix.agent_id == "telegram_789"
+      assert by_session_prefix.channel == "telegram"
+
+      generic = Ctx.new(self(), "ctx_session_generic")
+      assert generic.agent_id == "ctx_session_generic"
+      assert generic.channel == nil
+    end
   end
 
   describe "model override and client_opts/active_provider" do
