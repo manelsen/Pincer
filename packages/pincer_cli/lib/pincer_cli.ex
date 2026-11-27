@@ -6,7 +6,7 @@ defmodule PincerCLI do
 
   Add to your `mix.exs`:
 
-      {:pincer_cli, "~> 0.1"}
+      {:pincer_cli, "~> 0.2"}
 
   Then enable in `config.yaml`:
 

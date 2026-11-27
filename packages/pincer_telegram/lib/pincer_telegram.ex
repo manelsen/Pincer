@@ -6,7 +6,7 @@ defmodule PincerTelegram do
 
   Add to your `mix.exs`:
 
-      {:pincer_telegram, "~> 0.1"}
+      {:pincer_telegram, "~> 0.2"}
 
   Then enable in `config.yaml`:
 

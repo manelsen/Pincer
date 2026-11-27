@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.2.0] - 2026-11-26
+## [0.2.0] - 2026-11-27
 
 ### Changed
 - Enforce compile-time `Boundary` 0.12 architecture across `Core`, `Ports`, `Adapters`, `LLM`, `Channels`, `CLI`, `Plugin`, and `Utils`, including strict internal `Core` slice boundaries and trimmed deps.
@@ -49,9 +49,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Curated memory (`MEMORY.md`, `USER.md`) is bounded by `:curated_memory_limits` and enforced on both read and write through `Pincer.Core.CuratedMemory`.
 - Parallel tool fan-out is configurable with `:tool_max_concurrency`.
 - Pluggable `Pincer.Ports.Sandbox` port with `Local`, `Docker` (`--cap-drop ALL`, `no-new-privileges`, `--network none`, `--user uid:gid`), and `SSH` adapters.
-- Zero-infra embedded SQLite3 + FTS5 + WAL storage backend (`Pincer.Storage.Adapters.SQLite`), onboarding (`mix pincer.setup --storage sqlite`), and `Pincer.Core.Doctor` storage diagnostics.
+- Zero-infra embedded SQLite3 + FTS5 + WAL storage backend (`Pincer.Adapters.Storage.SQLite`), onboarding (`mix pincer.setup --storage sqlite`), and `Pincer.Core.Doctor` storage diagnostics.
 - Closed-loop `Introspection.Kernel` → `Skills.Generator` / `Skills.Guard` → `Session.Server` skill promotion and prompt injection.
 - Multi-backend `mix pincer.purge_indices` via `Pincer.Ports.Storage.purge_invalid_documents/1`.
+- Interactive CLI `/status` command (`Pincer.CLI`) surfacing session state and effective LLM targets per purpose (`main`, `introspection`, `model_router`), aligned with `docs/SPECS/CLI_INTERACTIVE.md`, plus auxiliary LLM target reporting in `mix pincer.doctor`.
+- Hardened container deployment profile (`docker-compose.hardened.yml`) and operational guide (`docs/operations/container-hardening.md`) for untrusted sessions, paired with effective sandbox transport posture checks in `Pincer.Core.SecurityAudit`.
+- Refreshed `0.2.0` `README.md` with didactic SVG architecture diagrams and a dedicated technical architecture reference in `docs/architecture/overview.md`.
 - Postgres-free `sqlite-smoke` CI gate, strict posture fixture checks (`doctor --strict` and `security_audit --strict`), and opt-in real container Docker E2E suite (`--only docker`).
 - Open-source governance files (`SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`, `CODE_OF_CONDUCT.md`).
 
@@ -76,6 +79,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Manual debug scripts moved from `test/` to `scripts/manual/` so they no longer run as part of `mix test`.
 
 ### Security
+- Unified RBAC caller identity resolution (`agent_id` and `channel` resolved in `Pincer.Core.Executor.Ctx`), normalized YAML string-key role/permission lookups in `Pincer.Config` and `Pincer.Core.Executor.RBAC`, and made the unconfigured-session tool-approval policy explicit in `Pincer.Core.Executor.ToolRunner`.
+- Redacted raw tool argument values from default `INFO` logs in `Pincer.Adapters.NativeToolRegistry` (recording only action, sorted argument keys, and `duration_ms`) and gated/size-bounded raw LLM payload inspection in `PincerPorts.LLM.RawResponseLogger`.
+- Enforced session local-inference locality across auxiliary introspection calls (`Pincer.Core.Introspection.Client`, `Reflection`, `LessonExtractor`, and `Kernel`) so local-model sessions do not route reflection prompts to remote cloud providers.
+- Scrubbed daemon secret environment variables from the local `:os` sandbox runner (`Pincer.Adapters.Sandbox.Local`) and audited sandbox transport downgrades in `Pincer.Core.SecurityAudit`.
+- Propagated verified caller context (`session_id`, `agent_id`, `workspace_path`) through `Pincer.Ports.ToolRegistry` and `Pincer.Adapters.NativeToolRegistry` to `Pincer.Adapters.Connectors.MCP.Manager`, enforced per-server `allowed_agents` ACLs and `WorkspaceGuard` path confinement (`workspace_confined` / `path_args`), stripped model-supplied `_meta` fields, and forwarded trusted `_meta` metadata via `Pincer.Adapters.Connectors.MCP.Client.call_tool/4`.
 - Replaced the vulnerable `earmark` wrapper with `earmark_parser` (the maintained AST parser Earmark already proxied), updated `db_connection` to 2.10.3, and removed the unused `tesla`/`hackney` clients, dropping the vulnerable `idna` transitive dependency. `mix deps.get` now resolves with no Hex vulnerability warnings.
 - Centralized outbound URL validation in `Pincer.Utils.NetworkGuard`: rejects URL credentials, unsupported schemes, loopback/private/link-local/metadata/reserved IPv4 and IPv6 ranges, resolves all A/AAAA records, and pins `web_fetch` and attachment downloads to the validated address while preserving TLS SNI and the `Host` header. Redirects are revalidated and repinned; browser requests are checked by the Playwright sidecar.
 - Capped `web_fetch` and attachment bodies with a streaming Req sink that halts downloads above the limit, and added connect timeouts; removed the invalid `max_body_length` Req option that raised at runtime.

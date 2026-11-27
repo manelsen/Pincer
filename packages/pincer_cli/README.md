@@ -7,7 +7,7 @@ Command-line interface channel adapter for the [Pincer](https://github.com/manel
 ```elixir
 def deps do
   [
-    {:pincer_cli, "~> 0.1"}
+    {:pincer_cli, "~> 0.2"}
   ]
 end
 ```

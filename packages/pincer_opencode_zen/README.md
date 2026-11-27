@@ -9,7 +9,7 @@ Part of the [Pincer](https://github.com/manelsen/Pincer) AI agent framework.
 ```elixir
 def deps do
   [
-    {:pincer_opencode_zen, "~> 0.1"}
+    {:pincer_opencode_zen, "~> 0.2"}
   ]
 end
 ```
